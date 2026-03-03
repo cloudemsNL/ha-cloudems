@@ -1,0 +1,114 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "☀️ Welcome to CloudEMS v1.3",
+        "description": "CloudEMS is your smart energy management system for Home Assistant.\n\nThis wizard configures:\n• ⚡ Phase count & current limit\n• 🔌 Grid meter & phase sensors (auto-detected)\n• 🌞 Solar, battery & EV charger\n• 💶 Dynamic EV loading on EPEX price\n• ⚖️ Phase balancing (3-phase)\n• 📡 P1 smart meter connection\n\n☕ [Buy the developer a coffee](https://buymeacoffee.com/cloudems) | 🚀 [Premium](https://cloudems.eu)\n\nChoose your country for EPEX energy prices:",
+        "data": {
+          "energy_prices_country": "Country (EPEX dynamic prices)"
+        }
+      },
+      "phase_config": {
+        "title": "⚡ Phases & current limit",
+        "description": "Select the grid connection that matches your installation.\n\n**Single-phase** → typical older homes\n**Three-phase** → new builds, heat pumps or three-phase solar inverters\n\nNot sure? Check your fuse box — the number of main fuses indicates the number of phases.",
+        "data": {
+          "phase_preset": "Grid connection & current limit"
+        }
+      },
+      "phase_custom": {
+        "title": "⚡ Custom current limits",
+        "description": "Manually enter the number of phases and the maximum current per phase.\n\nL2 and L3 are only used for three-phase connections.",
+        "data": {
+          "phase_count": "Number of phases",
+          "max_current_l1": "Max current L1 (A)",
+          "max_current_l2": "Max current L2 (A) — three-phase only",
+          "max_current_l3": "Max current L3 (A) — three-phase only"
+        }
+      },
+      "grid_sensors": {
+        "title": "🔌 Grid meter sensors",
+        "description": "CloudEMS automatically found **{detected} sensor(s)** based on names and units. Review the suggestions and adjust if needed.\n\nPhase sensors are optional but enable accurate per-phase monitoring.",
+        "data": {
+          "grid_sensor": "Grid meter sensor (W or kW)",
+          "phase_sensors_L1": "Phase L1 sensor (optional)",
+          "phase_sensors_L2": "Phase L2 sensor (optional)",
+          "phase_sensors_L3": "Phase L3 sensor (optional)"
+        }
+      },
+      "solar_ev": {
+        "title": "🌞 Solar & EV",
+        "description": "Connect your solar inverter, home battery and EV charger. CloudEMS auto-detects solar surplus for smart charging.",
+        "data": {
+          "solar_sensor": "Solar inverter sensor (W)",
+          "battery_sensor": "Battery sensor (W)",
+          "ev_charger_entity": "EV charger entity (number/input_number)",
+          "enable_solar_dimmer": "Curtail solar at negative EPEX prices",
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)"
+        }
+      },
+      "features": {
+        "title": "🚀 Smart features (v1.3.0)",
+        "description": "Enable the new CloudEMS features that are relevant for your setup.",
+        "data": {
+          "dynamic_loading": "⚡ Dynamic loading — automatically charge EV during cheap EPEX hours",
+          "dynamic_load_price_threshold": "Cheap price threshold (EUR/kWh) — charge when price ≤ this value",
+          "cost_tracking_enabled": "💶 Energy cost tracking — live €/hour sensor based on EPEX price",
+          "phase_balance_enabled": "⚖️ Phase balancing — warning when L1/L2/L3 imbalance is detected",
+          "phase_balance_threshold_a": "Imbalance threshold (A) — warn when difference exceeds this",
+          "enable_multi_inverter": "🌞 Multi-inverter PID — smart per-phase dimming with phase detection"
+        }
+      },
+      "advanced": {
+        "title": "📡 P1 meter & Premium",
+        "description": "Connect your P1 smart meter for direct DSMR readings (more accurate than HA P1 integration).\n\nOptionally enter your CloudEMS API key for cloud AI NILM and premium features.\n[Subscribe at cloudems.eu]({premium_url})",
+        "data": {
+          "p1_enabled": "Enable P1 smart meter",
+          "p1_host": "P1 gateway IP address (e.g. 192.168.1.100)",
+          "p1_port": "P1 gateway port",
+          "cloud_api_key": "CloudEMS API key (optional)"
+        }
+      },
+      "inverters": {
+        "title": "☀️ Inverters & strings (v1.3.0)",
+        "description": "Configure your solar inverters for auto-learning and PID control.\n\nCloudEMS learns the **peak power** of each inverter and automatically detects **which phase** a single-phase inverter is connected to.\n\nSkip this step if you don't need direct inverter control.\n\n[Learn more]({docs_url})",
+        "data": {
+          "inverter_1_sensor": "Inverter 1 — power sensor (W)",
+          "inverter_1_control": "Inverter 1 — switch/dimmer (switch or number 0-100%)",
+          "inverter_1_label": "Inverter 1 — name (e.g. 'Roof South')",
+          "inverter_1_min_pct": "Inverter 1 — minimum power during dimming (%)",
+          "inverter_2_sensor": "Inverter 2 — power sensor (optional)",
+          "inverter_2_control": "Inverter 2 — switch/dimmer (optional)",
+          "inverter_2_label": "Inverter 2 — name (e.g. 'Garage')"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "CloudEMS is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "CloudEMS settings",
+        "description": "Update phase configuration and features.",
+        "data": {
+          "phase_count": "Number of phases",
+          "max_current_l1": "Max current L1 (A)",
+          "max_current_l2": "Max current L2 (A)",
+          "max_current_l3": "Max current L3 (A)",
+          "phase_balance_enabled": "Phase balancing",
+          "phase_balance_threshold_a": "Imbalance threshold (A)",
+          "dynamic_loading": "Dynamic EPEX loading",
+          "dynamic_load_price_threshold": "Cheap price threshold (EUR/kWh)",
+          "cost_tracking_enabled": "Energy cost tracking",
+          "enable_solar_dimmer": "Solar dimmer at negative price",
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)",
+          "p1_enabled": "P1 smart meter",
+          "p1_host": "P1 gateway IP",
+          "p1_port": "P1 gateway port",
+          "cloud_api_key": "CloudEMS API key"
+        }
+      }
+    }
+  }
+}
