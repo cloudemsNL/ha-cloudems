@@ -231,9 +231,6 @@ CONF_P1_SERIAL_PORT          = "p1_serial_port"
 DEFAULT_P1_PORT              = 8088
 DSMR_TELEGRAM_INTERVAL       = 10   # seconds
 
-# ── Diagnostics ───────────────────────────────────────────────────────────────
-STORAGE_KEY_DIAGNOSTICS      = f"{DOMAIN}_diagnostics"
-
 # ── Cost tracking ─────────────────────────────────────────────────────────────
 CONF_COST_TRACKING           = "cost_tracking_enabled"
 STORAGE_KEY_ENERGY_COST      = f"{DOMAIN}_energy_cost"

@@ -36,6 +36,144 @@ class EPEXPriceFetcher:
     async def async_setup(self) -> None:
         _LOGGER.info("EPEX price fetcher ready for area: %s", self._country)
 
+
+class EnergyPriceFetcher:
+    """
+    Adapter used by CloudEMSCoordinator.
+
+    Wraps ENTSO-E / HA integration price sources and exposes the
+    simple interface the coordinator expects:
+      - EnergyPriceFetcher(country, session, api_key)
+      - await .update()
+      - .current_price  (float, EUR/kWh)
+      - .is_negative_price(threshold) -> bool
+      - .get_cheapest_slots(n) -> list[dict]
+    """
+
+    def __init__(
+        self,
+        country: str = DEFAULT_EPEX_COUNTRY,
+        session: Any | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        self._country = country
+        self._session = session
+        self._api_key = api_key
+        self._prices: list[dict] = []
+        self._area = EPEX_AREAS.get(country, "10YNL----------L")
+
+    # ── Public interface ──────────────────────────────────────────────────────
+
+    @property
+    def current_price(self) -> float:
+        """Return current EUR/kWh price, 0.0 if unknown."""
+        return self._get_current_price() or 0.0
+
+    def is_negative_price(self, threshold: float = 0.0) -> bool:
+        """Return True when current price is at or below *threshold*."""
+        price = self._get_current_price()
+        if price is None:
+            return False
+        return price <= threshold
+
+    def get_cheapest_slots(self, count: int = 3) -> list[dict]:
+        """Return the cheapest *count* upcoming hourly slots."""
+        now = datetime.now(timezone.utc)
+        upcoming = [s for s in self._prices if s["end"] > now]
+        return sorted(upcoming, key=lambda x: x["price"])[:count]
+
+    async def update(self) -> None:
+        """Fetch / refresh prices from ENTSO-E or skip gracefully."""
+        if not self._session:
+            return
+        try:
+            prices = await self._fetch_entsoe()
+            if prices:
+                self._prices = prices
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("EnergyPriceFetcher.update failed: %s", err)
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _get_current_price(self) -> float | None:
+        now = datetime.now(timezone.utc)
+        for slot in self._prices:
+            start = slot["start"]
+            end = slot["end"]
+            # Ensure both are offset-aware for comparison
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            if start <= now < end:
+                return float(slot["price"])
+        return None
+
+    async def _fetch_entsoe(self) -> list[dict]:
+        if not self._session:
+            return []
+        token = self._api_key
+        if not token:
+            return []
+
+        now = datetime.now(timezone.utc)
+        period_start = now.strftime("%Y%m%d0000")
+        period_end = (now + timedelta(days=1)).strftime("%Y%m%d2300")
+
+        params = {
+            "securityToken": token,
+            "documentType": "A44",
+            "in_Domain": self._area,
+            "out_Domain": self._area,
+            "periodStart": period_start,
+            "periodEnd": period_end,
+        }
+
+        try:
+            async with self._session.get(
+                ENTSOE_BASE,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    xml = await resp.text()
+                    return self._parse_entsoe_xml(xml)
+        except Exception as err:
+            _LOGGER.debug("ENTSO-E fetch failed: %s", err)
+
+        return []
+
+    def _parse_entsoe_xml(self, xml: str) -> list[dict]:
+        import xml.etree.ElementTree as ET
+
+        prices = []
+        try:
+            root = ET.fromstring(xml)
+            ns = {"ns": "urn:iec62325.351:tc57wg16:451-3:publicationdocument:7:0"}
+
+            for ts in root.findall(".//ns:TimeSeries", ns):
+                period = ts.find(".//ns:Period", ns)
+                if period is None:
+                    continue
+                start_str = period.find("ns:timeInterval/ns:start", ns)
+                if start_str is None:
+                    continue
+                start = datetime.fromisoformat(start_str.text.replace("Z", "+00:00"))
+
+                for point in period.findall("ns:Point", ns):
+                    pos = int(point.find("ns:position", ns).text)
+                    price_mwh = float(point.find("ns:price.amount", ns).text)
+                    slot_start = start + timedelta(hours=pos - 1)
+                    prices.append({
+                        "start": slot_start,
+                        "end": slot_start + timedelta(hours=1),
+                        "price": price_mwh / 1000.0,
+                    })
+        except Exception as err:
+            _LOGGER.warning("ENTSO-E XML parse error: %s", err)
+
+        return sorted(prices, key=lambda x: x["start"])
+
     async def async_fetch_prices(self) -> None:
         """Fetch prices and populate self.prices list."""
         # Try existing energy integrations first (Tibber, ENTSO-E, Nordpool)
