@@ -4,8 +4,8 @@ import logging
 from typing import Any
 
 from .database import NILMDatabase
-from .local_ai import LocalAIClassifier
-from .cloud_ai import CloudAIClassifier
+from .local_ai import NILMLocalAI, LearnedDevice
+from .cloud_ai import NILMCloudAI
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class NILMAnalyzer:
         enable_cloud_ai: bool = True,
     ) -> None:
         self._database = NILMDatabase()
-        self._local_ai = LocalAIClassifier(self._database)
+        self._local_ai = NILMLocalAI(self._database)
         self._cloud_ai = cloud_ai
         self._confidence_threshold = confidence_threshold
         self._enable_local_ai = enable_local_ai

@@ -117,18 +117,3 @@ def _sanitise(data: Any) -> Any:
     if isinstance(data, float):
         return round(data, 6)
     return data
-
-
-async def async_generate_report(hass, entry) -> None:
-    """Generate a diagnostic report and post it as a persistent notification."""
-    from homeassistant.components import persistent_notification
-    coordinator = hass.data.get("cloudems", {}).get(entry.entry_id)
-    data = coordinator.data if coordinator else {}
-    config = dict(entry.data)
-    report = build_markdown_report(data, config)
-    persistent_notification.async_create(
-        hass,
-        message=report,
-        title="CloudEMS Diagnose",
-        notification_id="cloudems_diagnostics",
-    )
