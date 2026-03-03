@@ -83,9 +83,18 @@ def _score(entity_id: str, keywords: list[str]) -> int:
     return sum(1 for kw in keywords if kw in n)
 
 def _best(pool, keywords):
+    """Return the best matching entity_id from pool.
+
+    Tiebreaker: longer keyword match wins; then shorter entity_id (more specific name).
+    This prevents non-deterministic picks when multiple sensors score equally.
+    """
     scored = [(s, _score(s, keywords)) for s in pool]
     scored = [(s, sc) for s, sc in scored if sc > 0]
-    return max(scored, key=lambda x: x[1])[0] if scored else None
+    if not scored:
+        return None
+    # Sort: highest score first, then shortest entity_id as tiebreaker
+    scored.sort(key=lambda x: (-x[1], len(x[0]), x[0]))
+    return scored[0][0]
 
 def _detect_sensors(hass, phase_count: int) -> dict:
     power   = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") in ("W","kW")]
@@ -490,10 +499,10 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
                 vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
         }
         if not use_sep:
-            schema[vol.Optional(CONF_GRID_SENSOR, default=data.get(CONF_GRID_SENSOR, ""))] = _ent()
+            schema[vol.Optional(CONF_GRID_SENSOR, description={"suggested_value": data.get(CONF_GRID_SENSOR) or None})] = _ent()
         else:
-            schema[vol.Optional(CONF_IMPORT_SENSOR, default=data.get(CONF_IMPORT_SENSOR, ""))] = _ent()
-            schema[vol.Optional(CONF_EXPORT_SENSOR, default=data.get(CONF_EXPORT_SENSOR, ""))] = _ent()
+            schema[vol.Optional(CONF_IMPORT_SENSOR, description={"suggested_value": data.get(CONF_IMPORT_SENSOR) or None})] = _ent()
+            schema[vol.Optional(CONF_EXPORT_SENSOR, description={"suggested_value": data.get(CONF_EXPORT_SENSOR) or None})] = _ent()
         if phase_count == 3:
             for k in (CONF_MAX_CURRENT_L2, CONF_MAX_CURRENT_L3):
                 schema[vol.Optional(k, default=float(data.get(k, DEFAULT_MAX_CURRENT)))] = \
@@ -508,11 +517,11 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
 
         schema: dict = {}
         for k in [CONF_PHASE_SENSORS+"_L1", CONF_VOLTAGE_L1, CONF_POWER_L1]:
-            schema[vol.Optional(k, default=data.get(k, ""))] = _ent()
+            schema[vol.Optional(k, description={"suggested_value": data.get(k) or None})] = _ent()
         if phase_count == 3:
             for k in [CONF_PHASE_SENSORS+"_L2", CONF_PHASE_SENSORS+"_L3",
                       CONF_VOLTAGE_L2, CONF_VOLTAGE_L3, CONF_POWER_L2, CONF_POWER_L3]:
-                schema[vol.Optional(k, default=data.get(k, ""))] = _ent()
+                schema[vol.Optional(k, description={"suggested_value": data.get(k) or None})] = _ent()
         return self.async_show_form(step_id="phase_sensors", data_schema=vol.Schema(schema))
 
     async def async_step_solar_ev_opts(self, user_input=None):
@@ -522,9 +531,9 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="solar_ev_opts",
             data_schema=vol.Schema({
-                vol.Optional(CONF_SOLAR_SENSOR,   default=data.get(CONF_SOLAR_SENSOR, "")): _ent(),
-                vol.Optional(CONF_BATTERY_SENSOR, default=data.get(CONF_BATTERY_SENSOR, "")): _ent(),
-                vol.Optional(CONF_EV_CHARGER_ENTITY, default=data.get(CONF_EV_CHARGER_ENTITY, "")): _ent(["number","input_number"]),
+                vol.Optional(CONF_SOLAR_SENSOR,   description={"suggested_value": data.get(CONF_SOLAR_SENSOR) or None}): _ent(),
+                vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
+                vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
                 vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
             }),

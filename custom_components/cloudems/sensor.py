@@ -56,6 +56,8 @@ async def async_setup_entry(
         CloudEMSBoilerStatusSensor(coordinator, entry),
         # v1.5: AI / NILM status sensor
         CloudEMSAIStatusSensor(coordinator, entry),
+        # v1.6: EPEX all-hours chart sensor
+        CloudEMSEPEXTodaySensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -872,7 +874,7 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
     """
     _attr_name = "CloudEMS AI · Status"
     _attr_icon = "mdi:robot"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Note: NOT DIAGNOSTIC — users need to see this to understand NILM state
 
     def __init__(self, coord, entry):
         super().__init__(coord)
@@ -902,4 +904,60 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
                 "total_peak_w":  ai.get("solar_peak_w", 0),
                 "estimated_kwp": round(ai.get("solar_peak_w", 0) / 1000, 2),
             },
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.6.0 — EPEX today all-hours price sensor (for dashboard charts)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
+    """
+    State  = current EPEX spot price (EUR/kWh).
+    Attributes contain the full list of today's hourly prices — ideal for
+    a Lovelace ApexCharts card or custom:plotly-graph.
+
+    Example attribute value:
+        today_prices: [{hour: 0, price: 0.082}, {hour: 1, price: 0.071}, ...]
+    """
+    _attr_name = "CloudEMS Energy · EPEX Today"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR/kWh"
+    _attr_icon = ICON_PRICE
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_epex_today"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        p = (self.coordinator.data or {}).get("energy_price", {}).get("current")
+        return round(p, 5) if p is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        today_all = ep.get("today_all", [])
+        cur = ep.get("current")
+        avg = ep.get("avg_today")
+        return {
+            "today_prices":    today_all,
+            "next_hours":      ep.get("next_hours", []),
+            "min_today":       ep.get("min_today"),
+            "max_today":       ep.get("max_today"),
+            "avg_today":       avg,
+            "is_cheap_now":    (cur < avg) if (cur is not None and avg is not None) else None,
+            "is_negative":     ep.get("is_negative", False),
+            "cheapest_hour_1": ep.get("cheapest_hour_1"),
+            "cheapest_hour_2": ep.get("cheapest_hour_2"),
+            "cheapest_hour_3": ep.get("cheapest_hour_3"),
+            "cheapest_2h_start": ep.get("cheapest_2h_start"),
+            "cheapest_3h_start": ep.get("cheapest_3h_start"),
+            "data_source":     ep.get("source", "unknown"),
+            "country":         ep.get("country", ""),
+            "slot_count":      ep.get("slot_count", 0),
         }

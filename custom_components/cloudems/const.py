@@ -2,12 +2,13 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
 SUPPORT_URL = "https://github.com/cloudemsNL/ha-cloudems"
-BUY_ME_COFFEE_URL = "https://buymeacoffee.com/cloudems"
+BUY_ME_COFFEE_URL = "https://buymeacoffee.com/smarthost9m"
+BUY_ME_COFFEE_ALT_URL = "https://buymeacoffee.com/cloudems"
 ATTRIBUTION = "Data provided by CloudEMS — cloudems.eu"
 
 ATTR_PROBABILITY = "probability"
@@ -194,6 +195,12 @@ EPEX_AREAS = {
 EPEX_UPDATE_INTERVAL             = 3600
 DEFAULT_NEGATIVE_PRICE_THRESHOLD = 0.0
 DEFAULT_EPEX_COUNTRY             = "NL"
+
+# Countries that have a free (no-API-key) price source built in
+EPEX_FREE_COUNTRIES = {"NL", "DE", "AT"}
+
+# Optional separate ENTSO-E transparency platform key (free registration)
+CONF_ENTSOE_API_KEY = "entsoe_api_key"
 
 # ── NILM ──────────────────────────────────────────────────────────────────────
 NILM_MODE_DATABASE   = "database"
