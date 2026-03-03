@@ -29,6 +29,7 @@ CONF_SOLAR_SENSOR           = "solar_sensor"
 CONF_BATTERY_SENSOR         = "battery_sensor"
 CONF_EV_CHARGER_ENTITY      = "ev_charger_entity"
 CONF_ENERGY_PRICES_COUNTRY  = "energy_prices_country"
+CONF_EPEX_COUNTRY           = CONF_ENERGY_PRICES_COUNTRY  # alias
 CONF_CLOUD_API_KEY          = "cloud_api_key"
 CONF_NILM_MODE              = "nilm_mode"
 CONF_MAX_CURRENT_PER_PHASE  = "max_current_per_phase"
