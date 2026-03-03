@@ -1,0 +1,217 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "⚡ Willkommen bei CloudEMS v1.4",
+        "description": "**CloudEMS** ist dein intelligentes Energiemanagementsystem für Home Assistant.\n\n✅ NILM-Geräteerkennung · Phasenbegrenzung · Solar-Curtailment · EPEX-Preise · Dynamisches EV-Laden · Lastspitzenkappung\n\n📖 [Dokumentation & Hilfe]({support_url}) · ☕ [CloudEMS unterstützen]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "data": {
+          "energy_prices_country": "Land (EPEX dynamische Preise)"
+        },
+        "data_description": {
+          "energy_prices_country": "Wähle dein Land für die korrekten EPEX Day-Ahead-Strompreise. Verfügbar: NL, BE, DE, FR, AT, CH, DK, NO, SE, FI."
+        }
+      },
+      "phase_config": {
+        "title": "⚡ Netzanschluss",
+        "description": "Wähle die Sicherungsgröße deiner Installation. CloudEMS hält sich immer an diese Grenze.",
+        "data": {
+          "phase_preset": "Netzanschluss & Sicherungsgröße"
+        },
+        "data_description": {
+          "phase_preset": "z.B. 3x25A = 3-phasig mit 25 A je Phase. 'Benutzerdefiniert' für manuelle Eingabe."
+        }
+      },
+      "phase_custom": {
+        "title": "⚡ Benutzerdefinierte Stromgrenzen",
+        "description": "Gib den maximalen Strom je Phase ein. CloudEMS überschreitet diese Werte niemals.",
+        "data": {
+          "phase_count": "Anzahl Phasen",
+          "max_current_l1": "Max. Strom L1 (A)",
+          "max_current_l2": "Max. Strom L2 (A)",
+          "max_current_l3": "Max. Strom L3 (A)"
+        },
+        "data_description": {
+          "max_current_l1": "Maximaler Netzstrom auf Phase L1 (typischerweise deine Sicherungsgröße, z.B. 25 A).",
+          "max_current_l2": "Maximaler Netzstrom auf Phase L2. Nur relevant bei 3-phasigen Installationen.",
+          "max_current_l3": "Maximaler Netzstrom auf Phase L3. Nur relevant bei 3-phasigen Installationen."
+        }
+      },
+      "grid_sensors": {
+        "title": "🔌 Netzsensoren",
+        "description": "CloudEMS hat automatisch **{detected}** Sensor(en) erkannt.\n\n**Nettoensor:** Verwende diesen, wenn deine P1-Integration einen einzelnen Netzleistungswert liefert.\n**Getrennte Import/Export-Sensoren:** Nutze dies, wenn Import und Export separat gemeldet werden.\n\nDie Reservenetzspannung ({mains_voltage} V) wird verwendet, wenn kein Spannungssensor verbunden ist.",
+        "data": {
+          "use_separate_import_export": "Getrennte Import- und Export-Sensoren verwenden",
+          "grid_sensor": "Nettoleistungssensor (W oder kW — positiv = Bezug)",
+          "import_power_sensor": "Import-/Verbrauchssensor (W oder kW)",
+          "export_power_sensor": "Export-/Einspeisesensor (W oder kW)",
+          "mains_voltage": "Reserve-Netzspannung (V)"
+        },
+        "data_description": {
+          "use_separate_import_export": "Aktivieren, wenn deine Messung Import und Export als zwei separate Sensoren liefert.",
+          "grid_sensor": "Haupt-Netzsensor. Positiv = Netzbezug, negativ = Einspeisung.",
+          "import_power_sensor": "Bezogene Leistung aus dem Netz (immer positiv).",
+          "export_power_sensor": "Ins Netz eingespeiste Leistung (immer positiv).",
+          "mains_voltage": "Wird als Fallback für P=U×I verwendet. Standard: 230 V (EU)."
+        }
+      },
+      "phase_sensors": {
+        "title": "🔌 Phasensensoren (optional)",
+        "description": "Diese Sensoren sind **optional** — CloudEMS funktioniert auch ohne sie.\n\nStromsensoren ermöglichen Phasenbegrenzung. Spannungssensoren verbessern die Berechnungsgenauigkeit.\n\nAlle {phase_count} Phasen werden entsprechend deiner Netzverbindung angezeigt.",
+        "data": {
+          "phase_sensors_L1": "L1 Stromsensor (A)",
+          "phase_sensors_L2": "L2 Stromsensor (A)",
+          "phase_sensors_L3": "L3 Stromsensor (A)",
+          "voltage_sensor_l1": "L1 Spannungssensor (V)",
+          "voltage_sensor_l2": "L2 Spannungssensor (V)",
+          "voltage_sensor_l3": "L3 Spannungssensor (V)",
+          "power_sensor_l1": "L1 Leistungssensor (W)",
+          "power_sensor_l2": "L2 Leistungssensor (W)",
+          "power_sensor_l3": "L3 Leistungssensor (W)"
+        }
+      },
+      "solar_ev": {
+        "title": "🌞 Solar & E-Fahrzeug",
+        "description": "Verbinde deinen Wechselrichter, Batteriespeicher und E-Ladestation. Alle Felder sind optional.",
+        "data": {
+          "solar_sensor": "Wechselrichter-Sensor (W oder kW)",
+          "battery_sensor": "Batteriespeicher-Sensor (W oder kW)",
+          "ev_charger_entity": "E-Ladestation Sollwert-Entity (number)",
+          "enable_solar_dimmer": "Solar-Curtailment bei negativem EPEX-Preis",
+          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+        }
+      },
+      "inverter_count": {
+        "title": "☀️ Wie viele Wechselrichter?",
+        "description": "Anzahl der PV-Wechselrichter in deiner Anlage. Wähle **0** wenn kein Management gewünscht.\n\n📖 [Multi-Wechselrichter Doku]({docs_url})",
+        "data": {
+          "inverter_count": "Anzahl Wechselrichter (0–9)"
+        }
+      },
+      "inverter_detail": {
+        "title": "☀️ Wechselrichter {inverter_num} von {total}",
+        "description": "Konfiguriere Wechselrichter **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Neigung:** {tilt_tip}",
+        "data": {
+          "inv_sensor": "Leistungssensor (W oder kW)",
+          "inv_control": "Schalter oder Dimmer (optional)",
+          "inv_label": "Name (z.B. 'Dach Süd')",
+          "inv_min_pct": "Mindestleistung bei Curtailment (%)",
+          "inv_azimuth": "Azimut (°) — optional, leer = selbst lernen",
+          "inv_tilt": "Neigungswinkel (°) — optional, leer = selbst lernen"
+        }
+      },
+      "features": {
+        "title": "🚀 Funktionen",
+        "description": "Aktiviere die gewünschten CloudEMS-Funktionen. Jederzeit änderbar unter Einstellungen → Integrationen → CloudEMS → Konfigurieren.",
+        "data": {
+          "dynamic_loading": "⚡ Dynamisches Laden — EV in günstigsten EPEX-Stunden laden",
+          "dynamic_load_price_threshold": "Günstiger Preisschwellwert (EUR/kWh)",
+          "cost_tracking_enabled": "💶 Energiekostenverfolgung",
+          "phase_balance_enabled": "⚖️ Phasensymmetrierung (nur 3-phasig)",
+          "phase_balance_threshold_a": "Max. Phasenungleichgewicht (A)",
+          "peak_shaving_enabled": "📊 Lastspitzenkappung — Spitzenlast begrenzen"
+        }
+      },
+      "peak_config": {
+        "title": "📊 Lastspitzenkappung",
+        "data": {
+          "peak_shaving_limit_w": "Spitzenlastgrenze (W)",
+          "peak_shaving_assets": "Abschaltbare Verbraucher"
+        }
+      },
+      "ai_config": {
+        "title": "🤖 KI & NILM",
+        "description": "CloudEMS kann Geräte aus deinen Leistungsdaten erkennen (NILM).\n\n[CloudEMS API-Schlüssel anfordern]({premium_url})",
+        "data": {
+          "cloud_api_key": "CloudEMS Cloud-API-Schlüssel (optional)",
+          "ollama_enabled": "Ollama lokale KI für NILM aktivieren"
+        }
+      },
+      "ollama_config": {
+        "title": "🤖 Ollama-Einstellungen",
+        "data": {
+          "ollama_host": "Ollama-Host (z.B. localhost oder 192.168.1.x)",
+          "ollama_port": "Ollama-Port (Standard 11434)",
+          "ollama_model": "Ollama-Modell (z.B. llama3, mistral, phi3)"
+        }
+      },
+      "advanced": {
+        "title": "📡 P1 Smart Meter",
+        "description": "Optional: direkte P1/DSMR-Verbindung. Nur aktivieren bei direkter TCP-Verbindung.",
+        "data": {
+          "p1_enabled": "Direkte P1-Verbindung aktivieren"
+        }
+      },
+      "p1_config": {
+        "title": "📡 P1-Verbindungseinstellungen",
+        "data": {
+          "p1_host": "P1 Gateway IP-Adresse",
+          "p1_port": "P1 Gateway TCP-Port"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "⚙️ CloudEMS — Konfigurieren",
+        "description": "Wähle den Bereich, den du bearbeiten möchtest.",
+        "data": { "section": "Einstellungsbereich" }
+      },
+      "sensors": {
+        "title": "🔌 Sensoren & Netz",
+        "data": {
+          "use_separate_import_export": "Getrennte Import-/Export-Sensoren",
+          "grid_sensor": "Nettoleistungssensor",
+          "import_power_sensor": "Import-Sensor",
+          "export_power_sensor": "Export-Sensor",
+          "mains_voltage": "Reserve-Netzspannung (V)",
+          "phase_count": "Phasen",
+          "max_current_l1": "Max. Strom L1 (A)",
+          "max_current_l2": "Max. Strom L2 (A)",
+          "max_current_l3": "Max. Strom L3 (A)"
+        }
+      },
+      "solar_ev_opts": {
+        "title": "☀️ Solar & E-Fahrzeug",
+        "data": {
+          "solar_sensor": "Wechselrichter-Sensor",
+          "battery_sensor": "Batterie-Sensor",
+          "ev_charger_entity": "E-Ladestation Entity",
+          "enable_solar_dimmer": "Solar-Curtailment bei Negativpreis",
+          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+        }
+      },
+      "features_opts": {
+        "title": "🚀 Funktionen",
+        "data": {
+          "dynamic_loading": "Dynamisches Laden",
+          "dynamic_load_price_threshold": "Günstiger Preisschwellwert",
+          "cost_tracking_enabled": "Kostenverfolgung",
+          "peak_shaving_enabled": "Lastspitzenkappung",
+          "peak_shaving_limit_w": "Spitzenlastgrenze (W)",
+          "peak_shaving_assets": "Abschaltbare Verbraucher",
+          "phase_balance_enabled": "Phasensymmetrierung",
+          "phase_balance_threshold_a": "Ungleichgewichtsschwelle (A)"
+        }
+      },
+      "ai_opts": {
+        "title": "🤖 KI & NILM",
+        "data": {
+          "cloud_api_key": "CloudEMS API-Schlüssel",
+          "ollama_enabled": "Ollama aktiviert",
+          "ollama_host": "Ollama-Host",
+          "ollama_port": "Ollama-Port",
+          "ollama_model": "Ollama-Modell"
+        }
+      },
+      "advanced_opts": {
+        "title": "📡 P1 & Erweitert",
+        "data": {
+          "p1_enabled": "P1 aktiviert",
+          "p1_host": "P1-Gateway-IP",
+          "p1_port": "P1-Gateway-Port"
+        }
+      }
+    }
+  }
+}

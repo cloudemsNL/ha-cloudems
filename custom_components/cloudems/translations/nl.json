@@ -1,0 +1,241 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "⚡ Welkom bij CloudEMS v1.5",
+        "description": "**CloudEMS** is je slimme energiebeheersysteem voor Home Assistant.\n\n✅ NILM apparaatdetectie · Fase-begrenzing · Zonnedimmer · EPEX-prijzen · Dynamisch EV laden · Piekafschaving\n\n📖 [Documentatie]({support_url}) · ☕ [Steun CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "data": {
+          "energy_prices_country": "Land (EPEX dynamische prijzen)",
+          "wizard_mode": "Installatiemodus"
+        },
+        "data_description": {
+          "energy_prices_country": "Kies je land voor de juiste EPEX day-ahead stroomprijzen.",
+          "wizard_mode": "Basis: snel installeren met de belangrijkste sensoren. Geavanceerd: volledige controle over alle sensoren, omvormers en P1."
+        }
+      },
+      "grid_connection": {
+        "title": "⚡ Netaansluiting",
+        "description": "Kies de zekeringsgrootte die past bij jouw installatie. CloudEMS gebruikt deze limiet om overschrijding te voorkomen.",
+        "data": {
+          "phase_preset": "Aansluiting & zekeringswaarde"
+        },
+        "data_description": {
+          "phase_preset": "Bijv. 3×25A = 3-fase met 25 A per fase. Kies 'Aangepast' voor handmatige invoer."
+        }
+      },
+      "phase_custom": {
+        "title": "⚡ Aangepaste stroomlimieten",
+        "description": "Voer de maximale stroom per fase in. CloudEMS zal deze waarden nooit overschrijden.",
+        "data": {
+          "phase_count": "Aantal fasen",
+          "max_current_l1": "Max. stroom L1 (A)",
+          "max_current_l2": "Max. stroom L2 (A)",
+          "max_current_l3": "Max. stroom L3 (A)"
+        },
+        "data_description": {
+          "max_current_l1": "Maximale netbelasting op fase L1 — typisch je zekeringswaarde (bijv. 25 A).",
+          "max_current_l2": "Maximale netbelasting op fase L2. Alleen bij 3-fase.",
+          "max_current_l3": "Maximale netbelasting op fase L3. Alleen bij 3-fase."
+        }
+      },
+      "grid_sensors": {
+        "title": "🔌 Netsensoren",
+        "description": "CloudEMS heeft automatisch **{detected}** sensor(s) gevonden.\n\n**Nettosensor:** Gebruik één sensor die het nettovermogen rapporteert (positief = afname).\n**Apart import / export:** Gebruik dit als je integratie import en export als twee aparte sensoren levert.\n\nDe fallback-spanning ({mains_voltage} V) wordt gebruikt voor P = V × I als er geen direct vermogenssensor is.",
+        "data": {
+          "use_separate_import_export": "Aparte import- en exportsensoren gebruiken",
+          "grid_sensor": "Nettovermogen sensor (W of kW)",
+          "import_power_sensor": "Import / verbruik sensor (W of kW)",
+          "export_power_sensor": "Export / teruglevering sensor (W of kW)",
+          "mains_voltage": "Fallback-netspanning (V)"
+        },
+        "data_description": {
+          "use_separate_import_export": "Schakel in als je meter import en export als twee aparte sensoren levert.",
+          "grid_sensor": "Hoofd-netsensor. Positief = afname, negatief = teruglevering.",
+          "import_power_sensor": "Vermogen afgenomen van het net (altijd positief).",
+          "export_power_sensor": "Vermogen teruggeleverd aan het net (altijd positief).",
+          "mains_voltage": "Reservewaarde voor P = V × I als er geen spanningssensor is. Standaard: 230 V."
+        }
+      },
+      "phase_sensors": {
+        "title": "🔌 Per-fase sensoren (optioneel)",
+        "description": "Deze sensoren zijn **optioneel** — CloudEMS werkt ook zonder.\n\nStroomsensoren (A) maken per-fase begrenzing mogelijk. Spanningssensoren verbeteren de nauwkeurigheid. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen automatisch via stroom × spanning.\n\n{phase_count} fase(n) getoond op basis van je aansluiting.",
+        "data": {
+          "phase_sensors_L1": "L1 stroomsensor (A)",
+          "phase_sensors_L2": "L2 stroomsensor (A)",
+          "phase_sensors_L3": "L3 stroomsensor (A)",
+          "voltage_sensor_l1": "L1 spanningssensor (V)",
+          "voltage_sensor_l2": "L2 spanningssensor (V)",
+          "voltage_sensor_l3": "L3 spanningssensor (V)",
+          "power_sensor_l1": "L1 vermogenssensor (W)",
+          "power_sensor_l2": "L2 vermogenssensor (W)",
+          "power_sensor_l3": "L3 vermogenssensor (W)"
+        },
+        "data_description": {
+          "phase_sensors_L1": "Stroom in ampère op fase L1. Gebruikt voor fase-begrenzing en balancering.",
+          "power_sensor_l1": "Direct vermogen op L1 (W). Als dit leeg is, berekent CloudEMS het automatisch via V × I."
+        }
+      },
+      "solar_ev": {
+        "title": "🌞 Zonne-energie & EV",
+        "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.",
+        "data": {
+          "solar_sensor": "Omvormer vermogenssensor (W of kW)",
+          "battery_sensor": "Batterij / opslag vermogenssensor (W of kW)",
+          "ev_charger_entity": "EV laadpaal setpoint (getal-entiteit)",
+          "enable_solar_dimmer": "Zon-energie afschalen bij negatieve EPEX-prijs",
+          "negative_price_threshold": "Prijsdrempel voor afschaling (EUR/kWh)"
+        }
+      },
+      "inverter_count": {
+        "title": "☀️ Hoeveel omvormers?",
+        "description": "Kies het aantal PV-omvormers in jouw installatie. Kies **0** om omvormerbeheer over te slaan.\n\nCloudEMS leert azimut, hellingshoek en piekvermogen automatisch.\n\n📖 [Multi-omvormer docs]({docs_url})",
+        "data": {
+          "inverter_count": "Aantal omvormers (0–9)"
+        }
+      },
+      "inverter_detail": {
+        "title": "☀️ Omvormer {inverter_num} van {total}",
+        "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.",
+        "data": {
+          "inv_sensor": "Vermogenssensor (W of kW)",
+          "inv_control": "Besturingsentiteit — schakelaar of dimmer (optioneel)",
+          "inv_label": "Naam (bijv. 'Dak Zuid')",
+          "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
+          "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
+          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren"
+        }
+      },
+      "features": {
+        "title": "🚀 Functies",
+        "description": "Schakel de gewenste functies in. Je kunt dit altijd wijzigen via Instellingen → Integraties → CloudEMS → Configureren.",
+        "data": {
+          "dynamic_loading": "Dynamisch laden — EV opladen tijdens goedkoopste EPEX-uren",
+          "dynamic_load_price_threshold": "Goedkope prijsdrempel (EUR/kWh)",
+          "cost_tracking_enabled": "Energiekostenregistratie",
+          "phase_balance_enabled": "Fase-balancering (alleen 3-fase)",
+          "phase_balance_threshold_a": "Max. fase-onbalans (A)",
+          "peak_shaving_enabled": "Piekafschaving — onder de maandelijkse piekvermogensgrens blijven"
+        }
+      },
+      "peak_config": {
+        "title": "📊 Piekafschaving instellen",
+        "data": {
+          "peak_shaving_limit_w": "Piekvermogensgrens (W)",
+          "peak_shaving_assets": "Afschakelbare verbruikers"
+        }
+      },
+      "ai_config": {
+        "title": "🤖 AI & NILM",
+        "description": "CloudEMS kan apparaten herkennen uit je vermogensprofiel (NILM).\n\n**Prioriteit:** Ingebouwde patroonherkenning → Ollama (lokaal) → Cloud AI\n\n**Geen:** Alleen ingebouwde patroonherkenning.\n**Ollama:** Lokale LLM op je eigen hardware — privacy-vriendelijk.\n**CloudEMS / OpenAI / Anthropic:** Cloud AI voor hoogste nauwkeurigheid.\n\n🔑 [Haal een CloudEMS API-sleutel]({premium_url})",
+        "data": {
+          "ai_provider": "AI-provider voor NILM",
+          "cloud_api_key": "API-sleutel (vereist voor CloudEMS, OpenAI en Anthropic)",
+          "nilm_min_confidence": "Minimale betrouwbaarheid voor apparaatdetectie (0,30–0,99)"
+        }
+      },
+      "ollama_config": {
+        "title": "🤖 Ollama-instellingen",
+        "data": {
+          "ollama_host": "Ollama host (bijv. localhost of 192.168.1.x)",
+          "ollama_port": "Ollama poort (standaard 11434)",
+          "ollama_model": "Ollama model (bijv. llama3, mistral, phi3)"
+        }
+      },
+      "advanced": {
+        "title": "📡 P1 slimme meter",
+        "description": "Optioneel: verbind een P1/DSMR slimme meter rechtstreeks via TCP. Activeer dit alleen als je een directe TCP-verbinding wilt.",
+        "data": {
+          "p1_enabled": "Directe P1 TCP-verbinding inschakelen"
+        }
+      },
+      "p1_config": {
+        "title": "📡 P1 verbindingsinstellingen",
+        "data": {
+          "p1_host": "P1 gateway IP-adres",
+          "p1_port": "P1 gateway TCP-poort"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "⚙️ CloudEMS — Configureren",
+        "description": "Kies de sectie die je wilt aanpassen.",
+        "data": { "section": "Instellingssectie" }
+      },
+      "sensors": {
+        "title": "🔌 Netsensoren",
+        "data": {
+          "use_separate_import_export": "Aparte import- en exportsensoren",
+          "grid_sensor": "Nettovermogen sensor",
+          "import_power_sensor": "Importsensor",
+          "export_power_sensor": "Exportsensor",
+          "mains_voltage": "Fallback-netspanning (V)",
+          "phase_count": "Aantal fasen",
+          "max_current_l1": "Max. stroom L1 (A)",
+          "max_current_l2": "Max. stroom L2 (A)",
+          "max_current_l3": "Max. stroom L3 (A)"
+        }
+      },
+      "phase_sensors": {
+        "title": "⚡ Fase-sensoren",
+        "description": "Per-fase stroom-, spannings- en vermogenssensoren. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen via stroom × spanning.",
+        "data": {
+          "phase_sensors_L1": "L1 stroomsensor",
+          "phase_sensors_L2": "L2 stroomsensor",
+          "phase_sensors_L3": "L3 stroomsensor",
+          "voltage_sensor_l1": "L1 spanningssensor",
+          "voltage_sensor_l2": "L2 spanningssensor",
+          "voltage_sensor_l3": "L3 spanningssensor",
+          "power_sensor_l1": "L1 vermogenssensor",
+          "power_sensor_l2": "L2 vermogenssensor",
+          "power_sensor_l3": "L3 vermogenssensor"
+        }
+      },
+      "solar_ev_opts": {
+        "title": "☀️ Zonne-energie & EV",
+        "data": {
+          "solar_sensor": "Omvormer sensor",
+          "battery_sensor": "Batterij sensor",
+          "ev_charger_entity": "EV laadpaal entiteit",
+          "enable_solar_dimmer": "Zon afschalen bij negatieve prijs",
+          "negative_price_threshold": "Prijsdrempel (EUR/kWh)"
+        }
+      },
+      "features_opts": {
+        "title": "🚀 Functies",
+        "data": {
+          "dynamic_loading": "Dynamisch laden",
+          "dynamic_load_price_threshold": "Goedkope prijsdrempel (EUR/kWh)",
+          "cost_tracking_enabled": "Kostenregistratie",
+          "peak_shaving_enabled": "Piekafschaving",
+          "peak_shaving_limit_w": "Piekvermogensgrens (W)",
+          "peak_shaving_assets": "Afschakelbare verbruikers",
+          "phase_balance_enabled": "Fase-balancering",
+          "phase_balance_threshold_a": "Onbalansdrempel (A)"
+        }
+      },
+      "ai_opts": {
+        "title": "🤖 AI & NILM",
+        "description": "Kies de AI-provider en stel NILM-detectie in. Herkende apparaten verschijnen als sensoren onder Instellingen → Apparaten → CloudEMS. Je kunt ze daar bevestigen, hernoemen of verwijderen.",
+        "data": {
+          "ai_provider": "AI-provider",
+          "cloud_api_key": "API-sleutel",
+          "ollama_host": "Ollama host",
+          "ollama_port": "Ollama poort",
+          "ollama_model": "Ollama model",
+          "nilm_min_confidence": "Minimale betrouwbaarheidsdrempel (0,30–0,99)"
+        }
+      },
+      "advanced_opts": {
+        "title": "📡 P1 & Geavanceerd",
+        "data": {
+          "p1_enabled": "Directe P1-verbinding ingeschakeld",
+          "p1_host": "P1 gateway IP",
+          "p1_port": "P1 gateway poort"
+        }
+      }
+    }
+  }
+}
