@@ -58,6 +58,10 @@ class P1Telegram:
     """Parsed P1 telegram values. All power in W, current in A."""
     power_import_w: float = 0.0
     power_export_w: float = 0.0
+    # Per-phase power (DSMR5 only, kW in telegram → stored as W)
+    power_l1_import_w: float = 0.0
+    power_l2_import_w: float = 0.0
+    power_l3_import_w: float = 0.0
     energy_import_kwh: float = 0.0
     energy_export_kwh: float = 0.0
     current_l1: float = 0.0

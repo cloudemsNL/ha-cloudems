@@ -275,11 +275,51 @@ class PVForecast:
 
         return forecasts
 
+    def get_forecast_tomorrow(self, inverter_id: str) -> list[HourForecast]:
+        """Return 24-hour forecast for tomorrow for one inverter."""
+        p = self._profiles.get(inverter_id)
+        if p is None or p._peak_wp < 10:
+            return []
+
+        tomorrow = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        forecasts: list[HourForecast] = []
+
+        for h in range(24):
+            target   = tomorrow + timedelta(hours=h)
+            hk       = str(target.hour)
+            stat_frac = float(p.hourly_yield_fraction.get(hk, 0.0))
+
+            weather_key = target.strftime("%Y-%m-%dT%H:00")
+            irradiance  = self._weather_cache.get(weather_key)
+            confidence  = 0.6 if irradiance is None else 0.85
+
+            if irradiance is not None:
+                max_irr  = 1000.0
+                irr_frac = min(irradiance / max_irr, 1.0) if max_irr else 0.0
+                blended  = stat_frac * 0.4 + irr_frac * 0.6
+            else:
+                blended = stat_frac
+
+            forecast_w = round(p._peak_wp * blended, 1)
+            forecasts.append(HourForecast(hour=target.hour, forecast_w=forecast_w, confidence=confidence))
+
+        return forecasts
+
     def get_total_forecast_today_kwh(self) -> float:
         """Sum forecast for all inverters for today in kWh."""
         total = 0.0
         for eid in self._profiles:
             for hf in self.get_forecast(eid):
+                total += hf.forecast_w / 1000.0
+        return round(total, 2)
+
+    def get_total_forecast_tomorrow_kwh(self) -> float:
+        """Sum forecast for all inverters for tomorrow in kWh."""
+        total = 0.0
+        for eid in self._profiles:
+            for hf in self.get_forecast_tomorrow(eid):
                 total += hf.forecast_w / 1000.0
         return round(total, 2)
 

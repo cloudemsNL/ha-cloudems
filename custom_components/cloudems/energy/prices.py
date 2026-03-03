@@ -99,10 +99,12 @@ class EnergyPriceFetcher:
         return result[:count]
 
     def get_price_info(self) -> dict:
-        current      = self._get_current_price()
-        next_hours   = self.get_next_hours(24)
-        today_slots  = self._today_slots()
-        prices_today = [s["price"] for s in today_slots]
+        """Returns complete price dict for coordinator and sensors."""
+        current        = self._get_current_price()
+        next_hours     = self.get_next_hours(24)
+        today_slots    = self._today_slots()
+        tomorrow_slots = self._tomorrow_slots()
+        prices_today   = [s["price"] for s in today_slots]
 
         sorted_by_price = sorted(next_hours, key=lambda h: h["price"])
         cheapest_hours  = [h["hour"] for h in sorted_by_price]
@@ -119,28 +121,39 @@ class EnergyPriceFetcher:
                 "label": start.strftime("%H:%M"),
             })
 
+        tomorrow_all = []
+        for s in tomorrow_slots:
+            start = self._aware(s["start"])
+            tomorrow_all.append({
+                "hour":  start.hour,
+                "price": round(float(s["price"]), 5),
+                "label": start.strftime("%H:%M"),
+            })
+
         return {
-            "current":           round(current, 5) if current is not None else None,
-            "is_negative":       self.is_negative_price(),
-            "min_today":         round(min(prices_today), 5) if prices_today else None,
-            "max_today":         round(max(prices_today), 5) if prices_today else None,
-            "avg_today":         round(mean(prices_today), 5) if prices_today else None,
-            "next_hours":        next_hours,
-            "today_all":         today_all,
-            "cheapest_hour_1":   cheapest_hours[0] if len(cheapest_hours) > 0 else None,
-            "cheapest_hour_2":   cheapest_hours[1] if len(cheapest_hours) > 1 else None,
-            "cheapest_hour_3":   cheapest_hours[2] if len(cheapest_hours) > 2 else None,
-            "cheapest_2h_start": cheapest_2h,
-            "cheapest_3h_start": cheapest_3h,
-            "in_cheapest_1h":    now_hour in cheapest_hours[:1],
-            "in_cheapest_2h":    now_hour in cheapest_hours[:2],
-            "in_cheapest_3h":    now_hour in cheapest_hours[:3],
-            "cheapest_1h_hours": cheapest_hours[:1],
-            "cheapest_2h_hours": cheapest_hours[:2],
-            "cheapest_3h_hours": cheapest_hours[:3],
-            "source":            self._source,
-            "country":           self._country,
-            "slot_count":        len(self._prices),
+            "current":            round(current, 5) if current is not None else None,
+            "is_negative":        self.is_negative_price(),
+            "min_today":          round(min(prices_today), 5) if prices_today else None,
+            "max_today":          round(max(prices_today), 5) if prices_today else None,
+            "avg_today":          round(mean(prices_today), 5) if prices_today else None,
+            "next_hours":         next_hours,
+            "today_all":          today_all,
+            "tomorrow_all":       tomorrow_all,
+            "tomorrow_available": len(tomorrow_all) > 0,
+            "cheapest_hour_1":    cheapest_hours[0] if len(cheapest_hours) > 0 else None,
+            "cheapest_hour_2":    cheapest_hours[1] if len(cheapest_hours) > 1 else None,
+            "cheapest_hour_3":    cheapest_hours[2] if len(cheapest_hours) > 2 else None,
+            "cheapest_2h_start":  cheapest_2h,
+            "cheapest_3h_start":  cheapest_3h,
+            "in_cheapest_1h":     now_hour in cheapest_hours[:1],
+            "in_cheapest_2h":     now_hour in cheapest_hours[:2],
+            "in_cheapest_3h":     now_hour in cheapest_hours[:3],
+            "cheapest_1h_hours":  cheapest_hours[:1],
+            "cheapest_2h_hours":  cheapest_hours[:2],
+            "cheapest_3h_hours":  cheapest_hours[:3],
+            "source":             self._source,
+            "country":            self._country,
+            "slot_count":         len(self._prices),
         }
 
     # ── Update ────────────────────────────────────────────────────────────────
@@ -197,6 +210,12 @@ class EnergyPriceFetcher:
     def _today_slots(self) -> list:
         now = datetime.now(timezone.utc)
         ts  = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        te  = ts + timedelta(days=1)
+        return [s for s in self._prices if ts <= self._aware(s["start"]) < te]
+
+    def _tomorrow_slots(self) -> list:
+        now = datetime.now(timezone.utc)
+        ts  = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         te  = ts + timedelta(days=1)
         return [s for s in self._prices if ts <= self._aware(s["start"]) < te]
 

@@ -127,7 +127,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._peak_shaving      = None
         self._boiler_ctrl       = None
 
-        # Cost accumulators
+        # v1.9: new sub-modules
+        self._co2_fetcher:       Optional[object] = None
+        self._battery_scheduler:    Optional[object] = None
+        self._congestion_detector:  Optional[object] = None
+        self._battery_degradation:  Optional[object] = None
+        self._sensor_hints:         Optional[object] = None
+        self._cost_forecaster:   Optional[object] = None
+
+        # v1.8: EV PID controller
+        self._ev_pid: Optional[object] = None
+        # v1.8: PID auto-tuner state per controller
+        self._phase_pid_tuners: dict = {}
         self._cost_today_eur  = 0.0
         self._cost_month_eur  = 0.0
         self._cost_day_key    = ""
@@ -154,27 +165,40 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         """Add prev_hour_price, rank_today and is_cheap_hour to price_info dict."""
         if not price_info or not self._prices:
             return price_info
-        next_hours = price_info.get("next_hours", [])
-        all_today  = self._prices._today_slots() if hasattr(self._prices, "_today_slots") else []
-        cur        = price_info.get("current")
+        # Use today_all from prices.py (already has hour int) if available
+        # Fallback: use raw _today_slots() and extract hour via _aware()
+        today_all = price_info.get("today_all", [])
+        cur = price_info.get("current")
 
-        # Previous hour price
+        # Previous hour price — find slot whose hour == (now - 1)
         prev = None
         try:
             from datetime import datetime, timezone
             now    = datetime.now(timezone.utc)
             prev_h = (now.hour - 1) % 24
-            prev_slot = next((s for s in all_today if s.get("hour") == prev_h), None)
-            if prev_slot:
-                prev = prev_slot.get("price")
+            if today_all:
+                # today_all has "hour" int key (from prices.py v1.6+)
+                prev_slot = next((s for s in today_all if s.get("hour") == prev_h), None)
+                if prev_slot:
+                    prev = prev_slot.get("price")
+            else:
+                # Fallback to raw slots from _today_slots() using datetime
+                for s in self._prices._today_slots():
+                    slot_hour = self._prices._aware(s["start"]).hour
+                    if slot_hour == prev_h:
+                        prev = float(s["price"])
+                        break
         except Exception:
             pass
 
         # Rank of current price among today's hours (1 = cheapest)
         rank = None
-        if cur is not None and all_today:
-            prices_today = sorted(s["price"] for s in all_today)
-            rank = next((i + 1 for i, p in enumerate(prices_today) if p >= cur - 0.0001), None)
+        prices_today = [s["price"] for s in today_all] if today_all else []
+        if not prices_today:
+            prices_today = [float(s["price"]) for s in self._prices._today_slots()]
+        if cur is not None and prices_today:
+            sorted_prices = sorted(prices_today)
+            rank = next((i + 1 for i, p in enumerate(sorted_prices) if p >= cur - 0.0001), None)
 
         # Is this a cheap hour? (below avg)
         is_cheap = False
@@ -249,9 +273,60 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         cfg = self._config
 
+        # v1.9: CO2 intensity (always active — uses static defaults without key)
+        from .energy.co2 import CO2IntensityFetcher
+        self._co2_fetcher = CO2IntensityFetcher(
+            country = cfg.get("co2_country", cfg.get(CONF_ENERGY_PRICES_COUNTRY, "NL")),
+            session = self._session,
+        )
+        await self._co2_fetcher.update()
+
+        # v1.9: Cost forecaster (always active — self-trains over time)
+        from .energy_manager.cost_forecaster import EnergyCostForecaster
+        self._cost_forecaster = EnergyCostForecaster(self.hass)
+        await self._cost_forecaster.async_setup()
+
+        # v1.9: Battery EPEX scheduler (only when battery entities configured)
+        if cfg.get("battery_scheduler_enabled", False) or cfg.get("battery_soc_entity"):
+            from .energy_manager.battery_scheduler import BatteryEPEXScheduler
+            self._battery_scheduler = BatteryEPEXScheduler(self.hass, cfg)
+            await self._battery_scheduler.async_setup()
+
+        # v1.10: Grid congestion detector (always active if threshold configured)
+        if cfg.get("congestion_threshold_w") or cfg.get("congestion_enabled", True):
+            from .energy_manager.grid_congestion import GridCongestionDetector
+            self._congestion_detector = GridCongestionDetector(self.hass, cfg)
+            await self._congestion_detector.async_setup()
+
+        # v1.10: Battery degradation tracker (active if SoC entity configured)
+        if cfg.get("battery_soc_entity"):
+            from .energy_manager.battery_degradation import BatteryDegradationTracker
+            self._battery_degradation = BatteryDegradationTracker(self.hass, cfg)
+            await self._battery_degradation.async_setup()
+
+        # v1.10: NILM remote feed (non-blocking background refresh)
+        await self._nilm._db.async_setup(self.hass)
+        _LOGGER.info("CloudEMS: BatteryEPEXScheduler actief")
+
+        # v1.10.2: Sensor hint engine (passive pattern observer)
+        from .energy_manager.sensor_hint import SensorHintEngine
+        self._sensor_hints = SensorHintEngine(self.hass, cfg)
+        await self._sensor_hints.async_setup()
+
+        # v1.8: EV PID controller (runs alongside DynamicLoader)
+        from .energy_manager.dynamic_ev_charger import EVChargingPIDController
+        from .const import (DEFAULT_PID_EV_KP, DEFAULT_PID_EV_KI, DEFAULT_PID_EV_KD,
+                            CONF_PID_EV_KP, CONF_PID_EV_KI, CONF_PID_EV_KD,
+                            MIN_EV_CURRENT, MAX_EV_CURRENT)
+        self._ev_pid = EVChargingPIDController(
+            min_a  = MIN_EV_CURRENT,
+            max_a  = MAX_EV_CURRENT,
+            kp     = float(cfg.get(CONF_PID_EV_KP, DEFAULT_PID_EV_KP)),
+            ki     = float(cfg.get(CONF_PID_EV_KI, DEFAULT_PID_EV_KI)),
+            kd     = float(cfg.get(CONF_PID_EV_KD, DEFAULT_PID_EV_KD)),
+        )
         if cfg.get(CONF_DYNAMIC_LOADING, False):
-            from .energy_manager.dynamic_loader import DynamicLoader
-            self._dynamic_loader = DynamicLoader(cfg, self._set_ev_current)
+            self._ev_pid.enable(True)
 
         if cfg.get(CONF_PHASE_BALANCE, False):
             from .energy_manager.phase_balancer import PhaseBalancer
@@ -338,7 +413,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # EPEX price info (FIX: get_price_info() now exists)
             price_info: dict = self._prices.get_price_info() if self._prices else {}
 
-            # Dynamic loader
+            # Dynamic loader (threshold-based, keeps running for price logic)
             ev_decision = {}
             if self._dynamic_loader:
                 ev_decision = await self._dynamic_loader.async_evaluate(
@@ -346,6 +421,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     solar_surplus_w=data.get("solar_power", 0.0),
                     max_current_a  =float(self._config.get(CONF_MAX_CURRENT_L1, DEFAULT_MAX_CURRENT)),
                 )
+
+            # v1.8: EV PID controller — smooth solar surplus tracking
+            ev_pid_state = {}
+            if self._ev_pid and self._ev_pid._enabled:
+                grid_w  = data.get("grid_power", 0.0)
+                new_a   = self._ev_pid.compute(grid_w)
+                if new_a is not None:
+                    await self._set_ev_current(new_a)
+                    self._log_decision("ev_pid",
+                        f"🔋 EV PID: {new_a:.1f}A (netto {grid_w:.0f}W)")
+                ev_pid_state = self._ev_pid.pid_state
 
             # Phase balancer
             balance_data = {}
@@ -371,11 +457,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "current_l2": t.current_l2,
                     "current_l3": t.current_l3,
                 }
+                # v1.9: P1 per-phase power → NILM (highest quality input)
+                # DSMR5 telegrams include per-phase import power in kW
+                # P1Telegram fields: power_l1_import_w, power_l2_import_w, power_l3_import_w
+                for ph, attr in (("L1","power_l1_import_w"),("L2","power_l2_import_w"),("L3","power_l3_import_w")):
+                    pw = getattr(t, attr, None)
+                    if pw is not None and pw >= 0:
+                        self._nilm.update_power(ph, pw, source="p1_direct")
+                # Also feed per-phase from current × voltage if power not in telegram (DSMR4)
+                mains_v = float(self._config.get(CONF_MAINS_VOLTAGE, DEFAULT_MAINS_VOLTAGE_V))
+                if getattr(t, "current_l1", None) is not None and not getattr(t, "power_l1_import_w", None):
+                    for ph, amp in (("L1", t.current_l1),("L2", t.current_l2),("L3", t.current_l3)):
+                        if amp is not None:
+                            self._nilm.update_power(ph, amp * mains_v, source="p1_i*u")
 
             # Solar learner + PV forecast
             inverter_data      = []
-            pv_forecast_kwh    = None
+            pv_forecast_kwh         = None
+            pv_forecast_tomorrow_kwh = None
             pv_forecast_hourly: list = []
+            pv_forecast_hourly_tomorrow: list = []
             inverter_profiles:  list = []
 
             if self._solar_learner:
@@ -411,11 +512,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             if self._pv_forecast:
                 await self._pv_forecast.async_refresh_weather()
-                pv_forecast_kwh   = self._pv_forecast.get_total_forecast_today_kwh()
-                inverter_profiles = self._pv_forecast.get_all_profiles()
+                pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh()
+                pv_forecast_tomorrow_kwh = self._pv_forecast.get_total_forecast_tomorrow_kwh()
+                inverter_profiles        = self._pv_forecast.get_all_profiles()
                 for inv_id in [p["inverter_id"] for p in inverter_profiles]:
                     for hf in self._pv_forecast.get_forecast(inv_id):
                         pv_forecast_hourly.append({
+                            "inverter_id": inv_id,
+                            "hour":        hf.hour,
+                            "forecast_w":  hf.forecast_w,
+                            "confidence":  hf.confidence,
+                        })
+                    for hf in self._pv_forecast.get_forecast_tomorrow(inv_id):
+                        pv_forecast_hourly_tomorrow.append({
                             "inverter_id": inv_id,
                             "hour":        hf.hour,
                             "forecast_w":  hf.forecast_w,
@@ -488,6 +597,109 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._cost_today_eur  = round(self._cost_today_eur  + cost_ph * (UPDATE_INTERVAL_FAST/3600.0), 4)
             self._cost_month_eur  = round(self._cost_month_eur  + cost_ph * (UPDATE_INTERVAL_FAST/3600.0), 4)
 
+            # v1.9: CO2 intensity update (rate-limited internally to 15 min)
+            await self._co2_fetcher.update()
+            co2_info = self._co2_fetcher.get_info()
+
+            # v1.9: Cost forecaster tick
+            await self._cost_forecaster.async_tick(
+                power_w       = max(0.0, data.get("grid_power", 0.0)),
+                price_eur_kwh = current_price or 0.0,
+            )
+            cost_forecast = self._cost_forecaster.get_forecast(price_info)
+
+            # v1.9: Battery EPEX scheduler
+            battery_schedule = {}
+            if self._battery_scheduler:
+                battery_schedule = await self._battery_scheduler.async_evaluate(
+                    price_info      = price_info,
+                    solar_surplus_w = solar_surplus,
+                )
+
+            # v1.10: Grid congestion detection
+            congestion_data: dict = {}
+            if self._congestion_detector:
+                grid_import_w   = max(0.0, data.get("grid_power", 0.0))
+                current_price   = price_info.get("current", 0.0) if price_info else 0.0
+                cong_result     = await self._congestion_detector.async_evaluate(
+                    grid_import_w  = grid_import_w,
+                    price_eur_kwh  = current_price,
+                )
+                congestion_data = {
+                    "active":          cong_result.congestion_active,
+                    "import_w":        cong_result.import_w,
+                    "threshold_w":     cong_result.threshold_w,
+                    "utilisation_pct": cong_result.utilisation_pct,
+                    "actions":         cong_result.actions,
+                    "today_events":    cong_result.today_events,
+                    "month_events":    cong_result.month_events,
+                    "peak_today_w":    cong_result.peak_today_w,
+                    "monthly_summary": self._congestion_detector.get_monthly_summary(),
+                }
+                # Propagate congestion state to boiler controller
+                if self._boiler_ctrl:
+                    self._boiler_ctrl.update_congestion_state(cong_result.congestion_active)
+                if cong_result.congestion_active and cong_result.actions:
+                    self._log_decision(
+                        "congestion",
+                        f"⚡ Netcongestie: {cong_result.utilisation_pct:.0f}% benutting "
+                        f"— {len(cong_result.actions)} aanbevolen acties"
+                    )
+
+            # v1.10: Battery degradation tracking
+            degradation_data: dict = {}
+            if self._battery_degradation:
+                soc_eid  = self._config.get("battery_soc_entity", "")
+                soc_val  = self._read_state(soc_eid) if soc_eid else None
+                deg_result = self._battery_degradation.update(soc_val)
+                degradation_data = {
+                    "soh_pct":        deg_result.soh_pct,
+                    "capacity_kwh":   deg_result.capacity_kwh,
+                    "total_cycles":   deg_result.total_cycles,
+                    "cycles_per_day": deg_result.cycles_per_day,
+                    "alert_level":    deg_result.alert_level,
+                    "alert_message":  deg_result.alert_message,
+                    "soc_low_events": deg_result.soc_low_events,
+                    "days_tracked":   deg_result.days_tracked,
+                }
+                await self._battery_degradation.async_save()
+                if deg_result.alert_level in ("warn", "critical"):
+                    self._log_decision(
+                        "battery_health",
+                        f"🔋 {deg_result.alert_message}"
+                    )
+
+            # v1.10: Update outside temperature for heat demand mode
+            outside_temp_eid = self._config.get("outside_temp_entity", "")
+            if self._boiler_ctrl and outside_temp_eid:
+                outside_temp = self._read_state(outside_temp_eid)
+                self._boiler_ctrl.update_outside_temp(outside_temp)
+
+            # v1.10.2: Sensor hint engine — detect unconfigured PV/battery from grid patterns
+            sensor_hints: list = []
+            if self._sensor_hints:
+                cfg = self._config
+                has_solar   = bool(cfg.get("solar_sensor", ""))
+                has_battery = bool(cfg.get("battery_sensor", ""))
+                has_curr_l1 = bool(cfg.get("phase_sensors_L1", ""))
+                has_volt_l1 = bool(cfg.get("voltage_sensor_l1", ""))
+                has_pwr_l1  = bool(cfg.get("power_sensor_l1", ""))
+                hints = self._sensor_hints.update(
+                    grid_power_w        = data.get("grid_power", 0.0),
+                    has_solar_sensor    = has_solar,
+                    has_battery_sensor  = has_battery,
+                    has_current_l1      = has_curr_l1,
+                    has_voltage_l1      = has_volt_l1,
+                    has_power_l1        = has_pwr_l1,
+                )
+                sensor_hints = self._sensor_hints.get_all_hints()
+                for h in hints:
+                    self._log_decision(
+                        "sensor_hint",
+                        f"💡 {h.title}: {h.message[:80]}…"
+                    )
+                await self._sensor_hints.async_save()
+
             # Generate insights
             self._insights = self._generate_insights(
                 data, price_info, inverter_data, peak_data, balance_data,
@@ -516,13 +728,31 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "ev_decision":          ev_decision,
                 "p1_data":              p1_data,
                 "inverter_data":        inverter_data,          # ← NEW: peak + clipping
-                "pv_forecast_today_kwh":pv_forecast_kwh,
-                "pv_forecast_hourly":   pv_forecast_hourly,
+                "pv_forecast_today_kwh":     pv_forecast_kwh,
+                "pv_forecast_tomorrow_kwh":  pv_forecast_tomorrow_kwh,
+                "pv_forecast_hourly":        pv_forecast_hourly,
+                "pv_forecast_hourly_tomorrow": pv_forecast_hourly_tomorrow,
                 "inverter_profiles":    inverter_profiles,
                 "peak_shaving":         peak_data,
                 "boiler_status":        self._boiler_ctrl.get_status() if self._boiler_ctrl else [],
-                "decision_log":         list(self._decision_log),  # ← NEW
-                "insights":             self._insights,             # ← NEW
+                "decision_log":         list(self._decision_log),
+                "insights":             self._insights,
+                "nilm_diagnostics":     self._nilm.get_diagnostics(),  # ← v1.7
+                "ev_pid_state":         ev_pid_state,                   # ← v1.8
+                "phase_pid_states":     self._get_phase_pid_states(),   # ← v1.8
+                "co2_info":             co2_info,                       # ← v1.9
+                "cost_forecast":        cost_forecast,                  # ← v1.9
+                "battery_schedule":     battery_schedule,               # ← v1.9
+                "congestion":           congestion_data,                # ← v1.10
+                "battery_degradation":  degradation_data,              # ← v1.10
+                "nilm_db_stats":        self._nilm._db.get_stats(),    # ← v1.10
+                "sensor_hints":         sensor_hints,                   # ← v1.10.2
+                "scale_info":           {eid: self._calc.get_scale_info(eid)
+                                         for eid in [
+                                             self._config.get("grid_sensor",""),
+                                             self._config.get("solar_sensor",""),
+                                             self._config.get("battery_sensor",""),
+                                         ] if eid},                        # ← v1.10.2
             }
             return self._data
 
@@ -533,11 +763,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     # ── Data gathering ────────────────────────────────────────────────────────
 
     def _read_state(self, entity_id: str) -> Optional[float]:
+        """Read HA state as float. Also feeds unit_of_measurement to the power calculator."""
         if not entity_id:
             return None
         state = self.hass.states.get(entity_id)
-        if state is None or state.state in ("unavailable","unknown",""):
+        if state is None or state.state in ("unavailable", "unknown", ""):
             return None
+        # Feed UOM to power calculator so kW/W is determined from metadata first
+        self._calc.observe_state(entity_id, state)
         try:
             return float(state.state)
         except (ValueError, TypeError):
@@ -611,10 +844,48 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 derived_from= resolved.get("derived_from","direct"),
             )
 
-            # Feed NILM
-            self._nilm.update_power(ph, resolved.get("power_w") or 0.0)
+            # Feed NILM — v1.8: smart fallback cascade
+            #
+            # Priority:
+            #   1. Per-phase power sensor configured & valid  → best accuracy
+            #   2. No phase sensor but total grid available   → split equally per phase
+            #   3. Single-phase install                       → total on L1
+            #
+            # This ensures NILM always gets a meaningful signal even when
+            # no per-phase sensors are installed.
+            phase_pw = resolved.get("power_w")
+            if phase_pw is not None:
+                self._nilm.update_power(ph, phase_pw, source="per_phase")
+            # (fallback handled below after all phases are processed)
 
-    # ── Insights generation ───────────────────────────────────────────────────
+        # v1.8: NILM fallback — if no per-phase power sensors, use total grid
+        # Detect how many phases had real data
+        phases_with_data = []
+        for ph in phases:
+            amp_key, volt_key, pwr_key = phase_conf[ph]
+            if self._read_state(cfg.get(amp_key,"")) is not None or \
+               self._read_state(cfg.get(pwr_key,"")) is not None:
+                phases_with_data.append(ph)
+
+        if not phases_with_data:
+            # No per-phase sensors at all → distribute total grid power
+            total_w = data.get("grid_power", 0.0)
+            n       = len(phases)
+            if n > 1:
+                # Equal split — better than nothing; at least the total signature is preserved
+                per_phase_w = total_w / n
+                for ph in phases:
+                    self._nilm.update_power(ph, per_phase_w, source="total_split")
+            else:
+                # Single phase — send total directly to L1
+                self._nilm.update_power("L1", total_w, source="total_l1")
+
+    def _get_phase_pid_states(self) -> dict:
+        """Return PID state for all phase controllers (from multi-inverter manager)."""
+        if self._multi_inv_manager:
+            status = self._multi_inv_manager.get_status()
+            return status.get("phase_pids", {})
+        return {}
 
     def _generate_insights(
         self,

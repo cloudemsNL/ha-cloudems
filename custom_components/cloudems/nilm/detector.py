@@ -34,9 +34,81 @@ from ..const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-POWER_CHANGE_THRESHOLD = 25   # W — minimum change to detect an event
+# These defaults are overridden at runtime by AdaptiveNILMThreshold
+POWER_CHANGE_THRESHOLD = 25.0  # W — starting value; adapts based on signal noise
 WINDOW_SIZE            = 10
-DEBOUNCE_TIME          = 2.0  # seconds
+DEBOUNCE_TIME          = 2.0   # seconds
+
+
+
+class AdaptiveNILMThreshold:
+    """
+    Automatically adjusts the power-change detection threshold based on
+    the measured noise floor of the grid signal.
+
+    Algorithm:
+      - Track a rolling window of per-sample |Δpower| values
+      - Estimate noise as the 80th-percentile of those deltas
+      - Set threshold = max(MIN, min(MAX, noise * 3.0))
+        (3σ rule: events 3× above noise floor are real events)
+      - Persist learned threshold across HA restarts
+
+    This means:
+      - Quiet installations (good P1 meters) → threshold drops to ~10W
+      - Noisy installations (cheap clamp meters) → threshold stays high
+    """
+    def __init__(self, initial: float = 25.0,
+                 min_w: float = 8.0, max_w: float = 100.0,
+                 window: int = 120):
+        from ..const import NILM_MIN_THRESHOLD_W, NILM_MAX_THRESHOLD_W, NILM_NOISE_WINDOW
+        self._threshold   = initial
+        self._min_w       = min_w
+        self._max_w       = max_w
+        self._window      = window
+        self._deltas: list = []   # rolling |Δpower| values
+        self._prev_power: dict = {}
+        self._adapted     = False
+
+    @property
+    def threshold(self) -> float:
+        return self._threshold
+
+    def update(self, phase: str, power_w: float) -> None:
+        """Feed a new power reading; adapt threshold from noise."""
+        prev = self._prev_power.get(phase)
+        if prev is not None:
+            delta = abs(power_w - prev)
+            self._deltas.append(delta)
+            if len(self._deltas) > self._window:
+                self._deltas.pop(0)
+            if len(self._deltas) >= 30:
+                self._recalculate()
+        self._prev_power[phase] = power_w
+
+    def _recalculate(self) -> None:
+        import statistics
+        sorted_d = sorted(self._deltas)
+        # 80th percentile of idle deltas → noise floor
+        idx       = int(len(sorted_d) * 0.80)
+        noise_p80 = sorted_d[idx]
+        # threshold = 3× noise floor, clamped
+        new_t = max(self._min_w, min(self._max_w, noise_p80 * 3.0))
+        if abs(new_t - self._threshold) > 2.0:
+            _LOGGER.debug(
+                "NILM adaptive threshold: %.1fW → %.1fW (noise p80=%.1fW)",
+                self._threshold, new_t, noise_p80,
+            )
+            self._threshold  = round(new_t, 1)
+            self._adapted    = True
+
+    def to_dict(self) -> dict:
+        return {
+            "threshold_w":  self._threshold,
+            "adapted":      self._adapted,
+            "samples":      len(self._deltas),
+            "noise_p80_w":  round(sorted(self._deltas)[int(len(self._deltas)*0.8)], 1)
+                            if len(self._deltas) >= 10 else None,
+        }
 
 
 @dataclass
@@ -200,7 +272,22 @@ class NILMDetector:
         self._store_energy:  Optional[Store] = None
         self._last_energy_save = 0.0
 
-        _LOGGER.info("CloudEMS NILM Detector v1.4 initialized")
+        # v1.8: adaptive threshold
+        self._adaptive = AdaptiveNILMThreshold()
+
+        # v1.8: track which sensor inputs are feeding NILM
+        self._sensor_input_log: Dict[str, str] = {}   # phase → source description
+
+        # v1.7: diagnostics
+        self._diag_events_total: int = 0
+        self._diag_events_classified: int = 0
+        self._diag_events_missed: int = 0
+        self._diag_last_event_ts: float = 0.0
+        self._diag_last_event_delta: float = 0.0
+        self._diag_last_match: str = ""
+        self._diag_log: list = []     # ring buffer, last 20 events
+
+        _LOGGER.info("CloudEMS NILM Detector v1.8 initialized")
 
     # ── Storage setup ─────────────────────────────────────────────────────────
 
@@ -262,9 +349,25 @@ class NILMDetector:
 
     # ── Power update ──────────────────────────────────────────────────────────
 
-    def update_power(self, phase: str, power_watt: float, timestamp: float = None):
+    def update_power(self, phase: str, power_watt: float, timestamp: float = None,
+                     source: str = "per_phase"):
+        """Feed a new power reading for NILM edge detection.
+        
+        Args:
+            phase:      'L1', 'L2' or 'L3'
+            power_watt: power in Watts (positive = consumption)
+            timestamp:  unix timestamp (defaults to now)
+            source:     human label for diagnostics ('per_phase', 'total_split', 'total_l1')
+        """
         if timestamp is None:
             timestamp = time.time()
+        # v1.8: record sensor source for diagnostics
+        self._sensor_input_log[phase] = source
+
+        # v1.8: feed adaptive threshold
+        self._adaptive.update(phase, power_watt)
+        threshold = self._adaptive.threshold
+
         buf = self._power_buffers.get(phase)
         if buf is None:
             return
@@ -277,7 +380,7 @@ class NILMDetector:
         baseline = self._baseline_power[phase]
         delta    = avg - baseline
 
-        if abs(delta) >= POWER_CHANGE_THRESHOLD:
+        if abs(delta) >= threshold:
             last_ev = self._last_event_time.get(phase, 0)
             if timestamp - last_ev > DEBOUNCE_TIME:
                 self._last_event_time[phase] = timestamp
@@ -290,8 +393,13 @@ class NILMDetector:
                     rms_power   = avg,
                     phase       = phase,
                 )
+                # FIX v1.7: use create_task instead of deprecated ensure_future
                 import asyncio
-                asyncio.ensure_future(self._async_process_event(event))
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(self._async_process_event(event))
+                except RuntimeError:
+                    asyncio.ensure_future(self._async_process_event(event))
 
         # Update baseline slowly
         self._baseline_power[phase] = baseline * 0.998 + avg * 0.002
@@ -305,7 +413,9 @@ class NILMDetector:
     # ── Classification ────────────────────────────────────────────────────────
 
     async def _async_process_event(self, event: PowerEvent) -> None:
-        matches: List[Dict] = self._db.classify(event)
+        # FIX v1.7: pass scalar args — database.classify(float, float), NOT the PowerEvent object
+        matches: List[Dict] = self._db.classify(event.delta_power, event.rise_time)
+        self._diag_log_event(event, matches)
         if self._local_ai.is_available:
             matches = self._merge_matches(matches, self._local_ai.classify(event))
 
@@ -459,6 +569,82 @@ class NILMDetector:
 
     def dismiss_device(self, device_id: str) -> None:
         self._devices.pop(device_id, None)
+
+    def _diag_log_event(self, event: "PowerEvent", matches: list) -> None:
+        """Record event in diagnostics ring buffer."""
+        from datetime import datetime, timezone
+        self._diag_events_total += 1
+        self._diag_last_event_ts    = event.timestamp
+        self._diag_last_event_delta = event.delta_power
+        direction = "↑ AAN" if event.delta_power > 0 else "↓ UIT"
+        best = matches[0] if matches else None
+
+        if best and best["confidence"] >= NILM_MIN_CONFIDENCE:
+            self._diag_events_classified += 1
+            self._diag_last_match = best["device_type"]
+            result = f"✅ {best['device_type']} ({best['confidence']*100:.0f}%)"
+        elif best:
+            self._diag_events_missed += 1
+            self._diag_last_match = f"laag vertrouwen ({best['confidence']*100:.0f}%)"
+            result = f"⚠️ laag: {best['device_type']} ({best['confidence']*100:.0f}%)"
+        else:
+            self._diag_events_missed += 1
+            self._diag_last_match = "geen match"
+            result = "❌ geen match in database"
+
+        entry = {
+            "ts":        datetime.fromtimestamp(event.timestamp, tz=timezone.utc).strftime("%H:%M:%S"),
+            "phase":     event.phase,
+            "delta_w":   round(event.delta_power, 1),
+            "peak_w":    round(event.peak_power, 1),
+            "rise_s":    round(event.rise_time, 2),
+            "direction": direction,
+            "result":    result,
+            "top_matches": [
+                {"type": m["device_type"], "conf_pct": round(m["confidence"]*100, 0)}
+                for m in (matches[:3] if matches else [])
+            ],
+        }
+        self._diag_log.insert(0, entry)
+        if len(self._diag_log) > 30:
+            self._diag_log.pop()
+        _LOGGER.debug("NILM event %s %+.0fW → %s", event.phase, event.delta_power, result)
+
+    def get_diagnostics(self) -> dict:
+        """Return full diagnostics dict for the NILM Diagnostics sensor."""
+        from datetime import datetime, timezone
+        last_ts = None
+        if self._diag_last_event_ts:
+            last_ts = datetime.fromtimestamp(
+                self._diag_last_event_ts, tz=timezone.utc
+            ).isoformat()
+
+        # Classification rate
+        total = self._diag_events_total
+        rate  = round(self._diag_events_classified / total * 100, 1) if total > 0 else 0.0
+
+        return {
+            "events_total":        total,
+            "events_classified":   self._diag_events_classified,
+            "events_missed":       self._diag_events_missed,
+            "classification_rate_pct": rate,
+            "last_event_ts":       last_ts,
+            "last_event_delta_w":  self._diag_last_event_delta,
+            "last_match":          self._diag_last_match,
+            "baselines_w": {
+                ph: round(v, 1) for ph, v in self._baseline_power.items()
+            },
+            "devices_known":       len(self._devices),
+            "devices_confirmed":   sum(1 for d in self._devices.values() if d.confirmed),
+            "ai_mode":             self.active_mode,
+            # v1.8: adaptive threshold info
+            "adaptive_threshold":  self._adaptive.to_dict(),
+            # v1.8: which sensors feed NILM per phase
+            "sensor_inputs":       dict(self._sensor_input_log),
+            "power_threshold_w":   self._adaptive.threshold,
+            "debounce_s":          DEBOUNCE_TIME,
+            "recent_events":       self._diag_log[:20],
+        }
 
     # ── Accessors ─────────────────────────────────────────────────────────────
 

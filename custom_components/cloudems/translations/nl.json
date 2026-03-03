@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "⚡ Welkom bij CloudEMS v1.5",
-        "description": "**CloudEMS** is je slimme energiebeheersysteem voor Home Assistant.\n\n✅ NILM apparaatdetectie · Fase-begrenzing · Zonnedimmer · EPEX-prijzen · Dynamisch EV laden · Piekafschaving\n\n📖 [Documentatie]({support_url}) · ☕ [Steun CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "description": "**CloudEMS** is je slimme energiebeheersysteem voor Home Assistant.\n\n✅ NILM apparaatdetectie · Fase-begrenzing · Zonnedimmer · EPEX-prijzen · Dynamisch EV laden · Piekafschaving\n\n📖 [Documentatie]({support_url}) · ☕ [Steun CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})\n\n![]({diagram_url})",
         "data": {
           "energy_prices_country": "Land (EPEX dynamische prijzen)",
           "wizard_mode": "Installatiemodus"
@@ -15,7 +15,7 @@
       },
       "grid_connection": {
         "title": "⚡ Netaansluiting",
-        "description": "Kies de zekeringsgrootte die past bij jouw installatie. CloudEMS gebruikt deze limiet om overschrijding te voorkomen.",
+        "description": "Kies de zekeringsgrootte die past bij jouw installatie. CloudEMS gebruikt deze limiet om overschrijding te voorkomen.\n\n![]({diagram_url})",
         "data": {
           "phase_preset": "Aansluiting & zekeringswaarde"
         },
@@ -40,7 +40,7 @@
       },
       "grid_sensors": {
         "title": "🔌 Netsensoren",
-        "description": "CloudEMS heeft automatisch **{detected}** sensor(s) gevonden.\n\n**Nettosensor:** Gebruik één sensor die het nettovermogen rapporteert (positief = afname).\n**Apart import / export:** Gebruik dit als je integratie import en export als twee aparte sensoren levert.\n\nDe fallback-spanning ({mains_voltage} V) wordt gebruikt voor P = V × I als er geen direct vermogenssensor is.",
+        "description": "CloudEMS heeft automatisch **{detected}** sensor(s) gevonden.\n\n**Nettosensor:** Gebruik één sensor die het nettovermogen rapporteert (positief = afname).\n**Apart import / export:** Gebruik dit als je integratie import en export als twee aparte sensoren levert.\n\nDe fallback-spanning ({mains_voltage} V) wordt gebruikt voor P = V × I als er geen direct vermogenssensor is.\n\n![]({diagram_url})",
         "data": {
           "use_separate_import_export": "Aparte import- en exportsensoren gebruiken",
           "grid_sensor": "Nettovermogen sensor (W of kW)",
@@ -58,7 +58,7 @@
       },
       "phase_sensors": {
         "title": "🔌 Per-fase sensoren (optioneel)",
-        "description": "Deze sensoren zijn **optioneel** — CloudEMS werkt ook zonder.\n\nStroomsensoren (A) maken per-fase begrenzing mogelijk. Spanningssensoren verbeteren de nauwkeurigheid. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen automatisch via stroom × spanning.\n\n{phase_count} fase(n) getoond op basis van je aansluiting.",
+        "description": "Deze sensoren zijn **optioneel** — CloudEMS werkt ook zonder.\n\nStroomsensoren (A) maken per-fase begrenzing mogelijk. Spanningssensoren verbeteren de nauwkeurigheid. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen automatisch via stroom × spanning.\n\n{phase_count} fase(n) getoond op basis van je aansluiting.\n\n![]({diagram_url})",
         "data": {
           "phase_sensors_L1": "L1 stroomsensor (A)",
           "phase_sensors_L2": "L2 stroomsensor (A)",
@@ -77,7 +77,7 @@
       },
       "solar_ev": {
         "title": "🌞 Zonne-energie & EV",
-        "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.",
+        "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.\n\n![]({diagram_url})",
         "data": {
           "solar_sensor": "Omvormer vermogenssensor (W of kW)",
           "battery_sensor": "Batterij / opslag vermogenssensor (W of kW)",
@@ -95,7 +95,7 @@
       },
       "inverter_detail": {
         "title": "☀️ Omvormer {inverter_num} van {total}",
-        "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.",
+        "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.\n\n![]({diagram_url})",
         "data": {
           "inv_sensor": "Vermogenssensor (W of kW)",
           "inv_control": "Besturingsentiteit — schakelaar of dimmer (optioneel)",
@@ -153,7 +153,8 @@
         "data": {
           "p1_host": "P1 gateway IP-adres",
           "p1_port": "P1 gateway TCP-poort"
-        }
+        },
+        "description": "\n\n![]({diagram_url})"
       }
     }
   },
@@ -162,7 +163,9 @@
       "init": {
         "title": "⚙️ CloudEMS — Configureren",
         "description": "Kies de sectie die je wilt aanpassen.",
-        "data": { "section": "Instellingssectie" }
+        "data": {
+          "section": "Instellingssectie"
+        }
       },
       "sensors": {
         "title": "🔌 Netsensoren",
@@ -233,9 +236,21 @@
         "data": {
           "p1_enabled": "Directe P1-verbinding ingeschakeld",
           "p1_host": "P1 gateway IP",
-          "p1_port": "P1 gateway poort"
+          "p1_port": "P1 gateway poort",
+          "congestion_threshold_w": "Netcongestie drempel (W)",
+          "congestion_price_threshold": "Prijsdrempel congestie (€/kWh)",
+          "battery_chemistry": "Batterijchemie (LFP / NMC / NCA / LTO)",
+          "outside_temp_entity": "Buitentemperatuursensor (voor warmtevraag)",
+          "battery_degradation_enabled": "Batterijdegradatie bijhouden",
+          "congestion_enabled": "Netcongestiedetectie inschakelen"
+        },
+        "data_description": {
+          "congestion_threshold_w": "Importvermogen waarboven congestie wordt gemeld. Typisch gelijk aan het capaciteitstarief limiet.",
+          "battery_chemistry": "Kies de chemie van je batterij. LFP degradeert langzamer dan NMC.",
+          "outside_temp_entity": "Optioneel: koppel een buitenthermometer. CloudEMS schakelt de warmtepomp/CV prioritair in als het koud is én de prijs laag is."
         }
       }
     }
-  }
+  },
+  "entity": {}
 }

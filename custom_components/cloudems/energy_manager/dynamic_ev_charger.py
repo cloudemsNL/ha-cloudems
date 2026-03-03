@@ -208,3 +208,134 @@ class DynamicEVCharger:
             "always_on_current_a": self._always_on_current,
             "solar_priority": self._solar_prio,
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.8.0 — PID-gebaseerde EV-laadstroom controller
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EVChargingPIDController:
+    """
+    Regelt de EV-laadstroom via een PID-regelaar met solar-surplus als setpoint.
+
+    Doel: houd het netto netverbruik op 0W (of een configureerbare offset).
+    
+    Werking:
+      setpoint   = target_grid_w (standaard: 0W, = maximaal zonne-overschot benutten)
+      meting     = huidig netto netverbruik (positief = import)
+      output     = laadstroom in Ampere
+
+    Bij import (meting > setpoint):  stroom verlagen  (te veel import)
+    Bij export (meting < setpoint):  stroom verhogen  (er is surplus)
+
+    Parameters (instelbaar via HA number entities):
+      Kp = 0.05   Snelle reactie op surplus-wijzigingen
+      Ki = 0.008  Compensatie voor blijvende afwijking (bewolking)
+      Kd = 0.02   Demping bij snel wisselende bewolking
+
+    Voordelen t.o.v. threshold-gebaseerde logica:
+      - Gladde stroomregeling (geen harde sprongen)
+      - Past automatisch aan bij veranderende zonproductie
+      - Reageert sneller op bewolking
+      - Geen configureerbare drempelwaarden nodig
+    """
+
+    def __init__(
+        self,
+        min_a: float = 6.0,
+        max_a: float = 32.0,
+        kp: float = 0.05,
+        ki: float = 0.008,
+        kd: float = 0.02,
+        target_grid_w: float = 0.0,   # 0W = geen import/export
+        sample_time_s: float = 10.0,
+    ) -> None:
+        from .pid_controller import PIDController
+        self._pid = PIDController(
+            kp          = kp,
+            ki          = ki,
+            kd          = kd,
+            setpoint    = target_grid_w,
+            output_min  = min_a,
+            output_max  = max_a,
+            deadband    = 0.5,
+            sample_time = sample_time_s,
+            label       = "ev_charging",
+        )
+        self._min_a      = min_a
+        self._max_a      = max_a
+        self._target_w   = target_grid_w
+        self._last_a     = min_a
+        self._enabled    = False
+        self._auto_tuner = None
+
+    def enable(self, enabled: bool) -> None:
+        self._enabled = enabled
+        if not enabled:
+            self._pid.reset()
+
+    def set_pid_params(self, kp: float, ki: float, kd: float) -> None:
+        """Live update PID parameters (from HA number entities)."""
+        changed = (kp != self._pid.kp or ki != self._pid.ki or kd != self._pid.kd)
+        self._pid.kp = kp
+        self._pid.ki = ki
+        self._pid.kd = kd
+        if changed:
+            _LOGGER.info("EV PID params updated: Kp=%.3f Ki=%.3f Kd=%.3f", kp, ki, kd)
+
+    def set_target_grid_w(self, target_w: float) -> None:
+        """Update the grid target (0 = no import/export, negative = allow some export)."""
+        self._pid.update_setpoint(target_w)
+        self._target_w = target_w
+
+    def compute(self, grid_power_w: float) -> float | None:
+        """
+        Compute desired charging current based on current grid power.
+
+        Args:
+            grid_power_w: current net grid power (positive = import, negative = export)
+
+        Returns:
+            Desired charging current in Ampere, or None if too soon.
+        """
+        if not self._enabled:
+            return None
+
+        # PID: setpoint is target_grid_w, measurement is current grid power
+        # Positive error = we're exporting more than target → increase charging
+        # Negative error = we're importing → decrease charging
+        output = self._pid.compute(grid_power_w)
+        if output is not None:
+            self._last_a = round(output, 1)
+        return output
+
+    def start_auto_tune(self) -> None:
+        """Start auto-tuning relay experiment."""
+        from .pid_controller import PIDAutoTuner
+        relay_amp = (self._max_a - self._min_a) * 0.2   # 20% of range
+        self._auto_tuner = PIDAutoTuner(
+            self._pid,
+            relay_amplitude=relay_amp,
+            min_cycles=3,
+            label="ev_charging",
+        )
+        _LOGGER.info("EV PID auto-tune gestart (relay amplitude=%.1fA)", relay_amp)
+
+    def auto_tune_step(self, grid_power_w: float) -> float | None:
+        """Run one auto-tune step. Returns relay output or None if tuning not active."""
+        if self._auto_tuner and self._auto_tuner.active:
+            out = self._auto_tuner.step(grid_power_w)
+            if self._auto_tuner.done:
+                self._auto_tuner.apply_to_pid()
+                self._auto_tuner = None
+                _LOGGER.info("EV PID auto-tune voltooid, parameters toegepast")
+            return out
+        return None
+
+    @property
+    def pid_state(self) -> dict:
+        d = self._pid.to_dict()
+        d["auto_tuner"] = self._auto_tuner.to_dict() if self._auto_tuner else None
+        d["target_grid_w"] = self._target_w
+        d["last_output_a"] = self._last_a
+        return d

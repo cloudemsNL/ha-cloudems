@@ -35,9 +35,12 @@ MODE_CHEAP_HOURS    = "cheap_hours"
 MODE_NEGATIVE_PRICE = "negative_price"
 MODE_PV_SURPLUS     = "pv_surplus"
 MODE_EXPORT_REDUCE  = "export_reduce"
+MODE_HEAT_DEMAND    = "heat_demand"    # Turn on when outside temp < setpoint (HP/CV priority)
+MODE_CONGESTION_OFF = "congestion_off" # Turn off during grid congestion events
 
 DEFAULT_SURPLUS_THRESHOLD_W  = 300   # W — minimum PV surplus to trigger
 DEFAULT_EXPORT_THRESHOLD_A   = 1.0   # A — minimum export current on phase to trigger
+DEFAULT_HEAT_DEMAND_TEMP_C   = 5.0   # °C — below this outside temp, heat demand is active
 DEFAULT_MIN_ON_MINUTES       = 10
 DEFAULT_MIN_OFF_MINUTES      = 5
 
@@ -54,6 +57,9 @@ class BoilerDecision:
 
 @dataclass
 class BoilerState:
+    outside_temp_c:    Optional[float] = None   # updated by coordinator
+    heat_demand_temp_c: float = 5.0             # trigger below this °C
+    congestion_active:  bool  = False           # set by GridCongestionDetector
     """Runtime state per boiler."""
     entity_id:        str
     label:            str
@@ -162,6 +168,26 @@ class BoilerController:
                         f"— schakel {b.label} in om te verbruiken"
                     )
 
+            # 5. Heat demand (heat pump / CV boiler priority)
+            #    Turn on when outside temperature is below setpoint AND PV or cheap hours
+            #    allow it. This ensures heat pumps run when heat is actually needed.
+            if not want_on and MODE_HEAT_DEMAND in b.modes:
+                outside_temp = b.outside_temp_c   # updated separately via update_outside_temp()
+                setpoint     = float(getattr(b, "heat_demand_temp_c", DEFAULT_HEAT_DEMAND_TEMP_C))
+                if outside_temp is not None and outside_temp < setpoint:
+                    # Only activate if price is reasonable (< 2x current price avg) or PV available
+                    price_ok = price_info.get("current", 0.5) < price_info.get("avg_today", 0.5) * 1.5
+                    if price_ok or solar_surplus_w > 200:
+                        want_on = True
+                        reason  = (
+                            f"Warmtevraag: buitentemp {outside_temp:.1f}°C < {setpoint:.1f}°C setpoint"
+                        )
+
+            # 6. Congestion override — force off regardless of other modes
+            if MODE_CONGESTION_OFF in b.modes and getattr(b, "congestion_active", False):
+                want_on = False
+                reason  = "Netcongestie actief — belasting uitgesteld"
+
             # ── Apply min on/off timers ────────────────────────────────────────
             action = "hold_off"
 
@@ -219,6 +245,16 @@ class BoilerController:
         await self._hass.services.async_call(
             domain, service, {"entity_id": entity_id}, blocking=False
         )
+
+    def update_outside_temp(self, temp_c: Optional[float]) -> None:
+        """Update outside temperature for heat demand mode."""
+        for b in self._boilers:
+            b.outside_temp_c = temp_c
+
+    def update_congestion_state(self, active: bool) -> None:
+        """Inform boilers about grid congestion state."""
+        for b in self._boilers:
+            b.congestion_active = active
 
     def get_status(self) -> list[dict]:
         """Return status of all boilers for sensor attributes."""

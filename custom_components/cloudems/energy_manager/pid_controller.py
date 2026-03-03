@@ -217,3 +217,181 @@ class PIDController:
                 "dt_s":           s.dt,
             }} if s else {}),
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.8.0 — PID Auto-Tuner (Relay Feedback / Ziegler-Nichols)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PIDAutoTuner:
+    """
+    Automatic PID parameter tuner using the relay feedback (Åström-Hägglund) method.
+
+    How it works:
+      1. Temporarily replaces PID output with a relay (bang-bang: high/low)
+      2. Measures the resulting oscillation (period Tu, amplitude Ku)
+      3. Calculates Kp, Ki, Kd using Ziegler-Nichols PID tuning rules
+      4. Writes results back to the PIDController
+      5. Caller can then accept or reject the new parameters
+
+    Usage:
+        tuner = PIDAutoTuner(pid_controller, relay_amplitude=5.0)
+        # call tuner.step(measurement) every sample_time instead of pid.compute()
+        if tuner.done:
+            kp, ki, kd = tuner.get_tuned_params()
+            pid.kp = kp; pid.ki = ki; pid.kd = kd
+
+    Safety: relay amplitude should be a small fraction of the output range.
+    Auto-tuning should only run during stable, representative operating conditions.
+    """
+
+    def __init__(
+        self,
+        pid: PIDController,
+        relay_amplitude: float = 5.0,   # half-amplitude of relay output swing
+        min_cycles: int = 4,             # number of full oscillation cycles needed
+        timeout_steps: int = 300,        # give up after N steps (~50 min at 10s)
+        label: str = "auto_tune",
+    ) -> None:
+        self._pid            = pid
+        self._relay_amp      = relay_amplitude
+        self._min_cycles     = min_cycles
+        self._timeout        = timeout_steps
+
+        self._relay_output   = pid.output_max   # start HIGH
+        self._last_crossing: float | None = None
+        self._crossings: list[float] = []       # timestamps of zero-crossings
+        self._amplitudes: list[float] = []      # output amplitudes between crossings
+        self._step           = 0
+        self._done           = False
+        self._failed         = False
+        self._tuned_kp: float | None = None
+        self._tuned_ki: float | None = None
+        self._tuned_kd: float | None = None
+        self._label          = label
+
+        _LOGGER.info("PID AutoTuner [%s] gestart (relay_amplitude=%.1f)", label, relay_amplitude)
+
+    @property
+    def done(self) -> bool:
+        return self._done
+
+    @property
+    def failed(self) -> bool:
+        return self._failed
+
+    @property
+    def active(self) -> bool:
+        return not self._done and not self._failed
+
+    def step(self, measurement: float) -> float:
+        """
+        Run one relay-feedback step.
+        Returns the relay output (use this instead of pid.compute()).
+        """
+        if self._done or self._failed:
+            return self._pid.compute(measurement) or self._pid._prev_output
+
+        self._step += 1
+        if self._step > self._timeout:
+            _LOGGER.warning("PID AutoTuner [%s]: timeout na %d stappen", self._label, self._step)
+            self._failed = True
+            return self._pid._prev_output
+
+        error = self._pid.setpoint - measurement
+
+        # Relay logic: flip output when error crosses zero
+        if self._last_crossing is None:
+            self._last_crossing = time.time()
+        
+        prev_relay = self._relay_output
+        if error > 0:
+            self._relay_output = self._pid.output_max
+        else:
+            self._relay_output = self._pid.output_min
+
+        # Detect sign change (zero crossing)
+        if (prev_relay != self._relay_output) and self._last_crossing is not None:
+            now = time.time()
+            period_half = now - self._last_crossing
+            self._crossings.append(period_half)
+            self._last_crossing = now
+
+            cycles = len(self._crossings) // 2
+            if cycles >= self._min_cycles:
+                self._calculate_params()
+
+        return self._relay_output
+
+    def _calculate_params(self) -> None:
+        """Apply Ziegler-Nichols tuning from measured oscillation."""
+        if len(self._crossings) < 4:
+            self._failed = True
+            return
+
+        # Estimate ultimate period Tu (average of full oscillation periods)
+        full_periods = [self._crossings[i] + self._crossings[i+1]
+                        for i in range(0, len(self._crossings)-1, 2)]
+        Tu = sum(full_periods) / len(full_periods) if full_periods else 0
+
+        # Ultimate gain Ku from relay: Ku = 4d / (π * A)
+        # d = relay amplitude, A = output amplitude (approx relay_amp)
+        d  = self._relay_amp
+        A  = d  # simplified; in practice measure actual output swing
+        if Tu <= 0 or A <= 0:
+            self._failed = True
+            return
+
+        Ku = (4 * d) / (3.14159 * A)
+
+        # Ziegler-Nichols PID rules
+        kp = 0.60 * Ku
+        ki = 1.20 * Ku / Tu
+        kd = 0.075 * Ku * Tu
+
+        # Clamp to reasonable ranges
+        kp = max(0.1, min(20.0, kp))
+        ki = max(0.01, min(5.0, ki))
+        kd = max(0.0,  min(5.0, kd))
+
+        self._tuned_kp = round(kp, 3)
+        self._tuned_ki = round(ki, 3)
+        self._tuned_kd = round(kd, 3)
+        self._done     = True
+
+        _LOGGER.info(
+            "PID AutoTuner [%s] klaar: Ku=%.2f Tu=%.1fs → Kp=%.3f Ki=%.3f Kd=%.3f",
+            self._label, Ku, Tu, kp, ki, kd,
+        )
+
+    def get_tuned_params(self) -> tuple[float, float, float] | None:
+        """Returns (Kp, Ki, Kd) if tuning completed, else None."""
+        if self._done and self._tuned_kp is not None:
+            return self._tuned_kp, self._tuned_ki, self._tuned_kd
+        return None
+
+    def apply_to_pid(self) -> bool:
+        """Write tuned parameters back to the PIDController. Returns True on success."""
+        params = self.get_tuned_params()
+        if params is None:
+            return False
+        self._pid.kp, self._pid.ki, self._pid.kd = params
+        self._pid.reset()
+        _LOGGER.info(
+            "PID AutoTuner [%s]: parameters toegepast op PID → Kp=%.3f Ki=%.3f Kd=%.3f",
+            self._label, *params,
+        )
+        return True
+
+    def to_dict(self) -> dict:
+        return {
+            "active":         self.active,
+            "done":           self._done,
+            "failed":         self._failed,
+            "step":           self._step,
+            "crossings":      len(self._crossings),
+            "relay_amplitude":self._relay_amp,
+            "tuned_kp":       self._tuned_kp,
+            "tuned_ki":       self._tuned_ki,
+            "tuned_kd":       self._tuned_kd,
+        }

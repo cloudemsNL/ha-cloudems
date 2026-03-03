@@ -2,7 +2,7 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
-VERSION = "1.6.0"
+VERSION = "1.9.0"
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -280,6 +280,40 @@ PLATFORM_NUMBER = "number"
 PLATFORM_BUTTON = "button"
 PLATFORM_SELECT = "select"
 
+# ── v1.8.0 — PID tuning entities ─────────────────────────────────────────────
+CONF_PID_PHASE_KP             = "pid_phase_kp"
+CONF_PID_PHASE_KI             = "pid_phase_ki"
+CONF_PID_PHASE_KD             = "pid_phase_kd"
+CONF_PID_EV_KP                = "pid_ev_kp"
+CONF_PID_EV_KI                = "pid_ev_ki"
+CONF_PID_EV_KD                = "pid_ev_kd"
+CONF_PRICE_THRESHOLD_CHEAP    = "price_threshold_cheap"   # configurable cheap price
+CONF_NILM_THRESHOLD_W         = "nilm_threshold_w"        # adaptive NILM sensitivity
+
+# v1.8.0 — NILM input mode
+NILM_INPUT_PER_PHASE          = "per_phase"      # per-phase power (best)
+NILM_INPUT_TOTAL_SPLIT        = "total_split"    # total grid / phase_count (fallback)
+NILM_INPUT_TOTAL_L1           = "total_l1"       # total grid on L1 only (last resort)
+
+# v1.8.0 — Adaptive NILM defaults
+DEFAULT_NILM_THRESHOLD_W      = 25.0     # start value; adapts down to ~8W
+NILM_MIN_THRESHOLD_W          = 8.0      # never go below 8W (avoids noise triggers)
+NILM_MAX_THRESHOLD_W          = 100.0    # never above 100W (would miss most devices)
+NILM_NOISE_WINDOW             = 60       # samples for noise estimation
+
+# v1.8.0 — PID defaults
+DEFAULT_PID_PHASE_KP          = 3.0
+DEFAULT_PID_PHASE_KI          = 0.4
+DEFAULT_PID_PHASE_KD          = 0.8
+DEFAULT_PID_EV_KP             = 0.05    # EV PID: setpoint=0W surplus, output=amps
+DEFAULT_PID_EV_KI             = 0.008
+DEFAULT_PID_EV_KD             = 0.02
+DEFAULT_PRICE_THRESHOLD_CHEAP = 0.10    # EUR/kWh
+
+# Storage key for PID state persistence
+STORAGE_KEY_PID_STATE         = f"{DOMAIN}_pid_state_v1"
+STORAGE_KEY_NILM_THRESHOLD    = f"{DOMAIN}_nilm_threshold_v1"
+
 # ── Compat aliases from v1.3 / v1.4 ──────────────────────────────────────────
 CONF_EV_PRICE_THRESHOLD       = CONF_EV_CHEAP_THRESHOLD
 CONF_ENABLE_PHASE_BALANCER    = CONF_ENABLE_PHASE_BALANCING
@@ -304,3 +338,45 @@ GRID_SENSOR_KEYWORDS     = ["grid","net","import","export","p1","dsmr","mains","
 PHASE_SENSOR_KEYWORDS_L1 = ["l1","fase_1","phase_1","phase1","stroom_l1","current_l1"]
 PHASE_SENSOR_KEYWORDS_L2 = ["l2","fase_2","phase_2","phase2","stroom_l2","current_l2"]
 PHASE_SENSOR_KEYWORDS_L3 = ["l3","fase_3","phase_3","phase3","stroom_l3","current_l3"]
+
+# ── v1.9.0 — CO2, battery scheduler, cost forecast, boiler learning ───────────
+CONF_CO2_COUNTRY              = "co2_country"       # ISO2 country for CO2 API
+CONF_BATTERY_CAPACITY_KWH     = "battery_capacity_kwh"
+CONF_BATTERY_CHARGE_ENTITY    = "battery_charge_entity"
+CONF_BATTERY_DISCHARGE_ENTITY = "battery_discharge_entity"
+CONF_BATTERY_SOC_ENTITY       = "battery_soc_entity"
+CONF_BATTERY_MAX_CHARGE_W     = "battery_max_charge_w"
+CONF_BATTERY_MAX_DISCHARGE_W  = "battery_max_discharge_w"
+CONF_BATTERY_SCHEDULER_ENABLED= "battery_scheduler_enabled"
+
+DEFAULT_BATTERY_CAPACITY_KWH  = 10.0
+DEFAULT_BATTERY_MAX_CHARGE_W  = 3000.0
+DEFAULT_CO2_COUNTRY           = "NL"
+
+# Storage keys
+STORAGE_KEY_BATTERY_SCHEDULE  = f"{DOMAIN}_battery_schedule_v1"
+STORAGE_KEY_BOILER_PATTERN    = f"{DOMAIN}_boiler_pattern_v1"
+STORAGE_KEY_COST_HISTORY      = f"{DOMAIN}_cost_history_v1"
+
+# CO2 API
+CO2_SIGNAL_URL  = "https://api.co2signal.com/v1/latest"   # needs free token
+ELECTRICITY_MAP_FREE_URL = "https://api.electricitymap.org/v3/carbon-intensity/latest"
+# Fallback: static European averages g CO2/kWh (source: EEA 2023)
+CO2_COUNTRY_DEFAULTS = {
+    "NL": 283, "DE": 385, "BE": 167, "FR": 56, "AT": 135,
+    "DK": 180, "NO": 28, "SE": 41, "FI": 126, "CH": 31,
+    "GB": 239, "ES": 206, "IT": 372, "PL": 750,
+}
+
+# ── v1.10.0 — Grid congestion, battery degradation, heat demand ───────────────
+CONF_CONGESTION_ENABLED        = "congestion_enabled"
+CONF_CONGESTION_THRESHOLD_W    = "congestion_threshold_w"
+CONF_CONGESTION_PRICE_THR      = "congestion_price_threshold"
+CONF_BATTERY_CHEMISTRY         = "battery_chemistry"
+CONF_OUTSIDE_TEMP_ENTITY       = "outside_temp_entity"
+CONF_BATTERY_DEGRADATION_ENABLED = "battery_degradation_enabled"
+
+DEFAULT_CONGESTION_THRESHOLD_W = 5000
+DEFAULT_OUTSIDE_TEMP_ENTITY    = ""
+
+BATTERY_CHEMISTRIES = ["LFP", "NMC", "NCA", "LTO"]

@@ -16,6 +16,152 @@ Vandaag is CloudEMS uitgegroeid tot een volwaardige energiemanager die draait op
 
 ---
 
+## 🆕 Wat is er nieuw in v1.9.0?
+
+### 🌱 CO2-intensiteit sensor (altijd actief, geen configuratie nodig)
+
+CloudEMS toont nu de CO2-intensiteit van het elektriciteitsnet in gCO2eq/kWh.
+
+| Bronnen | Beschikbaarheid |
+|---------|----------------|
+| Electricity Maps API | Gratis, geen sleutel |
+| CO2 Signal API | Gratis token vereist |
+| EEA 2023 statisch gemiddelde | Altijd, offline |
+
+Gebruik het om automaties te maken als: *"Laad de EV alleen wanneer het net groen is (<200g)"*.
+
+### 🔌 P1 direct naar NILM — hoogste kwaliteit invoer
+
+Wanneer je een P1-lezer hebt geconfigureerd (SLIMMELEZER, HomeWizard, USB), worden de per-fase vermogens uit het DSMR-telegram nu **direct naar de NILM-detector gestuurd** — zonder vertraging via HA-sensoren. Dit is de beste mogelijke NILM-invoer.
+
+**Prioriteitsvolgorde NILM-invoer (v1.9):**
+
+| Prioriteit | Bron | Kwaliteit |
+|-----------|------|----------|
+| 1 | P1 direct (DSMR5 per-fase W) | ⭐⭐⭐⭐⭐ |
+| 2 | P1 stroom × spanning (DSMR4) | ⭐⭐⭐⭐ |
+| 3 | Per-fase HA vermogenssensor | ⭐⭐⭐⭐ |
+| 4 | Totaal netverbruik ÷ fasen | ⭐⭐ |
+| 5 | Totaal netverbruik op L1 | ⭐ |
+
+### 🔋 Batterij EPEX-schema (automatische laadplanning)
+
+CloudEMS plant automatisch wanneer je batterij moet laden en ontladen op basis van EPEX dag-aheadprijzen.
+
+- **Laden**: 3 goedkoopste uren van de dag
+- **Ontladen**: 3 duurste uren van de dag
+- **Veiligheid**: stopt laden bij SoC > 90%, stopt ontladen bij SoC < 20%
+- **Slim**: slaat gepland laden over als PV het al doet
+
+Benodigde configuratie (optioneel):
+```yaml
+# configuration.yaml (of via UI opties)
+battery_scheduler_enabled: true
+battery_soc_entity: sensor.battery_state_of_charge
+battery_charge_entity: number.battery_charge_power
+battery_discharge_entity: number.battery_discharge_power
+battery_capacity_kwh: 10.0
+battery_max_charge_w: 3000
+battery_max_discharge_w: 3000
+```
+
+### 📊 Energiekosten-voorspelling (zelf-lerend)
+
+De sensor **`CloudEMS Energie · Kosten Verwachting`** voorspelt wat je vandaag en morgen kwijt bent aan stroom.
+
+- **Zelf-lerend**: leert jouw verbruikspatroon per uur (exponentieel voortschrijdend gemiddelde)
+- **Nauwkeurigheid neemt toe**: na 5+ dagen bruikbaar, na 14+ dagen betrouwbaar
+- **Morgen-preview**: als EPEX-prijzen voor morgen bekend zijn (na ~13:00) geeft het ook een schatting voor morgen
+- **ApexCharts-klaar**: `hourly_patterns` attribuut geeft verbruikscurve per uur voor grafieken
+
+### 🖥️ Professioneel dashboard YAML (`cloudems-dashboard-v1.9.yaml`)
+
+Compleet klaar dashboard met:
+- Live EPEX prijsgrafiek vandaag + morgen (ApexCharts kolommen)
+- Fase-stroom monitor (live lijndiagram)
+- NILM apparatenlijst
+- Kosten-widgets (vandaag actueel + verwachting + morgen)
+- CO2-intensiteitskaart
+- NILM diagnose pagina (events, baseline per fase, classificatierate)
+- PID-tuning pagina met live state-grafieken
+
+Vereist: `apexcharts-card` en `mushroom-cards` via HACS.
+
+---
+
+## 🆕 Wat is er nieuw in v1.9.0?
+
+### 🧠 Zelf-lerende verbeteringen
+
+**Adaptieve NILM-drempel**
+Voorheen was de detectiedrempel hardcoded op 25W. Nu leert CloudEMS automatisch hoe "rustig" of "lawaaierig" jouw netsignaal is, en past de drempel aan. Een goede P1-meter kan zakken naar ~10W (detecteert waterkoker van 1200W én LED-lamp van 40W). Een goedkope klemstroomtransformator blijft hoger om valse meldingen te vermijden.
+
+**EV laden via PID-regelaar**
+De dynamische EV-lader gebruikt nu een echte PID-regelaar in plaats van drempel-logica. Setpoint = 0W netimport. Resultaat: gladde laadstroomregeling die automatisch meegaat met wisselende zonproductie en bewolking — geen harde sprongen meer.
+
+**PID Auto-Tuner (Relay Feedback)**
+Voor installaties met fase-begrenzing: CloudEMS kan zichzelf automatisch afregelen met de Åström-Hägglund relay-methode (Ziegler-Nichols). Dit bepaalt de ideale Kp/Ki/Kd voor jouw specifieke installatie. Start via de HA-service `cloudems.start_pid_autotune`.
+
+### 🔌 NILM sensor-cascade
+
+Voorheen werkte NILM alleen met per-fase vermogenssensoren. Nu is er een cascade:
+
+| Prioriteit | Bron | Wanneer |
+|-----------|------|---------|
+| 1 | Per-fase vermogenssensor (W) | Beste: aparte sensor per L1/L2/L3 |
+| 2 | Per-fase stroomsensor (A × U) | Goed: stroomsensor zonder aparte vermogenssensor |
+| 3 | Totaal netverbruik ÷ 3 fasen | Fallback: verdeeld over fasen |
+| 4 | Totaal netverbruik op L1 | Laatste: enkelfasige installaties |
+
+De sensor **CloudEMS NILM · Sensor Input** toont precies welke modus actief is en geeft aanbevelingen voor verbetering.
+
+### 🎛️ Instelbare PID-parameters
+
+Nieuwe instelentiteiten (zichtbaar in HA onder **Instellingen → CloudEMS**):
+
+| Entiteit | Beschrijving | Standaard |
+|---------|-------------|---------|
+| `CloudEMS Fase PID · Kp` | Proportionele versterking fase-begrenzing | 3.0 |
+| `CloudEMS Fase PID · Ki` | Integratieve versterking fase-begrenzing | 0.4 |
+| `CloudEMS Fase PID · Kd` | Differentiële versterking fase-begrenzing | 0.8 |
+| `CloudEMS EV PID · Kp` | Proportionele versterking EV-lader | 0.05 |
+| `CloudEMS EV PID · Ki` | Integratieve versterking EV-lader | 0.008 |
+| `CloudEMS EV PID · Kd` | Differentiële versterking EV-lader | 0.02 |
+| `CloudEMS Prijs · Goedkoop drempel` | Prijs waaronder "goedkoop" geldt (EUR/kWh) | 0.10 |
+| `CloudEMS NILM · Gevoeligheid (W)` | Minimale vermogenssprong voor detectie | 25W (adaptief) |
+
+Wijzigingen worden **direct live toegepast** — geen HA-herstart nodig.
+
+### 📊 Nieuwe sensoren
+
+| Sensor | Beschrijving |
+|--------|-------------|
+| `CloudEMS System · PID Diagnostics` | Live PID-toestand: fout, integraal, output per regelaar |
+| `CloudEMS NILM · Sensor Input` | Welke sensoren NILM gebruikt + adaptieve drempel |
+
+---
+
+---
+
+## 🆕 Wat is er nieuw in v1.9.0?
+
+### 🐛 Kritieke bugfixes
+
+| Bug | Impact | Opgelost |
+|-----|--------|----------|
+| `db.classify(event)` kreeg een PowerEvent-object i.p.v. `(float, float)` | **NILM werkte volledig niet** — nul detecties | ✅ |
+| `asyncio.ensure_future` zonder running loop | Kon crashen bij snelle updates | ✅ |
+| `_enrich_price_info` zocht `s.get("hour")` in slots zonder `hour`-key | `prev_hour_price` altijd `None` | ✅ |
+| Lege velden in configuratiescherm gaven validatiefout | Kon sensoren niet leegmaken | ✅ v1.6 |
+
+### ✨ Nieuwe functies
+
+- **NILM Diagnose-sensor** (`CloudEMS NILM · Diagnostics`) — zie precies wat NILM meet: welke vermogenssprongen gedetecteerd worden, waarom iets wel of niet geclassificeerd wordt, en wat de baseline per fase is
+- **Morgen-prijzen** — `CloudEMS Energy · EPEX Today` bevat nu ook `tomorrow_prices` (beschikbaar na ~13:00 CET)
+- **Volledige dag-grafiek** — `today_prices` bevat altijd alle 24 uren, ook de al verstreken uren
+
+---
+
 ## ☕ Steun de ontwikkeling
 
 CloudEMS is volledig gratis en open source. Toch kost het ontwikkelen, testen en onderhouden van deze integratie honderden uren per jaar. Serverkosten, ENTSO-E data, API-testen, documentatie schrijven — het loopt op.
@@ -161,7 +307,7 @@ Ga naar **Instellingen → Integraties → CloudEMS → Configureren** en kies d
 - 🤖 **AI & NILM** — AI-backend wisselen
 - 📡 **P1 & Geavanceerd** — P1-instellingen
 
-> ✅ **Bug opgelost in v1.6.0:** Lege velden in het configuratiescherm worden nu correct geaccepteerd — net als in de wizard.
+> ✅ **Bug opgelost in v1.9.0:** Lege velden in het configuratiescherm worden nu correct geaccepteerd — net als in de wizard.
 
 ---
 
@@ -200,6 +346,10 @@ Ga naar **Instellingen → Integraties → CloudEMS → Configureren** en kies d
 | Sensor | Beschrijving |
 |--------|-------------|
 | `CloudEMS AI · Status` | Welke AI-backend actief is en hoeveel apparaten herkend zijn |
+| `CloudEMS NILM · Diagnostics` | Diagnose: events/minuut, classificatierate, baseline per fase, event-log |
+| `CloudEMS Batterij · EPEX Schema` | Huidige batterij-actie + volledig dagschema op basis van EPEX |
+| `CloudEMS Net · CO2 Intensiteit` | Gram CO2/kWh van het elektriciteitsnet (live of statisch) |
+| `CloudEMS Energie · Kosten Verwachting` | Verwachte totale dagkosten + morgen-voorspelling (zelf-lerend) |
 | `CloudEMS NILM · Devices` | Aantal herkende apparaten |
 | `CloudEMS NILM · Running Devices` | Aantal apparaten dat nu aan staat |
 | `CloudEMS NILM · Running Devices Power` | Totaal vermogen van lopende apparaten (W) |
@@ -272,7 +422,9 @@ CloudEMS ondersteunt drie AI-backends:
 
 **Herkende apparaattypen:** Wasmachine, droger, vaatwasser, oven, magnetron, waterkoker, tv, computer, warmtepomp, boiler, EV-lader, omvormer, verlichting.
 
-> ℹ️ NILM heeft een inwerkperiode van enkele uren tot dagen. De sensor `CloudEMS AI · Status` toont de huidige leerstand. Hoe meer schakelingen gemeten worden, hoe nauwkeuriger de detectie.
+> ℹ️ NILM heeft een inwerkperiode van enkele uren tot dagen. De sensor `CloudEMS AI · Status` toont de huidige leerstand.
+>
+> **Sensor-prioriteit:** NILM gebruikt bij voorkeur per-fase vermogenssensoren. Zonder fase-sensoren valt het terug op het totale netverbruik. Zie `CloudEMS NILM · Sensor Input` voor de actieve modus en aanbevelingen. De sensor `CloudEMS AI · Status` toont de huidige leerstand. Hoe meer schakelingen gemeten worden, hoe nauwkeuriger de detectie.
 
 ---
 
@@ -357,7 +509,7 @@ Het dashboard toont:
 → De wizard suggereert sensoren op basis van eenheden en namen. Je kunt altijd handmatig een andere sensor selecteren.
 
 **Lege waarden niet geaccepteerd in configuratiescherm**
-→ Opgelost in v1.6.0. Zorg dat je de nieuwste versie gebruikt.
+→ Opgelost in v1.9.0. Zorg dat je de nieuwste versie gebruikt.
 
 ### Debug-logging inschakelen
 
@@ -393,6 +545,23 @@ Nee, standaard niet. EPEX-prijzen ophalen is de enige uitgaande verbinding. Clou
 
 ---
 
+
+## 🎛️ PID-regelaars afstellen
+
+CloudEMS gebruikt drie PID-regelaars:
+
+**1. Fase-begrenzer (multi-omvormer dimming)**
+Past de omvormeruitgang aan om de fasestroom onder het ingestelde maximum te houden. Pas **Kp** aan voor snelheid, **Ki** voor het wegwerken van blijvende afwijking, **Kd** voor dempening bij plotselinge schakelingen.
+
+**2. EV-laadstroom PID**
+Regelt de laadstroom zodat het netto netverbruik op ±0W blijft (optimaal solar-overschot benutten). Hogere **Kp** = snellere reactie op bewolking, maar risico op oscillatie.
+
+**3. Auto-tuner**
+Wil je de parameters automatisch bepalen? Roep de HA-service `cloudems.start_pid_autotune` aan. CloudEMS voert een relay-experiment uit en berekent de ideale Kp/Ki/Kd via de Ziegler-Nichols methode. Resultaten zijn zichtbaar in `CloudEMS System · PID Diagnostics`.
+
+> **Tip:** Begin met de standaardwaarden. Pas pas aan als je oscillatie ziet (te hoge Kp) of trage reactie (te lage Kp/Ki).
+
+---
 ## 🤝 Bijdragen
 
 Bijdragen zijn van harte welkom!

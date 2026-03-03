@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "⚡ Welcome to CloudEMS v1.5",
-        "description": "**CloudEMS** is your smart energy management system for Home Assistant.\n\n✅ NILM device detection · Phase limiting · Solar curtailment · EPEX prices · Dynamic EV charging · Peak shaving\n\n📖 [Documentation]({support_url}) · ☕ [Support CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "description": "**CloudEMS** is your smart energy management system for Home Assistant.\n\n✅ NILM device detection · Phase limiting · Solar curtailment · EPEX prices · Dynamic EV charging · Peak shaving\n\n📖 [Documentation]({support_url}) · ☕ [Support CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})\n\n![]({diagram_url})",
         "data": {
           "energy_prices_country": "Country (EPEX dynamic prices)",
           "wizard_mode": "Setup mode"
@@ -15,7 +15,7 @@
       },
       "grid_connection": {
         "title": "⚡ Grid connection",
-        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
+        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.\n\n![]({diagram_url})",
         "data": {
           "phase_preset": "Grid connection & fuse size"
         },
@@ -40,7 +40,7 @@
       },
       "grid_sensors": {
         "title": "🔌 Grid sensors",
-        "description": "CloudEMS detected **{detected}** sensor(s) automatically.\n\n**Net sensor:** Use a single sensor reporting net grid power (positive = import).\n**Separate import / export:** Use this if your integration reports them as two sensors.\n\nThe fallback voltage ({mains_voltage} V) is used to calculate power from current (P = V × I) when no direct power sensor is available.",
+        "description": "CloudEMS detected **{detected}** sensor(s) automatically.\n\n**Net sensor:** Use a single sensor reporting net grid power (positive = import).\n**Separate import / export:** Use this if your integration reports them as two sensors.\n\nThe fallback voltage ({mains_voltage} V) is used to calculate power from current (P = V × I) when no direct power sensor is available.\n\n![]({diagram_url})",
         "data": {
           "use_separate_import_export": "Use separate import and export sensors",
           "grid_sensor": "Net power sensor (W or kW)",
@@ -58,7 +58,7 @@
       },
       "phase_sensors": {
         "title": "🔌 Per-phase sensors (optional)",
-        "description": "These sensors are **optional** — CloudEMS works without them.\n\nCurrent sensors (A) enable per-phase limiting. Voltage sensors improve accuracy. If a power sensor is missing, CloudEMS will calculate power from current × voltage automatically.\n\nShowing {phase_count} phase(s) based on your grid connection.",
+        "description": "These sensors are **optional** — CloudEMS works without them.\n\nCurrent sensors (A) enable per-phase limiting. Voltage sensors improve accuracy. If a power sensor is missing, CloudEMS will calculate power from current × voltage automatically.\n\nShowing {phase_count} phase(s) based on your grid connection.\n\n![]({diagram_url})",
         "data": {
           "phase_sensors_L1": "L1 current sensor (A)",
           "phase_sensors_L2": "L2 current sensor (A)",
@@ -84,7 +84,7 @@
       },
       "solar_ev": {
         "title": "🌞 Solar & EV",
-        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.",
+        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.\n\n![]({diagram_url})",
         "data": {
           "solar_sensor": "Solar inverter power sensor (W or kW)",
           "battery_sensor": "Battery / storage power sensor (W or kW)",
@@ -109,7 +109,7 @@
       },
       "inverter_detail": {
         "title": "☀️ Inverter {inverter_num} of {total}",
-        "description": "Configure inverter **{inverter_num}**.\n\n**Azimuth:** {azimuth_tip}\n**Tilt:** {tilt_tip}\n\nLeave azimuth and tilt blank to let CloudEMS self-learn them.",
+        "description": "Configure inverter **{inverter_num}**.\n\n**Azimuth:** {azimuth_tip}\n**Tilt:** {tilt_tip}\n\nLeave azimuth and tilt blank to let CloudEMS self-learn them.\n\n![]({diagram_url})",
         "data": {
           "inv_sensor": "Power sensor (W or kW)",
           "inv_control": "Control entity — switch or dimmer (optional)",
@@ -195,7 +195,8 @@
         "data_description": {
           "p1_host": "IP address of your P1 gateway (e.g. HomeWizard P1, DSMR-reader).",
           "p1_port": "TCP port of the P1 gateway. Default is 8088."
-        }
+        },
+        "description": "\n\n![]({diagram_url})"
       }
     }
   },
@@ -204,7 +205,9 @@
       "init": {
         "title": "⚙️ CloudEMS — Configure",
         "description": "Select the section you want to edit.",
-        "data": { "section": "Settings section" }
+        "data": {
+          "section": "Settings section"
+        }
       },
       "sensors": {
         "title": "🔌 Grid Sensors",
@@ -279,9 +282,21 @@
         "data": {
           "p1_enabled": "Direct P1 connection enabled",
           "p1_host": "P1 gateway IP",
-          "p1_port": "P1 gateway port"
+          "p1_port": "P1 gateway port",
+          "congestion_threshold_w": "Grid congestion threshold (W)",
+          "congestion_price_threshold": "Congestion price threshold (€/kWh)",
+          "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
+          "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
+          "battery_degradation_enabled": "Track battery degradation",
+          "congestion_enabled": "Enable grid congestion detection"
+        },
+        "data_description": {
+          "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
+          "battery_chemistry": "Select your battery chemistry. LFP degrades slower than NMC.",
+          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low."
         }
       }
     }
-  }
+  },
+  "entity": {}
 }
