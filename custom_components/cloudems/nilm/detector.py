@@ -302,6 +302,9 @@ class NILMDetector:
         # v1.16: known battery power — used to skip false NILM edges
         self._battery_power_w: float = 0.0
 
+        # v1.17: Hybride NILM verrijkingslaag (optioneel — wordt gezet door coordinator)
+        self._hybrid: Optional[Any] = None
+
         _LOGGER.info("CloudEMS NILM Detector v1.8 initialized")
 
     # ── Storage setup ─────────────────────────────────────────────────────────
@@ -445,6 +448,18 @@ class NILMDetector:
         self._diag_log_event(event, matches)
         if self._local_ai.is_available:
             matches = self._merge_matches(matches, self._local_ai.classify(event))
+
+        # v1.17: Hybride verrijking — ankering + contextpriors + 3-fase balans
+        if self._hybrid is not None:
+            try:
+                matches = self._hybrid.enrich_matches(
+                    matches   = matches,
+                    delta_w   = event.delta_power,
+                    phase     = event.phase,
+                    timestamp = event.timestamp,
+                )
+            except Exception as _he:
+                _LOGGER.debug("HybridNILM enrich fout: %s", _he)
 
         best_conf = matches[0]["confidence"] if matches else 0.0
 

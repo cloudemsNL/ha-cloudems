@@ -54,6 +54,7 @@ from .const import (
     CONF_ENERGY_PRICES_COUNTRY,
 )
 from .nilm.detector import NILMDetector, DetectedDevice
+from .nilm.hybrid_nilm import HybridNILM
 from .energy_manager.home_baseline import HomeBaselineLearner
 from .energy_manager.ev_session_learner import EVSessionLearner
 from .energy_manager.nilm_schedule import NILMScheduleLearner
@@ -217,6 +218,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._absence:        Optional[object] = None
         self._preheat:        Optional[object] = None
         self._pv_accuracy:    Optional[object] = None
+
+        # v1.17: Hybride NILM
+        self._hybrid: Optional[HybridNILM] = None
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -660,6 +664,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._hp_cop = HeatPumpCOPLearner(self.hass)
         await self._hp_cop.async_setup()
 
+        # v1.17: Hybride NILM — auto-discovery + contextpriors + 3-fase balans
+        self._hybrid = HybridNILM(self.hass)
+        await self._hybrid.async_setup()
+        # Koppel hybride laag aan de NILM-detector
+        self._nilm._hybrid = self._hybrid
+        _LOGGER.info("CloudEMS HybridNILM geïntegreerd")
+
     # ── Update loop ───────────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> Dict:
@@ -1061,6 +1072,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             # v1.10.3: NILM schedule learner (enriches device list with schedule metadata)
             nilm_devices_raw = self._nilm.get_devices_for_ha()
+
+            # v1.17: Hybride NILM tick + anker-apparaten samenvoegen
+            if self._hybrid:
+                await self._hybrid.async_tick()
+                anchored = self._hybrid.get_anchored_devices()
+                # Voeg ankers toe — verwijder eventuele NILM-dubbelingen op zelfde device_type+phase
+                anchored_keys = {(a["device_type"], a["phase"]) for a in anchored}
+                nilm_devices_raw = [
+                    d for d in nilm_devices_raw
+                    if (d.get("device_type"), d.get("phase")) not in anchored_keys
+                ] + anchored
+
             if self._nilm_schedule:
                 nilm_devices_enriched = self._nilm_schedule.update(nilm_devices_raw)
                 nilm_schedule_summary = self._nilm_schedule.get_schedule_summary()
@@ -1738,6 +1761,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "nilm_diagnostics":     self._nilm.get_diagnostics(),  # ← v1.7
                 "ollama_health":        self._ollama_health,            # ← v1.16
                 "ollama_diagnostics":   self._nilm.get_ollama_diagnostics(),  # ← v1.16
+                "hybrid_nilm":          self._hybrid.get_diagnostics() if self._hybrid else {},  # ← v1.17
                 "ev_pid_state":         ev_pid_state,                   # ← v1.8
                 "phase_pid_states":     self._get_phase_pid_states(),   # ← v1.8
                 "co2_info":             co2_info,                       # ← v1.9

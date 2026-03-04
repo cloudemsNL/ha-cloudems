@@ -126,6 +126,8 @@ async def async_setup_entry(
         CloudEMSClippingForecastSensor(coordinator, entry),
         # v1.16.0: Ollama AI diagnostics
         CloudEMSOllamaDiagSensor(coordinator, entry),
+        # v1.17.0: Hybride NILM diagnostics
+        CloudEMSHybridNILMSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -898,16 +900,27 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
         devices = (self.coordinator.data or {}).get("nilm_devices", [])
         d = self.coordinator.data or {}
         # v1.16.1: trim to essential fields only to stay under HA recorder 16 KB limit
+        _src_map = {"smart_plug":"smart_plug","injected":"smart_plug",
+                    "cloud_ai":"cloud_ai","ollama":"ollama","local_ai":"local_ai"}
         slim_devices = [
             {
                 "name":          dv.get("name", "Unknown"),
                 "device_type":   dv.get("device_type", "unknown"),
+                "type":          dv.get("device_type", "unknown"),   # alias for card
                 "is_on":         dv.get("is_on", False),
+                "state":         "on" if dv.get("is_on") else "off",
+                "running":       dv.get("is_on", False),
                 "power_w":       round(dv.get("current_power", 0), 1),
+                "power_min":     round(dv.get("power_min", dv.get("current_power", 0)), 1),
                 "confidence":    round(dv.get("confidence", 0) * 100, 0),
                 "confirmed":     dv.get("confirmed", False),
-                "phase":         dv.get("phase", ""),
-                "source":        dv.get("source", ""),
+                "on_events":     dv.get("on_events", 0),
+                "dismissed":     dv.get("dismissed", False),
+                # v1.17: fase + bron
+                "phase":         dv.get("phase", "L1") or "L1",
+                "phase_label":   dv.get("phase", "L1") if dv.get("phase","L1") not in ("ALL","") else "3∅",
+                "source":        dv.get("source", "database"),
+                "source_type":   _src_map.get(dv.get("source",""), "nilm"),
             }
             for dv in devices
         ]
@@ -947,19 +960,36 @@ class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
         return round(dev.current_power, 1) if dev else None
 
     @property
+    @staticmethod
+    def _source_type(source: str) -> str:
+        return {
+            "smart_plug": "smart_plug", "injected": "smart_plug",
+            "cloud_ai": "cloud_ai", "ollama": "ollama",
+            "local_ai": "local_ai", "database": "nilm",
+            "community": "nilm", "builtin": "nilm",
+        }.get(source, "nilm")
+
     def extra_state_attributes(self):
         dev = self._dev
         if not dev:
             return {}
+        src_type = self._source_type(dev.source)
         return {
             "device_id":        dev.device_id,
             "device_type":      dev.display_type,
             "is_on":            dev.is_on,
             "confidence_pct":   round(dev.effective_confidence * 100, 1),
             "source":           dev.source,
+            # v1.17: bron-type + fase voor dashboard
+            "source_type":      src_type,
+            "source_label":     {
+                "smart_plug": "Stekker", "nilm": "NILM",
+                "local_ai": "Lokale AI", "cloud_ai": "Cloud AI", "ollama": "Ollama",
+            }.get(src_type, "NILM"),
             "confirmed":        dev.confirmed,
             "user_feedback":    dev.user_feedback,
             "phase":            dev.phase,
+            "phase_label":      dev.phase if dev.phase not in ("ALL", "") else "3∅",
             "on_events":        dev.on_events,
             "energy_today_kwh": dev.energy.today_kwh,
             "energy_week_kwh":  dev.energy.week_kwh,
@@ -1433,10 +1463,45 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
             "device_names": [d.get("name", d.get("device_type", "Unknown")) for d in running],
             "device_list": [
                 {
-                    "name":       d.get("name", "Unknown"),
-                    "type":       d.get("device_type", "unknown"),
-                    "confirmed":  d.get("confirmed", False),
-                    "confidence": round(d.get("confidence", 0) * 100, 0),
+                    "name":         d.get("name", "Unknown"),
+                    "type":         d.get("device_type", "unknown"),
+                    "confirmed":    d.get("confirmed", False),
+                    "confidence":   round(d.get("confidence", 0) * 100, 0),
+                    # v1.17: fase + bron voor dashboard
+                    "phase":        d.get("phase", "L1"),
+                    "phase_label":  d.get("phase", "L1") if d.get("phase", "L1") not in ("ALL", "") else "3∅",
+                    "source":       d.get("source", "database"),
+                    "source_type":  {
+                        "smart_plug": "smart_plug", "injected": "smart_plug",
+                        "cloud_ai": "cloud_ai", "ollama": "ollama",
+                        "local_ai": "local_ai",
+                    }.get(d.get("source", ""), "nilm"),
+                    "power_w":      round(d.get("current_power", 0), 1),
+                    "running":      True,
+                    "state":        "on",
+                }
+                for d in running
+            ],
+            "nilm_mode": (self.coordinator.data or {}).get("nilm_mode", "database"),
+            # Backward-compat alias: oudere kaartversies lezen "devices"
+            "devices": [
+                {
+                    "name":         d.get("name", "Unknown"),
+                    "device_type":  d.get("device_type", "unknown"),
+                    "type":         d.get("device_type", "unknown"),
+                    "state":        "on",
+                    "running":      True,
+                    "power_w":      round(d.get("current_power", 0), 1),
+                    "confidence":   round(d.get("confidence", 0) * 100, 0),
+                    "phase":        d.get("phase", "L1"),
+                    "phase_label":  d.get("phase", "L1") if d.get("phase", "L1") not in ("ALL", "") else "3\u2205",
+                    "source":       d.get("source", "database"),
+                    "source_type":  {
+                        "smart_plug": "smart_plug", "injected": "smart_plug",
+                        "cloud_ai": "cloud_ai", "ollama": "ollama",
+                        "local_ai": "local_ai",
+                    }.get(d.get("source", ""), "nilm"),
+                    "confirmed":    d.get("confirmed", False),
                 }
                 for d in running
             ],
@@ -1477,11 +1542,22 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
         return {
             "devices": [
                 {
-                    "name":       d.get("name", "Unknown"),
-                    "type":       d.get("device_type", "unknown"),
-                    "power_w":    round(d.get("current_power", 0), 1),
-                    "confirmed":  d.get("confirmed", False),
-                    "confidence": round(d.get("confidence", 0) * 100, 0),
+                    "name":        d.get("name", "Unknown"),
+                    "type":        d.get("device_type", "unknown"),
+                    "power_w":     round(d.get("current_power", 0), 1),
+                    "confirmed":   d.get("confirmed", False),
+                    "confidence":  round(d.get("confidence", 0) * 100, 0),
+                    # v1.17: fase + bron
+                    "phase":       d.get("phase", "L1"),
+                    "phase_label": d.get("phase", "L1") if d.get("phase", "L1") not in ("ALL", "") else "3∅",
+                    "source":      d.get("source", "database"),
+                    "source_type": {
+                        "smart_plug": "smart_plug", "injected": "smart_plug",
+                        "cloud_ai": "cloud_ai", "ollama": "ollama",
+                        "local_ai": "local_ai",
+                    }.get(d.get("source", ""), "nilm"),
+                    "state":       "on",
+                    "running":     True,
                 }
                 for d in sorted(running, key=lambda x: x.get("current_power", 0), reverse=True)
             ],
@@ -3543,4 +3619,58 @@ class CloudEMSOllamaDiagSensor(CoordinatorEntity, SensorEntity):
             "nilm_active_mode":     d.get("nilm_mode", "database"),
             # Recent activity
             "recent_calls":         diag.get("recent_calls", []),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.17.0 — Hybride NILM sensor (ankers + weer + diagnostics)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
+    """
+    Toont de status van de Hybride NILM-laag:
+      • Aantal actieve smart-plug ankers
+      • Actuele buitentemperatuur (voor contextpriors)
+      • Seizoen
+      • Statistieken: enrich-calls, anchor hits, prior boosts/penalties, fase-hints
+    """
+    _attr_name       = "CloudEMS NILM · Hybride Status"
+    _attr_icon       = "mdi:chip"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_hybrid_nilm"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("hybrid_nilm", {})
+        return d.get("anchors_active", 0)
+
+    @property
+    def native_unit_of_measurement(self): return "ankers"
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("hybrid_nilm", {})
+        stats = d.get("stats", {})
+        return {
+            "anchors_total":           d.get("anchors_total", 0),
+            "anchors_active":          d.get("anchors_active", 0),
+            "weather_temperature_c":   d.get("weather_temperature_c"),
+            "weather_season":          d.get("weather_season"),
+            "weather_irradiance_w":    d.get("weather_irradiance_w"),
+            "weather_sensors":         d.get("weather_sensors", []),
+            "anchors":                 d.get("anchors", []),
+            # stats
+            "stat_enrich_calls":       stats.get("enrich_calls", 0),
+            "stat_anchor_hits":        stats.get("anchor_hits", 0),
+            "stat_prior_boosts":       stats.get("prior_boosts", 0),
+            "stat_prior_penalties":    stats.get("prior_penalties", 0),
+            "stat_phase_balance_hints":stats.get("phase_balance_hints", 0),
+            "stat_discoveries":        stats.get("discoveries", 0),
         }

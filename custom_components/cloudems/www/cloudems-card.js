@@ -1,5 +1,5 @@
 /**
- * CloudEMS Dashboard Card — v1.15.4
+ * CloudEMS Dashboard Card — v1.17.1
  * Visual energy overview: flow diagram · NILM device cards · battery health ·
  * PV forecast · phase bars · EPEX price chart · EV charging · congestion alerts.
  * Copyright © 2025 CloudEMS — https://cloudems.eu
@@ -334,24 +334,95 @@ class CloudEMSCard extends LitElement {
       </div>`;
   }
 
-  // ── Devices (NILM) ───────────────────────────────────────────────────────
+  // ── Devices (NILM) — v1.17 fase + bron ─────────────────────────────────
+
+  // Fase-kleuren: L1=blauw, L2=geel, L3=groen, ALL/3-fase=lila
+  _phaseStyle(phase) {
+    const map = {
+      L1:  { bg:"#3b82f620", border:"#3b82f6", text:"#93c5fd", label:"L1" },
+      L2:  { bg:"#eab30820", border:"#eab308", text:"#fde047", label:"L2" },
+      L3:  { bg:"#22c55e20", border:"#22c55e", text:"#86efac", label:"L3" },
+      ALL: { bg:"#a855f720", border:"#a855f7", text:"#d8b4fe", label:"3\u2205" },
+    };
+    return map[phase] || { bg:"#64748b20", border:"#64748b", text:"#94a3b8", label:phase||"?" };
+  }
+
+  // Bron-stijlen: stekker=groen, NILM=blauw, local_ai=amber, cloud_ai=lila, ollama=oranje
+  _sourceStyle(srcType) {
+    const map = {
+      smart_plug: { bg:"#059669", ico:"\uD83D\uDD0C", label:"Stekker",   desc:"Rechtstreeks gemeten via slimme stekker" },
+      nilm:       { bg:"#2563eb", ico:"\uD83D\uDD0D", label:"NILM",      desc:"Patroonherkenning op vermogenscurve"     },
+      local_ai:   { bg:"#ca8a04", ico:"\uD83E\uDDE0", label:"Lokale AI", desc:"Lokaal getraind ML-model"               },
+      cloud_ai:   { bg:"#7c3aed", ico:"\u2601\uFE0F", label:"Cloud AI",  desc:"CloudEMS AI classificatie"              },
+      ollama:     { bg:"#ea580c", ico:"\uD83E\uDD99", label:"Ollama",    desc:"Lokale LLM (Ollama)"                    },
+    };
+    return map[srcType] || map.nilm;
+  }
 
   _renderDevices() {
     const nilmEid = this.config.nilm_sensor;
     if (!nilmEid) return html`<div class="empty">Voeg <code>nilm_sensor</code> toe aan de kaartconfiguratie.</div>`;
 
-    const devices  = this._attr(nilmEid, "devices", []) || [];
-    const running  = devices.filter(d => d.state === "on" || d.running);
-    const detected = devices.filter(d => !d.running && d.state !== "on" && !d.dismissed);
-    const nilmMode = this._attr(nilmEid, "nilm_mode", "pattern");
+    // Lees actieve apparaten: device_list (v1.17+) → devices (oud) → leeg
+    const runDevices = (this._attr(nilmEid, "device_list", null)
+                     || this._attr(nilmEid, "devices", null)
+                     || []);
+    const running = runDevices.filter(d => d.state === "on" || d.running);
 
-    const modeLabel = { cloud: "☁️ CloudAI", ollama: "🦙 Ollama", pattern: "📊 Patroon" };
+    // Lees ALLE apparaten (incl. niet-actief) van de stats-sensor indien beschikbaar
+    const statsSensor = nilmEid.replace("_running_devices", "_nilm_statistics");
+    const allDevicesRaw = this._attr(statsSensor, "devices", null);
+    let detected = [];
+    if (allDevicesRaw) {
+      // Filter: niet actief, niet gedismissed, wel al eens gezien (on_events > 0)
+      detected = allDevicesRaw.filter(d =>
+        !d.is_on && !d.dismissed && (d.on_events || 0) > 0
+      ).map(d => ({
+        name:        d.name || d.device_type,
+        type:        d.device_type,
+        device_type: d.device_type,
+        state:       "off",
+        running:     false,
+        power_w:     d.power_min || d.typical_power_w || 0,
+        confidence:  Math.round((d.confidence || 0) * 100),
+        phase:       d.phase || "L1",
+        phase_label: d.phase || "L1",
+        source:      d.source || "database",
+        source_type: d.source_type || (d.source === "smart_plug" ? "smart_plug" : "nilm"),
+        confirmed:   d.confirmed || false,
+      }));
+    }
+
+    const nilmMode = this._attr(nilmEid, "nilm_mode", "database");
+
+    const modeLabel = {
+      cloud_ai:"☁️ Cloud AI", ollama:"🦙 Ollama",
+      local_ai:"🧠 Lokale AI", database:"📊 Patroon", pattern:"📊 Patroon",
+    };
+
+    // Fase-verdeling: tel actieve apparaten per fase
+    const phaseCnt = {L1:0, L2:0, L3:0};
+    running.forEach(d => { const ph = d.phase||"L1"; if (ph in phaseCnt) phaseCnt[ph]++; });
+    const hasPhases = Object.values(phaseCnt).some(v => v > 0);
 
     return html`
       <div class="devices-hdr">
         <span class="devices-title">NILM Apparaatherkenning</span>
-        <span class="mode-chip">${modeLabel[nilmMode] ?? nilmMode}</span>
+        <span class="mode-chip">${modeLabel[nilmMode] || nilmMode}</span>
       </div>
+
+      ${hasPhases ? html`
+        <div class="phase-summary">
+          ${["L1","L2","L3"].map(ph => {
+            const s = this._phaseStyle(ph);
+            const cnt = phaseCnt[ph];
+            return cnt > 0 ? html`
+              <span class="ph-pill" style="background:${s.bg};border-color:${s.border};color:${s.text}">
+                ${s.label} · ${cnt}
+              </span>` : ``;
+          })}
+        </div>
+      ` : ``}
 
       ${running.length > 0 ? html`
         <div class="section-lbl">🟢 Actief nu</div>
@@ -361,36 +432,68 @@ class CloudEMSCard extends LitElement {
       ${detected.length > 0 ? html`
         <div class="section-lbl" style="margin-top:14px">🔍 Recent gedetecteerd</div>
         <div class="device-grid">${detected.map(d => this._renderDeviceCard(d, false))}</div>
-      ` : ""}
+      ` : ``}
 
-      ${devices.length === 0 ? html`
+      ${running.length === 0 && detected.length === 0 ? html`
         <div class="empty">
           CloudEMS leert je apparaten kennen.<br>
           Na een paar uur verschijnen hier je apparaten.
-        </div>` : ""}
+        </div>` : ``}
     `;
   }
 
   _renderDeviceCard(device, active) {
-    const type = device.device_type || "unknown";
+    const type = device.type || device.device_type || "unknown";
     const icon = DEVICE_ICONS[type] || DEVICE_ICONS.unknown;
     const name = device.name || icon.label;
-    const conf = device.confidence ? Math.round(device.confidence * 100) : null;
-    const pw   = device.power_w ?? device.power_min;
-    const src  = { community: "🌐", ai: "🤖", builtin: "📊" }[device.source] ?? "📊";
+    const conf = device.confidence !== undefined ? Math.round(Number(device.confidence)) : null;
+    const pw   = device.power_w != null ? device.power_w : device.current_power;
+
+    // Fase-badge
+    const phase   = (device.phase || "L1").replace("3\u2205","ALL");
+    const phStyle = this._phaseStyle(phase);
+
+    // Bron-badge
+    const srcType = device.source_type ||
+      (device.source === "smart_plug" || device.source === "injected" ? "smart_plug" :
+       device.source === "cloud_ai" ? "cloud_ai" :
+       device.source === "ollama"   ? "ollama"   :
+       device.source === "local_ai" ? "local_ai" : "nilm");
+    const srcStyle    = this._sourceStyle(srcType);
+    const isPlug      = srcType === "smart_plug";
+    const confColor   = isPlug ? "#34d399" :
+      (conf !== null ? (conf > 75 ? "#4ade80" : conf > 50 ? "#fbbf24" : "#f97316") : "#64748b");
 
     return html`
       <div class="dev-card ${active ? "dev-active" : ""}">
-        ${active ? html`<span class="dev-dot"></span>` : ""}
+        ${active ? html`<span class="dev-dot"></span>` : ``}
+
         <div class="dev-icon" style="background:${icon.color}1a;border-color:${icon.color}33">
           ${icon.emoji}
         </div>
+
         <div class="dev-body">
           <div class="dev-name">${name}</div>
-          <div class="dev-type" style="color:${icon.color}">${icon.label}${pw ? " · ~" + this._fmt(pw) : ""}</div>
-          ${conf !== null ? html`
-            <div class="conf-bar"><div class="conf-fill" style="width:${conf}%;background:${conf > 70 ? "#4ade80" : conf > 45 ? "#fbbf24" : "#f97316"}"></div></div>
-            <div class="dev-conf">${src} ${conf}% zekerheid</div>` : ""}
+          <div class="dev-type" style="color:${icon.color}">
+            ${icon.label}${pw != null ? " \u00B7 " + this._fmt(pw) : ""}
+          </div>
+
+          <div class="dev-badges">
+            <span class="dev-badge" style="background:${phStyle.bg};border-color:${phStyle.border};color:${phStyle.text}">
+              \u26A1 ${phStyle.label}
+            </span>
+            <span class="dev-badge" style="background:${srcStyle.bg}22;border-color:${srcStyle.bg}88;color:${srcStyle.bg}" title="${srcStyle.desc}">
+              ${srcStyle.ico} ${srcStyle.label}
+            </span>
+          </div>
+
+          ${isPlug ? html`
+            <div class="conf-bar"><div class="conf-fill" style="width:100%;background:linear-gradient(90deg,#059669,#34d399)"></div></div>
+            <div class="dev-conf" style="color:#34d399">✅ 100% · Direct gemeten</div>
+          ` : conf !== null ? html`
+            <div class="conf-bar"><div class="conf-fill" style="width:${conf}%;background:${confColor}"></div></div>
+            <div class="dev-conf" style="color:${confColor}">${srcStyle.ico} ${conf}% · ${srcStyle.label}</div>
+          ` : ``}
         </div>
       </div>`;
   }
@@ -717,7 +820,7 @@ class CloudEMSCard extends LitElement {
             const defrost  = this._attr(copEid,"defrost_today",0)||0;
             const reliable = this._attr(copEid,"reliable",false);
             const method   = {"direct":"Direct gemeten","thermal_model":"Thermisch model","formula":"Schatting"}[this._attr(copEid,"method","formula")]||"—";
-            return html\`
+            return html`
               <div class="ins-row">
                 <span class="ins-key">COP nu</span>
                 <span class="ins-val" style="color:\${copCur ? (copCur >= 3 ? "#4ade80" : copCur >= 2 ? "#f97316" : "#ef4444") : "var(--c-muted)"}">\${copCur?.toFixed(2) ?? "—"}</span>
@@ -735,8 +838,8 @@ class CloudEMSCard extends LitElement {
                 <span class="ins-val" style="color:var(--c-muted)">\${method}</span>
               </div>
               <div class="ins-note">\${reliable ? "✅ COP-curve is betrouwbaar geleerd" : "🎓 Nog aan het leren (3+ verwarmingsdagen nodig)"}</div>
-            \`;
-          })() : html\`<div class="ins-note">Voeg <code>cop_sensor</code> toe.</div>\`}
+            `;
+          })() : html`<div class="ins-note">Voeg <code>cop_sensor</code> toe.</div>`}
         </div>
 
         <!-- Thermisch huismodel -->
@@ -904,6 +1007,11 @@ class CloudEMSCard extends LitElement {
       .conf-bar { background:rgba(255,255,255,.08); border-radius:3px; height:3px; margin-top:5px; overflow:hidden; }
       .conf-fill{ height:100%; border-radius:3px; transition:width .4s; }
       .dev-conf { font-size:0.62rem; color:var(--c-sub); margin-top:2px; }
+      /* v1.17: fase + bron badges */
+      .dev-badges { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+      .dev-badge { font-size:.62rem; font-weight:700; padding:2px 6px; border-radius:99px; border:1px solid; white-space:nowrap; line-height:1.4; }
+      .phase-summary { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:10px; margin-top:2px; }
+      .ph-pill { font-size:.68rem; font-weight:600; padding:2px 9px; border-radius:99px; border:1px solid; white-space:nowrap; }
 
       /* Forecast */
       .forecast-row { display:flex; gap:10px; margin-bottom:14px; }
@@ -1012,6 +1120,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "cloudems-card",
   name:        "CloudEMS Dashboard",
-  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.15.4)",
+  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.17.1)",
   preview:     true,
 });
