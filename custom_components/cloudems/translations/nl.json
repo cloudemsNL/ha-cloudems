@@ -312,7 +312,7 @@
       },
       "batteries_opts": {
         "title": "🔋 Batterijen",
-        "description": "Hoeveel batterijen wil je configureren?",
+        "description": "Huidig geconfigureerd: **{battery_names}** ({current_count} batterij/batterijen).\n\nStel 0 in om alle batterijen te verwijderen. Verhogen voegt toe; verlagen verwijdert de laatste.",
         "data": {
           "battery_count": "Aantal batterijen"
         }

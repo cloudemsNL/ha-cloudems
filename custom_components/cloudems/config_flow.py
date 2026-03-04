@@ -356,6 +356,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 4c. Inverter detail loop (Advanced) ───────────────────────────────────
     async def async_step_inverter_detail(self, user_input=None):
         i = self._inv_step + 1
+        # Pre-fill from existing config (relevant during Reconfigure)
+        existing_cfgs = self._config.get(CONF_INVERTER_CONFIGS, [])
+        existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
         if user_input is not None:
             self._config[CONF_INVERTER_CONFIGS].append({
                 "entity_id":      user_input.get("inv_sensor"),
@@ -376,13 +379,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="inverter_detail",
             data_schema=vol.Schema({
-                vol.Required("inv_sensor"):      _ent(),
-                vol.Optional("inv_control"):     _ent(["switch","number"]),
-                vol.Optional("inv_label", default=f"Inverter {i}"): str,
-                vol.Optional("inv_rated_power", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-                vol.Optional("inv_min_pct", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
-                vol.Optional("inv_azimuth"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
-                vol.Optional("inv_tilt"):    vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
+                vol.Required("inv_sensor", default=existing.get("entity_id", vol.UNDEFINED)): _ent(),
+                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch","number"]),
+                vol.Optional("inv_label", default=existing.get("label", f"Inverter {i}")): str,
+                vol.Optional("inv_rated_power", default=float(existing.get("rated_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
+                vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}):    vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
             }),
             description_placeholders={
                     "diagram_url": "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNDIwIDEzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+PHJlY3Qgd2lkdGg9IjQyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMiIgZmlsbD0iIzFjMWMyZSIvPjx0ZXh0IHg9IjIxMCIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiIGZvbnQtd2VpZ2h0PSI2MDAiPlBlciBvbXZvcm1lcjogdmVybW9nZW4gKyByaWNodGluZyArIGhlbGxpbmc8L3RleHQ+PHJlY3QgeD0iMjAiIHk9IjQwIiB3aWR0aD0iNTAiIGhlaWdodD0iMzUiIHJ4PSI2IiBmaWxsPSIjZmJiZjI0MjAiIHN0cm9rZT0iI2ZiYmYyNDY2IiBzdHJva2Utd2lkdGg9IjEuNSIvPjxyZWN0IHg9IjI4IiB5PSI0NyIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIwIiByeD0iMiIgZmlsbD0iIzFlM2E1ZiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjAuOCIvPjxyZWN0IHg9IjQ3IiB5PSI0NyIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIwIiByeD0iMiIgZmlsbD0iIzFlM2E1ZiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjAuOCIvPjx0ZXh0IHg9IjQ1IiB5PSI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3LjUiIGZpbGw9IiNmYmJmMjQiPlBhbmVsZW48L3RleHQ+PGxpbmUgeDE9IjcyIiB5MT0iNTgiIHgyPSIxMDUiIHkyPSI1OCIgc3Ryb2tlPSIjZmJiZjI0IiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYmkpIi8+PHJlY3QgeD0iMTA4IiB5PSI0MCIgd2lkdGg9IjgwIiBoZWlnaHQ9Ijc2IiByeD0iOSIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjM2NmYxNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iMTQ4IiB5PSI2MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNCI+JiM5ODg5OzwvdGV4dD48dGV4dCB4PSIxNDgiIHk9Ijc2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM4MThjZjgiIGZvbnQtd2VpZ2h0PSI2MDAiPk9tdm9ybWVyPC90ZXh0Pjx0ZXh0IHg9IjE0OCIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iNyIgZmlsbD0iIzY0NzQ4YiI+YXppbXV0OiAxODAgWjwvdGV4dD48dGV4dCB4PSIxNDgiIHk9IjEwNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3IiBmaWxsPSIjNjQ3NDhiIj5oZWxsaW5nOiAzMCBncmFkZW48L3RleHQ+PHJlY3QgeD0iMjEwIiB5PSI0MCIgd2lkdGg9IjE5MCIgaGVpZ2h0PSI3NiIgcng9IjkiIGZpbGw9IiMwZjE3MmEiIHN0cm9rZT0iIzFlMjkzYiIgc3Ryb2tlLXdpZHRoPSIxIi8+PHRleHQgeD0iMzA1IiB5PSI1OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI4IiBmaWxsPSIjOTRhM2I4Ij5Db25maWd1cmF0aWUgcGVyIG9tdm9ybWVyPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iNzMiIGZvbnQtc2l6ZT0iNy41IiBmaWxsPSIjOTRhM2I4Ij5WZXJtb2dlbnNzZW5zb3IgKFcgb2Yga1cpPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iODciIGZvbnQtc2l6ZT0iNy41IiBmaWxsPSIjOTRhM2I4Ij5OYWFtIGJpanYuIERhayBadWlkPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iMTAxIiBmb250LXNpemU9IjcuNSIgZmlsbD0iIzk0YTNiOCI+QXppbXV0OiAwTiA5ME8gMTgwWiAyNzBXPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iMTE1IiBmb250LXNpemU9IjcuNSIgZmlsbD0iIzk0YTNiOCI+SGVsbGluZzogMD1wbGF0IDkwPXZlcnRpY2FhbDwvdGV4dD48ZGVmcz48bWFya2VyIGlkPSJiaSIgbWFya2VyV2lkdGg9IjUiIG1hcmtlckhlaWdodD0iNSIgcmVmWD0iNCIgcmVmWT0iMi41IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDUsMi41IEwwLDUgWiIgZmlsbD0iI2ZiYmYyNCIvPjwvbWFya2VyPjwvZGVmcz48L3N2Zz4=",
@@ -616,16 +619,47 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 # Options flow — multi-step grouped by category
 # ══════════════════════════════════════════════════════════════════════════════
 
-class CloudEMSOptionsFlow(config_entries.OptionsFlow):
+# ══════════════════════════════════════════════════════════════════════════════
+# Options flow — multi-step grouped by category
+# ══════════════════════════════════════════════════════════════════════════════
+
+# HA 2023.3+ exposes OptionsFlowWithConfigEntry which auto-triggers a
+# config-entry reload after async_create_entry — no manual update_listener
+# needed and no "restart required" dialog shown to the user.
+# Fall back to the plain OptionsFlow on older HA builds.
+try:
+    _OptionsBase = config_entries.OptionsFlowWithConfigEntry
+except AttributeError:
+    _OptionsBase = config_entries.OptionsFlow  # type: ignore[assignment]
+
+
+class CloudEMSOptionsFlow(_OptionsBase):
 
     def __init__(self, config_entry) -> None:
-        self._entry = config_entry
+        # OptionsFlowWithConfigEntry stores config_entry as self.config_entry;
+        # plain OptionsFlow does not call super().__init__() with the entry.
+        try:
+            super().__init__(config_entry)
+        except TypeError:
+            super().__init__()
+        self._entry = config_entry  # always available as shorthand
         self._opts: dict = {}
         self._inv_count = 0
         self._inv_step  = 0
 
     def _data(self) -> dict:
-        return {**self._entry.data, **self._entry.options, **self._opts}
+        # OptionsFlowWithConfigEntry exposes self.config_entry; keep _entry too.
+        entry = getattr(self, "config_entry", self._entry)
+        return {**entry.data, **entry.options, **self._opts}
+
+    def _entry_options(self) -> dict:
+        """Return current entry options — works with both base classes."""
+        entry = getattr(self, "config_entry", self._entry)
+        return dict(entry.options)
+
+    def _save(self, extra: dict) -> object:
+        """Merge extra into options and save; triggers auto-reload via base class."""
+        return self.async_create_entry(title="", data={**self._entry_options(), **extra})
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
@@ -653,7 +687,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         data = self._data()
         phase_count = int(data.get(CONF_PHASE_COUNT, 3))
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
 
         use_sep = bool(data.get(CONF_USE_SEPARATE_IE, False))
         schema: dict = {
@@ -679,7 +713,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         data = self._data()
         phase_count = int(data.get(CONF_PHASE_COUNT, 3))
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
 
         schema: dict = {}
         for k in [CONF_PHASE_SENSORS+"_L1", CONF_VOLTAGE_L1, CONF_POWER_L1]:
@@ -695,7 +729,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
     async def async_step_solar_ev_opts(self, user_input=None):
         data = self._data()
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
         return self.async_show_form(
             step_id="solar_ev_opts",
             data_schema=vol.Schema({
@@ -714,7 +748,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
     async def async_step_features_opts(self, user_input=None):
         data = self._data()
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
         phase_count = int(data.get(CONF_PHASE_COUNT, 1))
         schema: dict = {
             vol.Optional(CONF_DYNAMIC_LOADING, default=bool(data.get(CONF_DYNAMIC_LOADING, False))): bool,
@@ -742,7 +776,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             provider = user_input.get(CONF_AI_PROVIDER, AI_PROVIDER_NONE)
             user_input[CONF_OLLAMA_ENABLED] = (provider == AI_PROVIDER_OLLAMA)
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
         return self.async_show_form(
             step_id="ai_opts",
             data_schema=vol.Schema({
@@ -763,7 +797,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
 
     def _inv_d(self) -> dict:
         """Shorthand for combined entry data."""
-        return {**self._entry.data, **self._entry.options, **self._opts}
+        return self._data()
 
     async def async_step_inverters_opts(self, user_input=None):
         """Choose how many PV inverters to configure."""
@@ -778,7 +812,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
                 return await self.async_step_inverter_detail_opts()
             # Zero inverters: clear config and finish
             self._opts[CONF_ENABLE_MULTI_INVERTER] = False
-            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+            return self._save(self._opts)
 
         current_count = str(len(current_cfgs))
         return self.async_show_form(
@@ -814,7 +848,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             if self._inv_step < self._inv_count:
                 return await self.async_step_inverter_detail_opts()
             self._opts[CONF_ENABLE_MULTI_INVERTER] = len(self._opts[CONF_INVERTER_CONFIGS]) > 0
-            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+            return self._save(self._opts)
 
         return self.async_show_form(
             step_id="inverter_detail_opts",
@@ -847,7 +881,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             for k, v in suppliers.items()
         ]
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
         return self.async_show_form(
             step_id="prices_opts",
             data_schema=vol.Schema({
@@ -864,28 +898,48 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
     async def async_step_batteries_opts(self, user_input=None):
         """How many batteries do you have?"""
         data = self._data()
-        current_count = len(data.get(CONF_BATTERY_CONFIGS, []))
+        existing_cfgs = data.get(CONF_BATTERY_CONFIGS, [])
+
+        # Legacy: user may have a single battery via CONF_BATTERY_SENSOR (not multi-config).
+        # Synthesise a minimal config entry so the wizard shows 1 (not 0) as default.
+        legacy_sensor = data.get(CONF_BATTERY_SENSOR)
+        if not existing_cfgs and legacy_sensor:
+            existing_cfgs = [{"power_sensor": legacy_sensor, "label": "Batterij 1"}]
+
+        current_count = len(existing_cfgs)
         if user_input is not None:
             self._inv_count = int(user_input.get(CONF_BATTERY_COUNT, 0))
             self._opts[CONF_BATTERY_COUNT]   = self._inv_count
             self._opts[CONF_BATTERY_CONFIGS] = []
+            # Keep synthesised configs for pre-fill in detail steps
+            self._existing_bat_cfgs = existing_cfgs
             self._inv_step = 0
             if self._inv_count > 0:
                 return await self.async_step_battery_detail_opts()
             self._opts[CONF_ENABLE_MULTI_BATTERY] = False
-            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+            self._opts[CONF_BATTERY_SENSOR] = ""   # clear legacy sensor if removing all
+            return self._save(self._opts)
+
+        bat_names = ", ".join(
+            c.get("label", f"Batterij {i+1}") for i, c in enumerate(existing_cfgs)
+        ) or "—"
         return self.async_show_form(
             step_id="batteries_opts",
             data_schema=vol.Schema({
                 vol.Required(CONF_BATTERY_COUNT, default=current_count): _inverter_count_selector(),
             }),
+            description_placeholders={
+                "current_count": str(current_count),
+                "battery_names": bat_names,
+            },
         )
 
     async def async_step_battery_detail_opts(self, user_input=None):
         """Configure one battery at a time."""
         data = self._data()
         i = self._inv_step + 1
-        existing_cfgs = data.get(CONF_BATTERY_CONFIGS, [])
+        # Use the synthesised/existing configs stored during batteries_opts
+        existing_cfgs = getattr(self, "_existing_bat_cfgs", data.get(CONF_BATTERY_CONFIGS, []))
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
         if user_input is not None:
@@ -904,7 +958,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             if self._inv_step < self._inv_count:
                 return await self.async_step_battery_detail_opts()
             self._opts[CONF_ENABLE_MULTI_BATTERY] = len(self._opts[CONF_BATTERY_CONFIGS]) > 0
-            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+            return self._save(self._opts)
 
         return self.async_show_form(
             step_id="battery_detail_opts",
@@ -927,7 +981,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
     async def async_step_advanced_opts(self, user_input=None):
         data = self._data()
         if user_input is not None:
-            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+            return self._save(user_input)
         return self.async_show_form(
             step_id="advanced_opts",
             data_schema=vol.Schema({

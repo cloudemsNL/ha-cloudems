@@ -521,13 +521,30 @@ class CloudEMSCard extends LitElement {
     const outP = s?.attributes?.current_output_pct ?? 100;
     const col  = this._phaseColor(outP < 100 ? 80 : pct);
 
+    // Learning progress
+    const learnPct    = s?.attributes?.learn_confidence_pct ?? null;
+    const confident   = s?.attributes?.confident ?? false;
+    const orientOk    = s?.attributes?.orientation_learned ?? false;
+    const clipping    = s?.attributes?.clipping ?? false;
+    const samples     = s?.attributes?.samples ?? 0;
+
+    const learnBadge = !confident
+      ? html`<span style="font-size:0.68rem;color:#94a3b8;margin-left:4px">🎓 ${learnPct !== null ? learnPct + "%" : samples + " samples"} geleerd</span>`
+      : orientOk
+        ? html`<span style="font-size:0.68rem;color:#4ade80;margin-left:4px">✅ Volledig geleerd</span>`
+        : html`<span style="font-size:0.68rem;color:#4ade80;margin-left:4px">✅ Vermogen geleerd</span>`;
+
     return html`
       <div style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span style="font-weight:600;font-size:0.85rem">☀️ ${lbl}</span>
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;align-items:center">
+          <span style="display:flex;align-items:center;gap:4px">
+            <span style="font-weight:600;font-size:0.85rem">☀️ ${lbl}</span>
+            ${learnBadge}
+          </span>
           <span style="font-size:0.78rem;color:${col};font-weight:600">${curW !== null ? this._fmt(curW) : "—"}</span>
         </div>
         <div class="ph-bar-wrap" style="height:10px"><div class="ph-bar" style="width:${pct}%;background:${col}"></div></div>
+        ${clipping ? html`<div style="font-size:0.72rem;color:#f97316;margin-top:4px;padding-left:8px;border-left:2px solid #f97316">⚠️ Clipping gedetecteerd — panelen begrensd</div>` : ""}
         ${outP < 100 ? html`<div style="font-size:0.72rem;color:#f97316;margin-top:4px;padding-left:8px;border-left:2px solid #f97316">⚡ Gedimmd naar ${outP.toFixed(0)}%</div>` : ""}
         <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--c-sub);margin-top:3px">
           <span>Piek: ${peak > 0 ? peak.toFixed(0) + " W" : "Aan het leren…"}</span>

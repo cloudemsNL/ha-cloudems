@@ -1,7 +1,7 @@
 {
   "domain": "cloudems",
   "name": "CloudEMS - Energy Management System",
-  "version": "1.13.0",
+  "version": "1.14.1",
   "documentation": "https://github.com/cloudemsNL/ha-cloudems",
   "issue_tracker": "https://github.com/cloudemsNL/ha-cloudems/issues",
   "dependencies": [],

@@ -53,6 +53,16 @@ MIN_POWER_CLIPPING = 500
 # Gemiddelde feed-in prijs NL (als fallback)
 DEFAULT_FEEDIN_EUR_KWH = 0.08
 
+# Bekende netbeheerder feed-in curtailment limieten (W)
+# Gebaseerd op gangbare netten-aansluitingen in NL/BE/DE
+GRID_CURTAILMENT_LIMITS_W = [
+    1000, 1500, 2000, 2500, 3000, 3450, 3500, 3680,   # kleinverbruik limieten
+    4000, 4600, 5000, 5520, 5750, 6000, 6900,           # 3×16A / 3×20A / 3×25A
+    8000, 10000, 11040, 13800, 15000, 17250, 20000,     # zakelijk / teruglevering
+]
+# Tolerantie rondom een curtailment-limiet (% van limiet)
+CURTAILMENT_TOLERANCE_PCT = 0.025   # 2.5% = ±250 W op 10 kW
+
 
 @dataclass
 class ClippingEvent:
@@ -118,6 +128,9 @@ class ClippingLossCalculator:
         # Per-omvormer plateau-tracker (lopend event)
         self._active: dict[str, dict] = {}   # inverter_id → {start_ts, readings}
 
+        # Per-inverter learned scale factors: plateau→peak ratio history
+        self._scale_factors: dict[str, list[float]] = {}
+
         self._dirty    = False
         self._last_save = 0.0
 
@@ -129,6 +142,8 @@ class ClippingLossCalculator:
             except Exception:
                 pass
         self._events = self._events[-2000:]  # max 2000 events
+        # Restore per-inverter scale factors
+        self._scale_factors: dict[str, list[float]] = saved.get("scale_factors", {})
         _LOGGER.info("ClippingCalculator: %d events geladen", len(self._events))
 
     def tick(
@@ -177,7 +192,30 @@ class ClippingLossCalculator:
         readings         = act["readings"]
         plateau_w        = sum(readings) / len(readings)
         peak_estimates   = act["peak_estimates"]
-        estimated_peak_w = sum(peak_estimates) / len(peak_estimates) if peak_estimates else plateau_w * 1.15
+
+        if peak_estimates:
+            # Use provided forecast estimate
+            estimated_peak_w = sum(peak_estimates) / len(peak_estimates)
+            # Learn the scale factor from this observation (only if estimate > plateau)
+            if estimated_peak_w > plateau_w:
+                scale = estimated_peak_w / plateau_w
+                # Only store plausible scale factors (1.0–2.5× = realistic clipping)
+                if 1.01 < scale < 2.5:
+                    factors = self._scale_factors.setdefault(inverter_id, [])
+                    factors.append(round(scale, 3))
+                    # Keep last 50 observations
+                    self._scale_factors[inverter_id] = factors[-50:]
+                    self._dirty = True
+        else:
+            # No forecast: use learned scale factor if available, else 1.15
+            factors = self._scale_factors.get(inverter_id, [])
+            if len(factors) >= 3:
+                # Use median of learned scale factors — robust to outliers
+                sorted_f = sorted(factors)
+                learned_scale = sorted_f[len(sorted_f) // 2]
+            else:
+                learned_scale = 1.15   # conservative default until we have data
+            estimated_peak_w = plateau_w * learned_scale
 
         # Lost kWh = (estimated_peak - plateau) × duration_h
         duration_h = duration_min / 60.0
@@ -201,6 +239,52 @@ class ClippingLossCalculator:
                 "%.0fW geschat piek | %.3f kWh verlies",
                 inverter_id, duration_min, plateau_w, estimated_peak_w, lost_kwh,
             )
+
+    def get_learned_ceiling(self, inverter_id: str) -> Optional[float]:
+        """
+        Return the self-learned clipping ceiling (W) for an inverter.
+
+        Uses the median of the most recent plateau observations (last 30 days).
+        Returns None if fewer than 3 events have been observed (not yet reliable).
+
+        This ceiling represents the *actual* hardware limit as measured in the field —
+        it may be lower than the rated power if the inverter is derated, or lower
+        than peak_power_w_7d if clipping was happening while that peak was recorded.
+
+        Use this in the coordinator instead of `rated_power_w * 0.95` or
+        `peak_power_w_7d * 0.98` to avoid false positives and circular references.
+        """
+        now = time.time()
+        d30 = now - 30 * 86400
+        recent_plateaus = [
+            ev.plateau_w
+            for ev in self._events
+            if ev.inverter_id == inverter_id and ev.start_ts > d30
+        ]
+        # Also include any active observation
+        if inverter_id in self._active:
+            readings = self._active[inverter_id].get("readings", [])
+            if readings:
+                recent_plateaus.append(sum(readings) / len(readings))
+
+        if len(recent_plateaus) < 3:
+            return None  # not enough data yet
+
+        # Use the median plateau as the learned ceiling — robust to outliers
+        sorted_p = sorted(recent_plateaus)
+        return round(sorted_p[len(sorted_p) // 2], 1)
+
+    def get_learned_scale_factor(self, inverter_id: str) -> float:
+        """
+        Return the self-learned peak/plateau ratio for an inverter.
+        Used to estimate what the inverter *would* produce without clipping.
+        Falls back to 1.15 (conservative default) if fewer than 3 observations.
+        """
+        factors = self._scale_factors.get(inverter_id, [])
+        if len(factors) >= 3:
+            sorted_f = sorted(factors)
+            return sorted_f[len(sorted_f) // 2]
+        return 1.15
 
     def get_data(
         self,
@@ -243,8 +327,17 @@ class ClippingLossCalculator:
             kwh_year   = round(s["kwh_30d"] / 30 * 365, 1) if s["kwh_30d"] > 0 else 0.0
             eur_year   = round(kwh_year * feedin_price_eur_kwh, 2)
 
-            # Curtailment-vermoeden: plateau exact op round number (netbeheerder limiet?)
-            curtailment = plateau_w > 0 and abs(plateau_w % 1000) < 50
+            # Curtailment-vermoeden: plateau valt binnen 2.5% van een bekende
+            # netbeheerder feed-in limiet (bijv. 3680 W, 5000 W, 10000 W).
+            # Dit is betrouwbaarder dan `plateau % 1000 < 50` wat ook normale
+            # omvormergrenzens kan raken (bijv. 5000 W omvormer → plateau 5000 W).
+            curtailment = False
+            if plateau_w > 0:
+                for limit_w in GRID_CURTAILMENT_LIMITS_W:
+                    tol = limit_w * CURTAILMENT_TOLERANCE_PCT
+                    if abs(plateau_w - limit_w) <= tol:
+                        curtailment = True
+                        break
 
             # Terugverdientijd uitbreiding
             payback = round(expansion_cost_eur / eur_year, 1) if eur_year > 5 else None
@@ -322,6 +415,7 @@ class ClippingLossCalculator:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
             await self._store.async_save({
                 "events": [e.to_dict() for e in self._events[-2000:]],
+                "scale_factors": self._scale_factors,
             })
             self._dirty     = False
             self._last_save = time.time()

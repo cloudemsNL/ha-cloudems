@@ -500,14 +500,18 @@ class CloudEMSInverterSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         d = self._inv_data()
         return {
-            "peak_power_w":    d.get("peak_w", 0),
-            "estimated_wp":    d.get("estimated_wp", 0),
-            "utilisation_pct": d.get("utilisation_pct", 0),
-            "clipping":        d.get("clipping", False),
-            "phase":           d.get("phase","unknown"),
-            "phase_certain":   d.get("phase_certain", False),
-            "samples":         d.get("samples", 0),
-            "confident":       d.get("confident", False),
+            "peak_power_w":        d.get("peak_w", 0),
+            "estimated_wp":        d.get("estimated_wp", 0),
+            "utilisation_pct":     d.get("utilisation_pct", 0),
+            "clipping":            d.get("clipping", False),
+            "clipping_ceiling_w":  d.get("clipping_ceiling_w"),
+            "phase":               d.get("phase", "unknown"),
+            "phase_certain":       d.get("phase_certain", False),
+            "samples":             d.get("samples", 0),
+            "confident":           d.get("confident", False),
+            # Learning progress — how far along the self-learning cycle is (%)
+            "learn_confidence_pct": d.get("learn_pct", 0),
+            "orientation_learned":  d.get("orientation_confident", False),
         }
 
 

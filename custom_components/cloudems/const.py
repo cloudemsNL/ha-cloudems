@@ -2,7 +2,7 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
-VERSION = "1.13.0"
+VERSION = "1.14.1"
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -345,20 +345,21 @@ GRID_EXCLUDE_KEYWORDS    = ["solar","pv","zon","inverter","omvormer","battery","
                              "batt","storage","ev","charger","laadpaal","yield","feedin","feed_in",
                              "clipping","forecast","predicted","estimated"]
 PHASE_EXCLUDE_KEYWORDS   = ["solar","pv","zon","inverter","omvormer","battery","batterij","accu",
-                             "batt","storage","ev","charger","laadpaal"]
-CURRENT_EXCLUDE_KEYWORDS = ["solar","pv","zon","inverter","battery","batt","storage","ev","charger"]
+                             "batt","storage","ev","charger","laadpaal",
+                             # PV inverter brand prefixes — their AC-side current/power sensors
+                             # measure inverter output, NOT the grid meter phase current
+                             "on_grid","goodwe","growatt","solis","solaredge","fronius",
+                             "enphase","huawei_solar","deye","sunsynk","sofar","sma_",
+                             "output_current","output_power","ac_current","ac_power"]
+CURRENT_EXCLUDE_KEYWORDS = ["solar","pv","zon","inverter","battery","batt","storage","ev","charger",
+                             # Same brand exclusions — inverter AC-side current ≠ grid CT current
+                             "on_grid","goodwe","growatt","solis","solaredge","fronius",
+                             "enphase","huawei_solar","deye","sunsynk","sofar","sma_",
+                             "output_current","ac_current"]
 # Voltage-specific exclusions: extends PHASE_EXCLUDE_KEYWORDS with PV inverter
 # voltage sensor patterns. "on_grid" is used by GoodWe/Solis for the AC-side
 # voltage measured by the inverter — not a standalone grid meter.
 VOLTAGE_EXCLUDE_KEYWORDS = PHASE_EXCLUDE_KEYWORDS + [
-    "on_grid",          # GoodWe / Solis: AC grid-side inverter measurement
-    "goodwe",           # GoodWe brand prefix in entity_id
-    "solis",            # Solis brand prefix in entity_id
-    "solaredge",        # SolarEdge brand prefix
-    "fronius",          # Fronius brand prefix
-    "enphase",          # Enphase brand prefix
-    "huawei_solar",     # Huawei SUN2000 prefix
-    "deye",             # Deye/Sunsynk brand prefix
     "output_voltage",   # Generic inverter AC output label
     "ac_voltage",       # Generic inverter AC output label
 ]

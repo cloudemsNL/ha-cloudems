@@ -67,12 +67,16 @@ _LOGGER = logging.getLogger(__name__)
 # Max decision log entries kept in memory
 MAX_DECISION_LOG = 50
 # Clipping detection: plateau-based (flat top in power curve)
-# A rolling window of recent readings per inverter; if stddev < PLATEAU_STABILITY_PCT
-# AND power > PLATEAU_MIN_FRACTION of the seen peak → clipping detected.
+# A rolling window of recent readings per inverter; if stddev < adaptive threshold
+# AND power ≈ learned ceiling → clipping detected.
+# The ceiling is learned from ClippingLossCalculator.get_learned_ceiling() which
+# accumulates actual plateau events — no hardcoded fraction of nominal power.
 PLATEAU_WINDOW_SIZE    = 6      # number of readings (~60s at 10s interval)
-PLATEAU_STABILITY_PCT  = 0.015  # max stddev/mean allowed (1.5%)
+PLATEAU_STABILITY_PCT  = 0.015  # max stddev/mean allowed when no baseline known (1.5%)
 PLATEAU_MIN_FRACTION   = 0.80   # must be at least 80% of seen peak to count
 DEFAULT_FEEDIN_EUR_KWH = 0.08   # fallback feed-in tarief als EPEX niet beschikbaar
+# How close to the learned ceiling before we call it clipping (when ceiling is known)
+CLIPPING_CEILING_FRAC  = 0.985  # within 1.5% of learned ceiling = clipping
 
 
 class CloudEMSCoordinator(DataUpdateCoordinator):
@@ -180,6 +184,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._insights: str = ""
         # Per-inverter rolling power window for plateau/clipping detection
         self._plateau_windows: dict = {}  # entity_id → deque of float
+        # Per-inverter noise baseline: measured stddev/mean when NOT near ceiling.
+        # Adapted over time — allows stricter clipping detection on smooth inverters.
+        self._noise_baselines: dict = {}  # entity_id → EMA of stability ratio
         # Per-battery learned stats: {sensor_id: {max_charge_w, max_discharge_w, energy_accum_wh}}
         self._battery_learned: dict = {}
 
@@ -655,21 +662,40 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     util   = round(cur_w / peak_w * 100, 1) if peak_w > 0 else 0.0
 
                     # ── Plateau-based clipping detection ─────────────────────
-                    # Clipping = inverter output is FLAT at its rated limit even
-                    # as irradiance rises. Detect via rolling stddev on a ~60s window.
-                    # IMPORTANT: use rated_power_w from config if set, else fall back
-                    # to a much more conservative threshold to avoid false positives
-                    # early in the day when the learned peak_w is still low.
+                    # Clipping = inverter output is FLAT at its hardware limit.
+                    # Strategy (in priority order):
+                    #  1. Use self-learned ceiling from ClippingLossCalculator
+                    #     (most accurate: actual observed plateau, not a fraction)
+                    #  2. Fall back to rated_power_w from config (if set)
+                    #  3. Fall back to peak_power_w_7d (only after 50+ samples,
+                    #     conservative fraction to avoid false positives)
                     inv_cfg = next(
                         (c for c in self._config.get(CONF_INVERTER_CONFIGS, []) if c.get("entity_id") == eid),
                         {}
                     )
                     rated_w = inv_cfg.get("rated_power_w") or None
-                    # For clipping we need a reliable ceiling:
-                    # - If rated_power_w is configured → use that
-                    # - Else use peak_power_w_7d (best 7-day observation, more stable than all-time peak)
-                    #   but only after enough samples and only if utilisation is very high
-                    clipping_ceiling = rated_w if rated_w else profile.peak_power_w_7d
+
+                    # Try to get self-learned ceiling first
+                    learned_ceiling_w: Optional[float] = None
+                    if self._clipping_loss:
+                        learned_ceiling_w = self._clipping_loss.get_learned_ceiling(eid)
+
+                    if learned_ceiling_w:
+                        # Best case: use self-learned ceiling
+                        clipping_ceiling = learned_ceiling_w
+                        clip_frac = CLIPPING_CEILING_FRAC   # within 1.5% of learned ceiling
+                        min_samples = 0
+                    elif rated_w:
+                        # Configured rated power: reliable, allow 5% headroom
+                        clipping_ceiling = rated_w
+                        clip_frac = 0.95
+                        min_samples = 0
+                    else:
+                        # Learned all-time peak — only use after enough samples
+                        clipping_ceiling = profile.peak_power_w_7d
+                        clip_frac = 0.98
+                        min_samples = 50
+
                     win = self._plateau_windows.setdefault(eid, deque(maxlen=PLATEAU_WINDOW_SIZE))
                     if cur_w > 0:
                         win.append(cur_w)
@@ -679,15 +705,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         variance = sum((x - mean_w) ** 2 for x in win) / len(win)
                         stddev_w = variance ** 0.5
                         stability = stddev_w / mean_w if mean_w > 0 else 1.0
-                        # When using rated_power: clip at 95% of rated (tight)
-                        # When using learned peak only: require 98% AND only after 50+ samples
-                        if rated_w:
-                            clip_frac = 0.95
-                            min_samples = 0
-                        else:
-                            clip_frac = 0.98
-                            min_samples = 50
-                        if (stability < PLATEAU_STABILITY_PCT
+
+                        # Adaptive stability threshold: use per-inverter learned noise
+                        # baseline when not near ceiling. Smoother inverters get tighter.
+                        baseline_stability = self._noise_baselines.get(eid, PLATEAU_STABILITY_PCT)
+                        adaptive_threshold = max(PLATEAU_STABILITY_PCT, baseline_stability * 1.5)
+
+                        if mean_w < clipping_ceiling * 0.70:
+                            # Well below ceiling: update noise baseline (EMA)
+                            prev = self._noise_baselines.get(eid, stability)
+                            self._noise_baselines[eid] = prev * 0.95 + stability * 0.05
+
+                        if (stability < adaptive_threshold
                                 and mean_w >= clipping_ceiling * clip_frac
                                 and profile.samples >= min_samples):
                             clipping = True
@@ -1109,8 +1138,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                         if "energy_price_current_hour" in (data or {}) else 0.08)
                     for inv in inverter_data:
                         eid  = inv["entity_id"]
-                        # estimated_peak: gebruik forecast als beschikbaar, anders all-time piek × 0.9
-                        est_peak = inv.get("peak_w", 0.0) * 0.95
+                        # estimated_peak: use learned scale factor if available,
+                        # otherwise forecast hourly yield, otherwise all-time peak × factor
+                        learned_scale = self._clipping_loss.get_learned_scale_factor(eid)
+                        # Prefer forecast-derived estimate if we have hourly yield data
+                        fc_est = inv.get("forecast_peak_w", 0.0)
+                        if fc_est and fc_est > 0:
+                            est_peak = fc_est
+                        else:
+                            est_peak = inv.get("peak_w", 0.0) * learned_scale
                         self._clipping_loss.tick(
                             inverter_id      = eid,
                             label            = inv.get("label", eid),

@@ -114,6 +114,7 @@
           "inv_sensor": "Power sensor (W or kW)",
           "inv_control": "Control entity — switch or dimmer (optional)",
           "inv_label": "Name (e.g. 'Roof South')",
+          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn",
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave blank to self-learn",
           "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn"
@@ -348,7 +349,7 @@
       },
       "batteries_opts": {
         "title": "🔋 Batteries",
-        "description": "How many batteries do you want to configure?",
+        "description": "Currently configured: **{battery_names}** ({current_count} battery/batteries).\n\nSet count to 0 to remove all. Increasing the count adds new batteries; decreasing removes the last ones.",
         "data": {
           "battery_count": "Number of batteries"
         }

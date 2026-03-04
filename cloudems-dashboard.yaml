@@ -10,7 +10,9 @@
 #    6. 🚗  Mobiliteit          — EV auto + e-bike/scooter gezin
 #    7. 🤖  NILM Apparaten      — detectie, top-5, drift, schema's
 #    8. 🔋  Boiler & Batterij   — boilersturing, batterij EPEX, piekafschaving
-#    9. 🧠  Zelflerend          — leervoortgang, anomalie, weerkalibratie
+#    8. 🔋  Batterij           — SOC, SoH, EPEX schema
+#    9. 🛁  Boiler             — boiler sturing, triggers
+#   10. 🧠  Zelflerend          — leervoortgang, anomalie, weerkalibratie
 #   10. 🔔  Meldingen           — notification engine, alle actieve alerts
 #   11. 🔧  Diagnose            — technisch, congestie, PID, hints
 ##############################################################################
@@ -918,17 +920,12 @@ views:
             name: Classificatiescore (%)
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # VIEW 8 — 🔋 BOILER & BATTERIJ
+  # VIEW 8 — 🔋 BATTERIJ
   # ═══════════════════════════════════════════════════════════════════════════
-  - title: Boiler & Batterij
-    path: cloudems-boiler
-    icon: mdi:water-boiler
+  - title: Batterij
+    path: cloudems-battery
+    icon: mdi:battery-charging-high
     cards:
-
-      - type: entity
-        entity: sensor.cloudems_boiler_status
-        name: "🔌 Boiler sturing status"
-        icon: mdi:water-boiler
 
       # ── Multi-batterij overzicht ───────────────────────────────────────────
       - type: markdown
@@ -1024,6 +1021,19 @@ views:
         show:
           legend: true
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 9 — 🛁 BOILER
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Boiler
+    path: cloudems-boiler
+    icon: mdi:water-boiler
+    cards:
+
+      - type: entity
+        entity: sensor.cloudems_boiler_status
+        name: "🔌 Boiler sturing status"
+        icon: mdi:water-boiler
+
       # ── Sturing triggers ──────────────────────────────────────────────────
       - type: entities
         title: "⚡ Actieve sturing-triggers"
@@ -1035,8 +1045,7 @@ views:
           - entity: sensor.cloudems_system_decision_log
             name: Laatste actie
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  # VIEW 9 — 🧠 ZELFLEREND
+
   # ═══════════════════════════════════════════════════════════════════════════
   - title: Zelflerend
     path: cloudems-intelligence
