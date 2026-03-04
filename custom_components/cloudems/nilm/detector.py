@@ -667,25 +667,24 @@ class NILMDetector:
         import time as _t
         device_id = "__battery_injected__"
         if device_id not in self._devices:
-            from .database import DeviceDatabase
             dev = DetectedDevice(
-                device_id   = device_id,
-                device_type = "battery",
-                name        = label,
-                confidence  = 1.0,
-                power_w     = abs(power_w),
-                phase       = "ALL",
-                source      = "injected",
+                device_id     = device_id,
+                device_type   = "battery",
+                name          = label,
+                confidence    = 1.0,
+                current_power = abs(power_w),
+                is_on         = abs(power_w) > 50,
+                phase         = "ALL",
+                source        = "injected",
             )
             self._devices[device_id] = dev
 
         dev = self._devices[device_id]
-        dev.power_w    = round(abs(power_w), 1)
-        dev.is_on      = abs(power_w) > 50
-        dev.running    = abs(power_w) > 50
-        dev.confidence = 1.0
-        dev.name       = f"{label} ({'laden' if power_w > 0 else 'ontladen'})"
-        dev.last_seen  = _t.time()
+        dev.current_power = round(abs(power_w), 1)
+        dev.is_on         = abs(power_w) > 50
+        dev.confidence    = 1.0
+        dev.name          = f"{label} ({'laden' if power_w > 0 else 'ontladen'})"
+        dev.last_seen     = _t.time()
 
     def get_devices_for_ha(self) -> List[dict]:
         """Return all devices as dicts suitable for HA attributes.

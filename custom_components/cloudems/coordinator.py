@@ -1433,14 +1433,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "summary":      sanity_result.summary,
                     "issues": [
                         {
-                            "code":        i.code,
-                            "level":       i.level,
-                            "sensor_type": i.sensor_type,
-                            "entity_id":   i.entity_id,
-                            "description": i.description,
-                            "advice":      i.advice,
-                            "value":       round(i.value, 2),
-                            "expected":    i.expected,
+                            "code":        getattr(i, "code", ""),
+                            "level":       getattr(i, "level", "warning"),
+                            "sensor_type": getattr(i, "sensor_type", ""),
+                            "entity_id":   getattr(i, "entity_id", ""),
+                            "description": getattr(i, "description", ""),
+                            "advice":      getattr(i, "advice", ""),
+                            "value":       round(getattr(i, "value", 0.0), 2),
+                            "expected":    getattr(i, "expected", ""),
                         }
                         for i in sanity_result.issues
                     ],
@@ -1491,8 +1491,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 solar_w_now = max(0.0, data.get("solar_power", 0.0))
                 fc_now = sum(h.get("forecast_w", 0) for h in pv_forecast_hourly
                              if h.get("hour") == __import__("datetime").datetime.now().hour)
-                self._pv_accuracy.tick(actual_w=solar_w_now, forecast_w=fc_now)
-                pv_accuracy_data = self._pv_accuracy.get_data()
+                self._pv_accuracy.tick_production(pv_w=solar_w_now)
+                _acc = self._pv_accuracy.get_data()
+                pv_accuracy_data = {
+                    "mape_14d_pct":       _acc.mape_14d,
+                    "mape_30d_pct":       _acc.mape_30d,
+                    "bias_factor":        _acc.bias_factor,
+                    "samples":            _acc.days_with_data,
+                    "last_day_mape":      _acc.last_day_error_pct,
+                    "quality_label":      _acc.quality_label,
+                    "advice":             _acc.advice,
+                    "days_tracked":       _acc.days_tracked,
+                    "calibration_month":  _acc.calibration_month,
+                    "consecutive_over":   _acc.consecutive_over,
+                    "consecutive_under":  _acc.consecutive_under,
+                    "monthly_bias":       _acc.monthly_bias,
+                }
                 await self._pv_accuracy.async_maybe_save()
 
             # Generate insights
@@ -1862,8 +1876,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if balance_data.get("imbalance_a", 0) > 5:
             tips.append(f"⚖️ Fase-onbalans: {balance_data.get('imbalance_a',0):.1f}A verschil. Overweeg lasten te herverdelingen.")
 
+        # Startup / learning phase: geen EPEX-data of te weinig data
         if not tips:
-            tips.append("✅ Alles in orde. Geen bijzonderheden.")
+            if price_info and price_info.get("current") is not None:
+                tips.append("✅ Alles in orde — geen bijzonderheden op dit moment.")
+            else:
+                tips.append("⏳ CloudEMS leert je installatie kennen. Tips verschijnen zodra EPEX-prijzen beschikbaar zijn.")
 
         return " | ".join(tips)
 

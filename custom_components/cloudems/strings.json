@@ -46,14 +46,20 @@
           "grid_sensor": "Net power sensor (W or kW)",
           "import_power_sensor": "Import / consumption sensor (W or kW)",
           "export_power_sensor": "Export / feed-in sensor (W or kW)",
-          "mains_voltage": "Fallback mains voltage (V)"
+          "mains_voltage": "Fallback mains voltage (V)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
         },
         "data_description": {
           "use_separate_import_export": "Enable when your meter reports import and export as two separate sensors instead of one net value.",
           "grid_sensor": "Main grid power sensor. Positive = importing, negative = exporting.",
           "import_power_sensor": "Power consumed from the grid (always positive).",
           "export_power_sensor": "Power fed back to the grid (always positive).",
-          "mains_voltage": "Used as fallback for P = V × I when no voltage sensor is connected. Default: 230 V (EU)."
+          "mains_voltage": "Used as fallback for P = V × I when no voltage sensor is connected. Default: 230 V (EU).",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
         }
       },
       "phase_sensors": {
@@ -68,7 +74,10 @@
           "voltage_sensor_l3": "L3 voltage sensor (V)",
           "power_sensor_l1": "L1 power sensor (W)",
           "power_sensor_l2": "L2 power sensor (W)",
-          "power_sensor_l3": "L3 power sensor (W)"
+          "power_sensor_l3": "L3 power sensor (W)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
         },
         "data_description": {
           "phase_sensors_L1": "Current in amperes on phase L1. Used for per-phase limiting and balancing.",
@@ -79,7 +88,10 @@
           "voltage_sensor_l3": "Actual voltage on L3.",
           "power_sensor_l1": "Direct power measurement on L1 (W). Use if available for maximum accuracy. Falls back to V × I automatically.",
           "power_sensor_l2": "Direct power measurement on L2 (W).",
-          "power_sensor_l3": "Direct power measurement on L3 (W)."
+          "power_sensor_l3": "Direct power measurement on L3 (W).",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
         }
       },
       "solar_ev": {

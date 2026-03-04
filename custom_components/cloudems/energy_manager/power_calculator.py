@@ -97,13 +97,17 @@ class ScaleState:
         a sensor sending 1234 with unit kW would give 1 234 000 W which is wrong.
         """
         if abs(raw) > ALWAYS_WATT_ABOVE:
-            # Definitely Watts regardless of what UOM says
+            # Definitely Watts regardless of what UOM says.
+            # Warn once, then lock to W so subsequent calls are silent.
             if self.uom_is_kw:
                 _LOGGER.warning(
                     "PowerCalculator: %s has UOM=kW but value=%.1f > %.0f — "
-                    "treating as Watts (probable sensor mis-label).",
+                    "treating as Watts (probable sensor mis-label). "
+                    "Scale locked to W; this message will not repeat.",
                     self.entity_id, raw, ALWAYS_WATT_ABOVE,
                 )
+                self.uom_is_kw  = False
+                self.uom_locked = True
             return raw
         return raw * 1000.0 if self.is_kw else raw
 

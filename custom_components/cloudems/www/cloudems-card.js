@@ -1,5 +1,5 @@
 /**
- * CloudEMS Dashboard Card — v1.15.3
+ * CloudEMS Dashboard Card — v1.15.4
  * Visual energy overview: flow diagram · NILM device cards · battery health ·
  * PV forecast · phase bars · EPEX price chart · EV charging · congestion alerts.
  * Copyright © 2025 CloudEMS — https://cloudems.eu
@@ -87,9 +87,10 @@ class CloudEMSCard extends LitElement {
   _val(eid, fb = null) {
     if (!eid || !this.hass) return fb;
     const s = this.hass.states[eid];
-    if (!s || ["unavailable", "unknown", ""].includes(s.state)) return fb;
+    if (!s || ["unavailable", "unknown", "", "NaN"].includes(s.state)) return fb;
     const n = parseFloat(s.state);
-    return isNaN(n) ? s.state : n;
+    if (isNaN(n) || !isFinite(n)) return typeof s.state === 'string' && s.state.length > 0 ? s.state : fb;
+    return n;
   }
 
   _attr(eid, attr, fb = null) {
@@ -114,7 +115,7 @@ class CloudEMSCard extends LitElement {
   }
 
   _fmt(w) {
-    if (w === null || w === undefined) return "—";
+    if (w === null || w === undefined || isNaN(w) || !isFinite(w)) return "—";
     const abs = Math.abs(w);
     if (abs >= 1000) return (w / 1000).toFixed(1) + " kW";
     return Math.round(w) + " W";
@@ -1011,6 +1012,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "cloudems-card",
   name:        "CloudEMS Dashboard",
-  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.15.3)",
+  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.15.4)",
   preview:     true,
 });

@@ -49,19 +49,25 @@
           "grid_sensor": "Nettovermogen sensor (W of kW)",
           "import_power_sensor": "Import / verbruik sensor (W of kW)",
           "export_power_sensor": "Export / teruglevering sensor (W of kW)",
-          "mains_voltage": "Fallback-netspanning (V)"
+          "mains_voltage": "Fallback-netspanning (V)",
+          "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5"
         },
         "data_description": {
-          "use_separate_import_export": "Schakel in als je meter import en export als twee aparte sensoren levert.",
-          "grid_sensor": "Hoofd-netsensor. Positief = afname, negatief = teruglevering.",
-          "import_power_sensor": "Vermogen afgenomen van het net (altijd positief).",
-          "export_power_sensor": "Vermogen teruggeleverd aan het net (altijd positief).",
-          "mains_voltage": "Reservewaarde voor P = V × I als er geen spanningssensor is. Standaard: 230 V."
+          "use_separate_import_export": "⚙️ Gebruik aparte sensoren als je meter import en export afzonderlijk meet (bijv. DSMR5)",
+          "grid_sensor": "🔌 Eén bidirectionele sensor (positief = afname, negatief = teruglevering)",
+          "import_power_sensor": "🔌 Sensor voor stroomafname van het net",
+          "export_power_sensor": "Sensor voor teruglevering aan het net",
+          "mains_voltage": "─────────── Netspanning ───────────",
+          "power_sensor_l1_export": "Teruglevering per fase L1 (alleen DSMR5 / bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
+          "power_sensor_l2_export": "Teruglevering per fase L2.",
+          "power_sensor_l3_export": "Teruglevering per fase L3."
         }
       },
       "phase_sensors": {
-        "title": "🔌 Per-fase sensoren (optioneel)",
-        "description": "Deze sensoren zijn **optioneel** — CloudEMS werkt ook zonder.\n\nStroomsensoren (A) maken per-fase begrenzing mogelijk. Spanningssensoren verbeteren de nauwkeurigheid. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen automatisch via stroom × spanning.\n\n{phase_count} fase(n) getoond op basis van je aansluiting.\n\n![]({diagram_url})",
+        "title": "⚡ Fase-sensoren",
+        "description": "Stroom (A), spanning (V) en vermogen (W) per fase. DSMR5 meters met afzonderlijke import/export per fase: vul de teruglevering-sensoren in.",
         "data": {
           "phase_sensors_L1": "L1 stroomsensor (A)",
           "phase_sensors_L2": "L2 stroomsensor (A)",
@@ -71,11 +77,18 @@
           "voltage_sensor_l3": "L3 spanningssensor (V)",
           "power_sensor_l1": "L1 vermogenssensor (W)",
           "power_sensor_l2": "L2 vermogenssensor (W)",
-          "power_sensor_l3": "L3 vermogenssensor (W)"
+          "power_sensor_l3": "L3 vermogenssensor (W)",
+          "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5"
         },
         "data_description": {
-          "phase_sensors_L1": "Stroom in ampère op fase L1. Gebruikt voor fase-begrenzing en balancering.",
-          "power_sensor_l1": "Direct vermogen op L1 (W). Als dit leeg is, berekent CloudEMS het automatisch via V × I."
+          "phase_sensors_L1": "─────────── Stroomsensoren (A) ───────────",
+          "power_sensor_l1": "─────────── Vermogenssensoren (W) ───────────",
+          "voltage_sensor_l1": "─────────── Spanningssensoren (V) ───────────",
+          "power_sensor_l1_export": "Teruglevering per fase L1 (alleen DSMR5 / bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
+          "power_sensor_l2_export": "Teruglevering per fase L2.",
+          "power_sensor_l3_export": "Teruglevering per fase L3."
         }
       },
       "solar_ev": {
@@ -87,6 +100,11 @@
           "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
           "enable_solar_dimmer": "Zon-energie afschalen bij negatieve EPEX-prijs",
           "negative_price_threshold": "Prijsdrempel voor afschaling (EUR/kWh)"
+        },
+        "data_description": {
+          "solar_sensor": "☀️ Totaal PV-vermogen sensor (bij meerdere omvormers de som-sensor)",
+          "battery_sensor": "─────────── Opslag ───────────",
+          "ev_charger_entity": "─────────── EV Laden ───────────"
         }
       },
       "inverter_count": {
@@ -100,13 +118,22 @@
         "title": "☀️ Omvormer {inverter_num} van {total}",
         "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.\n\n![]({diagram_url})",
         "data": {
-          "inv_sensor": "Vermogenssensor (W of kW)",
+          "inv_sensor": "Vermogenssensor (W of kW) *",
           "inv_control": "Besturingsentiteit — schakelaar of dimmer (optioneel)",
           "inv_label": "Naam (bijv. 'Dak Zuid')",
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
-          "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
-          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren",
-          "inv_rated_power": "Nominaal omvormervermogen (W) — optioneel, voor nauwkeurige clipping-detectie"
+          "inv_azimuth": "Azimut (°) — leeg laten voor automatisch leren",
+          "inv_tilt": "Hellingshoek (°) — leeg laten voor automatisch leren",
+          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren"
+        },
+        "data_description": {
+          "inv_sensor": "🔌 Koppel de vermogenssensor van deze omvormer (W of kW)",
+          "inv_label": "─────────── Identificatie ───────────",
+          "inv_rated_power": "Nominaal piekvermogen in Wp — laat 0 staan om dit automatisch te laten leren",
+          "inv_azimuth": "─────────── Oriëntatie (leeg = automatisch leren) ───────────",
+          "inv_tilt": "Hellingshoek: 0 = plat dak · 30 = standaard schuin · 90 = verticaal",
+          "inv_min_pct": "─────────── Begrenzing ───────────",
+          "inv_control": "Koppel een schakelaar of number-entiteit om het omvormervermogen te beperken"
         }
       },
       "features": {
@@ -180,14 +207,14 @@
         "title": "🔋 Batterij {battery_num} van {total}",
         "description": "Configureer batterij {battery_num}.",
         "data": {
-          "bat_power_sensor": "Vermogenssensor (W, + = laden, - = ontladen)",
-          "bat_soc_sensor": "State of Charge sensor (%) — optioneel",
-          "bat_capacity_kwh": "Capaciteit (kWh)",
-          "bat_max_charge_w": "Max laadvermogen (W)",
-          "bat_max_discharge_w": "Max ontlaadvermogen (W)",
-          "bat_charge_entity": "Laad setpoint entiteit — optioneel",
-          "bat_discharge_entity": "Ontlaad setpoint entiteit — optioneel",
-          "bat_label": "Naam (bijv. Thuisbatterij)"
+          "bat_power_sensor": "Vermogenssensor (W, positief=laden) *",
+          "bat_soc_sensor": "Laadniveau sensor (%) — optioneel",
+          "bat_capacity_kwh": "Batterijcapaciteit (kWh) — 0 = zelf leren",
+          "bat_max_charge_w": "Max. laadvermogen (W) — 0 = zelf leren",
+          "bat_max_discharge_w": "Max. ontlaadvermogen (W) — 0 = zelf leren",
+          "bat_charge_entity": "Laadbesturing entiteit (optioneel)",
+          "bat_discharge_entity": "Ontlaadbesturing entiteit (optioneel)",
+          "bat_label": "Naam (bijv. 'Thuisbatterij')"
         }
       },
       "prices": {
@@ -225,7 +252,7 @@
         }
       },
       "sensors": {
-        "title": "🔌 Netsensoren",
+        "title": "🔌 Grid Sensors",
         "data": {
           "use_separate_import_export": "Aparte import- en exportsensoren",
           "grid_sensor": "Nettovermogen sensor",
@@ -236,11 +263,12 @@
           "max_current_l1": "Max. stroom L1 (A)",
           "max_current_l2": "Max. stroom L2 (A)",
           "max_current_l3": "Max. stroom L3 (A)"
-        }
+        },
+        "description": "Netaansluiting, netspanning en faseinstellingen."
       },
       "phase_sensors": {
         "title": "⚡ Fase-sensoren",
-        "description": "Per-fase stroom-, spannings- en vermogenssensoren. Als een vermogenssensor ontbreekt, berekent CloudEMS het vermogen via stroom × spanning.",
+        "description": "Per-fase stroom, spanning en vermogen. DSMR5 bidirectionele meter: vul ook de teruglevering-sensoren in voor netto fase-vermogen.",
         "data": {
           "phase_sensors_L1": "L1 stroomsensor",
           "phase_sensors_L2": "L2 stroomsensor",
@@ -257,18 +285,15 @@
         }
       },
       "solar_ev_opts": {
-        "title": "EV Laadpaal Instellingen",
+        "title": "☀️ PV & EV Laden",
         "data": {
+          "solar_sensor": "PV / omvormer sensor (W of kW)",
           "battery_sensor": "Batterij sensor",
           "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
           "enable_solar_dimmer": "Zonnebegrenzing inschakelen",
-          "negative_price_threshold": "Negatieve prijs drempel (€/kWh)",
-          "gas_sensor": "Gasmeter sensor (m³) — optioneel, alternatief voor P1",
-          "gas_price_sensor": "Gas prijs sensor (€/m³) — optioneel",
-          "gas_price_fixed": "Vaste gasprijs (€/m³) — gebruikt als geen sensor",
-          "boiler_efficiency": "Elektrische boiler rendement (0.5–1.0)",
-          "heat_pump_cop": "Warmtepomp COP (1.0–8.0)"
-        }
+          "negative_price_threshold": "Negatieve prijs drempel (€/kWh)"
+        },
+        "description": "Zonnepaneel sensor, EV laadpaal en zonnebegrenzing."
       },
       "features_opts": {
         "title": "🚀 Functies",
@@ -319,14 +344,22 @@
       },
       "inverter_detail_opts": {
         "title": "☀️ Omvormer {inverter_num} van {total}",
-        "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.",
+        "description": "Pas de instellingen van omvormer **{inverter_num}** aan.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLeeg laten — CloudEMS leert ze automatisch.",
         "data": {
           "inv_sensor": "Vermogenssensor (W of kW)",
           "inv_control": "Besturingsentiteit — schakelaar of dimmer (optioneel)",
           "inv_label": "Naam (bijv. 'Dak Zuid')",
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
-          "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
-          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren"
+          "inv_azimuth": "Azimut (°) — leeg laten voor automatisch leren",
+          "inv_tilt": "Hellingshoek (°) — leeg laten voor automatisch leren",
+          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren"
+        }
+      },
+      "inverters_opts": {
+        "title": "🔆 PV Omvormers",
+        "description": "Hoeveel omvormers wil je configureren? Bestaande omvormers: {inverter_names}",
+        "data": {
+          "inverter_count": "Aantal omvormers (0–9)"
         }
       },
       "batteries_opts": {
@@ -416,6 +449,21 @@
       "cloudems_heat_pump_defrost_count": {
         "name": "Warmtepomp Ontdooicycli Vandaag",
         "state": {}
+      },
+      "absence_detector": {
+        "name": "Aanwezigheid"
+      },
+      "climate_preheat": {
+        "name": "Klimaat Verwarmingsadvies"
+      },
+      "pv_forecast_accuracy": {
+        "name": "PV Prognose Nauwkeurigheid"
+      },
+      "ema_diagnostics": {
+        "name": "Sensor EMA Diagnostiek"
+      },
+      "sensor_sanity": {
+        "name": "Sensor Sanity"
       }
     }
   }

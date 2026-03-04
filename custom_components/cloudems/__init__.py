@@ -149,5 +149,51 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_migrate_entry(hass, config_entry) -> bool:
-    _LOGGER.debug("CloudEMS: migration from version %s", config_entry.version)
+    """Migrate old config entries to current version.
+
+    v1 → v2: removes legacy top-level inv/bat sensor keys that moved into
+              CONF_INVERTER_CONFIGS / CONF_BATTERY_CONFIGS lists.
+    v2 → v3: renames entity_ids that changed slug in v1.15
+              (e.g. Efficientiedrift, device_drift unique_id normalisation).
+    """
+    version = config_entry.version
+    _LOGGER.info("CloudEMS: migrating from version %s", version)
+
+    if version == 1:
+        # v1→v2: remove stale top-level sensor keys that are now inside nested configs
+        stale_keys = [
+            "solar_sensor_legacy", "battery_sensor_legacy",
+            "inverter_entity", "bat_power_entity",
+        ]
+        new_data = {k: v for k, v in config_entry.data.items() if k not in stale_keys}
+        hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
+        version = 2
+        _LOGGER.info("CloudEMS: migrated to version 2")
+
+    if version == 2:
+        # v2→v3: fix unique_id renames from v1.13→v1.15
+        # Rename entity registry entries for slugs that changed
+        slug_renames = {
+            # old unique_id suffix → new unique_id suffix
+            "_efficientiedrift":        "_device_drift",
+            "_apparaat_efficientiedrift": "_device_drift",
+            "_aanwezigheid":            "_occupancy",
+            "_verbruik_anomalie":       "_anomaly",
+        }
+        from homeassistant.helpers import entity_registry as er
+        ent_reg = er.async_get(hass)
+        entry_id = config_entry.entry_id
+        renamed = 0
+        for old_suffix, new_suffix in slug_renames.items():
+            old_uid = f"{entry_id}{old_suffix}"
+            entity = ent_reg.async_get_entity_id("sensor", DOMAIN, old_uid) or                      ent_reg.async_get_entity_id("binary_sensor", DOMAIN, old_uid)
+            if entity:
+                ent_reg.async_update_entity(entity, new_unique_id=f"{entry_id}{new_suffix}")
+                renamed += 1
+                _LOGGER.info("CloudEMS migrate: renamed %s → %s", old_uid, f"{entry_id}{new_suffix}")
+        if renamed:
+            _LOGGER.info("CloudEMS: migrated %d entity unique_ids", renamed)
+        hass.config_entries.async_update_entry(config_entry, version=3)
+        _LOGGER.info("CloudEMS: migrated to version 3")
+
     return True

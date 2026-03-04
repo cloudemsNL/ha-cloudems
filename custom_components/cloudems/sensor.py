@@ -115,6 +115,12 @@ async def async_setup_entry(
         CloudEMSCostForecastSensor(coordinator, entry),
         # v1.9: battery EPEX schedule
         CloudEMSBatteryScheduleSensor(coordinator, entry),
+        # v1.15.4: new intelligence sensors (absence detector, climate preheat, PV accuracy, EMA diag, sanity)
+        CloudEMSAbsenceDetectorSensor(coordinator, entry),
+        CloudEMSClimatePreheatSensor(coordinator, entry),
+        CloudEMSPVForecastAccuracySensor(coordinator, entry),
+        CloudEMSEMADiagnosticsSensor(coordinator, entry),
+        CloudEMSSanitySensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -137,8 +143,18 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
+    # Pre-populate registered sets from the HA entity registry so that on HA
+    # restart, already-known dynamic entities are not re-added (which causes
+    # "ID already exists - ignoring" warnings in the log).
+    from homeassistant.helpers import entity_registry as er
+    _er = er.async_get(hass)
+    _existing_uids: set = {
+        e.unique_id
+        for e in er.async_entries_for_config_entry(_er, entry.entry_id)
+    }
+
     # Dynamically add NILM device sensors when detected
-    registered_nilm_ids: set = set()
+    registered_nilm_ids: set = set(_existing_uids)
 
     @callback
     def _nilm_updated():
@@ -154,7 +170,7 @@ async def async_setup_entry(
     coordinator.async_add_listener(_nilm_updated)
 
     # Dynamically add per-inverter profile sensors and clipping binary sensors
-    registered_inv_ids: set = set()
+    registered_inv_ids: set = set(_existing_uids)
 
     @callback
     def _inverters_updated():
@@ -278,11 +294,17 @@ class CloudEMSInsightsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        text = (self.coordinator.data or {}).get("insights", "")
+        data = self.coordinator.data or {}
+        text = data.get("insights", "")
+        # If coordinator has no data yet: show helpful startup message, not "unavailable"
+        if not data:
+            return "⏳ CloudEMS start op — even geduld..."
+        if not text:
+            return "✅ Bezig met leren — over enkele minuten verschijnen hier tips."
         # HA state max 255 chars — show first tip only
-        if text and " | " in text:
+        if " | " in text:
             return text.split(" | ")[0][:255]
-        return (text or "Bezig met laden...")[:255]
+        return text[:255]
 
     @property
     def extra_state_attributes(self):
@@ -2864,7 +2886,7 @@ class CloudEMSDayTypeSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSDeviceDriftSensor(CoordinatorEntity, SensorEntity):
     """Apparaat efficiëntie drift detectie — slijtage, kalk, defect."""
-    _attr_name = "CloudEMS · Apparaat Efficiëntiedrift"
+    _attr_name = "CloudEMS · Apparaat Efficientiedrift"
     _attr_icon = "mdi:chart-timeline-variant-shimmer"
 
     def __init__(self, coord, entry):
@@ -3073,4 +3095,222 @@ class CloudEMSConsumptionCategoriesSensor(CoordinatorEntity, SensorEntity):
             "pie_data":          c.get("pie_data", []),
             "dominant_insight":  c.get("dominant_insight", ""),
             "avg_breakdown_pct": c.get("avg_breakdown_pct", {}),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.15.4: NEW HA Sensor entities voor absence/occupancy, climate preheat,
+#          PV forecast accuracy, EMA diagnostics en sensor sanity guard.
+#          Deze modules bestonden al in coordinator maar hadden geen HA entiteiten.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSAbsenceDetectorSensor(CoordinatorEntity, SensorEntity):
+    """Aanwezigheidsstatus via AbsenceDetector (verbruikspatroon-gebaseerd).
+    
+    Meldt: home / away / sleeping / vacation.
+    Attributes: confidence, standby_w, vacation_hours, advice.
+    """
+    _attr_name  = "CloudEMS Occupancy"
+    _attr_icon  = "mdi:home-account"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_absence_detector"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        return (self.coordinator.data or {}).get("occupancy", {}).get("state", "unknown")
+
+    @property
+    def extra_state_attributes(self):
+        o = (self.coordinator.data or {}).get("occupancy", {})
+        return {
+            "confidence":     o.get("confidence", 0.0),
+            "state":          o.get("state", "unknown"),
+            "standby_w":      o.get("standby_w"),
+            "vacation_hours": o.get("vacation_hours", 0),
+            "advice":         o.get("advice", ""),
+        }
+
+
+class CloudEMSClimatePreheatSensor(CoordinatorEntity, SensorEntity):
+    """Verwarmingsadvies van ClimatePreHeatAdvisor.
+    
+    Meldt: pre_heat / reduce / normal.
+    Attributes: setpoint_offset_c, reason, price_ratio, w_per_k, reliable.
+    """
+    _attr_name  = "CloudEMS Climate Preheat"
+    _attr_icon  = "mdi:thermometer-auto"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_climate_preheat"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        return (self.coordinator.data or {}).get("climate_preheat", {}).get("mode", "normal")
+
+    @property
+    def extra_state_attributes(self):
+        p = (self.coordinator.data or {}).get("climate_preheat", {})
+        return {
+            "mode":              p.get("mode", "normal"),
+            "setpoint_offset_c": p.get("setpoint_offset_c", 0.0),
+            "reason":            p.get("reason", ""),
+            "price_ratio":       p.get("price_ratio"),
+            "w_per_k":           p.get("w_per_k"),
+            "reliable":          p.get("reliable", False),
+        }
+
+
+class CloudEMSPVForecastAccuracySensor(CoordinatorEntity, SensorEntity):
+    """PV prognose nauwkeurigheid (MAPE 14d / 30d, biasfactor).
+    
+    State = MAPE 14d in %.
+    """
+    _attr_name  = "CloudEMS PV Forecast Accuracy"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon  = "mdi:weather-sunny-alert"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pv_forecast_accuracy"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @staticmethod
+    def _acc_dict(raw) -> dict:
+        """Normalise pv_accuracy to a plain dict.
+
+        The coordinator now always returns a dict, but during the very first
+        async_write_ha_state (called inside async_add_entities before the
+        coordinator has run with the new code) the value may still be a
+        PVAccuracyData dataclass from the initial coordinator run.
+        This helper handles both cases gracefully.
+        """
+        if raw is None:
+            return {}
+        if isinstance(raw, dict):
+            return raw
+        # PVAccuracyData dataclass — map fields to the expected dict keys
+        return {
+            "mape_14d_pct":      getattr(raw, "mape_14d", None),
+            "mape_30d_pct":      getattr(raw, "mape_30d", None),
+            "bias_factor":       getattr(raw, "bias_factor", None),
+            "samples":           getattr(raw, "days_with_data", 0),
+            "last_day_mape":     getattr(raw, "last_day_error_pct", None),
+            "quality_label":     getattr(raw, "quality_label", None),
+            "advice":            getattr(raw, "advice", None),
+            "days_tracked":      getattr(raw, "days_tracked", 0),
+            "calibration_month": getattr(raw, "calibration_month", None),
+            "consecutive_over":  getattr(raw, "consecutive_over", 0),
+            "consecutive_under": getattr(raw, "consecutive_under", 0),
+            "monthly_bias":      getattr(raw, "monthly_bias", {}),
+        }
+
+    @property
+    def native_value(self):
+        a = self._acc_dict((self.coordinator.data or {}).get("pv_accuracy"))
+        mape = a.get("mape_14d_pct")
+        if mape is None:
+            return None
+        try:
+            return round(float(mape), 1)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def extra_state_attributes(self):
+        a = self._acc_dict((self.coordinator.data or {}).get("pv_accuracy"))
+        return {
+            "mape_14d_pct":   a.get("mape_14d_pct"),
+            "mape_30d_pct":   a.get("mape_30d_pct"),
+            "bias_factor":    a.get("bias_factor"),
+            "samples":        a.get("samples", 0),
+            "last_day_mape":  a.get("last_day_mape"),
+        }
+
+
+class CloudEMSEMADiagnosticsSensor(CoordinatorEntity, SensorEntity):
+    """EMA (Exponential Moving Average) diagnostiek voor vertraagde cloud-sensoren.
+    
+    State = totaal geblokkeerde spikes.
+    Attributes: frozen_sensors, slow_sensors, spikes_blocked.
+    """
+    _attr_name  = "CloudEMS EMA Diagnostics"
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_icon  = "mdi:chart-bell-curve"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ema_diagnostics"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("ema_diagnostics", {}).get("spikes_blocked", 0)
+
+    @property
+    def extra_state_attributes(self):
+        e = (self.coordinator.data or {}).get("ema_diagnostics", {})
+        return {
+            "spikes_blocked":  e.get("spikes_blocked", 0),
+            "frozen_sensors":  e.get("frozen_sensors", []),
+            "slow_sensors":    e.get("slow_sensors", []),
+            "tracked_sensors": e.get("tracked_sensors", 0),
+            "summary":         e.get("summary", ""),
+        }
+
+
+class CloudEMSSanitySensor(CoordinatorEntity, SensorEntity):
+    """Sensor sanity guard — detecteert misconfigureerde sensoren (kW/W verwarring, te hoge waarden, enz.).
+    
+    State = totaal actieve issues.
+    Attributes: issues (lijst), summary, has_critical, has_warning.
+    """
+    _attr_name  = "CloudEMS Sensor Sanity"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon  = "mdi:shield-check"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_sensor_sanity"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        s = (self.coordinator.data or {}).get("sensor_sanity", {})
+        issues = s.get("issues", [])
+        return len(issues) if isinstance(issues, list) else 0
+
+    @property
+    def extra_state_attributes(self):
+        s = (self.coordinator.data or {}).get("sensor_sanity", {})
+        return {
+            "has_critical": s.get("has_critical", False),
+            "has_warning":  s.get("has_warning", False),
+            "summary":      s.get("summary", "Alle sensoren OK"),
+            "issues":       s.get("issues", []),
         }

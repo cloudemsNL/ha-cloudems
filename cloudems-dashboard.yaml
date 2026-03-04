@@ -314,9 +314,9 @@ views:
             attribute: advice
             name: Advies
 
-      # ── Ori&euml;ntatie leervoortgang ──────────────────────────────────────
+      # ── Oriëntatie leervoortgang ──────────────────────────────────────
       - type: markdown
-        title: "🧭 Ori&euml;ntatie leervoortgang"
+        title: "🧭 Oriëntatie leervoortgang"
         content: |
           {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
           {% if invs | length == 0 %}*Geen omvormers.*

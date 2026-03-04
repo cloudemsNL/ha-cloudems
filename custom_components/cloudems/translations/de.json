@@ -44,19 +44,25 @@
           "grid_sensor": "Nettoleistungssensor (W oder kW — positiv = Bezug)",
           "import_power_sensor": "Import-/Verbrauchssensor (W oder kW)",
           "export_power_sensor": "Export-/Einspeisesensor (W oder kW)",
-          "mains_voltage": "Reserve-Netzspannung (V)"
+          "mains_voltage": "Reserve-Netzspannung (V)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
         },
         "data_description": {
-          "use_separate_import_export": "Aktivieren, wenn deine Messung Import und Export als zwei separate Sensoren liefert.",
-          "grid_sensor": "Haupt-Netzsensor. Positiv = Netzbezug, negativ = Einspeisung.",
-          "import_power_sensor": "Bezogene Leistung aus dem Netz (immer positiv).",
-          "export_power_sensor": "Ins Netz eingespeiste Leistung (immer positiv).",
-          "mains_voltage": "Wird als Fallback für P=U×I verwendet. Standard: 230 V (EU)."
+          "use_separate_import_export": "⚙️ Separate Sensoren verwenden, wenn Ihr Zähler Import und Export separat misst (z.B. DSMR5)",
+          "grid_sensor": "🔌 Einzelner bidirektionaler Sensor (positiv = Bezug, negativ = Einspeisung)",
+          "import_power_sensor": "🔌 Sensor für Netzbezug",
+          "export_power_sensor": "Sensor für Einspeisung ins Netz",
+          "mains_voltage": "─────────── Netzspannung ───────────",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
         }
       },
       "phase_sensors": {
-        "title": "🔌 Phasensensoren (optional)",
-        "description": "Diese Sensoren sind **optional** — CloudEMS funktioniert auch ohne sie.\n\nStromsensoren ermöglichen Phasenbegrenzung. Spannungssensoren verbessern die Berechnungsgenauigkeit.\n\nAlle {phase_count} Phasen werden entsprechend deiner Netzverbindung angezeigt.",
+        "title": "⚡ Phasensensoren",
+        "description": "Strom (A), Spannung (V) und Leistung (W) pro Phase. DSMR5 Zähler mit separatem Import/Export pro Phase: Einspeisesensoren ausfüllen.",
         "data": {
           "phase_sensors_L1": "L1 Stromsensor (A)",
           "phase_sensors_L2": "L2 Stromsensor (A)",
@@ -66,7 +72,18 @@
           "voltage_sensor_l3": "L3 Spannungssensor (V)",
           "power_sensor_l1": "L1 Leistungssensor (W)",
           "power_sensor_l2": "L2 Leistungssensor (W)",
-          "power_sensor_l3": "L3 Leistungssensor (W)"
+          "power_sensor_l3": "L3 Leistungssensor (W)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
+        },
+        "data_description": {
+          "phase_sensors_L1": "─────────── Stromsensoren (A) ───────────",
+          "voltage_sensor_l1": "─────────── Spannungssensoren (V) ───────────",
+          "power_sensor_l1": "─────────── Leistungssensoren (W) ───────────",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
         }
       },
       "solar_ev": {
@@ -78,6 +95,11 @@
           "ev_charger_entity": "E-Ladestation Sollwert-Entity (number)",
           "enable_solar_dimmer": "Solar-Curtailment bei negativem EPEX-Preis",
           "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+        },
+        "data_description": {
+          "solar_sensor": "☀️ Gesamt-PV-Leistungssensor (Summensensor bei mehreren Wechselrichtern)",
+          "battery_sensor": "─────────── Speicher ───────────",
+          "ev_charger_entity": "─────────── E-Auto Laden ───────────"
         }
       },
       "inverter_count": {
@@ -98,6 +120,15 @@
           "inv_azimuth": "Azimut (°) — optional, leer = selbst lernen",
           "inv_tilt": "Neigungswinkel (°) — optional, leer = selbst lernen",
           "inv_rated_power": "Nennleistung Wechselrichter (W) — optional, für genaue Clipping-Erkennung"
+        },
+        "data_description": {
+          "inv_sensor": "🔌 Leistungssensor dieses Wechselrichters anschließen (W oder kW)",
+          "inv_label": "─────────── Identifikation ───────────",
+          "inv_rated_power": "Nennleistung in Wp — 0 lassen, damit CloudEMS dies automatisch lernt",
+          "inv_azimuth": "─────────── Ausrichtung (leer = automatisch lernen) ───────────",
+          "inv_tilt": "Neigungswinkel: 0 = flaches Dach · 30 = typische Neigung · 90 = vertikal",
+          "inv_min_pct": "─────────── Begrenzung ───────────",
+          "inv_control": "Schalter oder Number-Entität zum Begrenzen der Wechselrichterleistung"
         }
       },
       "features": {
@@ -170,7 +201,7 @@
         }
       },
       "sensors": {
-        "title": "🔌 Sensoren & Netz",
+        "title": "🔌 Grid-Sensoren",
         "data": {
           "use_separate_import_export": "Getrennte Import-/Export-Sensoren",
           "grid_sensor": "Nettoleistungssensor",
@@ -181,21 +212,19 @@
           "max_current_l1": "Max. Strom L1 (A)",
           "max_current_l2": "Max. Strom L2 (A)",
           "max_current_l3": "Max. Strom L3 (A)"
-        }
+        },
+        "description": "Netzanschluss, Spannung und Phaseneinstellungen."
       },
       "solar_ev_opts": {
-        "title": "E-Auto Ladegerät Einstellungen",
+        "title": "☀️ PV & E-Auto Laden",
         "data": {
+          "solar_sensor": "PV / Wechselrichter Sensor (W oder kW)",
           "battery_sensor": "Batterie-Sensor",
           "ev_charger_entity": "E-Ladestation Entity",
           "enable_solar_dimmer": "Solar-Curtailment bei Negativpreis",
-          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)",
-          "gas_sensor": "Gaszähler-Sensor (m³) — optional, Alternative zu P1",
-          "gas_price_sensor": "Gaspreissensor (€/m³) — optional",
-          "gas_price_fixed": "Fester Gaspreis (€/m³) — verwendet wenn kein Sensor",
-          "boiler_efficiency": "Elektrischer Boiler Wirkungsgrad (0.5–1.0)",
-          "heat_pump_cop": "Wärmepumpe COP (1.0–8.0)"
-        }
+          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+        },
+        "description": "PV-Sensor, Ladepunkt und Solarabschaltung."
       },
       "features_opts": {
         "title": "🚀 Funktionen",
@@ -237,12 +266,20 @@
           "inv_label": "Name (z.B. 'Dach Süd')",
           "inv_min_pct": "Mindestleistung bei Abregelung (%)",
           "inv_azimuth": "Azimut (°) — optional, leer lassen für automatisches Lernen",
-          "inv_tilt": "Neigungswinkel (°) — optional, leer lassen für automatisches Lernen"
+          "inv_tilt": "Neigungswinkel (°) — optional, leer lassen für automatisches Lernen",
+          "inv_rated_power": "Nennleistung (Wp) — 0 = automatisch lernen"
+        }
+      },
+      "inverters_opts": {
+        "title": "🔆 PV-Wechselrichter",
+        "description": "Wie viele Wechselrichter möchten Sie konfigurieren? Aktuell: {inverter_names}",
+        "data": {
+          "inverter_count": "Anzahl Wechselrichter (0–9)"
         }
       },
       "batteries_opts": {
         "title": "🔋 Batterien",
-        "description": "Wie viele Batterien möchten Sie konfigurieren?",
+        "description": "Aktuell konfiguriert: **{battery_names}** ({current_count} Batterie/Batterien).\n\nAuf 0 setzen, um alle zu entfernen. Erhöhen fügt hinzu; verringern entfernt die letzte.",
         "data": {
           "battery_count": "Anzahl Batterien"
         }
@@ -291,7 +328,9 @@
           "power_sensor_l1_export": "DSMR5 Rückspeisung L1 (W) — optional",
           "power_sensor_l2_export": "DSMR5 Rückspeisung L2 (W) — optional",
           "power_sensor_l3_export": "DSMR5 Rückspeisung L3 (W) — optional"
-        }
+        },
+        "title": "⚡ Phasensensoren",
+        "description": "Strom, Spannung und Leistung pro Phase. DSMR5 bidirektionaler Zähler: auch Einspeisesensoren für Nettophasenleistung ausfüllen."
       }
     }
   },
@@ -334,6 +373,21 @@
       "cloudems_heat_pump_defrost_count": {
         "name": "Wärmepumpe Abtauzyklen Heute",
         "state": {}
+      },
+      "absence_detector": {
+        "name": "Anwesenheit"
+      },
+      "climate_preheat": {
+        "name": "Klimaheizungsempfehlung"
+      },
+      "pv_forecast_accuracy": {
+        "name": "PV-Prognosegenauigkeit"
+      },
+      "ema_diagnostics": {
+        "name": "Sensor EMA Diagnose"
+      },
+      "sensor_sanity": {
+        "name": "Sensor Sanität"
       }
     }
   }

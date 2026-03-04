@@ -234,23 +234,29 @@ class PVForecast:
             return   # Cache for 1 hour
         # v1.15.0: prefer global_tilted_irradiance with learned orientation
         # Average tilt/azimuth across all configured inverters
-        avg_tilt = 35.0
-        avg_az   = 180.0
+        avg_tilt  = 35.0
+        avg_az    = 180.0
+        avg_az_om = 0.0   # Open-Meteo default: 0=S (south-facing)
         profiles_with_data = [
             p for p in self._profiles.values()
             if p.effective_tilt is not None and p.effective_azimuth is not None
         ]
         if profiles_with_data:
-            avg_tilt = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
-            avg_az   = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
+            avg_tilt  = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
+            avg_az    = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
             # Convert HA azimuth (0=N,90=E,180=S,270=W) to Open-Meteo (-180…180, 0=S)
             avg_az_om = avg_az - 180.0  # 0=S, -90=E, +90=W
+
+        # Defensive fallback: guard against stale bytecode cache or future
+        # refactors that might leave avg_az_om unassigned on some code paths.
+        _tilt = avg_tilt  if isinstance(locals().get("avg_tilt"),  (int, float)) else 35.0
+        _azom = avg_az_om if isinstance(locals().get("avg_az_om"), (int, float)) else 0.0
 
         url = (
             f"{OPEN_METEO_URL_BASE}"
             f"&latitude={self._lat}&longitude={self._lon}"
             f"&hourly=global_tilted_irradiance,direct_radiation,shortwave_radiation"
-            f"&tilt={avg_tilt:.0f}&azimuth={avg_az_om:.0f}"
+            f"&tilt={_tilt:.0f}&azimuth={_azom:.0f}"
         )
         try:
             async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:

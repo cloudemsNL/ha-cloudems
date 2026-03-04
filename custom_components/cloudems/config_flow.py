@@ -110,7 +110,13 @@ def _exclude(pool: list, exclude_kws: list) -> list:
     return [e for e in pool if not any(kw in e.lower() for kw in ex)]
 
 def _detect_sensors(hass, phase_count: int) -> dict:
-    # Raw pools by unit
+    """Auto-detect HA sensors by unit + keyword scoring.
+
+    Scoring priority:
+      1. Exact DSMR / HomeWizard entity patterns (highest weight: +5)
+      2. Keyword match in entity_id
+      3. Tiebreaker: shortest entity_id (more specific name)
+    """
     all_power   = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") in ("W","kW")]
     all_current = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "A"]
     all_voltage = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "V"]
@@ -121,26 +127,41 @@ def _detect_sensors(hass, phase_count: int) -> dict:
     phase_current = _exclude(all_current, CURRENT_EXCLUDE_KEYWORDS)
     phase_voltage = _exclude(all_voltage, VOLTAGE_EXCLUDE_KEYWORDS)
 
-    # Dedicated pools for PV / battery — use the full list so we can still find them
+    # PV / battery use full pool so we still find them even if exclusions are broad
     pv_power   = all_power
     batt_power = all_power
+
+    # DSMR5 / HomeWizard per-phase export pool  (bidirectional meters)
+    dsmr_export_l1 = _best(all_power, ["power_returned_l1","power_l1_neg","l1_export","l1_return","fase_1_return"])
+    dsmr_export_l2 = _best(all_power, ["power_returned_l2","power_l2_neg","l2_export","l2_return","fase_2_return"])
+    dsmr_export_l3 = _best(all_power, ["power_returned_l3","power_l3_neg","l3_export","l3_return","fase_3_return"])
+
+    # Better import/export detection: DSMR 'power_delivered' = import, 'power_returned' = export
+    import_kws = ["power_delivered","net_power_import","import_power","energy_import","power_import",
+                  "levering","consume","afname","meting_levering"]
+    export_kws = ["power_returned","net_power_export","export_power","energy_export","power_export",
+                  "teruglevering","feed","return","terugmeting"]
 
     p3 = phase_count == 3
     return {
         CONF_GRID_SENSOR:            _best(grid_power,    GRID_SENSOR_KEYWORDS),
-        CONF_IMPORT_SENSOR:          _best(grid_power,    ["import","levering","power_delivered","consume"]),
-        CONF_EXPORT_SENSOR:          _best(grid_power,    ["export","teruglevering","power_returned","feed"]),
-        CONF_SOLAR_SENSOR:           _best(pv_power,      ["solar","pv","zon","inverter","omvormer","yield"]),
-        CONF_BATTERY_SENSOR:         _best(batt_power,    ["battery","batterij","accu","batt","storage"]),
+        CONF_IMPORT_SENSOR:          _best(grid_power,    import_kws),
+        CONF_EXPORT_SENSOR:          _best(grid_power,    export_kws),
+        CONF_SOLAR_SENSOR:           _best(pv_power,      ["solar","pv","zon","zonne","inverter","omvormer","yield","opwek"]),
+        CONF_BATTERY_SENSOR:         _best(batt_power,    ["battery","batterij","accu","batt","storage","opslag"]),
         CONF_PHASE_SENSORS+"_L1":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L1),
         CONF_PHASE_SENSORS+"_L2":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
         CONF_PHASE_SENSORS+"_L3":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
-        CONF_VOLTAGE_L1:             _best(phase_voltage, ["l1","phase1","phase_1","fase_1"]),
-        CONF_VOLTAGE_L2:             _best(phase_voltage, ["l2","phase2","phase_2","fase_2"]) if p3 else None,
-        CONF_VOLTAGE_L3:             _best(phase_voltage, ["l3","phase3","phase_3","fase_3"]) if p3 else None,
+        CONF_VOLTAGE_L1:             _best(phase_voltage, ["l1","phase1","phase_1","fase_1","voltage_l1"]),
+        CONF_VOLTAGE_L2:             _best(phase_voltage, ["l2","phase2","phase_2","fase_2","voltage_l2"]) if p3 else None,
+        CONF_VOLTAGE_L3:             _best(phase_voltage, ["l3","phase3","phase_3","fase_3","voltage_l3"]) if p3 else None,
         CONF_POWER_L1:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L1),
         CONF_POWER_L2:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
         CONF_POWER_L3:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
+        # DSMR5 per-phase export (bidirectionele meter)
+        "power_sensor_l1_export":    dsmr_export_l1,
+        "power_sensor_l2_export":    dsmr_export_l2 if p3 else None,
+        "power_sensor_l3_export":    dsmr_export_l3 if p3 else None,
     }
 
 
@@ -258,14 +279,22 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         s = self._suggestions
         use_sep = self._config.get(CONF_USE_SEPARATE_IE, False)
 
-        schema: dict = {vol.Optional(CONF_USE_SEPARATE_IE, default=False): bool}
+        schema: dict = {vol.Optional(CONF_USE_SEPARATE_IE, default=use_sep): bool}
         if not use_sep:
-            schema[vol.Optional(CONF_GRID_SENSOR, description={"suggested_value": s.get(CONF_GRID_SENSOR)})] = _ent()
+            schema[vol.Optional(CONF_GRID_SENSOR,   description={"suggested_value": self._config.get(CONF_GRID_SENSOR)   or s.get(CONF_GRID_SENSOR)})]   = _ent()
         else:
-            schema[vol.Optional(CONF_IMPORT_SENSOR, description={"suggested_value": s.get(CONF_IMPORT_SENSOR)})] = _ent()
-            schema[vol.Optional(CONF_EXPORT_SENSOR, description={"suggested_value": s.get(CONF_EXPORT_SENSOR)})] = _ent()
+            schema[vol.Optional(CONF_IMPORT_SENSOR, description={"suggested_value": self._config.get(CONF_IMPORT_SENSOR) or s.get(CONF_IMPORT_SENSOR)})] = _ent()
+            schema[vol.Optional(CONF_EXPORT_SENSOR, description={"suggested_value": self._config.get(CONF_EXPORT_SENSOR) or s.get(CONF_EXPORT_SENSOR)})] = _ent()
         schema[vol.Optional(CONF_MAINS_VOLTAGE, default=DEFAULT_MAINS_VOLTAGE_V)] = \
             vol.All(vol.Coerce(float), vol.Range(min=100, max=480))
+
+        # DSMR5 per-fase teruglevering sensoren (bidirectionele meter).
+        # Sommige slimme meters (DSMR5) meten teruglevering per fase apart.
+        # Getoond in zowel Basis als Geavanceerd, zodat dit niet ontbreekt in de wizard.
+        for exp_key in ("power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"):
+            sv = self._config.get(exp_key) or s.get(exp_key)
+            if sv or phase_count == 3:
+                schema[vol.Optional(exp_key, description={"suggested_value": sv})] = _ent()
 
         return self.async_show_form(
             step_id="grid_sensors",
@@ -289,23 +318,26 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_solar_ev()
 
         s = self._suggestions
+        def _sv(key):
+            """Return existing config value, falling back to auto-detected suggestion."""
+            return self._config.get(key) or s.get(key)
+
         schema: dict = {
-            vol.Optional(CONF_PHASE_SENSORS+"_L1", description={"suggested_value": s.get(CONF_PHASE_SENSORS+"_L1")}): _ent(),
-            vol.Optional(CONF_VOLTAGE_L1,          description={"suggested_value": s.get(CONF_VOLTAGE_L1)}):          _ent(),
-            vol.Optional(CONF_POWER_L1,            description={"suggested_value": s.get(CONF_POWER_L1)}):            _ent(),
+            vol.Optional(CONF_PHASE_SENSORS+"_L1", description={"suggested_value": _sv(CONF_PHASE_SENSORS+"_L1")}): _ent(),
+            vol.Optional(CONF_VOLTAGE_L1,          description={"suggested_value": _sv(CONF_VOLTAGE_L1)}):          _ent(),
+            vol.Optional(CONF_POWER_L1,            description={"suggested_value": _sv(CONF_POWER_L1)}):            _ent(),
         }
         if phase_count == 3:
-            for k, sk in [
-                # L2 fields grouped together
-                (CONF_PHASE_SENSORS+"_L2", CONF_PHASE_SENSORS+"_L2"),
-                (CONF_VOLTAGE_L2,          CONF_VOLTAGE_L2),
-                (CONF_POWER_L2,            CONF_POWER_L2),
-                # L3 fields grouped together
-                (CONF_PHASE_SENSORS+"_L3", CONF_PHASE_SENSORS+"_L3"),
-                (CONF_VOLTAGE_L3,          CONF_VOLTAGE_L3),
-                (CONF_POWER_L3,            CONF_POWER_L3),
+            for k in [
+                CONF_PHASE_SENSORS+"_L2", CONF_VOLTAGE_L2, CONF_POWER_L2,
+                CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3,
             ]:
-                schema[vol.Optional(k, description={"suggested_value": s.get(sk)})] = _ent()
+                schema[vol.Optional(k, description={"suggested_value": _sv(k)})] = _ent()
+        # DSMR5: add per-phase export sensors (bidirectional meters)
+        for exp_key in ("power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"):
+            sv = self._config.get(exp_key) or s.get(exp_key)
+            schema[vol.Optional(exp_key, description={"suggested_value": sv})] = _ent()
+
         return self.async_show_form(
             step_id="phase_sensors",
             data_schema=vol.Schema(schema),
@@ -325,13 +357,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Similarly, the battery sensor is configured per-battery in the battery loop.
         schema: dict = {}
         if not self._advanced():
-            schema[vol.Optional(CONF_SOLAR_SENSOR, description={"suggested_value": s.get(CONF_SOLAR_SENSOR)})] = _ent()
-            schema[vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": s.get(CONF_BATTERY_SENSOR)})] = _ent()
+            schema[vol.Optional(CONF_SOLAR_SENSOR,   description={"suggested_value": self._config.get(CONF_SOLAR_SENSOR)   or s.get(CONF_SOLAR_SENSOR)})]   = _ent()
+            schema[vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": self._config.get(CONF_BATTERY_SENSOR) or s.get(CONF_BATTERY_SENSOR)})] = _ent()
         return self.async_show_form(
             step_id="solar_ev",
             data_schema=vol.Schema({
                 **schema,
-                vol.Optional(CONF_EV_CHARGER_ENTITY):  _ent(["number","input_number"]),
+                vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": self._config.get(CONF_EV_CHARGER_ENTITY)}): _ent(["number","input_number"]),
             }),
         )
 
@@ -339,13 +371,16 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_inverter_count(self, user_input=None):
         if user_input is not None:
             self._inv_count = int(user_input.get(CONF_INVERTER_COUNT, 0))
+            # Save existing configs for pre-fill BEFORE clearing the list
+            self._existing_inv_cfgs = list(self._config.get(CONF_INVERTER_CONFIGS, []))
             self._config[CONF_INVERTER_COUNT]   = self._inv_count
             self._config[CONF_INVERTER_CONFIGS] = []
             self._inv_step = 0
             return await self.async_step_inverter_detail() if self._inv_count > 0 else await self.async_step_battery_count()
+        existing_inv_count = str(len(self._config.get(CONF_INVERTER_CONFIGS, [])))
         return self.async_show_form(
             step_id="inverter_count",
-            data_schema=vol.Schema({vol.Required(CONF_INVERTER_COUNT, default="0"): _inverter_count_selector()}),
+            data_schema=vol.Schema({vol.Required(CONF_INVERTER_COUNT, default=existing_inv_count): _inverter_count_selector()}),
             description_placeholders={
                     "diagram_url": "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNDIwIDEzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+PHJlY3Qgd2lkdGg9IjQyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMiIgZmlsbD0iIzFjMWMyZSIvPjx0ZXh0IHg9IjIxMCIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiIGZvbnQtd2VpZ2h0PSI2MDAiPktvcHBlbCBvbXZvcm1lciwgYmF0dGVyaWogZW4gbGFhZHBhYWwgKG9wdGlvbmVlbCk8L3RleHQ+PHJlY3QgeD0iMjAiIHk9IjQwIiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjcwIiByeD0iOSIgZmlsbD0iI2ZiYmYyNDE4IiBzdHJva2U9IiNmYmJmMjQ1NSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB4PSI3MCIgeT0iNjMiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTgiPuKYgO+4jzwvdGV4dD48dGV4dCB4PSI3MCIgeT0iNzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iOC41IiBmaWxsPSIjZmJiZjI0IiBmb250LXdlaWdodD0iNjAwIj5PbXZvcm1lcjwvdGV4dD48dGV4dCB4PSI3MCIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iNyIgZmlsbD0iIzY0NzQ4YiI+dmVybW9nZW5zc2Vuc29yPC90ZXh0Pjx0ZXh0IHg9IjcwIiB5PSIxMDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iNyIgZmlsbD0iIzY0NzQ4YiI+KFcgb2Yga1cpPC90ZXh0PjxyZWN0IHg9IjE2MCIgeT0iNDAiIHdpZHRoPSIxMDAiIGhlaWdodD0iNzAiIHJ4PSI5IiBmaWxsPSIjMjJjNTVlMTgiIHN0cm9rZT0iIzIyYzU1ZTU1IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHg9IjIxMCIgeT0iNjMiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTgiPvCflIs8L3RleHQ+PHRleHQgeD0iMjEwIiB5PSI3OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI4LjUiIGZpbGw9IiM0YWRlODAiIGZvbnQtd2VpZ2h0PSI2MDAiPkJhdHRlcmlqPC90ZXh0Pjx0ZXh0IHg9IjIxMCIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iNyIgZmlsbD0iIzY0NzQ4YiI+KyA9IGxhZGVuPC90ZXh0Pjx0ZXh0IHg9IjIxMCIgeT0iMTAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjciIGZpbGw9IiM2NDc0OGIiPi0gPSBvbnRsYWRlbjwvdGV4dD48cmVjdCB4PSIzMDAiIHk9IjQwIiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjcwIiByeD0iOSIgZmlsbD0iIzgxOGNmODE4IiBzdHJva2U9IiM4MThjZjg1NSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz48dGV4dCB4PSIzNTAiIHk9IjYzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE4Ij7wn5qXPC90ZXh0Pjx0ZXh0IHg9IjM1MCIgeT0iNzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iOC41IiBmaWxsPSIjODE4Y2Y4IiBmb250LXdlaWdodD0iNjAwIj5MYWFkcGFhbDwvdGV4dD48dGV4dCB4PSIzNTAiIHk9IjkwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjciIGZpbGw9IiM2NDc0OGIiPnNldHBvaW50IGVudGl0ZWl0PC90ZXh0Pjx0ZXh0IHg9IjM1MCIgeT0iMTAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjciIGZpbGw9IiM2NDc0OGIiPihudW1iZXIpPC90ZXh0Pjx0ZXh0IHg9IjIxMCIgeT0iMTI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM0NzU1NjkiPkFsbGUgdmVsZGVuIHppam4gb3B0aW9uZWVsPC90ZXh0Pjwvc3ZnPg==",
                     "docs_url": SUPPORT_URL},
@@ -354,8 +389,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 4c. Inverter detail loop (Advanced) ───────────────────────────────────
     async def async_step_inverter_detail(self, user_input=None):
         i = self._inv_step + 1
-        # Pre-fill from existing config (relevant during Reconfigure)
-        existing_cfgs = self._config.get(CONF_INVERTER_CONFIGS, [])
+        # Pre-fill from saved existing configs (before the list was cleared in inverter_count)
+        existing_cfgs = getattr(self, "_existing_inv_cfgs", []) or self._config.get(CONF_INVERTER_CONFIGS, [])
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
         if user_input is not None:
             self._config[CONF_INVERTER_CONFIGS].append({
@@ -377,20 +412,24 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="inverter_detail",
             data_schema=vol.Schema({
-                vol.Required("inv_sensor", default=existing.get("entity_id", vol.UNDEFINED)): _ent(),
-                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch","number"]),
-                vol.Optional("inv_label", default=existing.get("label", f"Inverter {i}")): str,
+                # ── Verplicht ─────────────────────────────────────────────────
+                vol.Required("inv_sensor", description={"suggested_value": existing.get("entity_id") or None}): _ent(),
+                # ── Identificatie ─────────────────────────────────────────────
+                vol.Optional("inv_label",       default=existing.get("label", f"Omvormer {i}")): str,
                 vol.Optional("inv_rated_power", default=float(existing.get("rated_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-                vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                # ── Oriëntatie (leeg laten = zelf leren) ──────────────────────
                 vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
                 vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}):    vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
+                # ── Begrenzing ────────────────────────────────────────────────
+                vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch","number"]),
             }),
             description_placeholders={
                     "diagram_url": "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNDIwIDEzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+PHJlY3Qgd2lkdGg9IjQyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMiIgZmlsbD0iIzFjMWMyZSIvPjx0ZXh0IHg9IjIxMCIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiIGZvbnQtd2VpZ2h0PSI2MDAiPlBlciBvbXZvcm1lcjogdmVybW9nZW4gKyByaWNodGluZyArIGhlbGxpbmc8L3RleHQ+PHJlY3QgeD0iMjAiIHk9IjQwIiB3aWR0aD0iNTAiIGhlaWdodD0iMzUiIHJ4PSI2IiBmaWxsPSIjZmJiZjI0MjAiIHN0cm9rZT0iI2ZiYmYyNDY2IiBzdHJva2Utd2lkdGg9IjEuNSIvPjxyZWN0IHg9IjI4IiB5PSI0NyIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIwIiByeD0iMiIgZmlsbD0iIzFlM2E1ZiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjAuOCIvPjxyZWN0IHg9IjQ3IiB5PSI0NyIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIwIiByeD0iMiIgZmlsbD0iIzFlM2E1ZiIgc3Ryb2tlPSIjM2I4MmY2IiBzdHJva2Utd2lkdGg9IjAuOCIvPjx0ZXh0IHg9IjQ1IiB5PSI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3LjUiIGZpbGw9IiNmYmJmMjQiPlBhbmVsZW48L3RleHQ+PGxpbmUgeDE9IjcyIiB5MT0iNTgiIHgyPSIxMDUiIHkyPSI1OCIgc3Ryb2tlPSIjZmJiZjI0IiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYmkpIi8+PHJlY3QgeD0iMTA4IiB5PSI0MCIgd2lkdGg9IjgwIiBoZWlnaHQ9Ijc2IiByeD0iOSIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjM2NmYxNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iMTQ4IiB5PSI2MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNCI+JiM5ODg5OzwvdGV4dD48dGV4dCB4PSIxNDgiIHk9Ijc2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM4MThjZjgiIGZvbnQtd2VpZ2h0PSI2MDAiPk9tdm9ybWVyPC90ZXh0Pjx0ZXh0IHg9IjE0OCIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iNyIgZmlsbD0iIzY0NzQ4YiI+YXppbXV0OiAxODAgWjwvdGV4dD48dGV4dCB4PSIxNDgiIHk9IjEwNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3IiBmaWxsPSIjNjQ3NDhiIj5oZWxsaW5nOiAzMCBncmFkZW48L3RleHQ+PHJlY3QgeD0iMjEwIiB5PSI0MCIgd2lkdGg9IjE5MCIgaGVpZ2h0PSI3NiIgcng9IjkiIGZpbGw9IiMwZjE3MmEiIHN0cm9rZT0iIzFlMjkzYiIgc3Ryb2tlLXdpZHRoPSIxIi8+PHRleHQgeD0iMzA1IiB5PSI1OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI4IiBmaWxsPSIjOTRhM2I4Ij5Db25maWd1cmF0aWUgcGVyIG9tdm9ybWVyPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iNzMiIGZvbnQtc2l6ZT0iNy41IiBmaWxsPSIjOTRhM2I4Ij5WZXJtb2dlbnNzZW5zb3IgKFcgb2Yga1cpPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iODciIGZvbnQtc2l6ZT0iNy41IiBmaWxsPSIjOTRhM2I4Ij5OYWFtIGJpanYuIERhayBadWlkPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iMTAxIiBmb250LXNpemU9IjcuNSIgZmlsbD0iIzk0YTNiOCI+QXppbXV0OiAwTiA5ME8gMTgwWiAyNzBXPC90ZXh0Pjx0ZXh0IHg9IjIyMiIgeT0iMTE1IiBmb250LXNpemU9IjcuNSIgZmlsbD0iIzk0YTNiOCI+SGVsbGluZzogMD1wbGF0IDkwPXZlcnRpY2FhbDwvdGV4dD48ZGVmcz48bWFya2VyIGlkPSJiaSIgbWFya2VyV2lkdGg9IjUiIG1hcmtlckhlaWdodD0iNSIgcmVmWD0iNCIgcmVmWT0iMi41IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDUsMi41IEwwLDUgWiIgZmlsbD0iI2ZiYmYyNCIvPjwvbWFya2VyPjwvZGVmcz48L3N2Zz4=",
                     
                 "inverter_num": str(i), "total": str(self._inv_count),
-                "azimuth_tip": "0=N 90=E 180=S 270=W — leave blank to self-learn",
-                "tilt_tip":    "0=flat 90=vertical — leave blank to self-learn",
+                "azimuth_tip": "0=N 90=E 180=S 270=W — leeg = zelf leren",
+                "tilt_tip":    "0=plat 90=verticaal — leeg = zelf leren",
             },
         )
 
@@ -398,6 +437,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_battery_count(self, user_input=None):
         if user_input is not None:
             self._bat_count = int(user_input.get(CONF_BATTERY_COUNT, 0))
+            # Save existing configs for pre-fill BEFORE clearing the list
+            self._existing_bat_cfgs = list(self._config.get(CONF_BATTERY_CONFIGS, []))
             self._config[CONF_BATTERY_COUNT]   = self._bat_count
             self._config[CONF_BATTERY_CONFIGS] = []
             self._bat_step = 0
@@ -416,6 +457,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 4e. Battery detail loop (Advanced) ───────────────────────────────────
     async def async_step_battery_detail(self, user_input=None):
         i = self._bat_step + 1
+        existing_bat_cfgs = getattr(self, "_existing_bat_cfgs", []) or self._config.get(CONF_BATTERY_CONFIGS, [])
         if user_input is not None:
             self._config[CONF_BATTERY_CONFIGS].append({
                 "power_sensor":     user_input.get("bat_power_sensor"),
@@ -434,11 +476,12 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if self._config[CONF_BATTERY_CONFIGS]:
                 self._config[CONF_ENABLE_MULTI_BATTERY] = True
             return await self.async_step_features()
+        existing_bat = existing_bat_cfgs[self._bat_step] if self._bat_step < len(existing_bat_cfgs) else {}
         return self.async_show_form(
             step_id="battery_detail",
             data_schema=vol.Schema({
-                vol.Required("bat_power_sensor"): _ent(),
-                vol.Optional("bat_soc_sensor"):   _ent(),
+                vol.Required("bat_power_sensor", description={"suggested_value": existing_bat.get("power_sensor")}): _ent(),
+                vol.Optional("bat_soc_sensor",   description={"suggested_value": existing_bat.get("soc_sensor")}):   _ent(),
                 vol.Optional("bat_capacity_kwh",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=1000)),
                 vol.Optional("bat_max_charge_w",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("bat_max_discharge_w", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
@@ -731,17 +774,19 @@ class CloudEMSOptionsFlow(_OptionsBase):
         return self.async_show_form(step_id="phase_sensors", data_schema=vol.Schema(schema))
 
     async def async_step_solar_ev_opts(self, user_input=None):
-        """🔌 EV Laadpaal — options section."""
+        """☀️ PV & EV Laden — opties voor PV sensor, laadpaal en zonnebegrenzing."""
         data = self._data()
         if user_input is not None:
             return self._save(user_input)
         return self.async_show_form(
             step_id="solar_ev_opts",
             data_schema=vol.Schema({
+                vol.Optional(CONF_SOLAR_SENSOR, description={"suggested_value": data.get(CONF_SOLAR_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
                 vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
+                # Note: gas & warmtepomp instellingen → 🔥 Gas & Warmte sectie
             }),
         )
 
@@ -836,6 +881,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         current_cfgs = data.get(CONF_INVERTER_CONFIGS, [])
         if user_input is not None:
             self._inv_count = int(user_input.get(CONF_INVERTER_COUNT, 0))
+            # Save existing configs BEFORE clearing, same as battery pattern
+            self._existing_inv_cfgs = list(current_cfgs)
             self._opts[CONF_INVERTER_COUNT]   = self._inv_count
             self._opts[CONF_INVERTER_CONFIGS] = []
             self._inv_step = 0
@@ -860,8 +907,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_inverter_detail_opts(self, user_input=None):
         """Configure each inverter one by one (Options flow)."""
         i = self._inv_step + 1
-        data = self._inv_d()
-        existing_cfgs = data.get(CONF_INVERTER_CONFIGS, [])
+        # Use the snapshot saved in inverters_opts (before the list was cleared)
+        # so entity selectors are pre-filled with the current configuration.
+        existing_cfgs = getattr(self, "_existing_inv_cfgs", None)
+        if existing_cfgs is None:
+            existing_cfgs = self._inv_d().get(CONF_INVERTER_CONFIGS, [])
         # Pre-fill from existing config for this slot if it exists
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
