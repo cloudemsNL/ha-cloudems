@@ -102,7 +102,8 @@
           "inv_label": "Naam (bijv. 'Dak Zuid')",
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
           "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
-          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren"
+          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren",
+          "inv_rated_power": "Nominaal omvormervermogen (W) — optioneel, voor nauwkeurige clipping-detectie"
         }
       },
       "features": {
@@ -114,7 +115,16 @@
           "cost_tracking_enabled": "Energiekostenregistratie",
           "phase_balance_enabled": "Fase-balancering (alleen 3-fase)",
           "phase_balance_threshold_a": "Max. fase-onbalans (A)",
-          "peak_shaving_enabled": "Piekafschaving — onder de maandelijkse piekvermogensgrens blijven"
+          "peak_shaving_enabled": "Piekafschaving — onder de maandelijkse piekvermogensgrens blijven",
+          "battery_scheduler_enabled": "Batterijplanning op basis van prijzen inschakelen",
+          "congestion_enabled": "Netcongestiebeheer inschakelen",
+          "battery_degradation_enabled": "Batterijdegradatie bijhouden",
+          "price_alert_high_eur_kwh": "Prijsalert drempel (€/kWh)",
+          "nilm_min_confidence": "Minimale apparaat-zekerheid (0.0–1.0)"
+        },
+        "data_description": {
+          "price_alert_high_eur_kwh": "Stuur een melding als de EPEX-prijs hoger is dan deze waarde. Standaard 0,30 €/kWh.",
+          "nilm_min_confidence": "Apparaten met een lagere zekerheid worden verborgen in het dashboard. Standaard 0,65."
         }
       },
       "peak_config": {
@@ -155,6 +165,37 @@
           "p1_port": "P1 gateway TCP-poort"
         },
         "description": "\n\n![]({diagram_url})"
+      },
+      "battery_count": {
+        "title": "🔋 Batterijen — Aantal",
+        "description": "Hoeveel batterijsystemen wil je koppelen?\n\nElke batterij wordt apart geconfigureerd met vermogenssensor, SoC en capaciteit.",
+        "data": {
+          "battery_count": "Aantal batterijen"
+        }
+      },
+      "battery_detail": {
+        "title": "🔋 Batterij {battery_num} van {total}",
+        "description": "Configureer batterij {battery_num}.",
+        "data": {
+          "bat_power_sensor": "Vermogenssensor (W, + = laden, - = ontladen)",
+          "bat_soc_sensor": "State of Charge sensor (%) — optioneel",
+          "bat_capacity_kwh": "Capaciteit (kWh)",
+          "bat_max_charge_w": "Max laadvermogen (W)",
+          "bat_max_discharge_w": "Max ontlaadvermogen (W)",
+          "bat_charge_entity": "Laad setpoint entiteit — optioneel",
+          "bat_discharge_entity": "Ontlaad setpoint entiteit — optioneel",
+          "bat_label": "Naam (bijv. Thuisbatterij)"
+        }
+      },
+      "prices": {
+        "title": "💶 Prijzen & Belasting",
+        "description": "Stel energiebelasting en leveranciersmarge in voor nauwkeurige kostenberekening.",
+        "data": {
+          "price_include_tax": "Energiebelasting meenemen",
+          "price_include_btw": "BTW meenemen (21%)",
+          "selected_supplier": "Leverancier (voor standaard marge)",
+          "supplier_markup": "Handmatige marge (€/kWh)"
+        }
       }
     }
   },
@@ -220,7 +261,10 @@
           "peak_shaving_limit_w": "Piekvermogensgrens (W)",
           "peak_shaving_assets": "Afschakelbare verbruikers",
           "phase_balance_enabled": "Fase-balancering",
-          "phase_balance_threshold_a": "Onbalansdrempel (A)"
+          "phase_balance_threshold_a": "Onbalansdrempel (A)",
+          "battery_scheduler_enabled": "Batterijplanning op basis van prijzen",
+          "congestion_enabled": "Netcongestiebeheer",
+          "battery_degradation_enabled": "Batterijdegradatie bijhouden"
         }
       },
       "ai_opts": {

@@ -347,6 +347,21 @@ GRID_EXCLUDE_KEYWORDS    = ["solar","pv","zon","inverter","omvormer","battery","
 PHASE_EXCLUDE_KEYWORDS   = ["solar","pv","zon","inverter","omvormer","battery","batterij","accu",
                              "batt","storage","ev","charger","laadpaal"]
 CURRENT_EXCLUDE_KEYWORDS = ["solar","pv","zon","inverter","battery","batt","storage","ev","charger"]
+# Voltage-specific exclusions: extends PHASE_EXCLUDE_KEYWORDS with PV inverter
+# voltage sensor patterns. "on_grid" is used by GoodWe/Solis for the AC-side
+# voltage measured by the inverter — not a standalone grid meter.
+VOLTAGE_EXCLUDE_KEYWORDS = PHASE_EXCLUDE_KEYWORDS + [
+    "on_grid",          # GoodWe / Solis: AC grid-side inverter measurement
+    "goodwe",           # GoodWe brand prefix in entity_id
+    "solis",            # Solis brand prefix in entity_id
+    "solaredge",        # SolarEdge brand prefix
+    "fronius",          # Fronius brand prefix
+    "enphase",          # Enphase brand prefix
+    "huawei_solar",     # Huawei SUN2000 prefix
+    "deye",             # Deye/Sunsynk brand prefix
+    "output_voltage",   # Generic inverter AC output label
+    "ac_voltage",       # Generic inverter AC output label
+]
 
 # ── v1.9.0 — CO2, battery scheduler, cost forecast, boiler learning ───────────
 CONF_CO2_COUNTRY              = "co2_country"       # ISO2 country for CO2 API
@@ -481,3 +496,11 @@ SUPPLIER_MARKUPS = {
         "custom":     ("Custom markup", 0.0),
     },
 }
+
+# ── v1.13.1 additions ────────────────────────────────────────────────────────
+CONF_PRICE_ALERT_HIGH      = "price_alert_high_eur_kwh"   # float: alert when EPEX > this
+DEFAULT_PRICE_ALERT_HIGH   = 0.30                          # €/kWh
+
+CONF_INVERTER_RATED_POWER  = "inverter_rated_power_w"      # per-inverter rated capacity (W)
+
+CONF_NILM_MIN_CONFIDENCE_UI= "nilm_confidence_ui"          # alias for wizard display

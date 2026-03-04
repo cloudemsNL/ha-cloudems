@@ -1,4 +1,4 @@
-"""Config flow for CloudEMS — v1.5.0."""
+"""Config flow for CloudEMS — v1.5.1."""
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 from __future__ import annotations
 import logging
@@ -36,7 +36,7 @@ from .const import (
     PHASE_PRESETS, PHASE_PRESET_LABELS,
     GRID_SENSOR_KEYWORDS,
     PHASE_SENSOR_KEYWORDS_L1, PHASE_SENSOR_KEYWORDS_L2, PHASE_SENSOR_KEYWORDS_L3,
-    GRID_EXCLUDE_KEYWORDS, PHASE_EXCLUDE_KEYWORDS, CURRENT_EXCLUDE_KEYWORDS,
+    GRID_EXCLUDE_KEYWORDS, PHASE_EXCLUDE_KEYWORDS, CURRENT_EXCLUDE_KEYWORDS, VOLTAGE_EXCLUDE_KEYWORDS,
     CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED,
     CONF_AI_PROVIDER, AI_PROVIDER_NONE, AI_PROVIDER_CLOUDEMS,
     AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC, AI_PROVIDER_OLLAMA,
@@ -44,6 +44,7 @@ from .const import (
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
     CONF_GAS_SENSOR,
     CONF_BATTERY_CONFIGS, CONF_ENABLE_MULTI_BATTERY, CONF_BATTERY_COUNT,
+    CONF_BATTERY_SCHEDULER_ENABLED, CONF_CONGESTION_ENABLED, CONF_BATTERY_DEGRADATION_ENABLED,
     CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED, CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP,
     DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP,
     CONF_PRICE_INCLUDE_TAX, CONF_PRICE_INCLUDE_BTW, CONF_SUPPLIER_MARKUP, CONF_SELECTED_SUPPLIER,
@@ -118,7 +119,7 @@ def _detect_sensors(hass, phase_count: int) -> dict:
     grid_power    = _exclude(all_power,   GRID_EXCLUDE_KEYWORDS)
     phase_power   = _exclude(all_power,   PHASE_EXCLUDE_KEYWORDS)
     phase_current = _exclude(all_current, CURRENT_EXCLUDE_KEYWORDS)
-    phase_voltage = _exclude(all_voltage, PHASE_EXCLUDE_KEYWORDS)
+    phase_voltage = _exclude(all_voltage, VOLTAGE_EXCLUDE_KEYWORDS)
 
     # Dedicated pools for PV / battery — use the full list so we can still find them
     pv_power   = all_power
@@ -173,6 +174,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._suggestions: dict = {}
         self._inv_count = 0
         self._inv_step  = 0
+        self._bat_count = 0
+        self._bat_step  = 0
 
     def _advanced(self) -> bool:
         return self._config.get(CONF_WIZARD_MODE) == WIZARD_MODE_ADVANCED
@@ -319,10 +322,11 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_inverter_count() if self._advanced() else await self.async_step_features()
         # In advanced mode the solar sensor is configured per-inverter in the
         # inverter_detail loop that follows, so we skip it here to avoid confusion.
+        # Similarly, the battery sensor is configured per-battery in the battery loop.
         schema: dict = {}
         if not self._advanced():
             schema[vol.Optional(CONF_SOLAR_SENSOR, description={"suggested_value": s.get(CONF_SOLAR_SENSOR)})] = _ent()
-        schema[vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": s.get(CONF_BATTERY_SENSOR)})] = _ent()
+            schema[vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": s.get(CONF_BATTERY_SENSOR)})] = _ent()
         return self.async_show_form(
             step_id="solar_ev",
             data_schema=vol.Schema({
@@ -340,7 +344,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_INVERTER_COUNT]   = self._inv_count
             self._config[CONF_INVERTER_CONFIGS] = []
             self._inv_step = 0
-            return await self.async_step_inverter_detail() if self._inv_count > 0 else await self.async_step_features()
+            return await self.async_step_inverter_detail() if self._inv_count > 0 else await self.async_step_battery_count()
         return self.async_show_form(
             step_id="inverter_count",
             data_schema=vol.Schema({vol.Required(CONF_INVERTER_COUNT, default="0"): _inverter_count_selector()}),
@@ -361,19 +365,21 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "min_power_pct":  float(user_input.get("inv_min_pct", 0.0)),
                 "azimuth_deg":    user_input.get("inv_azimuth") or None,
                 "tilt_deg":       user_input.get("inv_tilt") or None,
+                "rated_power_w":  float(user_input.get("inv_rated_power", 0)) or None,
             })
             self._inv_step += 1
             if self._inv_step < self._inv_count:
                 return await self.async_step_inverter_detail()
             if self._config[CONF_INVERTER_CONFIGS]:
                 self._config[CONF_ENABLE_MULTI_INVERTER] = True
-            return await self.async_step_features()
+            return await self.async_step_battery_count()
         return self.async_show_form(
             step_id="inverter_detail",
             data_schema=vol.Schema({
                 vol.Required("inv_sensor"):      _ent(),
                 vol.Optional("inv_control"):     _ent(["switch","number"]),
                 vol.Optional("inv_label", default=f"Inverter {i}"): str,
+                vol.Optional("inv_rated_power", default=0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("inv_min_pct", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
                 vol.Optional("inv_azimuth"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
                 vol.Optional("inv_tilt"):    vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
@@ -387,11 +393,69 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    # ── 4d. Battery count (Advanced) ─────────────────────────────────────────
+    async def async_step_battery_count(self, user_input=None):
+        if user_input is not None:
+            self._bat_count = int(user_input.get(CONF_BATTERY_COUNT, 0))
+            self._config[CONF_BATTERY_COUNT]   = self._bat_count
+            self._config[CONF_BATTERY_CONFIGS] = []
+            self._bat_step = 0
+            if self._bat_count > 0:
+                return await self.async_step_battery_detail()
+            self._config[CONF_ENABLE_MULTI_BATTERY] = False
+            return await self.async_step_features()
+        return self.async_show_form(
+            step_id="battery_count",
+            data_schema=vol.Schema({
+                vol.Required(CONF_BATTERY_COUNT, default="0"): _inverter_count_selector(),
+            }),
+            description_placeholders={"docs_url": SUPPORT_URL},
+        )
+
+    # ── 4e. Battery detail loop (Advanced) ───────────────────────────────────
+    async def async_step_battery_detail(self, user_input=None):
+        i = self._bat_step + 1
+        if user_input is not None:
+            self._config[CONF_BATTERY_CONFIGS].append({
+                "power_sensor":     user_input.get("bat_power_sensor"),
+                "soc_sensor":       user_input.get("bat_soc_sensor"),
+                "capacity_kwh":     float(user_input.get("bat_capacity_kwh", 0.0)),
+                "max_charge_w":     float(user_input.get("bat_max_charge_w", 0.0)),
+                "max_discharge_w":  float(user_input.get("bat_max_discharge_w", 0.0)),
+                "charge_entity":    user_input.get("bat_charge_entity", ""),
+                "discharge_entity": user_input.get("bat_discharge_entity", ""),
+                "label":            user_input.get("bat_label", f"Batterij {i}"),
+                "priority":         i,
+            })
+            self._bat_step += 1
+            if self._bat_step < self._bat_count:
+                return await self.async_step_battery_detail()
+            if self._config[CONF_BATTERY_CONFIGS]:
+                self._config[CONF_ENABLE_MULTI_BATTERY] = True
+            return await self.async_step_features()
+        return self.async_show_form(
+            step_id="battery_detail",
+            data_schema=vol.Schema({
+                vol.Required("bat_power_sensor"): _ent(),
+                vol.Optional("bat_soc_sensor"):   _ent(),
+                vol.Optional("bat_capacity_kwh",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=1000)),
+                vol.Optional("bat_max_charge_w",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("bat_max_discharge_w", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("bat_charge_entity"):    _ent(["number", "input_number"]),
+                vol.Optional("bat_discharge_entity"): _ent(["number", "input_number"]),
+                vol.Optional("bat_label", default=f"Batterij {i}"): str,
+            }),
+            description_placeholders={
+                "battery_num": str(i),
+                "total":       str(self._bat_count),
+            },
+        )
+
     # ── 5. Features ───────────────────────────────────────────────────────────
     async def async_step_features(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_peak_config() if user_input.get(CONF_PEAK_SHAVING_ENABLED) else await self.async_step_ai_config()
+            return await self.async_step_peak_config() if user_input.get(CONF_PEAK_SHAVING_ENABLED) else await self.async_step_prices()
 
         phase_count = self._config.get(CONF_PHASE_COUNT, 1)
         schema: dict = {
@@ -400,6 +464,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.All(vol.Coerce(float), vol.Range(min=-0.5, max=1.0)),
             vol.Optional(CONF_COST_TRACKING, default=True): bool,
             vol.Optional(CONF_PEAK_SHAVING_ENABLED, default=False): bool,
+            vol.Optional(CONF_BATTERY_SCHEDULER_ENABLED, default=False): bool,
+            vol.Optional(CONF_CONGESTION_ENABLED, default=False): bool,
+            vol.Optional(CONF_BATTERY_DEGRADATION_ENABLED, default=False): bool,
+            vol.Optional("price_alert_high_eur_kwh", default=0.30):
+                vol.All(vol.Coerce(float), vol.Range(min=0.01, max=5.0)),
+            vol.Optional("nilm_min_confidence", default=0.65):
+                vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         }
         if phase_count == 3:
             schema[vol.Optional(CONF_PHASE_BALANCE, default=True)] = bool
@@ -411,7 +482,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_peak_config(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_ai_config()
+            return await self.async_step_prices()
         return self.async_show_form(
             step_id="peak_config",
             data_schema=vol.Schema({
@@ -420,6 +491,29 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_PEAK_SHAVING_ASSETS, default=[]):
                     selector.EntitySelector(selector.EntitySelectorConfig(
                         domain=["switch","number","input_boolean","light","climate"], multiple=True)),
+            }),
+        )
+
+    # ── 5c. Prices & tax ─────────────────────────────────────────────────────
+    async def async_step_prices(self, user_input=None):
+        if user_input is not None:
+            self._config.update(user_input)
+            return await self.async_step_ai_config()
+        country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+        suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
+        sup_options = [
+            selector.SelectOptionDict(value=k, label=v[0])
+            for k, v in suppliers.items()
+        ]
+        return self.async_show_form(
+            step_id="prices",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_PRICE_INCLUDE_TAX,  default=False): bool,
+                vol.Optional(CONF_PRICE_INCLUDE_BTW,  default=False): bool,
+                vol.Optional(CONF_SELECTED_SUPPLIER,  default="none"):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=sup_options, mode="dropdown")),
+                vol.Optional(CONF_SUPPLIER_MARKUP, default=0.0):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             }),
         )
 
@@ -508,6 +602,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._config = {**existing.data, **existing.options}
         self._inv_count = len(self._config.get(CONF_INVERTER_CONFIGS, []))
         self._inv_step  = 0
+        self._bat_count = len(self._config.get(CONF_BATTERY_CONFIGS, []))
+        self._bat_step  = 0
         return await self.async_step_user()
 
     @staticmethod
@@ -631,6 +727,9 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_PEAK_SHAVING_ASSETS, default=data.get(CONF_PEAK_SHAVING_ASSETS, [])):
                 selector.EntitySelector(selector.EntitySelectorConfig(
                     domain=["switch","number","input_boolean","light","climate","media_player"], multiple=True)),
+            vol.Optional(CONF_BATTERY_SCHEDULER_ENABLED, default=bool(data.get(CONF_BATTERY_SCHEDULER_ENABLED, False))): bool,
+            vol.Optional(CONF_CONGESTION_ENABLED,         default=bool(data.get(CONF_CONGESTION_ENABLED, False))): bool,
+            vol.Optional(CONF_BATTERY_DEGRADATION_ENABLED, default=bool(data.get(CONF_BATTERY_DEGRADATION_ENABLED, False))): bool,
         }
         if phase_count == 3:
             schema[vol.Optional(CONF_PHASE_BALANCE, default=bool(data.get(CONF_PHASE_BALANCE, True)))] = bool

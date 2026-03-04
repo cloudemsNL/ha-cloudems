@@ -241,8 +241,10 @@ class NILMDetector:
         on_device_update: Optional[Callable] = None,
         ollama_config:    Optional[dict]     = None,
         ai_provider:      str                = "none",
+        hass:             Any                = None,
     ):
         from ..const import AI_PROVIDER_OLLAMA
+        self._hass     = hass
         self._db       = NILMDatabase()
         self._local_ai = LocalAIClassifier(model_path)
         self._cloud_ai = CloudAIClassifier(api_key, session, provider=ai_provider)
@@ -414,7 +416,9 @@ class NILMDetector:
 
     async def _async_process_event(self, event: PowerEvent) -> None:
         # FIX v1.7: pass scalar args — database.classify(float, float), NOT the PowerEvent object
-        matches: List[Dict] = self._db.classify(event.delta_power, event.rise_time)
+        lang = getattr(getattr(self._hass, "config", None), "language", "en")
+        lang = lang[:2].lower() if lang else "en"
+        matches: List[Dict] = self._db.classify(event.delta_power, event.rise_time, language=lang)
         self._diag_log_event(event, matches)
         if self._local_ai.is_available:
             matches = self._merge_matches(matches, self._local_ai.classify(event))

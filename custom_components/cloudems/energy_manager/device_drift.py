@@ -32,13 +32,24 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_KEY     = "cloudems_device_drift_v1"
 STORAGE_VERSION = 1
 
-DRIFT_THRESHOLD     = 1.10   # 10% boven referentie → drift
-ALERT_THRESHOLD     = 1.20   # 20% boven referentie → alert
-DUTY_DRIFT_THRESH   = 0.20   # Duty cycle 20% hoger dan referentie → alert (koelkast)
-MIN_BASELINE_SAMPLES = 15    # Metingen nodig voor baseline
-ALPHA_CURRENT       = 0.15   # EMA voor huidig verbruik (sneller bijwerken)
+DRIFT_THRESHOLD     = 1.30   # 30% boven referentie → drift warning
+ALERT_THRESHOLD     = 1.50   # 50% boven referentie → alert
+DUTY_DRIFT_THRESH   = 0.25   # Duty cycle 25% hoger dan referentie → alert (koelkast)
+MIN_BASELINE_SAMPLES = 40    # Metingen nodig voor baseline (meer data = stabielere baseline)
+ALPHA_CURRENT       = 0.08   # EMA voor huidig verbruik (verlaagd → minder vals alarm op piekbelasting)
 ALPHA_BASELINE      = 0.02   # EMA voor baseline (traag leren)
 SAVE_INTERVAL_S     = 600
+
+# Apparaattypen met van nature hoog variabel vermogen — hogere drempel nodig
+# Een cirkelzaag snidjdt dun hout (400W) of dik hout (1800W) — dat is geen drift
+HIGH_VARIANCE_TYPES = {
+    "power_tool",   # cirkelzaag, laser, boor
+    "medical",      # CPAP (druk varieert per nacht)
+    "kitchen",      # wafelijzer, mixer (belasting varieert met gebruik)
+    "gaming",       # gaming PC (idle vs full load)
+}
+HIGH_VARIANCE_ALERT_THRESHOLD = 2.00   # 100% boven referentie voor variabele apparaten
+HIGH_VARIANCE_DRIFT_THRESHOLD = 1.60   # 60% boven referentie voor variabele apparaten
 
 
 @dataclass
@@ -70,12 +81,20 @@ class DeviceDriftProfile:
         return round((self.drift_ratio - 1.0) * 100, 1)
 
     @property
+    def _alert_threshold(self) -> float:
+        return HIGH_VARIANCE_ALERT_THRESHOLD if self.device_type in HIGH_VARIANCE_TYPES else ALERT_THRESHOLD
+
+    @property
+    def _drift_threshold(self) -> float:
+        return HIGH_VARIANCE_DRIFT_THRESHOLD if self.device_type in HIGH_VARIANCE_TYPES else DRIFT_THRESHOLD
+
+    @property
     def has_alert(self) -> bool:
-        return self.baseline_frozen and self.drift_ratio >= ALERT_THRESHOLD
+        return self.baseline_frozen and self.drift_ratio >= self._alert_threshold
 
     @property
     def has_warning(self) -> bool:
-        return self.baseline_frozen and self.drift_ratio >= DRIFT_THRESHOLD
+        return self.baseline_frozen and self.drift_ratio >= self._drift_threshold
 
 
 @dataclass

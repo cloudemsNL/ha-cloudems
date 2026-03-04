@@ -2791,6 +2791,9 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
                 "Elektriciteit en gas zijn nagenoeg even duur per kWh warmte."
             ),
         }
+
+
+class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
     """Zelfconsumptiegraad: % van PV-productie direct verbruikt."""
     _attr_name = "CloudEMS PV · Zelfconsumptiegraad"
     _attr_native_unit_of_measurement = "%"

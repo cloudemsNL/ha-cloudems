@@ -116,7 +116,8 @@
           "inv_label": "Name (e.g. 'Roof South')",
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave blank to self-learn",
-          "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn"
+          "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn",
+          "inv_rated_power": "Rated inverter power (W) — optional, for accurate clipping detection"
         }
       },
       "features": {
@@ -128,7 +129,12 @@
           "cost_tracking_enabled": "Energy cost tracking",
           "phase_balance_enabled": "Phase balancing (3-phase only)",
           "phase_balance_threshold_a": "Max phase imbalance (A)",
-          "peak_shaving_enabled": "Peak shaving — stay under monthly peak demand limit"
+          "peak_shaving_enabled": "Peak shaving — stay under monthly peak demand limit",
+          "battery_scheduler_enabled": "Enable battery scheduling based on prices",
+          "congestion_enabled": "Enable grid congestion management",
+          "battery_degradation_enabled": "Track battery degradation",
+          "price_alert_high_eur_kwh": "Price alert threshold (€/kWh)",
+          "nilm_min_confidence": "Minimum device confidence (0.0–1.0)"
         },
         "data_description": {
           "dynamic_loading": "Increase EV charging current during the cheapest EPEX hours and reduce it during expensive hours.",
@@ -136,7 +142,9 @@
           "cost_tracking_enabled": "Track daily, monthly and yearly energy costs using live EPEX prices.",
           "phase_balance_enabled": "Automatically redistribute loads to keep phase imbalance within the threshold.",
           "phase_balance_threshold_a": "Maximum allowed current difference between phases before rebalancing is triggered (A).",
-          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR)."
+          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR).",
+          "price_alert_high_eur_kwh": "Send an alert when the EPEX price exceeds this value. Default 0.30 €/kWh.",
+          "nilm_min_confidence": "Devices with lower confidence are hidden in the dashboard. Default 0.65."
         }
       },
       "peak_config": {
@@ -197,6 +205,37 @@
           "p1_port": "TCP port of the P1 gateway. Default is 8088."
         },
         "description": "\n\n![]({diagram_url})"
+      },
+      "battery_count": {
+        "title": "🔋 Batteries — Count",
+        "description": "How many battery systems do you want to configure?\n\nEach battery is configured individually with a power sensor, SoC and capacity.",
+        "data": {
+          "battery_count": "Number of batteries"
+        }
+      },
+      "battery_detail": {
+        "title": "🔋 Battery {battery_num} of {total}",
+        "description": "Configure battery {battery_num}.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, + = charging, - = discharging)",
+          "bat_soc_sensor": "State of Charge sensor (%) — optional",
+          "bat_capacity_kwh": "Capacity (kWh)",
+          "bat_max_charge_w": "Max charge power (W)",
+          "bat_max_discharge_w": "Max discharge power (W)",
+          "bat_charge_entity": "Charge setpoint entity — optional",
+          "bat_discharge_entity": "Discharge setpoint entity — optional",
+          "bat_label": "Name (e.g. Home Battery)"
+        }
+      },
+      "prices": {
+        "title": "💶 Prices & Tax",
+        "description": "Configure energy tax and supplier markup for accurate cost calculations.",
+        "data": {
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT (21%)",
+          "selected_supplier": "Supplier (for default markup)",
+          "supplier_markup": "Manual markup (€/kWh)"
+        }
       }
     }
   },

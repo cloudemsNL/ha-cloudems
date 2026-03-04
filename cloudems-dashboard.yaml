@@ -151,11 +151,12 @@ views:
     icon: mdi:solar-power-variant
     cards:
 
+      # ── Totaalstatus bovenaan ──────────────────────────────────────────────
       - type: horizontal-stack
         cards:
           - type: entity
             entity: sensor.cloudems_solar_system_intelligence
-            name: PV Nu (W)
+            name: PV Totaal Nu (W)
             icon: mdi:solar-power
           - type: entity
             entity: sensor.cloudems_solar_pv_forecast_today
@@ -165,7 +166,89 @@ views:
             entity: sensor.cloudems_solar_pv_forecast_tomorrow
             name: Verwacht morgen
             icon: mdi:calendar-arrow-right
+          - type: entity
+            entity: sensor.cloudems_pv_zelfconsumptiegraad
+            name: Zelfconsumptie %
+            icon: mdi:recycle
 
+      # ── Per-omvormer kaarten (dynamisch via template) ──────────────────────
+      - type: markdown
+        title: "☀️ Omvormers — Live status"
+        content: |
+          {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
+          {% if invs | length == 0 %}
+          *Geen omvormers geconfigureerd.*
+          {% else %}
+          | Omvormer | Nu | Piek 7d | Rated | Benutting | Richting | Fase | Clipping |
+          |----------|----|---------|-------|-----------|----------|------|----------|
+          {% for inv in invs -%}
+          {% set rated = inv.rated_power_w %}
+          {% set ceiling = inv.clipping_ceiling_w or inv.peak_w %}
+          {% set util_color = '🟢' if inv.utilisation_pct >= 60 else '🟡' if inv.utilisation_pct >= 20 else '⚫' %}
+          {% set clip_icon = '⚠️ JA' if inv.clipping else '✅' %}
+          {% set rated_str = (rated | int | string ~ ' W') if rated else '—' %}
+          | **{{ inv.label }}** | {{ inv.current_w | int }} W | {{ inv.peak_w_7d | int }} W | {{ rated_str }} | {{ util_color }} {{ inv.utilisation_pct | round(0) }}% | {{ inv.azimuth_compass or '?' }} {{ inv.tilt_deg | int if inv.tilt_deg else '' }}° | {{ ('✅ ' ~ inv.phase) if inv.phase_certain else ('🔍 ' ~ inv.phase) }} | {{ clip_icon }} |
+          {% endfor %}
+          {% endif %}
+
+      # ── Productiegrafiek alle omvormers (24u) ─────────────────────────────
+      - type: custom:mini-graph-card
+        name: "☀️ PV productie totaal (24u)"
+        entities:
+          - entity: sensor.cloudems_solar_system_intelligence
+            name: Totaal PV (W)
+            color: "#f1c40f"
+          - entity: sensor.cloudems_grid_export_power
+            name: Teruglevering (W)
+            color: "#2ecc71"
+        hours_to_show: 24
+        points_per_hour: 6
+        line_width: 2
+        show:
+          extrema: true
+          average: true
+          fill: fade
+
+      # ── Per-omvormer productie vergelijking ───────────────────────────────
+      - type: custom:mini-graph-card
+        name: "📊 Omvormers vergelijking (4u)"
+        entities:
+          - entity: sensor.cloudems_inverter_1_power
+            name: Omvormer 1
+            color: "#f39c12"
+          - entity: sensor.cloudems_inverter_2_power
+            name: Omvormer 2
+            color: "#3498db"
+          - entity: sensor.cloudems_inverter_3_power
+            name: Omvormer 3
+            color: "#2ecc71"
+          - entity: sensor.cloudems_inverter_4_power
+            name: Omvormer 4
+            color: "#9b59b6"
+        hours_to_show: 4
+        points_per_hour: 6
+        line_width: 2
+        show:
+          legend: true
+          extrema: true
+
+      # ── Omvormer utilisation gauges ────────────────────────────────────────
+      - type: markdown
+        title: "📈 Benutting & Clipping-drempel"
+        content: |
+          {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
+          {% for inv in invs %}
+          **{{ inv.label }}**: {{ inv.current_w | int }} W
+          {% set ceiling = inv.rated_power_w or inv.peak_w_7d or inv.peak_w %}
+          {% if ceiling > 0 %}
+          {% set pct = [(inv.current_w / ceiling * 100) | round(0), 100] | min | int %}
+          {% set bar_filled = (pct / 5) | int %}
+          `[{{ '█' * bar_filled }}{{ '░' * (20 - bar_filled) }}]` {{ pct }}% van {{ ceiling | int }} W
+          {% if inv.rated_power_w %}*(rating: {{ inv.rated_power_w | int }} W)*{% endif %}
+          {% endif %}
+          {% endfor %}
+
+      # ── PV gezondheid & forecast ───────────────────────────────────────────
       - type: entities
         title: "🔬 PV Paneelgezondheid"
         icon: mdi:solar-panel
@@ -181,6 +264,7 @@ views:
             attribute: any_alert
             name: Alert actief
 
+      # ── Clipping verlies ───────────────────────────────────────────────────
       - type: entities
         title: "✂️ Clipping Verlies & Curtailment"
         icon: mdi:solar-power-variant-outline
@@ -208,6 +292,7 @@ views:
             attribute: advice
             name: Advies
 
+      # ── Zelfconsumptie ─────────────────────────────────────────────────────
       - type: entities
         title: "♻️ Zelfconsumptie"
         icon: mdi:recycle
@@ -227,33 +312,24 @@ views:
             attribute: advice
             name: Advies
 
+      # ── Ori&euml;ntatie leervoortgang ──────────────────────────────────────
       - type: markdown
-        title: "🧭 Omvormers — zelf-geleerd"
+        title: "🧭 Ori&euml;ntatie leervoortgang"
         content: |
           {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
-          {% if invs | length == 0 %}
-          *Geen omvormers geconfigureerd.*
+          {% if invs | length == 0 %}*Geen omvormers.*
           {% else %}
-          | Omvormer | W nu | Piek | Richting | Fase | Clipping |
-          |----------|------|------|----------|------|----------|
+          | Omvormer | Azimut | Helling | Zekerheid | Voortgang |
+          |----------|--------|---------|-----------|-----------|
           {% for inv in invs -%}
-          | **{{ inv.label }}** | {{ inv.current_w | int }} W | {{ inv.peak_w | int }} W | {{ inv.azimuth_compass or '?' }} | {{ ('✅ ' ~ inv.phase) if inv.phase_certain else ('🔍 ' ~ inv.phase) }} | {{ '⚠️ Ja' if inv.clipping else '✅ Nee' }} |
+          {% set conf_icon = '✅' if inv.orientation_confident else '🔍' %}
+          {% set pct = inv.clear_sky_samples / (inv.orientation_samples_needed or 30) * 100 | round(0) | int %}
+          {% set pct = [pct, 100] | min %}
+          | **{{ inv.label }}** | {{ inv.azimuth_compass or '?' }} ({{ inv.azimuth_learned | round(0) if inv.azimuth_learned else '?' }}°) | {{ (inv.tilt_learned | round(0) | string ~ '°') if inv.tilt_learned else '?' }} | {{ conf_icon }} | {{ pct }}% ({{ inv.clear_sky_samples }}/{{ inv.orientation_samples_needed }} metingen) |
           {% endfor %}
           {% endif %}
 
-      - type: custom:mini-graph-card
-        name: "☀️ Teruglevering naar net (24u)"
-        entities:
-          - entity: sensor.cloudems_grid_export_power
-            name: Export (W)
-            color: "#f1c40f"
-        hours_to_show: 24
-        points_per_hour: 6
-        line_width: 2
-        show:
-          extrema: true
-          fill: true
-
+      # ── Energiemeter totalen ───────────────────────────────────────────────
       - type: entities
         title: "📊 Energiemeter totalen (kWh)"
         entities:
@@ -455,9 +531,13 @@ views:
         points_per_hour: 1
         line_width: 0
         bar: true
+        group_by: hour
+        aggregate_func: first
+        smoothing: false
         show:
           extrema: true
           average: true
+          legend: false
 
       - type: conditional
         conditions:
@@ -760,22 +840,24 @@ views:
       - type: markdown
         title: "🔝 Top 5 — Hoogste verbruikers nu"
         content: |
+          {% set min_conf = 30 %}
           {% set top = namespace(rows=[]) %}
           {% for rank in range(1, 6) %}
             {% set entity = 'sensor.cloudems_nilm_top_' ~ rank ~ '_device' %}
             {% set w = states(entity) %}
             {% set nm = state_attr(entity, 'name') %}
-            {% if w not in ('unknown','unavailable','none','') and nm %}
-              {% set top.rows = top.rows + [{'rank': rank, 'name': nm, 'w': w | float(0)}] %}
+            {% set conf = state_attr(entity, 'confidence') | float(0) %}
+            {% if w not in ('unknown','unavailable','none','') and nm and conf >= min_conf %}
+              {% set top.rows = top.rows + [{'rank': rank, 'name': nm, 'w': w | float(0), 'conf': conf | round(0) | int, 'confirmed': state_attr(entity, 'confirmed')}] %}
             {% endif %}
           {% endfor %}
           {% if top.rows | length == 0 %}
-          *Geen actieve apparaten gedetecteerd.*
+          *Geen actieve apparaten gedetecteerd (of zekerheid < {{ min_conf }}%).*
           {% else %}
-          | # | Apparaat | Vermogen |
-          |---|----------|----------|
+          | # | Apparaat | Vermogen | Zekerheid |
+          |---|----------|----------|-----------|
           {% for r in top.rows -%}
-          | **{{ r.rank }}** | {{ r.name }} | {{ r.w | int }} W |
+          | **{{ r.rank }}** | {{ '✅ ' if r.confirmed else '' }}{{ r.name }} | {{ r.w | int }} W | {{ '🟢' if r.conf >= 70 else '🟡' if r.conf >= 50 else '🔴' }} {{ r.conf }}% |
           {% endfor %}
           {% endif %}
 
@@ -848,8 +930,61 @@ views:
         name: "🔌 Boiler sturing status"
         icon: mdi:water-boiler
 
+      # ── Multi-batterij overzicht ───────────────────────────────────────────
+      - type: markdown
+        title: "🔋 Batterijen — Live status"
+        content: |
+          {% set bats = state_attr('sensor.cloudems_batterij_epex_schema', 'batteries') or [] %}
+          {% if bats | length == 0 %}
+          {% set action = states('sensor.cloudems_batterij_epex_schema') %}
+          {% set reason = state_attr('sensor.cloudems_batterij_epex_schema', 'reason') %}
+          {% set soc    = state_attr('sensor.cloudems_batterij_epex_schema', 'soc_pct') %}
+          **Batterij 1**
+          - Actie: {{ action or '—' }}
+          - Reden: {{ reason or '—' }}
+          - SOC: {{ soc | round(1) if soc else '—' }}%
+          {% else %}
+          | Batterij | SOC | Actie | Reden | Vermogen |
+          |----------|-----|-------|-------|----------|
+          {% for b in bats -%}
+          {% set soc_icon = '🟢' if b.soc_pct >= 60 else '🟡' if b.soc_pct >= 20 else '🔴' %}
+          | **{{ b.label or ('Batterij ' ~ loop.index) }}** | {{ soc_icon }} {{ b.soc_pct | round(0) }}% | {{ b.action or '—' }} | {{ (b.reason or '—') | truncate(40, True, '…') }} | {{ b.power_w | int if b.power_w is not none else '—' }} W |
+          {% endfor %}
+          {% endif %}
+
+      # ── SOC trend grafiek ──────────────────────────────────────────────────
+      - type: custom:mini-graph-card
+        name: "🔋 Batterij SOC (24u)"
+        entities:
+          - entity: sensor.cloudems_batterij_epex_schema
+            attribute: soc_pct
+            name: SOC %
+            color: "#2ecc71"
+        hours_to_show: 24
+        points_per_hour: 4
+        line_width: 2
+        show:
+          extrema: true
+          average: false
+          fill: fade
+
+      # ── Batterij gezondheid ────────────────────────────────────────────────
+      - type: markdown
+        title: "🩺 Batterij gezondheid (SoH)"
+        content: |
+          {% set soh = states('sensor.cloudems_battery_state_of_health') %}
+          {% set cycles = state_attr('sensor.cloudems_battery_state_of_health', 'total_cycles') %}
+          {% set cap = state_attr('sensor.cloudems_battery_state_of_health', 'capacity_kwh') %}
+          {% set level = state_attr('sensor.cloudems_battery_state_of_health', 'alert_level') %}
+          {% set icon = '✅' if level == 'ok' or not level else ('⚠️' if level == 'warn' else '🔴') %}
+          {{ icon }} **SoH: {{ soh }}%**
+          - Bruikbare capaciteit: {{ cap | round(2) if cap else '—' }} kWh
+          - Totaal cycli: {{ cycles or '—' }}
+
+      # ── EPEX batterijschema ────────────────────────────────────────────────
       - type: entities
-        title: "🔋 Batterij EPEX Schema"
+        title: "📅 EPEX Batterij Schema"
+        icon: mdi:battery-clock
         entities:
           - entity: sensor.cloudems_batterij_epex_schema
             name: Huidige actie
@@ -872,6 +1007,24 @@ views:
             attribute: capacity_kwh
             name: Bruikbare capaciteit (kWh)
 
+      # ── Batterij EPEX schema grafiek ───────────────────────────────────────
+      - type: custom:mini-graph-card
+        name: "🔋 Batterij EPEX prijsvenster (8u)"
+        entities:
+          - entity: sensor.cloudems_batterij_epex_schema
+            name: Batterij actie
+            color: "#22c55e"
+          - entity: sensor.cloudems_energy_epex_today
+            name: EPEX prijs
+            color: "#f39c12"
+            y_axis: secondary
+        hours_to_show: 8
+        points_per_hour: 2
+        line_width: 2
+        show:
+          legend: true
+
+      # ── Sturing triggers ──────────────────────────────────────────────────
       - type: entities
         title: "⚡ Actieve sturing-triggers"
         entities:

@@ -96,7 +96,8 @@
           "inv_label": "Name (z.B. 'Dach Süd')",
           "inv_min_pct": "Mindestleistung bei Curtailment (%)",
           "inv_azimuth": "Azimut (°) — optional, leer = selbst lernen",
-          "inv_tilt": "Neigungswinkel (°) — optional, leer = selbst lernen"
+          "inv_tilt": "Neigungswinkel (°) — optional, leer = selbst lernen",
+          "inv_rated_power": "Nennleistung Wechselrichter (W) — optional, für genaue Clipping-Erkennung"
         }
       },
       "features": {
@@ -108,7 +109,16 @@
           "cost_tracking_enabled": "💶 Energiekostenverfolgung",
           "phase_balance_enabled": "⚖️ Phasensymmetrierung (nur 3-phasig)",
           "phase_balance_threshold_a": "Max. Phasenungleichgewicht (A)",
-          "peak_shaving_enabled": "📊 Lastspitzenkappung — Spitzenlast begrenzen"
+          "peak_shaving_enabled": "📊 Lastspitzenkappung — Spitzenlast begrenzen",
+          "price_alert_high_eur_kwh": "Preisalert-Schwelle (€/kWh)",
+          "nilm_min_confidence": "Mindestgeräte-Konfidenz (0,0–1,0)",
+          "battery_scheduler_enabled": "Batterieplanung aktivieren",
+          "congestion_enabled": "Netüberlastungsmanagement aktivieren",
+          "battery_degradation_enabled": "Batteriedegradation überwachen"
+        },
+        "data_description": {
+          "price_alert_high_eur_kwh": "Benachrichtigung senden, wenn der EPEX-Preis diesen Wert überschreitet.",
+          "nilm_min_confidence": "Geräte mit geringerer Konfidenz werden im Dashboard ausgeblendet."
         }
       },
       "peak_config": {

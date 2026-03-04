@@ -36,6 +36,7 @@ class ApplianceSignature:
     harmonic_signature: Optional[List[float]] = None
     tags: List[str] = field(default_factory=list)
     source: str = "builtin"  # "builtin" | "community"
+    name_nl: Optional[str] = None       # Dutch display name (None = use English name)
 
     def matches(self, delta_power: float, rise_time: float) -> Tuple[bool, float]:
         """Check if a power event matches this appliance. Returns (match, confidence)."""
@@ -290,6 +291,10 @@ APPLIANCE_DATABASE: List[ApplianceSignature] = [
 ]
 
 
+# ─── Nederlandse apparaatnamen ────────────────────────────────────────────────
+# Vertalingen zijn verplaatst naar translations.py (alle talen).
+from .translations import localized_device_name, nl_device_name  # noqa: F401
+
 # ─── NILMDatabase class ────────────────────────────────────────────────────────
 
 class NILMDatabase:
@@ -398,7 +403,7 @@ class NILMDatabase:
     def community_count(self) -> int:
         return sum(1 for s in self._db if s.source == "community")
 
-    def classify(self, delta_power: float, rise_time: float = 2.0) -> List[Dict]:
+    def classify(self, delta_power: float, rise_time: float = 2.0, language: str = "en") -> list:
         """Classify a power event against the database. Returns top-5 ranked matches."""
         matches = []
         for sig in self._db:
@@ -406,7 +411,7 @@ class NILMDatabase:
             if matched:
                 matches.append({
                     "device_type": sig.device_type,
-                    "name":        sig.name,
+                    "name":        localized_device_name(sig.name, language),
                     "confidence":  round(confidence, 3),
                     "power_min":   sig.power_on_min,
                     "power_max":   sig.power_on_max,

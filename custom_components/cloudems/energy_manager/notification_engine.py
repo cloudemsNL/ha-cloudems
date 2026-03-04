@@ -430,6 +430,25 @@ class NotificationEngine:
                 "active":   True,
             }
 
+        # Hoge energieprijs (per uur alert)
+        price_info = data.get("energy_price", {})
+        current_price = price_info.get("current")
+        price_alert_thr = data.get("config_price_alert_high", 0.30)
+        if current_price and current_price > price_alert_thr:
+            alerts["price_alert_high"] = {
+                "priority": "warning",
+                "category": "price",
+                "title":    f"Hoge energieprijs: {current_price:.4f} €/kWh",
+                "message":  (
+                    f"Huidige prijs {current_price:.4f} €/kWh overschrijdt de ingestelde drempel "
+                    f"van {price_alert_thr:.2f} €/kWh. Overweeg zware lasten uit te schakelen."
+                ),
+                "active":   True,
+            }
+        elif "price_alert_high" in alerts:
+            # Price has dropped below threshold — deactivate
+            alerts["price_alert_high"]["active"] = False
+
         return alerts
 
     async def async_maybe_save(self) -> None:

@@ -97,6 +97,43 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "generate_report",        generate_report)
     hass.services.async_register(DOMAIN, "boiler_override",        boiler_override)
 
+    async def reset_drift_baseline(call: ServiceCall):
+        """Reset the drift baseline for a device (e.g. after replacement).
+        
+        Parameters:
+          device_id (optional): specific device id to reset. If omitted, resets ALL devices.
+        """
+        tracker = getattr(coordinator, "_device_drift", None)
+        if not tracker:
+            _LOGGER.warning("CloudEMS reset_drift_baseline: drift tracker not initialised")
+            return
+        device_id = call.data.get("device_id")
+        if device_id:
+            tracker._profiles.pop(device_id, None)
+            _LOGGER.info("CloudEMS: drift baseline reset for device '%s'", device_id)
+        else:
+            tracker._profiles.clear()
+            _LOGGER.info("CloudEMS: ALL drift baselines reset")
+        tracker._dirty = True
+        await tracker.async_maybe_save()
+
+    async def mute_alert(call: ServiceCall):
+        """Mute a CloudEMS alert by its key (suppresses for 24h).
+        
+        Parameters:
+          alert_key: the alert key, e.g. 'device_drift:my_device_id'
+        """
+        engine = getattr(coordinator, "_notification_engine", None)
+        if not engine:
+            return
+        key = call.data.get("alert_key", "")
+        if key:
+            engine.mute(key)
+            _LOGGER.info("CloudEMS: alert '%s' muted", key)
+
+    hass.services.async_register(DOMAIN, "reset_drift_baseline",   reset_drift_baseline)
+    hass.services.async_register(DOMAIN, "mute_alert",             mute_alert)
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

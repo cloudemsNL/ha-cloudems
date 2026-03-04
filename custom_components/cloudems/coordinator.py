@@ -115,6 +115,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             on_device_update=self._on_nilm_device_update,
             ollama_config=ollama_cfg,
             ai_provider=ai_provider,
+            hass=hass,
         )
         self._nilm.set_stores(self._store_devices, self._store_energy)
 
@@ -656,17 +657,39 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     # ── Plateau-based clipping detection ─────────────────────
                     # Clipping = inverter output is FLAT at its rated limit even
                     # as irradiance rises. Detect via rolling stddev on a ~60s window.
+                    # IMPORTANT: use rated_power_w from config if set, else fall back
+                    # to a much more conservative threshold to avoid false positives
+                    # early in the day when the learned peak_w is still low.
+                    inv_cfg = next(
+                        (c for c in self._config.get(CONF_INVERTER_CONFIGS, []) if c.get("entity_id") == eid),
+                        {}
+                    )
+                    rated_w = inv_cfg.get("rated_power_w") or None
+                    # For clipping we need a reliable ceiling:
+                    # - If rated_power_w is configured → use that
+                    # - Else use peak_power_w_7d (best 7-day observation, more stable than all-time peak)
+                    #   but only after enough samples and only if utilisation is very high
+                    clipping_ceiling = rated_w if rated_w else profile.peak_power_w_7d
                     win = self._plateau_windows.setdefault(eid, deque(maxlen=PLATEAU_WINDOW_SIZE))
                     if cur_w > 0:
                         win.append(cur_w)
                     clipping = False
-                    if len(win) >= PLATEAU_WINDOW_SIZE and peak_w > 0:
+                    if len(win) >= PLATEAU_WINDOW_SIZE and clipping_ceiling > 100:
                         mean_w = sum(win) / len(win)
                         variance = sum((x - mean_w) ** 2 for x in win) / len(win)
                         stddev_w = variance ** 0.5
                         stability = stddev_w / mean_w if mean_w > 0 else 1.0
-                        # Flat AND at/near the seen peak power
-                        if stability < PLATEAU_STABILITY_PCT and mean_w >= peak_w * PLATEAU_MIN_FRACTION:
+                        # When using rated_power: clip at 95% of rated (tight)
+                        # When using learned peak only: require 98% AND only after 50+ samples
+                        if rated_w:
+                            clip_frac = 0.95
+                            min_samples = 0
+                        else:
+                            clip_frac = 0.98
+                            min_samples = 50
+                        if (stability < PLATEAU_STABILITY_PCT
+                                and mean_w >= clipping_ceiling * clip_frac
+                                and profile.samples >= min_samples):
                             clipping = True
 
                     if clipping:
@@ -696,6 +719,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "peak_w":            round(peak_w, 1),
                         "peak_w_7d":         round(profile.peak_power_w_7d, 1),
                         "estimated_wp":      round(profile.estimated_wp, 1),
+                        "rated_power_w":     round(rated_w, 0) if rated_w else None,
+                        "clipping_ceiling_w":round(clipping_ceiling, 0) if clipping_ceiling else None,
                         "utilisation_pct":   util,
                         "clipping":          clipping,
                         "phase":             profile.detected_phase or "unknown",
@@ -1251,6 +1276,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "cost_per_hour":        round(cost_ph, 4),
                 "cost_today_eur":       self._cost_today_eur,
                 "cost_month_eur":       self._cost_month_eur,
+                "config_price_alert_high": float(self._config.get("price_alert_high_eur_kwh", 0.30)),
+                "config_nilm_confidence":  float(self._config.get("nilm_min_confidence", 0.65)),
                 "ev_decision":          ev_decision,
                 "p1_data":              p1_data,
                 "inverter_data":        inverter_data,          # ← NEW: peak + clipping
