@@ -233,24 +233,20 @@ class PVForecast:
         if time.time() - self._weather_ts < 3600:
             return   # Cache for 1 hour
         # v1.15.0: prefer global_tilted_irradiance with learned orientation
-        # Average tilt/azimuth across all configured inverters
-        avg_tilt  = 35.0
-        avg_az    = 180.0
-        avg_az_om = 0.0   # Open-Meteo default: 0=S (south-facing)
+        # Average tilt/azimuth across all configured inverters.
+        # Defaults are always assigned first so no code path can leave them unbound.
+        _tilt: float = 35.0
+        _azom: float = 0.0   # Open-Meteo convention: 0=S, -90=E, +90=W
+
         profiles_with_data = [
             p for p in self._profiles.values()
             if p.effective_tilt is not None and p.effective_azimuth is not None
         ]
         if profiles_with_data:
-            avg_tilt  = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
-            avg_az    = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
+            _tilt = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
+            _az   = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
             # Convert HA azimuth (0=N,90=E,180=S,270=W) to Open-Meteo (-180…180, 0=S)
-            avg_az_om = avg_az - 180.0  # 0=S, -90=E, +90=W
-
-        # Defensive fallback: guard against stale bytecode cache or future
-        # refactors that might leave avg_az_om unassigned on some code paths.
-        _tilt = avg_tilt  if isinstance(locals().get("avg_tilt"),  (int, float)) else 35.0
-        _azom = avg_az_om if isinstance(locals().get("avg_az_om"), (int, float)) else 0.0
+            _azom = _az - 180.0
 
         url = (
             f"{OPEN_METEO_URL_BASE}"
@@ -278,7 +274,7 @@ class PVForecast:
                     self._weather_ts    = time.time()
                     _LOGGER.debug(
                         "CloudEMS PVForecast: weather updated (%d hours, tilt=%.0f° az=%.0f°)",
-                        len(hours), avg_tilt, avg_az
+                        len(hours), _tilt, _azom + 180.0
                     )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("CloudEMS PVForecast: weather fetch failed: %s", exc)
