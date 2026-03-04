@@ -380,3 +380,6 @@ DEFAULT_CONGESTION_THRESHOLD_W = 5000
 DEFAULT_OUTSIDE_TEMP_ENTITY    = ""
 
 BATTERY_CHEMISTRIES = ["LFP", "NMC", "NCA", "LTO"]
+
+# ── v1.13.0 — Standalone gas sensor ──────────────────────────────────────────
+CONF_GAS_SENSOR = "gas_sensor"

@@ -47,6 +47,7 @@ from .const import (
     CONF_OLLAMA_ENABLED, CONF_OLLAMA_HOST, CONF_OLLAMA_PORT, CONF_OLLAMA_MODEL,
     CONF_PEAK_SHAVING_ENABLED, CONF_PEAK_SHAVING_LIMIT_W, CONF_PEAK_SHAVING_ASSETS,
     EPEX_UPDATE_INTERVAL, ALL_PHASES,
+    CONF_GAS_SENSOR,
 )
 from .nilm.detector import NILMDetector, DetectedDevice
 from .energy_manager.home_baseline import HomeBaselineLearner
@@ -1218,8 +1219,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "device_drift":         drift_data,
                 "phase_migration":      phase_migration_data,
                 "gas_data":             {
-                    "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else 0.0),
-                    "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else 0.0),
+                    "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else self._read_gas_sensor()),
+                    "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
                 },
                 "micro_mobility":       micro_mobility_data,
                 "clipping_loss":        clipping_loss_data,
@@ -1254,6 +1255,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return None
         # Feed UOM to power calculator so kW/W is determined from metadata first
         self._calc.observe_state(entity_id, state)
+        try:
+            return float(state.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _read_gas_sensor(self) -> Optional[float]:
+        """Read standalone gas sensor (m³) when P1 reader is not active."""
+        entity_id = self._config.get(CONF_GAS_SENSOR, "")
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in ("unavailable", "unknown", ""):
+            return None
         try:
             return float(state.state)
         except (ValueError, TypeError):

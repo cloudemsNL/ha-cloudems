@@ -41,6 +41,7 @@ from .const import (
     AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC, AI_PROVIDER_OLLAMA,
     AI_PROVIDER_LABELS, AI_PROVIDERS_NEEDING_KEY,
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
+    CONF_GAS_SENSOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -580,6 +581,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_SOLAR_SENSOR,   description={"suggested_value": data.get(CONF_SOLAR_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
+                vol.Optional(CONF_GAS_SENSOR, description={"suggested_value": data.get(CONF_GAS_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
             }),
@@ -690,7 +692,7 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="inverter_detail_opts",
             data_schema=vol.Schema({
-                vol.Required("inv_sensor", description={"suggested_value": existing.get("entity_id")}): _ent(),
+                vol.Required("inv_sensor", default=existing.get("entity_id", vol.UNDEFINED)): _ent(),
                 vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch", "number"]),
                 vol.Optional("inv_label",   default=existing.get("label", f"Inverter {i}")): str,
                 vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),

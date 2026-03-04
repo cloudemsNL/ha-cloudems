@@ -203,7 +203,8 @@
           "battery_sensor": "Batterij sensor",
           "ev_charger_entity": "EV laadpaal entiteit",
           "enable_solar_dimmer": "Zon afschalen bij negatieve prijs",
-          "negative_price_threshold": "Prijsdrempel (EUR/kWh)"
+          "negative_price_threshold": "Prijsdrempel (EUR/kWh)",
+          "gas_sensor": "Gasmeter sensor (m³) — optioneel, alternatief voor P1"
         }
       },
       "features_opts": {
@@ -248,6 +249,18 @@
           "congestion_threshold_w": "Importvermogen waarboven congestie wordt gemeld. Typisch gelijk aan het capaciteitstarief limiet.",
           "battery_chemistry": "Kies de chemie van je batterij. LFP degradeert langzamer dan NMC.",
           "outside_temp_entity": "Optioneel: koppel een buitenthermometer. CloudEMS schakelt de warmtepomp/CV prioritair in als het koud is én de prijs laag is."
+        }
+      },
+      "inverter_detail_opts": {
+        "title": "☀️ Omvormer {inverter_num} van {total}",
+        "description": "Configureer omvormer **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Helling:** {tilt_tip}\n\nLaat azimut en helling leeg — CloudEMS leert ze automatisch.",
+        "data": {
+          "inv_sensor": "Vermogenssensor (W of kW)",
+          "inv_control": "Besturingsentiteit — schakelaar of dimmer (optioneel)",
+          "inv_label": "Naam (bijv. 'Dak Zuid')",
+          "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
+          "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
+          "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren"
         }
       }
     }

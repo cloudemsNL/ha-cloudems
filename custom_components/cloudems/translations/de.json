@@ -155,7 +155,9 @@
       "init": {
         "title": "⚙️ CloudEMS — Konfigurieren",
         "description": "Wähle den Bereich, den du bearbeiten möchtest.",
-        "data": { "section": "Einstellungsbereich" }
+        "data": {
+          "section": "Einstellungsbereich"
+        }
       },
       "sensors": {
         "title": "🔌 Sensoren & Netz",
@@ -178,7 +180,8 @@
           "battery_sensor": "Batterie-Sensor",
           "ev_charger_entity": "E-Ladestation Entity",
           "enable_solar_dimmer": "Solar-Curtailment bei Negativpreis",
-          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)",
+          "gas_sensor": "Gaszähler-Sensor (m³) — optional, Alternative zu P1"
         }
       },
       "features_opts": {
@@ -210,6 +213,18 @@
           "p1_enabled": "P1 aktiviert",
           "p1_host": "P1-Gateway-IP",
           "p1_port": "P1-Gateway-Port"
+        }
+      },
+      "inverter_detail_opts": {
+        "title": "☀️ Wechselrichter {inverter_num} von {total}",
+        "description": "Konfiguriere Wechselrichter **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Neigung:** {tilt_tip}\n\nAzimut und Neigung leer lassen — CloudEMS lernt sie automatisch.",
+        "data": {
+          "inv_sensor": "Leistungssensor (W oder kW)",
+          "inv_control": "Steuerungseinheit — Schalter oder Dimmer (optional)",
+          "inv_label": "Name (z.B. 'Dach Süd')",
+          "inv_min_pct": "Mindestleistung bei Abregelung (%)",
+          "inv_azimuth": "Azimut (°) — optional, leer lassen für automatisches Lernen",
+          "inv_tilt": "Neigungswinkel (°) — optional, leer lassen für automatisches Lernen"
         }
       }
     }

@@ -346,7 +346,7 @@ views:
           content: >
             {% set m = state_attr('sensor.cloudems_fase_migratie_advies', 'advices') or [] %}
             {% set imp = state_attr('sensor.cloudems_fase_migratie_advies', 'imbalance_a') %}
-            **Fase onbalans: {{ imp }} A**
+            **Fase onbalans: {{ (imp | float(0)) | round(2) }} A**
 
             | Apparaat | Van | Naar | Verbetering |
             |----------|-----|------|-------------|
@@ -458,15 +458,21 @@ views:
           extrema: true
           average: true
 
-      - type: entities
-        title: "🔥 Gas (P1 DSMR)"
-        entities:
-          - entity: sensor.cloudems_gasstand
-            name: Gasmeter stand (m³)
-          - type: attribute
+      - type: conditional
+        conditions:
+          - condition: state
             entity: sensor.cloudems_gasstand
-            attribute: gas_kwh
-            name: Equivalent (kWh)
+            state_not: "unavailable"
+        card:
+          type: entities
+          title: "🔥 Gas (P1 DSMR / sensor)"
+          entities:
+            - entity: sensor.cloudems_gasstand
+              name: Gasmeter stand (m³)
+            - type: attribute
+              entity: sensor.cloudems_gasstand
+              attribute: gas_kwh
+              name: Equivalent (kWh)
 
       - type: entities
         title: "💶 Energiekosten"
@@ -528,23 +534,20 @@ views:
             attribute: heating_days
             name: Stookdagen geleerd
 
-      - type: entities
+      - type: markdown
         title: "📊 Verbruik per Categorie — Vandaag"
-        entities:
-          - entity: sensor.cloudems_verbruik_categorien
-            name: Totaal vandaag (kWh)
-          - type: attribute
-            entity: sensor.cloudems_verbruik_categorien
-            attribute: top_category
-            name: Grootste verbruiker
-          - type: attribute
-            entity: sensor.cloudems_verbruik_categorien
-            attribute: top_category_pct
-            name: Aandeel grootste (%)
-          - type: attribute
-            entity: sensor.cloudems_verbruik_categorien
-            attribute: dominant_insight
-            name: Inzicht
+        content: >
+          {% set s = states('sensor.cloudems_verbruik_categorien') %}
+          {% if s in ('unavailable','unknown','none','') %}
+          *Sensor nog niet beschikbaar — data wordt opgebouwd.*
+          {% else %}
+          {% set top = state_attr('sensor.cloudems_verbruik_categorien', 'top_category') %}
+          {% set pct = state_attr('sensor.cloudems_verbruik_categorien', 'top_category_pct') %}
+          {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') %}
+          **Totaal vandaag:** {{ s }} kWh
+          {% if top %}| Grootste verbruiker | {{ top }} ({{ pct }}%) |{% endif %}
+          {% if insight %}*{{ insight }}*{% endif %}
+          {% endif %}
 
       - type: markdown
         title: "🍕 Verbruiksverdeling (huidig)"
@@ -563,14 +566,26 @@ views:
 
       - type: horizontal-stack
         cards:
-          - type: entity
-            entity: binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom
-            name: Waarschijnlijk thuis
-            state_color: true
-          - type: entity
-            entity: binary_sensor.cloudems_verbruik_anomalie
-            name: Ongewoon verbruik
-            state_color: true
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom
+                state_not: "unavailable"
+            card:
+              type: entity
+              entity: binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom
+              name: Waarschijnlijk thuis
+              state_color: true
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.cloudems_verbruik_anomalie
+                state_not: "unavailable"
+            card:
+              type: entity
+              entity: binary_sensor.cloudems_verbruik_anomalie
+              name: Ongewoon verbruik
+              state_color: true
           - type: entity
             entity: sensor.cloudems_standby_verbruik_altijd_aan
             name: Standby (W)
