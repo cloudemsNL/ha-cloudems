@@ -1,5 +1,5 @@
 ##############################################################################
-#  CloudEMS Dashboard — v1.12.0
+#  CloudEMS Dashboard — v1.13.0
 #
 #  Views:
 #    1. 🏠  Overzicht          — real-time huis, dag-type, flex score, alerts
@@ -58,9 +58,9 @@ views:
             name: Teruglevering nu
             icon: mdi:transmission-tower-export
           - type: entity
-            entity: sensor.cloudems_grid_net_power
-            name: Netto net
-            icon: mdi:flash
+            entity: sensor.cloudems_solar_system_intelligence
+            name: Zonnestroom nu
+            icon: mdi:solar-power
 
       - type: horizontal-stack
         cards:
@@ -116,7 +116,7 @@ views:
           {% endif %}
 
       - type: custom:mini-graph-card
-        name: "⚡ Import · Export · Net (24u)"
+        name: "⚡ Import · Export (24u)"
         entities:
           - entity: sensor.cloudems_grid_import_power
             name: Import
@@ -124,9 +124,6 @@ views:
           - entity: sensor.cloudems_grid_export_power
             name: Export
             color: "#2ecc71"
-          - entity: sensor.cloudems_grid_net_power
-            name: Netto
-            color: "#3498db"
         hours_to_show: 24
         points_per_hour: 4
         line_width: 2
@@ -695,32 +692,30 @@ views:
             entity: sensor.cloudems_nilm_running_devices
             name: Nu aan
           - type: entity
-            entity: sensor.cloudems_nilm_running_devices_power
-            name: Totaal (W)
+            entity: sensor.cloudems_grid_import_power
+            name: Afname nu (W)
 
-      - type: entities
+      - type: markdown
         title: "🔝 Top 5 — Hoogste verbruikers nu"
-        entities:
-          - entity: sensor.cloudems_nilm_top_1_device
-            name: "#1"
-            secondary_info: attribute
-            attribute: name
-          - entity: sensor.cloudems_nilm_top_2_device
-            name: "#2"
-            secondary_info: attribute
-            attribute: name
-          - entity: sensor.cloudems_nilm_top_3_device
-            name: "#3"
-            secondary_info: attribute
-            attribute: name
-          - entity: sensor.cloudems_nilm_top_4_device
-            name: "#4"
-            secondary_info: attribute
-            attribute: name
-          - entity: sensor.cloudems_nilm_top_5_device
-            name: "#5"
-            secondary_info: attribute
-            attribute: name
+        content: >
+          {% set top = namespace(rows=[]) %}
+          {% for rank in range(1, 6) %}
+            {% set entity = 'sensor.cloudems_nilm_top_' ~ rank ~ '_device' %}
+            {% set w = states(entity) %}
+            {% set nm = state_attr(entity, 'name') %}
+            {% if w not in ('unknown','unavailable','none','') and nm %}
+              {% set top.rows = top.rows + [{'rank': rank, 'name': nm, 'w': w | float(0)}] %}
+            {% endif %}
+          {% endfor %}
+          {% if top.rows | length == 0 %}
+          *Geen actieve apparaten gedetecteerd.*
+          {% else %}
+          | # | Apparaat | Vermogen |
+          |---|----------|----------|
+          {% for r in top.rows -%}
+          | **{{ r.rank }}** | {{ r.name }} | {{ r.w | int }} W |
+          {% endfor %}
+          {% endif %}
 
       - type: markdown
         title: "⚙️ Apparaat Efficiëntiedrift"
@@ -838,24 +833,24 @@ views:
         entities:
           - entity: sensor.cloudems_home_baseline_anomalie
             name: Baseline model
-            secondary_info: attribute
+          - type: attribute
+            entity: sensor.cloudems_home_baseline_anomalie
             attribute: trained_slots
+            name: Slots geleerd
           - entity: sensor.cloudems_ev_sessie_leermodel
             name: EV sessies geleerd
-            secondary_info: attribute
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
             attribute: sessions_total
+            name: Sessies totaal
           - entity: sensor.cloudems_solar_system_intelligence
             name: Oriëntatie leervoortgang (%)
-            secondary_info: attribute
-            attribute: orientation_progress_pct
-          - entity: sensor.cloudems_pv_weerkalibratie
-            name: Weerkalibratie (%)
-            secondary_info: attribute
+          - type: attribute
+            entity: sensor.cloudems_pv_weerkalibratie
             attribute: progress_pct
+            name: Weerkalibratie (%)
           - entity: sensor.cloudems_dag_type_classificatie
             name: Dag-type zekerheid (%)
-            secondary_info: attribute
-            attribute: confidence
 
       - type: entities
         title: "📊 Verbruiksanomalie detail"

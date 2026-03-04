@@ -38,6 +38,9 @@ async def async_setup_entry(
 
     entities: list = [
         CloudEMSPowerSensor(coordinator, entry),
+        # CloudEMSGridNetPowerSensor removed – CloudEMSPowerSensor already owns
+        # sensor.cloudems_grid_net_power (unique_id _power). Adding a second
+        # sensor with the same name caused entity_id conflicts (_2 suffix).
         CloudEMSGridImportPowerSensor(coordinator, entry),
         CloudEMSGridExportPowerSensor(coordinator, entry),
         CloudEMSGridImportEnergySensor(coordinator, entry, tariff=1),
@@ -50,14 +53,10 @@ async def async_setup_entry(
         CloudEMSSolarROISensor(coordinator, entry),
         # v1.10.3: Self-learning intelligence sensors (zero-config)
         CloudEMSHomeBaselineSensor(coordinator, entry),
-        CloudEMSOccupancyBinarySensor(coordinator, entry),
-        CloudEMSAnomalyBinarySensor(coordinator, entry),
-        CloudEMSStandbyHunterSensor(coordinator, entry),
+        CloudEMSStandbyHunterSensor(coordinator, entry),  # occupancy + anomaly → binary_sensor.py
         CloudEMSEVSessionSensor(coordinator, entry),
         CloudEMSNILMScheduleSensor(coordinator, entry),
         CloudEMSWeatherCalibrationSensor(coordinator, entry),
-        # v1.10.3: Solar ROI sensor
-        CloudEMSSolarROISensor(coordinator, entry),
         # v1.11.0: 8 new intelligence sensors
         CloudEMSThermalModelSensor(coordinator, entry),
         CloudEMSFlexScoreSensor(coordinator, entry),
@@ -129,9 +128,8 @@ async def async_setup_entry(
     for inv in inv_cfgs:
         entities.append(CloudEMSInverterSensor(coordinator, entry, inv))
 
-    # EPEX cheap-hour binary sensors
-    for rank in [1, 2, 3]:
-        entities.append(CloudEMSCheapHourBinarySensor(coordinator, entry, rank))
+    # EPEX cheap-hour binary sensors (registered in binary_sensor.py for correct binary_sensor.* entity_ids)
+    # for rank in [1, 2, 3]: entities.append(CloudEMSCheapHourBinarySensor(...))
 
     async_add_entities(entities)
 
@@ -203,7 +201,11 @@ class CloudEMSPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         d = self.coordinator.data or {}
-        return d.get("power_w") or d.get("grid_power_w")
+        # BUG FIX: use `is not None` so value 0 is returned correctly (or → falsy on 0)
+        v = d.get("power_w")
+        if v is not None:
+            return v
+        return d.get("grid_power_w", 0)
 
     @property
     def extra_state_attributes(self):
@@ -977,6 +979,50 @@ class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
 # Grid Import / Export sensors (power + energy totals per tariff)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
+    """Current net grid power in Watt. Positive = import, negative = export.
+
+    BUG FIX v1.13.0: This sensor was referenced in the dashboard as
+    sensor.cloudems_grid_net_power but never registered, causing a
+    Configuratiefout.  The value is always available in coordinator data
+    as 'grid_power' regardless of whether the user configured a net sensor
+    or separate import/export sensors.
+    """
+    _attr_name = "CloudEMS Grid · Net Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_POWER
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_grid_net_power"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d  = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        # P1 net power takes priority; fall back to coordinator-computed grid_power
+        v = p1.get("net_power_w")
+        if v is not None:
+            return v
+        v = d.get("grid_power")
+        return v if v is not None else 0
+
+    @property
+    def extra_state_attributes(self):
+        d  = self.coordinator.data or {}
+        return {
+            "import_power_w": d.get("import_power_w", 0),
+            "export_power_w": d.get("export_power_w", 0),
+            "source":         "p1" if d.get("p1_data", {}).get("net_power_w") is not None else "calculated",
+        }
+
+
 class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
     """Current grid import power in Watt (Energieverbruik)."""
     _attr_name = "CloudEMS Grid · Import Power"
@@ -994,10 +1040,18 @@ class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
     def device_info(self): return _device_info(self._entry)
 
     @property
+    def available(self) -> bool:
+        return True  # Always available; returns 0 when no import is happening
+
+    @property
     def native_value(self):
         d = self.coordinator.data or {}
         p1 = d.get("p1_data", {})
-        return p1.get("power_import_w") or d.get("import_power_w") or d.get("import_power")
+        # BUG FIX: or-chain skips 0 (falsy) → use is-not-None priority chain
+        for v in (p1.get("power_import_w"), d.get("import_power_w"), d.get("import_power")):
+            if v is not None:
+                return v
+        return 0
 
     @property
     def extra_state_attributes(self):
@@ -1027,10 +1081,18 @@ class CloudEMSGridExportPowerSensor(CoordinatorEntity, SensorEntity):
     def device_info(self): return _device_info(self._entry)
 
     @property
+    def available(self) -> bool:
+        return True  # Always available; returns 0 when no export is happening
+
+    @property
     def native_value(self):
         d = self.coordinator.data or {}
         p1 = d.get("p1_data", {})
-        return p1.get("power_export_w") or d.get("export_power_w") or d.get("export_power")
+        # BUG FIX: or-chain skips 0 (falsy) → use is-not-None priority chain
+        for v in (p1.get("power_export_w"), d.get("export_power_w"), d.get("export_power")):
+            if v is not None:
+                return v
+        return 0
 
     @property
     def extra_state_attributes(self):
@@ -2096,7 +2158,7 @@ class CloudEMSHomeBaselineSensor(CoordinatorEntity, SensorEntity):
     Attributes contain the full picture: expected, current, standby baseline,
     occupancy inference, and standby-hunters (always-on wasters).
     """
-    _attr_name      = "CloudEMS Verbruik · Baseline & Anomalie"
+    _attr_name      = "CloudEMS Home Baseline Anomalie"  # slug → sensor.cloudems_home_baseline_anomalie
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -2561,7 +2623,7 @@ class CloudEMSPVHealthSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
     """Gasverbruik meter (m³) uit P1 telegram."""
-    _attr_name = "CloudEMS · Gasstand (m³)"
+    _attr_name = "CloudEMS Gasstand"  # slug → sensor.cloudems_gasstand
     _attr_native_unit_of_measurement = "m³"
     _attr_state_class  = SensorStateClass.TOTAL_INCREASING
     _attr_device_class = SensorDeviceClass.GAS
@@ -2730,7 +2792,7 @@ class CloudEMSPhaseMigrationSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSMicroMobilitySensor(CoordinatorEntity, SensorEntity):
     """E-bike en scooter laadtracker voor het gezin."""
-    _attr_name = "CloudEMS · Micro-Mobiliteit (e-bike/scooter)"
+    _attr_name = "CloudEMS Micro-Mobiliteit"  # slug → sensor.cloudems_micro_mobiliteit
     _attr_native_unit_of_measurement = "kWh"
     _attr_state_class  = SensorStateClass.TOTAL_INCREASING
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -2836,7 +2898,7 @@ class CloudEMSClippingLossSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSConsumptionCategoriesSensor(CoordinatorEntity, SensorEntity):
     """Verbruik uitgesplitst per categorie (verwarming, mobiliteit, wit goed, enz.)."""
-    _attr_name = "CloudEMS · Verbruik Categorieën"
+    _attr_name = "CloudEMS Verbruik Categorien"  # slug → sensor.cloudems_verbruik_categorien
     _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class  = SensorStateClass.TOTAL_INCREASING

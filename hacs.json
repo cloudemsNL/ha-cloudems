@@ -1,7 +1,7 @@
 {
-  "name": "CloudEMS",
+  "name": "CloudEMS - Energy Management System",
   "content_in_root": false,
   "render_readme": true,
-  "homeassistant": "2023.1.0",
-  "categories": ["integration"]
+  "homeassistant": "2024.1.0",
+  "filename": "cloudems-v1_13_0.zip"
 }

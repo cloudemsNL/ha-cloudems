@@ -16,9 +16,27 @@ Vandaag is CloudEMS uitgegroeid tot een volwaardige energiemanager die draait op
 
 ---
 
+## 🆕 Wat is er nieuw in v1.13.0?
+
+### 🐛 Bugfixes & verbeteringen
+
+| # | Probleem | Oplossing |
+|---|----------|-----------|
+| 1 | **Binary sensors verkeerd domein** — `binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom`, `binary_sensor.cloudems_verbruik_anomalie` en `binary_sensor.cloudems_energy_cheapest_1h/2h/3h` werden via het sensor-platform geregistreerd waardoor ze `sensor.*` entity_ids kregen en dashboard-kaarten "Entiteit niet gevonden" toonden | Verplaatst naar `binary_sensor.py` — entity_ids kloppen nu |
+| 2 | **Sensor namen genereerden verkeerde entity_ids** — o.a. `sensor.cloudems_micro_mobiliteit_e_bike_scooter`, `sensor.cloudems_verbruik_categorieen`, `sensor.cloudems_gasstand_m3` kwamen niet overeen met het dashboard | Namen aangepast zodat de slugs exact overeenkomen |
+| 3 | **Dubbele `CloudEMS Grid · Net Power` sensor** — `CloudEMSGridNetPowerSensor` conflicteerde met `CloudEMSPowerSensor` waardoor één de suffix `_2` kreeg | Dubbele verwijderd |
+| 4 | **Unknown i.p.v. 0W bij geen import/export** — import- en exportvermogenssensoren toonden `unknown` wanneer er geen stroom liep | `available = True` override toegevoegd |
+| 5 | **"Totaal (W)" klopte niet** — toonde NILM-geschatte som in plaats van gemeten afname | Vervangen door `sensor.cloudems_grid_import_power` |
+| 6 | **Top 5 toonde #1/#2/... i.p.v. apparaatnamen** — `secondary_info: attribute` werkt niet in recente HA-versies | Vervangen door Jinja2 markdown-tabel |
+| 7 | **Leervoortgang kaart toonde geen attribuutwaarden** | Omgezet naar `type: attribute` rijen |
+
+> ⚠️ **Na installatie:** herstart Home Assistant volledig zodat de entity registry de nieuwe `binary_sensor.*` entity_ids aanmaakt. Bestaande `sensor.*` varianten van aanwezigheid/anomalie/goedkoopste-uren kunnen daarna verwijderd worden via Instellingen → Entiteiten.
+
+---
+
 ## 🆕 Wat is er nieuw in v1.9.0?
 
-### 🌱 CO2-intensiteit sensor (altijd actief, geen configuratie nodig)
+ (altijd actief, geen configuratie nodig)
 
 CloudEMS toont nu de CO2-intensiteit van het elektriciteitsnet in gCO2eq/kWh.
 

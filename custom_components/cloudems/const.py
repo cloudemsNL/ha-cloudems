@@ -2,7 +2,7 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
-VERSION = "1.9.0"
+VERSION = "1.13.0"
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"

@@ -16,6 +16,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
     entities = [
         NegativePriceBinarySensor(coordinator, entry),
         CheapHourBinarySensor(coordinator, entry),
+        # Moved from sensor.py so entity_ids use binary_sensor.* domain
+        CloudEMSOccupancyBinarySensor(coordinator, entry),
+        CloudEMSAnomalyBinarySensor(coordinator, entry),
+        CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 1),
+        CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 2),
+        CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 3),
     ]
     for phase in range(1, (phase_count + 1) if phase_count == 3 else 2):
         entities.append(PhaseLimitedBinarySensor(coordinator, entry, phase))
@@ -77,3 +83,81 @@ class PhaseLimitedBinarySensor(CloudEMSBaseBinary):
     def is_on(self):
         phases = (self.coordinator.data or {}).get("phase_status", {})
         return phases.get(self._phase, {}).get("limited", False)
+
+
+# ── Moved from sensor.py so entity_ids correctly use binary_sensor.* domain ──
+
+class CloudEMSCheapHourRankedBinarySensor(CloudEMSBaseBinary):
+    """True when the current hour is in the N cheapest hours of the day."""
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_icon = "mdi:clock-check"
+
+    def __init__(self, coordinator, entry, rank: int):
+        super().__init__(coordinator, entry)
+        self._rank = rank
+        self._attr_name = f"CloudEMS Energy · Cheapest {rank}h"
+        self._attr_unique_id = f"{entry.entry_id}_cheap_hour_{rank}"
+
+    @property
+    def is_on(self) -> bool:
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        return bool(ep.get(f"in_cheapest_{self._rank}h", False))
+
+    @property
+    def extra_state_attributes(self):
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        return {
+            "hours": ep.get(f"cheapest_{self._rank}h_hours", []),
+            "current_price": ep.get("current"),
+        }
+
+
+class CloudEMSOccupancyBinarySensor(CloudEMSBaseBinary):
+    """ON when home consumption pattern indicates someone is probably home."""
+    _attr_name = "CloudEMS Aanwezigheid (op basis van stroom)"
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
+    _attr_icon = "mdi:home-account"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_occupancy"
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("baseline", {}).get("is_home", False))
+
+    @property
+    def extra_state_attributes(self):
+        b = (self.coordinator.data or {}).get("baseline", {})
+        return {
+            "current_w":   b.get("current_w"),
+            "standby_w":   b.get("standby_w"),
+            "model_ready": b.get("model_ready", False),
+            "method":      "power_based",
+        }
+
+
+class CloudEMSAnomalyBinarySensor(CloudEMSBaseBinary):
+    """ON when power consumption is significantly above the learned normal."""
+    _attr_name = "CloudEMS Verbruik Anomalie"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:alert-circle-outline"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_anomaly"
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("baseline", {}).get("anomaly", False))
+
+    @property
+    def extra_state_attributes(self):
+        b = (self.coordinator.data or {}).get("baseline", {})
+        return {
+            "current_w":   b.get("current_w"),
+            "expected_w":  b.get("expected_w"),
+            "deviation_w": b.get("deviation_w"),
+            "sigma_w":     b.get("sigma_w"),
+            "model_ready": b.get("model_ready", False),
+        }
