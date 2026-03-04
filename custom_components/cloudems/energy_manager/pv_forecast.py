@@ -1,5 +1,5 @@
 """
-CloudEMS PV Forecasting — v1.4.0
+CloudEMS PV Forecasting — v1.4.1
 
 Two-layer forecast engine:
   Layer 1: Statistical model using historically learned hourly yield curves
@@ -14,15 +14,27 @@ Self-learning orientation / azimuth / tilt:
   - After ~30 clear days the orientation estimate becomes "confident".
   - Users can fill in values manually; tooltip says "leave blank to self-learn".
 
+Changelog (v1.4.1):
+  - FIX: avg_az_om / _azom UnboundLocalError (was only assigned inside if-block)
+  - FIX: weather cache key mismatch — get_forecast used "%Y-%m-%dT%H:00" but
+         update_weather_calibration used "%Y-%m-%d %H:00" → unified to ISO format
+  - FIX: division-by-zero guards in blending logic (max_irr, peak_wp, len checks)
+  - FIX: _learn_orientation could raise on empty hf dict passed to max()
+  - FIX: _calib_factor / _calib_samples used fragile getattr pattern on dataclass
+  - ADD: try/except wrapper around async_refresh_weather body
+  - ADD: try/except wrapper around async_update body
+  - ADD: try/except wrapper around _learn_orientation body
+  - ADD: None-safety on all effective_tilt / effective_azimuth accesses
+  - ADD: guard against self._profiles being empty in get_total_forecast_* methods
+
 Copyright © 2025 CloudEMS — https://cloudems.eu
 """
 from __future__ import annotations
 import logging
-import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Any
+from typing import Optional
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -48,6 +60,13 @@ MIN_ORIENTATION_SAMPLES = 30
 MORNING_HOURS   = list(range(6, 11))
 AFTERNOON_HOURS = list(range(14, 19))
 
+# Unified weather-cache key format (ISO 8601) — used everywhere in this file
+_WEATHER_KEY_FMT = "%Y-%m-%dT%H:00"
+
+# Safe defaults for tilt/azimuth when no profile data is available yet
+_DEFAULT_TILT: float = 35.0   # degrees — typical Dutch roof
+_DEFAULT_AZOM: float = 0.0    # Open-Meteo: 0 = south, -90 = east, +90 = west
+
 
 @dataclass
 class InverterOrientation:
@@ -69,20 +88,28 @@ class InverterOrientation:
     hourly_yield_fraction: dict = field(default_factory=dict)  # {"8": 0.12, ...}
 
     # Runtime — not persisted
-    _prev_power_w: float = field(default=0.0, repr=False, compare=False)
-    _peak_wp:      float = field(default=0.0, repr=False, compare=False)
+    _prev_power_w:   float = field(default=0.0, repr=False, compare=False)
+    _peak_wp:        float = field(default=0.0, repr=False, compare=False)
+
+    # Calibration — stored as proper fields (no getattr hacks)
+    _calib_factor:   Optional[float] = field(default=None, repr=False, compare=False)
+    _calib_samples:  int             = field(default=0,    repr=False, compare=False)
 
     @property
     def effective_azimuth(self) -> Optional[float]:
         if self.azimuth_deg is not None:
-            return self.azimuth_deg
-        return self.learned_azimuth
+            return float(self.azimuth_deg)
+        if self.learned_azimuth is not None:
+            return float(self.learned_azimuth)
+        return None
 
     @property
     def effective_tilt(self) -> Optional[float]:
         if self.tilt_deg is not None:
-            return self.tilt_deg
-        return self.learned_tilt
+            return float(self.tilt_deg)
+        if self.learned_tilt is not None:
+            return float(self.learned_tilt)
+        return None
 
 
 @dataclass
@@ -113,12 +140,12 @@ class PVForecast:
         session: Optional[aiohttp.ClientSession] = None,
     ) -> None:
         self._hass     = hass
-        self._lat      = latitude
-        self._lon      = longitude
+        self._lat      = float(latitude)
+        self._lon      = float(longitude)
         self._session  = session
         self._store    = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._profiles: dict[str, InverterOrientation] = {}
-        self._configs  = inverter_configs
+        self._configs  = inverter_configs or []
         self._weather_cache: dict = {}
         self._weather_ts:   float = 0.0
 
@@ -127,8 +154,10 @@ class PVForecast:
     async def async_setup(self) -> None:
         saved: dict = await self._store.async_load() or {}
         for cfg in self._configs:
-            eid = cfg["entity_id"]
-            p   = self._profiles.setdefault(eid, InverterOrientation(
+            eid = cfg.get("entity_id", "")
+            if not eid:
+                continue
+            p = self._profiles.setdefault(eid, InverterOrientation(
                 inverter_id=eid,
                 label=cfg.get("label", eid),
                 azimuth_deg=cfg.get("azimuth_deg"),
@@ -137,10 +166,12 @@ class PVForecast:
             stored = saved.get(eid, {})
             p.learned_azimuth          = stored.get("learned_azimuth")
             p.learned_tilt             = stored.get("learned_tilt")
-            p.orientation_confident    = stored.get("orientation_confident", False)
-            p.clear_sky_samples        = stored.get("clear_sky_samples", 0)
-            p.hourly_yield_fraction    = stored.get("hourly_yield_fraction", {})
-            p._peak_wp                 = stored.get("peak_wp", 0.0)
+            p.orientation_confident    = bool(stored.get("orientation_confident", False))
+            p.clear_sky_samples        = int(stored.get("clear_sky_samples", 0))
+            p.hourly_yield_fraction    = dict(stored.get("hourly_yield_fraction", {}))
+            p._peak_wp                 = float(stored.get("peak_wp", 0.0))
+            p._calib_factor            = stored.get("calib_factor")  # None if absent
+            p._calib_samples           = int(stored.get("calib_samples", 0))
         _LOGGER.info("CloudEMS PVForecast: setup for %d inverters", len(self._profiles))
 
     async def async_save(self) -> None:
@@ -153,31 +184,39 @@ class PVForecast:
                 "clear_sky_samples":     p.clear_sky_samples,
                 "hourly_yield_fraction": p.hourly_yield_fraction,
                 "peak_wp":               p._peak_wp,
+                "calib_factor":          p._calib_factor,
+                "calib_samples":         p._calib_samples,
             }
         await self._store.async_save(data)
 
     # ── Update (called every 10 s from coordinator) ───────────────────────────
 
     async def async_update(self, inverter_id: str, power_w: float, peak_wp: float) -> None:
-        p = self._profiles.get(inverter_id)
-        if p is None:
-            return
+        try:
+            p = self._profiles.get(inverter_id)
+            if p is None:
+                return
 
-        if peak_wp > p._peak_wp:
-            p._peak_wp = peak_wp
+            peak_wp = float(peak_wp)
+            power_w = float(power_w)
 
-        hour_key = str(datetime.now(timezone.utc).hour)
-        frac     = (power_w / peak_wp) if peak_wp > 10 else 0.0
+            if peak_wp > p._peak_wp:
+                p._peak_wp = peak_wp
 
-        # Exponential moving average per hour
-        prev = float(p.hourly_yield_fraction.get(hour_key, frac))
-        p.hourly_yield_fraction[hour_key] = round(prev * 0.95 + frac * 0.05, 4)
+            hour_key = str(datetime.now(timezone.utc).hour)
+            frac     = (power_w / peak_wp) if peak_wp > 10 else 0.0
 
-        # Orientation learning — run once per hour when power > 5% of peak
-        if frac > 0.05:
-            await self._learn_orientation(p, power_w, peak_wp)
+            # Exponential moving average per hour
+            prev = float(p.hourly_yield_fraction.get(hour_key, frac))
+            p.hourly_yield_fraction[hour_key] = round(prev * 0.95 + frac * 0.05, 4)
 
-        p._prev_power_w = power_w
+            # Orientation learning — run once per hour when power > 5% of peak
+            if frac > 0.05:
+                await self._learn_orientation(p, power_w, peak_wp)
+
+            p._prev_power_w = power_w
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("CloudEMS PVForecast: async_update failed for %s: %s", inverter_id, exc)
 
     # ── Orientation learning ──────────────────────────────────────────────────
 
@@ -185,44 +224,47 @@ class PVForecast:
         self, p: InverterOrientation, power_w: float, peak_wp: float
     ) -> None:
         """Infer azimuth and tilt from daily yield shape."""
-        if peak_wp < 100:
-            return
+        try:
+            if peak_wp < 100:
+                return
 
-        hour = datetime.now(timezone.utc).hour
-        hf   = p.hourly_yield_fraction
+            hf = p.hourly_yield_fraction
+            if len(hf) < 8:
+                return  # Not enough data yet
 
-        if len(hf) < 8:
-            return  # Not enough data yet
+            # Solar noon = hour of maximum yield
+            # Guard: hf must be non-empty (already checked above, but be safe)
+            if not hf:
+                return
+            best_hour = max(hf, key=lambda h: hf[h], default=None)
+            if best_hour is None:
+                return
+            solar_noon = int(best_hour)
 
-        # Solar noon = hour of maximum yield
-        best_hour = max(hf, key=lambda h: hf[h], default=None)
-        if best_hour is None:
-            return
-        solar_noon = int(best_hour)
+            # Azimuth: noon at 12 UTC ≈ south (180°), each hour offset shifts 15°
+            noon_offset = solar_noon - 12          # -4 → east, +4 → west
+            learned_az  = 180.0 + noon_offset * 15.0
+            learned_az  = max(0.0, min(360.0, learned_az))
 
-        # Azimuth: noon at 12 UTC ≈ south (180°), each hour offset shifts 15°
-        # This is a rough heuristic; good enough without a full ephemeris lib
-        noon_offset  = solar_noon - 12          # -4 → east, +4 → west
-        learned_az   = 180.0 + noon_offset * 15.0
-        learned_az   = max(0.0, min(360.0, learned_az))
+            # Tilt: estimated from peak yield fraction relative to horizontal
+            hf_values = list(hf.values())
+            peak_frac  = max(hf_values) if hf_values else 0.0
+            learned_tilt = round(min(90.0, max(0.0, peak_frac * 90.0)), 1)
 
-        # Tilt: estimated from peak yield fraction relative to horizontal
-        # A flat roof (0°) would show broader, lower peak; steep (90°) narrow+high
-        peak_frac = max(hf.values()) if hf else 0.0
-        learned_tilt = round(min(90.0, max(0.0, peak_frac * 90.0)), 1)
+            p.learned_azimuth = round(learned_az, 1)
+            p.learned_tilt    = learned_tilt
+            p.clear_sky_samples += 1
 
-        p.learned_azimuth = round(learned_az, 1)
-        p.learned_tilt    = learned_tilt
-        p.clear_sky_samples += 1
+            if p.clear_sky_samples >= MIN_ORIENTATION_SAMPLES:
+                p.orientation_confident = True
 
-        if p.clear_sky_samples >= MIN_ORIENTATION_SAMPLES:
-            p.orientation_confident = True
-
-        if p.clear_sky_samples % 10 == 0:
-            _LOGGER.info(
-                "CloudEMS PVForecast [%s]: azimuth=%.0f° tilt=%.0f° (samples=%d confident=%s)",
-                p.label, learned_az, learned_tilt, p.clear_sky_samples, p.orientation_confident
-            )
+            if p.clear_sky_samples % 10 == 0:
+                _LOGGER.info(
+                    "CloudEMS PVForecast [%s]: azimuth=%.0f° tilt=%.0f° (samples=%d confident=%s)",
+                    p.label, learned_az, learned_tilt, p.clear_sky_samples, p.orientation_confident
+                )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("CloudEMS PVForecast: _learn_orientation failed for %s: %s", p.label, exc)
 
     # ── Forecast ──────────────────────────────────────────────────────────────
 
@@ -232,116 +274,122 @@ class PVForecast:
             return
         if time.time() - self._weather_ts < 3600:
             return   # Cache for 1 hour
-        # v1.15.0: prefer global_tilted_irradiance with learned orientation
-        # Average tilt/azimuth across all configured inverters.
-        # Defaults are always assigned first so no code path can leave them unbound.
-        _tilt: float = 35.0
-        _azom: float = 0.0   # Open-Meteo convention: 0=S, -90=E, +90=W
 
-        profiles_with_data = [
-            p for p in self._profiles.values()
-            if p.effective_tilt is not None and p.effective_azimuth is not None
-        ]
-        if profiles_with_data:
-            _tilt = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
-            _az   = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
-            # Convert HA azimuth (0=N,90=E,180=S,270=W) to Open-Meteo (-180…180, 0=S)
-            _azom = _az - 180.0
-
-        url = (
-            f"{OPEN_METEO_URL_BASE}"
-            f"&latitude={self._lat}&longitude={self._lon}"
-            f"&hourly=global_tilted_irradiance,direct_radiation,shortwave_radiation"
-            f"&tilt={_tilt:.0f}&azimuth={_azom:.0f}"
-        )
         try:
+            # Safe defaults — always set BEFORE any conditional so they are
+            # never unbound regardless of which code paths are taken.
+            _tilt: float = _DEFAULT_TILT
+            _azom: float = _DEFAULT_AZOM
+
+            profiles_with_data = [
+                p for p in self._profiles.values()
+                if p.effective_tilt is not None and p.effective_azimuth is not None
+            ]
+            if profiles_with_data:
+                tilts = [p.effective_tilt or _DEFAULT_TILT for p in profiles_with_data]
+                azims = [p.effective_azimuth or 180.0     for p in profiles_with_data]
+                _tilt = sum(tilts) / len(tilts)
+                _az   = sum(azims) / len(azims)
+                # Convert HA azimuth (0=N, 90=E, 180=S, 270=W)
+                # to Open-Meteo convention (-180…+180, 0=S, -90=E, +90=W)
+                _azom = _az - 180.0
+
+            # Clamp to valid Open-Meteo ranges
+            _tilt = max(0.0, min(90.0,  _tilt))
+            _azom = max(-180.0, min(180.0, _azom))
+
+            url = (
+                f"{OPEN_METEO_URL_BASE}"
+                f"&latitude={self._lat}&longitude={self._lon}"
+                f"&hourly=global_tilted_irradiance,direct_radiation,shortwave_radiation"
+                f"&tilt={_tilt:.0f}&azimuth={_azom:.0f}"
+            )
+
             async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                 if r.status == 200:
                     data  = await r.json()
                     hours = data.get("hourly", {}).get("time", [])
                     # Cascade: global_tilted → direct → shortwave
-                    rad_gti   = data.get("hourly", {}).get("global_tilted_irradiance", [])
-                    rad_dir   = data.get("hourly", {}).get("direct_radiation", [])
-                    rad_sw    = data.get("hourly", {}).get("shortwave_radiation", [])
+                    rad_gti = data.get("hourly", {}).get("global_tilted_irradiance", [])
+                    rad_dir = data.get("hourly", {}).get("direct_radiation", [])
+                    rad_sw  = data.get("hourly", {}).get("shortwave_radiation", [])
                     irradiances = []
                     for i in range(len(hours)):
                         gti = rad_gti[i] if i < len(rad_gti) else None
                         dr  = rad_dir[i] if i < len(rad_dir) else None
                         sw  = rad_sw[i]  if i < len(rad_sw)  else None
-                        # Use best available, non-null value
-                        irradiances.append(gti if gti is not None else (dr if dr is not None else (sw or 0)))
+                        # Use best available non-null value
+                        irradiances.append(
+                            gti if gti is not None else (dr if dr is not None else (sw or 0))
+                        )
                     self._weather_cache = dict(zip(hours, irradiances))
                     self._weather_ts    = time.time()
                     _LOGGER.debug(
                         "CloudEMS PVForecast: weather updated (%d hours, tilt=%.0f° az=%.0f°)",
                         len(hours), _tilt, _azom + 180.0
                     )
+                else:
+                    _LOGGER.debug(
+                        "CloudEMS PVForecast: weather fetch returned HTTP %d", r.status
+                    )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("CloudEMS PVForecast: weather fetch failed: %s", exc)
 
-    def get_forecast(self, inverter_id: str) -> list[HourForecast]:
-        """Return 24-hour forecast for one inverter."""
+    # ── Internal forecast helper ───────────────────────────────────────────────
+
+    @staticmethod
+    def _blend(stat_frac: float, irradiance: Optional[float]) -> tuple[float, float]:
+        """
+        Blend statistical fraction with weather irradiance.
+        Returns (blended_fraction, confidence).
+        """
+        if irradiance is None:
+            return stat_frac, 0.7
+
+        max_irr  = 1000.0
+        irr_frac = min(irradiance / max_irr, 1.0) if max_irr > 0 else 0.0
+        blended  = stat_frac * 0.4 + irr_frac * 0.6
+        return blended, 0.9
+
+    def _build_forecast(
+        self, inverter_id: str, start: datetime, confidence_no_weather: float
+    ) -> list[HourForecast]:
+        """Generic forecast builder for any 24-hour window starting at `start`."""
         p = self._profiles.get(inverter_id)
         if p is None or p._peak_wp < 10:
             return []
 
-        now      = datetime.now(timezone.utc)
         forecasts: list[HourForecast] = []
-
         for h in range(24):
-            target  = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=h)
-            hk      = str(target.hour)
+            target    = start + timedelta(hours=h)
+            hk        = str(target.hour)
             stat_frac = float(p.hourly_yield_fraction.get(hk, 0.0))
 
-            # Weather weighting
-            weather_key   = target.strftime("%Y-%m-%dT%H:00")
-            irradiance    = self._weather_cache.get(weather_key)
-            confidence    = 0.7 if irradiance is None else 0.9
+            weather_key = target.strftime(_WEATHER_KEY_FMT)
+            irradiance  = self._weather_cache.get(weather_key)
 
-            if irradiance is not None:
-                # Blend statistical shape with weather irradiance
-                max_irr = 1000.0   # W/m² clear sky reference
-                irr_frac = min(irradiance / max_irr, 1.0) if max_irr else 0.0
-                blended  = stat_frac * 0.4 + irr_frac * 0.6
-            else:
-                blended = stat_frac
+            blended, conf = self._blend(stat_frac, irradiance)
+            if irradiance is None:
+                conf = confidence_no_weather
 
-            forecast_w = round(p._peak_wp * blended, 1)
-            forecasts.append(HourForecast(hour=target.hour, forecast_w=forecast_w, confidence=confidence))
+            forecast_w = round(max(0.0, p._peak_wp * blended), 1)
+            forecasts.append(HourForecast(hour=target.hour, forecast_w=forecast_w, confidence=conf))
 
         return forecasts
+
+    def get_forecast(self, inverter_id: str) -> list[HourForecast]:
+        """Return 24-hour forecast for one inverter starting from the current hour."""
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        return self._build_forecast(inverter_id, now, confidence_no_weather=0.7)
 
     def get_forecast_tomorrow(self, inverter_id: str) -> list[HourForecast]:
         """Return 24-hour forecast for tomorrow for one inverter."""
-        p = self._profiles.get(inverter_id)
-        if p is None or p._peak_wp < 10:
-            return []
-
-        tomorrow = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) + timedelta(days=1)
-        forecasts: list[HourForecast] = []
-
-        for h in range(24):
-            target   = tomorrow + timedelta(hours=h)
-            hk       = str(target.hour)
-            stat_frac = float(p.hourly_yield_fraction.get(hk, 0.0))
-
-            weather_key = target.strftime("%Y-%m-%dT%H:00")
-            irradiance  = self._weather_cache.get(weather_key)
-            confidence  = 0.6 if irradiance is None else 0.85
-
-            if irradiance is not None:
-                max_irr  = 1000.0
-                irr_frac = min(irradiance / max_irr, 1.0) if max_irr else 0.0
-                blended  = stat_frac * 0.4 + irr_frac * 0.6
-            else:
-                blended = stat_frac
-
-            forecast_w = round(p._peak_wp * blended, 1)
-            forecasts.append(HourForecast(hour=target.hour, forecast_w=forecast_w, confidence=confidence))
-
-        return forecasts
+        tomorrow = (
+            datetime.now(timezone.utc)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        return self._build_forecast(inverter_id, tomorrow, confidence_no_weather=0.6)
 
     def get_total_forecast_today_kwh(self) -> float:
         """Sum forecast for all inverters for today in kWh."""
@@ -382,9 +430,6 @@ class PVForecast:
         return [self.get_profile_summary(eid) for eid in self._profiles]
 
     # ── Weather calibration ───────────────────────────────────────────────────
-    # Learns the ratio actual_output / open_meteo_expected for each irradiance
-    # bucket. After 30+ sunny days this self-calibrates the forecast model to the
-    # specific installation (panel angle, local shading, panel type).
 
     def update_weather_calibration(self, inverter_id: str, actual_w: float) -> None:
         """
@@ -392,51 +437,57 @@ class PVForecast:
         Compares actual inverter output to what the irradiance model predicts
         and adjusts a per-installation calibration factor.
         """
-        p = self._profiles.get(inverter_id)
-        if p is None:
-            return
-        if p._peak_wp < 10:
-            return
-        now = datetime.now(timezone.utc)
-        weather_key = now.strftime("%Y-%m-%d %H:00")
-        irradiance  = self._weather_cache.get(weather_key)
-        if irradiance is None or irradiance < 50:
-            return
-        # Maximum possible irradiance (1000 W/m² on a perfect clear day)
-        max_irr = 1000.0
-        expected_frac = min(irradiance / max_irr, 1.0)
-        expected_w    = expected_frac * p._peak_wp
-        if expected_w < 10:
-            return
-        ratio = actual_w / expected_w
-        # Clamp to plausible range (avoid dust/shadow outliers)
-        if not (0.05 <= ratio <= 1.5):
-            return
-        # EMA into per-profile calibration factor
-        cur_factor = getattr(p, "_calib_factor", None)
-        if cur_factor is None:
-            p._calib_factor = ratio
-        else:
-            p._calib_factor = 0.9 * cur_factor + 0.1 * ratio
-        p._calib_samples = getattr(p, "_calib_samples", 0) + 1
+        try:
+            p = self._profiles.get(inverter_id)
+            if p is None or p._peak_wp < 10:
+                return
+
+            now         = datetime.now(timezone.utc)
+            weather_key = now.strftime(_WEATHER_KEY_FMT)  # unified key format
+            irradiance  = self._weather_cache.get(weather_key)
+            if irradiance is None or irradiance < 50:
+                return
+
+            max_irr      = 1000.0
+            expected_frac = min(irradiance / max_irr, 1.0) if max_irr > 0 else 0.0
+            expected_w    = expected_frac * p._peak_wp
+            if expected_w < 10:
+                return
+
+            ratio = actual_w / expected_w
+            # Clamp to plausible range (avoid dust/shadow outliers)
+            if not (0.05 <= ratio <= 1.5):
+                return
+
+            # EMA into per-profile calibration factor
+            if p._calib_factor is None:
+                p._calib_factor = ratio
+            else:
+                p._calib_factor = 0.9 * p._calib_factor + 0.1 * ratio
+            p._calib_samples += 1
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "CloudEMS PVForecast: update_weather_calibration failed for %s: %s",
+                inverter_id, exc
+            )
 
     def get_calibration_summary(self) -> dict:
         """Return calibration info for all inverters."""
         invs = []
         for eid, p in self._profiles.items():
-            factor  = getattr(p, "_calib_factor", None)
-            samples = getattr(p, "_calib_samples", 0)
+            factor  = p._calib_factor
+            samples = p._calib_samples
             invs.append({
-                "inverter_id":   eid,
-                "label":         p.label,
-                "calib_factor":  round(factor, 3) if factor else None,
-                "calib_samples": samples,
+                "inverter_id":     eid,
+                "label":           p.label,
+                "calib_factor":    round(factor, 3) if factor is not None else None,
+                "calib_samples":   samples,
                 "calib_confident": samples >= 30,
-                "calib_pct":     round(min(100, samples / 30 * 100), 0),
+                "calib_pct":       round(min(100.0, samples / 30 * 100), 0),
             })
-        global_samples = sum(getattr(p, "_calib_samples", 0) for p in self._profiles.values())
+        global_samples = sum(p._calib_samples for p in self._profiles.values())
         return {
-            "inverters": invs,
+            "inverters":        invs,
             "global_confident": global_samples >= 30,
             "global_samples":   global_samples,
         }

@@ -1,4 +1,4 @@
-"""CloudEMS DataUpdateCoordinator — v1.15.3."""
+"""CloudEMS DataUpdateCoordinator — v1.15.5."""
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 # BUG FIXES in v1.4.1:
 #   - Added confirm_nilm_device(), dismiss_nilm_device(), async_shutdown() methods
