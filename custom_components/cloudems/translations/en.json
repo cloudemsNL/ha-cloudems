@@ -18,7 +18,7 @@
       },
       "grid_connection": {
         "title": "⚡ Grid connection",
-        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.\n\n![]({diagram_url})",
+        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
         "data": {
           "phase_preset": "Grid connection & fuse size"
         },
@@ -67,7 +67,7 @@
       },
       "phase_sensors": {
         "title": "⚡ Phase Sensors",
-        "description": "Current (A), voltage (V) and power (W) per phase. DSMR5 meters with separate import/export per phase: fill in the export sensors.",
+        "description": "Current (A), voltage (V) and power (W) per phase. DSMR5 meters with separate import/export per phase: fill in the export sensors.\n\nShowing {phase_count} phase(s) based on your grid connection.\n\n![]({diagram_url})",
         "data": {
           "phase_sensors_L1": "L1 current sensor (A)",
           "phase_sensors_L2": "L2 current sensor (A)",
@@ -99,7 +99,7 @@
       },
       "solar_ev": {
         "title": "🌞 Solar & EV",
-        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.\n\n![]({diagram_url})",
+        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.",
         "data": {
           "solar_sensor": "Solar inverter power sensor (W or kW)",
           "battery_sensor": "Battery / storage power sensor (W or kW)",

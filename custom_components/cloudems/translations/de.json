@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "⚡ Willkommen bei CloudEMS v1.4",
-        "description": "**CloudEMS** ist dein intelligentes Energiemanagementsystem für Home Assistant.\n\n✅ NILM-Geräteerkennung · Phasenbegrenzung · Solar-Curtailment · EPEX-Preise · Dynamisches EV-Laden · Lastspitzenkappung\n\n📖 [Dokumentation & Hilfe]({support_url}) · ☕ [CloudEMS unterstützen]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "description": "**CloudEMS** ist dein intelligentes Energiemanagementsystem für Home Assistant.\n\n✅ NILM-Geräteerkennung · Phasenbegrenzung · Solar-Curtailment · EPEX-Preise · Dynamisches EV-Laden · Lastspitzenkappung\n\n📖 [Dokumentation & Hilfe]({support_url}) · ☕ [CloudEMS unterstützen]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})\n\n![]({diagram_url})",
         "data": {
           "energy_prices_country": "Land (EPEX dynamische Preise)"
         },
@@ -38,7 +38,7 @@
       },
       "grid_sensors": {
         "title": "🔌 Netzsensoren",
-        "description": "CloudEMS hat automatisch **{detected}** Sensor(en) erkannt.\n\n**Nettoensor:** Verwende diesen, wenn deine P1-Integration einen einzelnen Netzleistungswert liefert.\n**Getrennte Import/Export-Sensoren:** Nutze dies, wenn Import und Export separat gemeldet werden.\n\nDie Reservenetzspannung ({mains_voltage} V) wird verwendet, wenn kein Spannungssensor verbunden ist.",
+        "description": "CloudEMS hat automatisch **{detected}** Sensor(en) erkannt.\n\n**Nettoensor:** Verwende diesen, wenn deine P1-Integration einen einzelnen Netzleistungswert liefert.\n**Getrennte Import/Export-Sensoren:** Nutze dies, wenn Import und Export separat gemeldet werden.\n\nDie Reservenetzspannung ({mains_voltage} V) wird verwendet, wenn kein Spannungssensor verbunden ist.\n\n![]({diagram_url})",
         "data": {
           "use_separate_import_export": "Getrennte Import- und Export-Sensoren verwenden",
           "grid_sensor": "Nettoleistungssensor (W oder kW — positiv = Bezug)",
@@ -62,7 +62,7 @@
       },
       "phase_sensors": {
         "title": "⚡ Phasensensoren",
-        "description": "Strom (A), Spannung (V) und Leistung (W) pro Phase. DSMR5 Zähler mit separatem Import/Export pro Phase: Einspeisesensoren ausfüllen.",
+        "description": "Strom (A), Spannung (V) und Leistung (W) pro Phase. DSMR5 Zähler mit separatem Import/Export pro Phase: Einspeisesensoren ausfüllen.\n\nZeigt {phase_count} Phase(n) basierend auf deinem Anschluss.\n\n![]({diagram_url})",
         "data": {
           "phase_sensors_L1": "L1 Stromsensor (A)",
           "phase_sensors_L2": "L2 Stromsensor (A)",
@@ -111,7 +111,7 @@
       },
       "inverter_detail": {
         "title": "☀️ Wechselrichter {inverter_num} von {total}",
-        "description": "Konfiguriere Wechselrichter **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Neigung:** {tilt_tip}",
+        "description": "Konfiguriere Wechselrichter **{inverter_num}**.\n\n**Azimut:** {azimuth_tip}\n**Neigung:** {tilt_tip}\n\n![]({diagram_url})",
         "data": {
           "inv_sensor": "Leistungssensor (W oder kW)",
           "inv_control": "Schalter oder Dimmer (optional)",
@@ -187,7 +187,12 @@
         "data": {
           "p1_host": "P1 Gateway IP-Adresse",
           "p1_port": "P1 Gateway TCP-Port"
-        }
+        },
+        "description": "\n\n![]({diagram_url})"
+      },
+      "battery_detail": {
+        "title": "🔋 Batterij {battery_num} van {total}",
+        "description": "Configureer batterij {battery_num}."
       }
     }
   },

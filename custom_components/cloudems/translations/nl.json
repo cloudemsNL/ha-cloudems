@@ -18,7 +18,7 @@
       },
       "grid_connection": {
         "title": "⚡ Netaansluiting",
-        "description": "Kies de zekeringsgrootte die past bij jouw installatie. CloudEMS gebruikt deze limiet om overschrijding te voorkomen.\n\n![]({diagram_url})",
+        "description": "Kies de zekeringsgrootte die past bij jouw installatie. CloudEMS gebruikt deze limiet om overschrijding te voorkomen.",
         "data": {
           "phase_preset": "Aansluiting & zekeringswaarde"
         },
@@ -67,7 +67,7 @@
       },
       "phase_sensors": {
         "title": "⚡ Fase-sensoren",
-        "description": "Stroom (A), spanning (V) en vermogen (W) per fase. DSMR5 meters met afzonderlijke import/export per fase: vul de teruglevering-sensoren in.",
+        "description": "Stroom (A), spanning (V) en vermogen (W) per fase. DSMR5 meters met afzonderlijke import/export per fase: vul de teruglevering-sensoren in.\n\nToont {phase_count} fase(n) op basis van jouw aansluiting.\n\n![]({diagram_url})",
         "data": {
           "phase_sensors_L1": "L1 stroomsensor (A)",
           "phase_sensors_L2": "L2 stroomsensor (A)",
@@ -93,7 +93,7 @@
       },
       "solar_ev": {
         "title": "EV Laadpaal (optioneel)",
-        "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.\n\n![]({diagram_url})",
+        "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.",
         "data": {
           "solar_sensor": "Omvormer vermogenssensor (W of kW)",
           "battery_sensor": "Batterij / opslag vermogenssensor (W of kW)",
