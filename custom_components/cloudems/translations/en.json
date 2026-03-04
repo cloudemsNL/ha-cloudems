@@ -10,7 +10,10 @@
         },
         "data_description": {
           "energy_prices_country": "Select your country to fetch the correct EPEX day-ahead electricity prices.",
-          "wizard_mode": "Basic: quick setup with essential sensors. Advanced: full control over all sensors, inverters and P1."
+          "wizard_mode": "Basic: quick setup with essential sensors. Advanced: full control over all sensors, inverters and P1.",
+          "battery_sensor": "⚠️ Cloud batteries (e.g. Zonneplan) may have 30–300s delay. CloudEMS applies EMA smoothing automatically.",
+          "grid_sensor": "Must be in Watts (W), not kWh or kW. P1 sensors typically report in W.",
+          "solar_sensor": "Must be in Watts (W). Some inverters report in kW — use a template to multiply by 1000."
         }
       },
       "grid_connection": {
@@ -275,11 +278,14 @@
           "voltage_sensor_l3": "L3 voltage sensor",
           "power_sensor_l1": "L1 power sensor",
           "power_sensor_l2": "L2 power sensor",
-          "power_sensor_l3": "L3 power sensor"
+          "power_sensor_l3": "L3 power sensor",
+          "power_sensor_l1_export": "DSMR5 export L1 (W) — optional",
+          "power_sensor_l2_export": "DSMR5 export L2 (W) — optional",
+          "power_sensor_l3_export": "DSMR5 export L3 (W) — optional"
         }
       },
       "solar_ev_opts": {
-        "title": "☀️ Solar & EV",
+        "title": "EV Charger Settings",
         "data": {
           "battery_sensor": "Battery sensor",
           "ev_charger_entity": "EV charger entity",
@@ -379,10 +385,66 @@
           "price_include_tax": "Include energy tax",
           "price_include_btw": "Include VAT",
           "selected_supplier": "Energy supplier (for markup)",
-          "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected"
+          "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected",
+          "contract_type": "Contract type",
+          "fixed_import_price": "Fixed import tariff (€/kWh)",
+          "fixed_export_price": "Fixed feed-in tariff (€/kWh)"
+        }
+      },
+      "gas_opts": {
+        "title": "Gas & Heating Settings",
+        "data": {
+          "gas_sensor": "Gas meter sensor",
+          "gas_price_sensor": "Gas price sensor",
+          "gas_price_fixed": "Fixed gas price (€/m³)",
+          "boiler_efficiency": "Boiler efficiency",
+          "heat_pump_cop": "Heat pump COP (manual)",
+          "heat_pump_power_entity": "Heat pump power sensor (W)",
+          "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)"
         }
       }
     }
   },
-  "entity": {}
+  "entity": {
+    "sensor": {
+      "cloudems_occupancy": {
+        "name": "Occupancy",
+        "state": {
+          "home": "Home",
+          "away": "Away",
+          "sleeping": "Sleeping",
+          "vacation": "Vacation"
+        }
+      },
+      "cloudems_climate_preheat": {
+        "name": "Climate Pre-Heat Advice",
+        "state": {
+          "pre_heat": "Pre-heat",
+          "reduce": "Reduce",
+          "normal": "Normal"
+        }
+      },
+      "cloudems_pv_forecast_accuracy": {
+        "name": "PV Forecast Accuracy"
+      },
+      "cloudems_ema_diagnostics": {
+        "name": "Sensor EMA Diagnostics"
+      },
+      "cloudems_sensor_sanity": {
+        "name": "Sensor Sanity Guard"
+      },
+      "cloudems_heat_pump_cop_current": {
+        "name": "Heat Pump COP (current)",
+        "state": {}
+      },
+      "cloudems_heat_pump_cop_7c": {
+        "name": "Heat Pump COP at 7°C",
+        "state": {}
+      },
+      "cloudems_heat_pump_defrost_count": {
+        "name": "Heat Pump Defrost Cycles Today",
+        "state": {}
+      }
+    }
+  }
 }

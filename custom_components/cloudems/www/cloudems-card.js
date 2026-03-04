@@ -1,5 +1,5 @@
 /**
- * CloudEMS Dashboard Card — v1.10.1
+ * CloudEMS Dashboard Card — v1.15.3
  * Visual energy overview: flow diagram · NILM device cards · battery health ·
  * PV forecast · phase bars · EPEX price chart · EV charging · congestion alerts.
  * Copyright © 2025 CloudEMS — https://cloudems.eu
@@ -67,6 +67,12 @@ class CloudEMSCard extends LitElement {
       forecast_sensor:  "sensor.cloudems_solar_pv_forecast_today",
       hints_sensor:     "sensor.cloudems_sensor_hints",
       ev_sensor:        "sensor.cloudems_ev_laadstroom_dynamisch",
+      occupancy_sensor:   "sensor.cloudems_occupancy",
+      preheat_sensor:     "sensor.cloudems_climate_preheat",
+      pv_accuracy_sensor: "sensor.cloudems_pv_forecast_accuracy",
+      ema_diag_sensor:    "sensor.cloudems_ema_diagnostics",
+      sanity_sensor:      "sensor.cloudems_sensor_sanity",
+      thermal_sensor:     "sensor.cloudems_thermal_model",
       inverter_sensors: [],
       phase_sensors: [
         { label: "L1", entity: "sensor.cloudems_fase_l1_stroom", max_a: 25 },
@@ -137,6 +143,8 @@ class CloudEMSCard extends LitElement {
       { id: "prices",    label: "💶", title: "Prijzen" },
       { id: "ev",        label: "🚗", title: "EV Laden" },
       { id: "inverters", label: "🔆", title: "Omvormers" },
+      { id: "insights",  label: "🏠", title: "Inzichten" },
+      { id: "diagnosis", label: "🛡️", title: "Diagnose" },
     ];
 
     return html`
@@ -159,6 +167,7 @@ class CloudEMSCard extends LitElement {
           </div>
         </div>
 
+        ${this._renderSanityBanner()}
         <div class="tabs" role="tablist">
           ${TABS.map(t => html`
             <button class="tab ${this._activeTab === t.id ? "active" : ""}"
@@ -177,6 +186,8 @@ class CloudEMSCard extends LitElement {
           ${this._activeTab === "prices"    ? this._renderPrices()    : ""}
           ${this._activeTab === "ev"        ? this._renderEV(evA, evReason, price) : ""}
           ${this._activeTab === "inverters" ? this._renderInverters() : ""}
+          ${this._activeTab === "insights"  ? this._renderInsights()  : ""}
+          ${this._activeTab === "diagnosis" ? this._renderDiagnosis() : ""}
         </div>
       </ha-card>
     `;
@@ -261,6 +272,9 @@ class CloudEMSCard extends LitElement {
           <marker id="arr-sol" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="${sc}" opacity="0.8"/></marker>
         </defs>
       </svg>
+
+      <!-- Context bar ────────────────────── -->
+      ${this._renderContextBar()}
 
       <!-- Stats grid ─────────────────────── -->
       <div class="stat-grid">
@@ -553,6 +567,259 @@ class CloudEMSCard extends LitElement {
       </div>`;
   }
 
+
+  // ── Sanity banner ────────────────────────────────────────────────────────
+
+  _renderSanityBanner() {
+    const eid = this.config.sanity_sensor;
+    const issues = this._attr(eid, "issues", []) || [];
+    const hasCrit = issues.some(i => i.level === "critical");
+    const hasWarn = issues.some(i => i.level === "warning");
+    if (!issues.length) return "";
+    const col  = hasCrit ? "#ef4444" : "#f97316";
+    const bg   = hasCrit ? "#ef444415" : "#f9731615";
+    const summary = this._attr(eid, "summary", "Sensorfout gedetecteerd");
+    return html`
+      <div class="sanity-banner" style="background:${bg};border-color:${col}40">
+        <span>${hasCrit ? "🔴" : "🟠"}</span>
+        <span>${summary}</span>
+        <span class="sanity-badge" style="background:${col}">${issues.length}</span>
+      </div>`;
+  }
+
+  // ── Context bar (shown on Overzicht) ─────────────────────────────────────
+
+  _renderContextBar() {
+    const occEid   = this.config.occupancy_sensor;
+    const pheatEid = this.config.preheat_sensor;
+    const pvaccEid = this.config.pv_accuracy_sensor;
+
+    const occState   = occEid   ? this._attr(occEid,   "state",          null) : null;
+    const occConf    = occEid   ? this._attr(occEid,   "confidence",     null) : null;
+    const phMode     = pheatEid ? this._attr(pheatEid, "mode",           null) : null;
+    const phOffset   = pheatEid ? this._attr(pheatEid, "setpoint_offset_c", null) : null;
+    const pvAcc      = pvaccEid ? this._attr(pvaccEid, "mape_14d_pct",   null) : null;
+
+    if (!occState && !phMode && pvAcc === null) return "";
+
+    const occIco  = { home:"🏠", away:"🚶", sleeping:"😴", vacation:"✈️" }[occState] ?? "❓";
+    const phIco   = { pre_heat:"🔥", reduce:"❄️", normal:"✅" }[phMode] ?? "—";
+    const phLabel = { pre_heat:"Voorverwarmen", reduce:"Minderen", normal:"Normaal" }[phMode] ?? "";
+
+    return html`
+      <div class="ctx-bar">
+        ${occState ? html`
+          <div class="ctx-item">
+            <span class="ctx-ico">${occIco}</span>
+            <div>
+              <div class="ctx-lbl">${{ home:"Thuis", away:"Weg", sleeping:"Slapend", vacation:"Vakantie" }[occState] ?? occState}</div>
+              ${occConf !== null ? html`<div class="ctx-sub">${Math.round(occConf * 100)}% zekerheid</div>` : ""}
+            </div>
+          </div>` : ""}
+        ${phMode ? html`
+          <div class="ctx-item">
+            <span class="ctx-ico">${phIco}</span>
+            <div>
+              <div class="ctx-lbl">${phLabel}</div>
+              ${phOffset !== null ? html`<div class="ctx-sub">${phOffset > 0 ? "+" : ""}${phOffset}°C offset</div>` : ""}
+            </div>
+          </div>` : ""}
+        ${pvAcc !== null ? html`
+          <div class="ctx-item">
+            <span class="ctx-ico">☀️</span>
+            <div>
+              <div class="ctx-lbl">PV nauwkeurigheid</div>
+              <div class="ctx-sub">${pvAcc.toFixed(1)}% MAPE</div>
+            </div>
+          </div>` : ""}
+      </div>`;
+  }
+
+  // ── Insights tab ─────────────────────────────────────────────────────────
+
+  _renderInsights() {
+    const occEid   = this.config.occupancy_sensor;
+    const pheatEid = this.config.preheat_sensor;
+    const pvaccEid = this.config.pv_accuracy_sensor;
+    const thermalEid = this.config.thermal_sensor;
+
+    return html`
+      <div class="ins-wrap">
+        <!-- Aanwezigheid -->
+        <div class="ins-card">
+          <div class="ins-title">🏠 Aanwezigheid</div>
+          ${occEid ? html`
+            <div class="ins-row">
+              <span class="ins-key">Status</span>
+              <span class="ins-val">${{ home:"Thuis", away:"Weg", sleeping:"Slapend", vacation:"Vakantie" }[this._attr(occEid,"state","?")] ?? "?"}</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Zekerheid</span>
+              <span class="ins-val">${Math.round((this._attr(occEid,"confidence",0)||0)*100)}%</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Standby</span>
+              <span class="ins-val">${this._attr(occEid,"standby_w",null) !== null ? this._attr(occEid,"standby_w",0).toFixed(0)+" W" : "—"}</span>
+            </div>
+            <div class="ins-note">${this._attr(occEid,"advice","")}</div>
+          ` : html`<div class="ins-note">Voeg <code>occupancy_sensor</code> toe.</div>`}
+        </div>
+
+        <!-- Verwarmingsadvies -->
+        <div class="ins-card">
+          <div class="ins-title">🌡️ Verwarmingsadvies</div>
+          ${pheatEid ? html`
+            <div class="ins-row">
+              <span class="ins-key">Modus</span>
+              <span class="ins-val" style="color:${{ pre_heat:"#f97316", reduce:"#60a5fa", normal:"#4ade80" }[this._attr(pheatEid,"mode","normal")]||"#4ade80"}">
+                ${{ pre_heat:"Voorverwarmen", reduce:"Minderen", normal:"Normaal" }[this._attr(pheatEid,"mode","normal")] ?? "—"}
+              </span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Setpoint offset</span>
+              <span class="ins-val">${this._attr(pheatEid,"setpoint_offset_c",null) !== null ? (this._attr(pheatEid,"setpoint_offset_c",0) > 0 ? "+" : "") + this._attr(pheatEid,"setpoint_offset_c",0) + " °C" : "—"}</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Prijsverhouding</span>
+              <span class="ins-val">${this._attr(pheatEid,"price_ratio",null) !== null ? this._attr(pheatEid,"price_ratio",1).toFixed(2)+"×" : "—"}</span>
+            </div>
+            <div class="ins-note">${this._attr(pheatEid,"reason","")}</div>
+          ` : html`<div class="ins-note">Voeg <code>preheat_sensor</code> toe.</div>`}
+        </div>
+
+        <!-- PV nauwkeurigheid -->
+        <div class="ins-card">
+          <div class="ins-title">☀️ PV Prognose nauwkeurigheid</div>
+          ${pvaccEid ? html`
+            <div class="ins-row">
+              <span class="ins-key">MAPE 14d</span>
+              <span class="ins-val" style="color:${(this._attr(pvaccEid,"mape_14d_pct",100)||100) < 20 ? "#4ade80" : "#f97316"}">${this._attr(pvaccEid,"mape_14d_pct",null)?.toFixed(1) ?? "—"}%</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">MAPE 30d</span>
+              <span class="ins-val">${this._attr(pvaccEid,"mape_30d_pct",null)?.toFixed(1) ?? "—"}%</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Biasfactor</span>
+              <span class="ins-val">${this._attr(pvaccEid,"bias_factor",null)?.toFixed(2) ?? "—"}</span>
+            </div>
+          ` : html`<div class="ins-note">Voeg <code>pv_accuracy_sensor</code> toe.</div>`}
+        </div>
+
+        <!-- Warmtepomp COP -->
+        <div class="ins-card">
+          <div class="ins-title">🌡️ Warmtepomp COP</div>
+          ${this.config.cop_sensor ? (() => {
+            const copEid = this.config.cop_sensor;
+            const copCur   = this._attr(copEid,"cop_current",null);
+            const cop7c    = this._attr(copEid,"cop_at_7c",null);
+            const defrost  = this._attr(copEid,"defrost_today",0)||0;
+            const reliable = this._attr(copEid,"reliable",false);
+            const method   = {"direct":"Direct gemeten","thermal_model":"Thermisch model","formula":"Schatting"}[this._attr(copEid,"method","formula")]||"—";
+            return html\`
+              <div class="ins-row">
+                <span class="ins-key">COP nu</span>
+                <span class="ins-val" style="color:\${copCur ? (copCur >= 3 ? "#4ade80" : copCur >= 2 ? "#f97316" : "#ef4444") : "var(--c-muted)"}">\${copCur?.toFixed(2) ?? "—"}</span>
+              </div>
+              <div class="ins-row">
+                <span class="ins-key">COP bij 7°C</span>
+                <span class="ins-val">\${cop7c?.toFixed(2) ?? "leren…"}</span>
+              </div>
+              <div class="ins-row">
+                <span class="ins-key">Ontdooicycli</span>
+                <span class="ins-val">\${defrost} vandaag</span>
+              </div>
+              <div class="ins-row">
+                <span class="ins-key">Methode</span>
+                <span class="ins-val" style="color:var(--c-muted)">\${method}</span>
+              </div>
+              <div class="ins-note">\${reliable ? "✅ COP-curve is betrouwbaar geleerd" : "🎓 Nog aan het leren (3+ verwarmingsdagen nodig)"}</div>
+            \`;
+          })() : html\`<div class="ins-note">Voeg <code>cop_sensor</code> toe.</div>\`}
+        </div>
+
+        <!-- Thermisch huismodel -->
+        <div class="ins-card">
+          <div class="ins-title">🏗️ Thermisch huismodel</div>
+          ${thermalEid ? html`
+            <div class="ins-row">
+              <span class="ins-key">Warmteverlies</span>
+              <span class="ins-val">${this._attr(thermalEid,"w_per_k",null) !== null ? this._attr(thermalEid,"w_per_k",0).toFixed(0)+" W/°C" : "Aan het leren…"}</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Betrouwbaar</span>
+              <span class="ins-val">${this._attr(thermalEid,"reliable",false) ? "✅ Ja" : "🎓 Aan het leren"}</span>
+            </div>
+            <div class="ins-row">
+              <span class="ins-key">Verwarmingsdagen</span>
+              <span class="ins-val">${this._attr(thermalEid,"heating_days",0)}</span>
+            </div>
+            <div class="ins-note">${this._attr(thermalEid,"advice","")}</div>
+          ` : html`<div class="ins-note">Voeg <code>thermal_sensor</code> toe.</div>`}
+        </div>
+      </div>`;
+  }
+
+  // ── Diagnosis tab ─────────────────────────────────────────────────────────
+
+  _renderDiagnosis() {
+    const sanityEid = this.config.sanity_sensor;
+    const emaEid    = this.config.ema_diag_sensor;
+
+    const issues     = this._attr(sanityEid, "issues",        []) || [];
+    const frozen     = this._attr(emaEid,    "frozen_sensors",[]) || [];
+    const slowSens   = this._attr(emaEid,    "slow_sensors",  []) || [];
+    const spikesTotal = this._attr(emaEid,   "spikes_blocked", 0) || 0;
+
+    return html`
+      <div class="diag-wrap">
+        <!-- Sanity issues -->
+        <div class="diag-section">
+          <div class="diag-title">🛡️ Sensorsanity (${issues.length} meldingen)</div>
+          ${issues.length === 0
+            ? html`<div class="diag-ok">✅ Alle sensoren zijn correct geconfigureerd.</div>`
+            : issues.map(issue => html`
+              <div class="diag-issue ${issue.level}">
+                <div class="diag-issue-hdr">
+                  <span class="diag-badge ${issue.level}">${issue.level === "critical" ? "🔴 Kritiek" : "🟠 Waarschuwing"}</span>
+                  <span class="diag-code">${issue.code}</span>
+                </div>
+                <div class="diag-desc">${issue.description}</div>
+                <div class="diag-advice">💡 ${issue.advice}</div>
+              </div>`)}
+        </div>
+
+        <!-- Frozen sensors -->
+        ${frozen.length > 0 ? html`
+          <div class="diag-section">
+            <div class="diag-title">🧊 Bevroren sensoren (${frozen.length})</div>
+            ${frozen.map(eid => html`
+              <div class="diag-row">⚠️ <code>${eid}</code> — geen update in &gt; 5 min</div>`)}
+          </div>` : ""}
+
+        <!-- EMA spikes -->
+        ${spikesTotal > 0 ? html`
+          <div class="diag-section">
+            <div class="diag-title">⚡ Geblokkeerde spikes (${spikesTotal} totaal)</div>
+            <div class="diag-note">Uitschieters werden afgevangen om NILM-fouten te voorkomen.</div>
+          </div>` : ""}
+
+        <!-- Slow cloud sensors -->
+        ${slowSens.length > 0 ? html`
+          <div class="diag-section">
+            <div class="diag-title">☁️ Trage cloud-sensoren (${slowSens.length})</div>
+            ${slowSens.map(s => html`
+              <div class="diag-row">
+                <div><code>${s.entity_id}</code></div>
+                <div class="diag-sub">Update interval ≈ ${s.interval_s}s · α = ${s.alpha} · ${s.spikes_blocked} spikes geblokkeerd</div>
+              </div>`)}
+          </div>` : ""}
+
+        ${issues.length === 0 && frozen.length === 0 && spikesTotal === 0 && slowSens.length === 0
+          ? html`<div class="diag-ok" style="margin-top:16px">🎉 Alles ziet er goed uit! Geen diagnose-items.</div>` : ""}
+      </div>`;
+  }
+
   // ── Styles ───────────────────────────────────────────────────────────────
 
   static get styles() {
@@ -691,6 +958,49 @@ class CloudEMSCard extends LitElement {
       .hint-msg   { font-size:0.72rem; color:var(--c-text); line-height:1.5; }
       .hint-conf  { font-size:0.65rem; color:var(--c-sub); margin-top:4px; }
       .alert-bar.cong { margin-top:0; }
+      /* Sanity banner */
+      .sanity-banner { display:flex; gap:8px; align-items:center; padding:6px 14px; font-size:0.74rem; border-bottom:1px solid; }
+      .sanity-badge  { border-radius:9px; padding:1px 7px; font-size:0.68rem; color:#fff; font-weight:700; margin-left:auto; }
+
+      /* Context bar */
+      .ctx-bar  { display:flex; gap:4px; padding:8px 14px; border-bottom:1px solid var(--c-border); overflow-x:auto; scrollbar-width:none; }
+      .ctx-bar::-webkit-scrollbar { display:none; }
+      .ctx-item { display:flex; align-items:center; gap:7px; background:var(--c-surf); border-radius:9px; padding:6px 10px; border:1px solid var(--c-border); min-width:max-content; }
+      .ctx-ico  { font-size:1.1rem; }
+      .ctx-lbl  { font-size:0.73rem; font-weight:600; }
+      .ctx-sub  { font-size:0.62rem; color:var(--c-sub); }
+
+      /* Insights tab */
+      .ins-wrap { display:flex; flex-direction:column; gap:10px; }
+      .ins-card { background:var(--c-surf); border-radius:11px; padding:12px; border:1px solid var(--c-border); }
+      .ins-title { font-size:0.78rem; font-weight:700; margin-bottom:9px; color:var(--c-indigo); }
+      .ins-row  { display:flex; justify-content:space-between; align-items:center; padding:3px 0; border-bottom:1px solid var(--c-border); }
+      .ins-row:last-of-type { border-bottom:none; }
+      .ins-key  { font-size:0.72rem; color:var(--c-sub); }
+      .ins-val  { font-size:0.76rem; font-weight:600; }
+      .ins-note { font-size:0.68rem; color:var(--c-sub); margin-top:7px; line-height:1.5; }
+
+      /* Diagnosis tab */
+      .diag-wrap    { display:flex; flex-direction:column; gap:12px; }
+      .diag-section { background:var(--c-surf); border-radius:11px; padding:12px; border:1px solid var(--c-border); }
+      .diag-title   { font-size:0.78rem; font-weight:700; margin-bottom:9px; }
+      .diag-ok      { font-size:0.76rem; color:#4ade80; text-align:center; padding:8px 0; }
+      .diag-issue   { border-radius:8px; padding:9px 11px; margin-bottom:7px; border:1px solid; }
+      .diag-issue.critical { background:#ef444410; border-color:#ef444430; }
+      .diag-issue.warning  { background:#f9731610; border-color:#f9731630; }
+      .diag-issue-hdr { display:flex; gap:8px; align-items:center; margin-bottom:5px; }
+      .diag-badge   { font-size:0.65rem; font-weight:600; border-radius:6px; padding:1px 6px; }
+      .diag-badge.critical { background:#ef444420; color:#f87171; }
+      .diag-badge.warning  { background:#f9731620; color:#fb923c; }
+      .diag-code    { font-size:0.65rem; color:var(--c-sub); font-family:monospace; }
+      .diag-desc    { font-size:0.73rem; line-height:1.5; }
+      .diag-advice  { font-size:0.68rem; color:var(--c-sub); margin-top:5px; line-height:1.5; border-left:2px solid var(--c-indigo); padding-left:8px; }
+      .diag-row     { font-size:0.73rem; padding:4px 0; border-bottom:1px solid var(--c-border); }
+      .diag-row:last-child { border-bottom:none; }
+      .diag-sub     { font-size:0.65rem; color:var(--c-sub); margin-top:2px; }
+      .diag-note    { font-size:0.7rem; color:var(--c-sub); }
+      code { font-family:monospace; background:rgba(255,255,255,.08); padding:1px 4px; border-radius:3px; font-size:0.85em; }
+
     `;
   }
 }
@@ -701,6 +1011,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "cloudems-card",
   name:        "CloudEMS Dashboard",
-  description: "Energiestroomdiagram · NILM apparaatkaarten · PV prognose · Batterijgezondheid · EPEX · EV · Fasen (v1.10.1)",
+  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.15.3)",
   preview:     true,
 });

@@ -184,7 +184,7 @@
         }
       },
       "solar_ev_opts": {
-        "title": "☀️ Solar & E-Fahrzeug",
+        "title": "E-Auto Ladegerät Einstellungen",
         "data": {
           "battery_sensor": "Batterie-Sensor",
           "ev_charger_entity": "E-Ladestation Entity",
@@ -268,8 +268,72 @@
           "price_include_tax": "Inkl. Energiesteuer",
           "price_include_btw": "Inkl. MwSt.",
           "selected_supplier": "Energieversorger (für Aufschlag)",
-          "supplier_markup": "Eigener Aufschlag (€/kWh)"
+          "supplier_markup": "Eigener Aufschlag (€/kWh)",
+          "contract_type": "Vertragstyp",
+          "fixed_import_price": "Fester Importtarif (€/kWh)",
+          "fixed_export_price": "Fester Einspeisevergütung (€/kWh)"
         }
+      },
+      "gas_opts": {
+        "title": "Gas & Heizung Einstellungen",
+        "data": {
+          "gas_sensor": "Gaszähler Sensor",
+          "gas_price_sensor": "Gaspreissensor",
+          "gas_price_fixed": "Fester Gaspreis (€/m³)",
+          "boiler_efficiency": "Kesselwirkungsgrad",
+          "heat_pump_cop": "Wärmepumpe COP (manuell)",
+          "heat_pump_power_entity": "Wärmepumpe Leistungssensor (W)",
+          "heat_pump_thermal_entity": "Wärmepumpe Thermosensor (W, optional)"
+        }
+      },
+      "phase_sensors": {
+        "data": {
+          "power_sensor_l1_export": "DSMR5 Rückspeisung L1 (W) — optional",
+          "power_sensor_l2_export": "DSMR5 Rückspeisung L2 (W) — optional",
+          "power_sensor_l3_export": "DSMR5 Rückspeisung L3 (W) — optional"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cloudems_occupancy": {
+        "name": "Anwesenheit",
+        "state": {
+          "home": "Zuhause",
+          "away": "Abwesend",
+          "sleeping": "Schläft",
+          "vacation": "Urlaub"
+        }
+      },
+      "cloudems_climate_preheat": {
+        "name": "Klimaanlage Vorheizempfehlung",
+        "state": {
+          "pre_heat": "Vorheizen",
+          "reduce": "Reduzieren",
+          "normal": "Normal"
+        }
+      },
+      "cloudems_pv_forecast_accuracy": {
+        "name": "PV-Prognose-Genauigkeit"
+      },
+      "cloudems_ema_diagnostics": {
+        "name": "Sensor EMA Diagnose"
+      },
+      "cloudems_sensor_sanity": {
+        "name": "Sensor Plausibilitätsprüfung"
+      },
+      "cloudems_heat_pump_cop_current": {
+        "name": "Wärmepumpe COP (aktuell)",
+        "state": {}
+      },
+      "cloudems_heat_pump_cop_7c": {
+        "name": "Wärmepumpe COP bei 7°C",
+        "state": {}
+      },
+      "cloudems_heat_pump_defrost_count": {
+        "name": "Wärmepumpe Abtauzyklen Heute",
+        "state": {}
       }
     }
   }

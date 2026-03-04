@@ -1,4 +1,4 @@
-"""CloudEMS DataUpdateCoordinator — v1.4.1."""
+"""CloudEMS DataUpdateCoordinator — v1.15.3."""
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 # BUG FIXES in v1.4.1:
 #   - Added confirm_nilm_device(), dismiss_nilm_device(), async_shutdown() methods
@@ -61,6 +61,12 @@ from .energy.prices import EnergyPriceFetcher
 from .energy.limiter import CurrentLimiter
 from .energy_manager.power_calculator import PowerCalculator
 from .energy_manager.notification_engine import NotificationEngine
+from .energy_manager.sensor_ema import SensorEMALayer
+from .energy_manager.sensor_sanity import SensorSanityGuard
+from .energy_manager.absence_detector import AbsenceDetector
+from .energy_manager.climate_preheat import ClimatePreHeatAdvisor
+from .energy_manager.pv_accuracy import PVForecastAccuracyTracker
+from .energy_manager.heat_pump_cop import HeatPumpCOPLearner
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -189,6 +195,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._noise_baselines: dict = {}  # entity_id → EMA of stability ratio
         # Per-battery learned stats: {sensor_id: {max_charge_w, max_discharge_w, energy_accum_wh}}
         self._battery_learned: dict = {}
+
+        # v1.15.0: new intelligence modules
+        self._hp_cop:         Optional[object] = None
+        self._sensor_ema:     Optional[object] = None
+        self._sensor_sanity:  Optional[object] = None
+        self._absence:        Optional[object] = None
+        self._preheat:        Optional[object] = None
+        self._pv_accuracy:    Optional[object] = None
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -531,6 +545,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             )
             await self._pv_forecast.async_setup()
 
+        # v1.15.0: EMA smoothing + sanity guard (always active)
+        self._sensor_ema    = SensorEMALayer()
+        self._sensor_sanity = SensorSanityGuard(self._config)
+        # v1.15.0: Absence detector + climate preheat advisor
+        self._absence = AbsenceDetector(self.hass)
+        self._preheat = ClimatePreHeatAdvisor()
+        # v1.15.0: PV forecast accuracy tracker
+        self._pv_accuracy = PVForecastAccuracyTracker(self.hass)
+        await self._pv_accuracy.async_setup()
+        # v1.15.0: Heat pump COP learner
+        self._hp_cop = HeatPumpCOPLearner(self.hass)
+        await self._hp_cop.async_setup()
+
     # ── Update loop ───────────────────────────────────────────────────────────
 
     async def _async_update_data(self) -> Dict:
@@ -550,8 +577,33 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             current_price = self._prices.current_price if self._prices else 0.0
 
-            # EPEX price info (FIX: get_price_info() now exists)
-            price_info: dict = self._prices.get_price_info() if self._prices else {}
+            # v1.15.0: contract type — dynamic (EPEX) or fixed tariff
+            from .const import (CONF_CONTRACT_TYPE, CONTRACT_TYPE_FIXED,
+                                DEFAULT_CONTRACT_TYPE, CONF_FIXED_IMPORT_PRICE, CONF_FIXED_EXPORT_PRICE)
+            contract_type = self._config.get(CONF_CONTRACT_TYPE, DEFAULT_CONTRACT_TYPE)
+
+            if contract_type == CONTRACT_TYPE_FIXED:
+                # Fixed tariff: build synthetic price_info without EPEX
+                fixed_import = float(self._config.get(CONF_FIXED_IMPORT_PRICE, 0.25))
+                fixed_export = float(self._config.get(CONF_FIXED_EXPORT_PRICE, 0.09))
+                import datetime as _dt
+                now_h = _dt.datetime.now().hour
+                # Flat 24-hour schedule at fixed price
+                today_all = [
+                    {"hour": h, "price": fixed_import, "is_cheap": True} for h in range(24)
+                ]
+                price_info = {
+                    "current":        fixed_import,
+                    "feed_in":        fixed_export,
+                    "avg_today":      fixed_import,
+                    "today_all":      today_all,
+                    "contract_type":  CONTRACT_TYPE_FIXED,
+                    "is_cheap_hour":  True,
+                }
+            else:
+                # EPEX price info (FIX: get_price_info() now exists)
+                price_info: dict = self._prices.get_price_info() if self._prices else {}
+                price_info["contract_type"] = CONTRACT_TYPE_FIXED if contract_type == CONTRACT_TYPE_FIXED else "dynamic"
 
             # v1.13.0: apply tax/BTW/markup to produce all-in price fields
             price_info = self._apply_price_components(price_info)
@@ -629,6 +681,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     for ph, amp in (("L1", t.current_l1),("L2", t.current_l2),("L3", t.current_l3)):
                         if amp is not None:
                             self._nilm.update_power(ph, amp * mains_v, source="p1_i*u")
+
+            # v1.15.1: inject battery directly into NILM (prevents false edge detection)
+            batt_configs = self._config.get("battery_configs", [])
+            total_battery_w = 0.0
+            for bc in batt_configs:
+                b_eid = bc.get("power_sensor", "")
+                b_raw = self._read_state(b_eid) if b_eid else None
+                if b_raw is not None:
+                    bw = self._calc.to_watts(b_eid, b_raw)
+                    total_battery_w += (bw or 0.0)
+            if abs(total_battery_w) > 50:
+                self._nilm.inject_battery(total_battery_w, "Thuisbatterij")
 
             # Solar learner + PV forecast
             inverter_data      = []
@@ -936,6 +1000,59 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "last_outside_temp_c": therm_obj.last_outside_temp_c,
                 }
                 await self._thermal_model.async_maybe_save()
+
+            # v1.15.0: Outdoor temp fallback via Open-Meteo when no sensor configured
+            outside_temp_eid = self._config.get("outside_temp_entity", "")
+            outside_temp_c_val = self._read_state(outside_temp_eid) if outside_temp_eid else None
+            if outside_temp_c_val is None and self._thermal_model:
+                outside_temp_c_val = await self._thermal_model.async_fetch_outdoor_temp(
+                    session=self._session
+                )
+
+            # v1.15.0: Heat pump COP update
+            hp_cop_data: dict = {}
+            if self._hp_cop:
+                hp_eid = self._config.get("heat_pump_power_entity", "")
+                hp_th_eid = self._config.get("heat_pump_thermal_entity", "")
+                hp_electric_w = 0.0
+                hp_thermal_w = None
+                if hp_eid:
+                    raw = self._read_state(hp_eid)
+                    if raw is not None:
+                        hp_electric_w = self._calc.to_watts(hp_eid, raw)
+                else:
+                    # Derive from NILM heat pump detections
+                    for dev in nilm_devices_raw:
+                        if dev.get("device_type") in ("heat_pump", "air_source_heat_pump") and dev.get("running"):
+                            hp_electric_w += float(dev.get("current_power") or dev.get("power_w") or 0)
+                if hp_th_eid:
+                    raw_th = self._read_state(hp_th_eid)
+                    if raw_th is not None:
+                        hp_thermal_w = self._calc.to_watts(hp_th_eid, raw_th)
+                # Get w_per_k from thermal model
+                wk_val = thermal_data.get("w_per_k") if thermal_data else None
+                indoor_t = self._config.get("indoor_temp_entity", "")
+                indoor_c = self._read_state(indoor_t) if indoor_t else None
+                cop_result = self._hp_cop.update(
+                    electric_w    = hp_electric_w,
+                    outdoor_temp_c= outside_temp_c_val,
+                    thermal_w     = hp_thermal_w,
+                    w_per_k       = wk_val,
+                    indoor_temp_c = indoor_c,
+                )
+                hp_cop_data = {
+                    "cop_current":    cop_result.cop_current,
+                    "cop_at_7c":      cop_result.cop_at_7c,
+                    "cop_at_2c":      cop_result.cop_at_2c,
+                    "cop_at_minus5c": cop_result.cop_at_minus5c,
+                    "defrost_today":  cop_result.defrost_today,
+                    "outdoor_temp_c": cop_result.outdoor_temp_c,
+                    "reliable":       cop_result.reliable,
+                    "method":         cop_result.method,
+                    "curve":          cop_result.curve,
+                    "defrost_threshold_c": cop_result.defrost_threshold_c,
+                }
+                await self._hp_cop.async_maybe_save()
 
             # Feature 2: Flexible power score
             from .energy_manager.flex_score import calculate_flex_score
@@ -1287,6 +1404,97 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     )
                 await self._sensor_hints.async_save()
 
+            # v1.15.0: Sanity guard
+            sanity_data: dict = {}
+            battery_total_w: Optional[float] = None
+            if self._config.get(CONF_BATTERY_SENSOR, ""):
+                batt_raw = self._read_state(self._config.get(CONF_BATTERY_SENSOR, ""))
+                battery_total_w = self._calc.to_watts(
+                    self._config.get(CONF_BATTERY_SENSOR, ""), batt_raw
+                ) if batt_raw is not None else None
+            if self._sensor_sanity:
+                phase_c = {}
+                if self._limiter:
+                    phase_c = {ph: info.get("current_a", 0.0)
+                               for ph, info in self._limiter.get_phase_summary().items()
+                               if isinstance(info, dict)}
+                sanity_result = self._sensor_sanity.update(
+                    grid_w    = data.get("grid_power", 0.0),
+                    solar_w   = data.get("solar_power", 0.0),
+                    battery_w = battery_total_w,
+                    phase_currents = phase_c,
+                    max_current_a  = float(self._config.get(CONF_MAX_CURRENT_PER_PHASE, DEFAULT_MAX_CURRENT)),
+                    phases         = int(self._config.get(CONF_PHASE_COUNT, 1)),
+                    mains_v        = float(self._config.get(CONF_MAINS_VOLTAGE, DEFAULT_MAINS_VOLTAGE_V)),
+                )
+                sanity_data = {
+                    "has_critical": sanity_result.has_critical,
+                    "has_warning":  sanity_result.has_warning,
+                    "summary":      sanity_result.summary,
+                    "issues": [
+                        {
+                            "code":        i.code,
+                            "level":       i.level,
+                            "sensor_type": i.sensor_type,
+                            "entity_id":   i.entity_id,
+                            "description": i.description,
+                            "advice":      i.advice,
+                            "value":       round(i.value, 2),
+                            "expected":    i.expected,
+                        }
+                        for i in sanity_result.issues
+                    ],
+                }
+
+            # v1.15.0: EMA diagnostics
+            ema_diag: dict = {}
+            if self._sensor_ema:
+                ema_diag = self._sensor_ema.get_diagnostics()
+
+            # v1.15.0: Absence / occupancy detection
+            occupancy_data: dict = {}
+            if self._absence:
+                occ = self._absence.update(data.get("grid_power", 0.0))
+                occupancy_data = {
+                    "state":         occ.state,
+                    "confidence":    occ.confidence,
+                    "vacation_hours": occ.vacation_hours,
+                    "standby_w":     occ.standby_w,
+                    "advice":        occ.advice,
+                }
+
+            # v1.15.0: Climate pre-heat advisor
+            preheat_data: dict = {}
+            if self._preheat:
+                avg_p = price_info.get("avg_today") if price_info else None
+                cur_p = price_info.get("current")   if price_info else None
+                wk    = thermal_data.get("w_per_k") if thermal_data else None
+                th_rel = thermal_data.get("reliable", False) if thermal_data else False
+                adv = self._preheat.update(
+                    current_price    = cur_p,
+                    avg_price_today  = avg_p,
+                    w_per_k          = wk,
+                    thermal_reliable = th_rel,
+                )
+                preheat_data = {
+                    "mode":               adv.mode,
+                    "setpoint_offset_c":  adv.setpoint_offset_c,
+                    "reason":             adv.reason,
+                    "price_ratio":        adv.price_ratio,
+                    "w_per_k":            adv.w_per_k,
+                    "reliable":           adv.reliable,
+                }
+
+            # v1.15.0: PV forecast accuracy tracker
+            pv_accuracy_data: dict = {}
+            if self._pv_accuracy:
+                solar_w_now = max(0.0, data.get("solar_power", 0.0))
+                fc_now = sum(h.get("forecast_w", 0) for h in pv_forecast_hourly
+                             if h.get("hour") == __import__("datetime").datetime.now().hour)
+                self._pv_accuracy.tick(actual_w=solar_w_now, forecast_w=fc_now)
+                pv_accuracy_data = self._pv_accuracy.get_data()
+                await self._pv_accuracy.async_maybe_save()
+
             # Generate insights
             self._insights = self._generate_insights(
                 data, price_info, inverter_data, peak_data, balance_data,
@@ -1364,6 +1572,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "micro_mobility":       micro_mobility_data,
                 "clipping_loss":        clipping_loss_data,
                 "consumption_categories": categories_data,
+                # v1.15.0: new intelligence
+                "heat_pump_cop":    hp_cop_data,
+                "sensor_sanity":    sanity_data,
+                "ema_diagnostics":  ema_diag,
+                "occupancy":        occupancy_data,
+                "climate_preheat":  preheat_data,
+                "pv_accuracy":      pv_accuracy_data,
                 "notifications":        {},  # gevuld na dispatch hieronder
             }
 
@@ -1493,6 +1708,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         raw_solar = self._read_state(cfg.get(CONF_SOLAR_SENSOR,""))
         solar_w   = self._calc.to_watts(cfg.get(CONF_SOLAR_SENSOR,""), raw_solar) if raw_solar is not None else 0.0
 
+        # v1.15.0: apply EMA smoothing to delay-prone cloud sensors
+        if self._sensor_ema:
+            grid_eid  = cfg.get(CONF_GRID_SENSOR, "")
+            solar_eid = cfg.get(CONF_SOLAR_SENSOR, "")
+            if grid_eid and grid_power is not None:
+                grid_power = self._sensor_ema.update(grid_eid, grid_power)
+                import_w   = max(0.0, grid_power or 0.0)
+                export_w   = max(0.0, -(grid_power or 0.0))
+            if solar_eid and solar_w is not None:
+                solar_w = self._sensor_ema.update(solar_eid, solar_w) or 0.0
+
         return {
             "grid_power":   grid_power or 0.0,
             "import_power": import_w   or 0.0,
@@ -1512,12 +1738,28 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "L2": (CONF_PHASE_SENSORS+"_L2", CONF_VOLTAGE_L2, CONF_POWER_L2),
             "L3": (CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3),
         }
+        # v1.15.0: DSMR5 per-phase export sensors
+        # Bidirectionele meters meten teruglevering per fase apart.
+        # Netto fase vermogen = import_W − export_W
+        from .const import CONF_POWER_L1_EXPORT, CONF_POWER_L2_EXPORT, CONF_POWER_L3_EXPORT
+        phase_export_keys = {"L1": CONF_POWER_L1_EXPORT, "L2": CONF_POWER_L2_EXPORT, "L3": CONF_POWER_L3_EXPORT}
 
         for ph in phases:
             amp_key, volt_key, pwr_key = phase_conf[ph]
             raw_a = self._read_state(cfg.get(amp_key,""))
             raw_v = self._read_state(cfg.get(volt_key,""))
             raw_p = self._read_state(cfg.get(pwr_key,""))
+            # DSMR5 netto: subtract export if configured
+            exp_eid = cfg.get(phase_export_keys.get(ph,""), "")
+            if exp_eid and raw_p is not None:
+                raw_exp = self._read_state(exp_eid)
+                if raw_exp is not None:
+                    try:
+                        exp_w = self._calc.to_watts(exp_eid, raw_exp)
+                        imp_w = self._calc.to_watts(pwr_key, raw_p)
+                        raw_p = imp_w - exp_w   # netto (negative = export)
+                    except Exception:
+                        pass
 
             resolved = self._calc.resolve_phase(
                 ph,

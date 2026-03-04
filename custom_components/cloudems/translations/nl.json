@@ -10,7 +10,10 @@
         },
         "data_description": {
           "energy_prices_country": "Kies je land voor de juiste EPEX day-ahead stroomprijzen.",
-          "wizard_mode": "Basis: snel installeren met de belangrijkste sensoren. Geavanceerd: volledige controle over alle sensoren, omvormers en P1."
+          "wizard_mode": "Basis: snel installeren met de belangrijkste sensoren. Geavanceerd: volledige controle over alle sensoren, omvormers en P1.",
+          "battery_sensor": "⚠️ Cloud-batterijen (bijv. Zonneplan) kunnen 30–300s vertraging hebben. CloudEMS past EMA-smoothing toe.",
+          "grid_sensor": "Moet in Watt (W) zijn, niet kWh of kW. P1-sensoren geven doorgaans W.",
+          "solar_sensor": "Moet in Watt (W) zijn. Sommige omvormers geven kW — gebruik dan een template om × 1000 te doen."
         }
       },
       "grid_connection": {
@@ -76,12 +79,12 @@
         }
       },
       "solar_ev": {
-        "title": "🌞 Zonne-energie & EV",
+        "title": "EV Laadpaal (optioneel)",
         "description": "Koppel je omvormer, batterij en laadpaal. Alle velden zijn optioneel.\n\n![]({diagram_url})",
         "data": {
           "solar_sensor": "Omvormer vermogenssensor (W of kW)",
           "battery_sensor": "Batterij / opslag vermogenssensor (W of kW)",
-          "ev_charger_entity": "EV laadpaal setpoint (getal-entiteit)",
+          "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
           "enable_solar_dimmer": "Zon-energie afschalen bij negatieve EPEX-prijs",
           "negative_price_threshold": "Prijsdrempel voor afschaling (EUR/kWh)"
         }
@@ -196,6 +199,19 @@
           "selected_supplier": "Leverancier (voor standaard marge)",
           "supplier_markup": "Handmatige marge (€/kWh)"
         }
+      },
+      "gas_opts": {
+        "title": "Gas & Warmte",
+        "description": "Gasverbruik, boiler en warmtepomp instellingen",
+        "data": {
+          "gas_sensor": "Gasverbruik sensor (m³/u)",
+          "gas_price_sensor": "Gasprijs sensor (€/m³)",
+          "gas_price_fixed": "Vaste gasprijs (€/m³)",
+          "boiler_efficiency": "Ketelrendement (0.5–1.0)",
+          "heat_pump_cop": "Warmtepomp COP (handmatig, valt terug op geleerde waarde)",
+          "heat_pump_power_entity": "Warmtepomp elektrisch vermogen sensor (W)",
+          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor (W, optioneel)"
+        }
       }
     }
   },
@@ -234,16 +250,19 @@
           "voltage_sensor_l3": "L3 spanningssensor",
           "power_sensor_l1": "L1 vermogenssensor",
           "power_sensor_l2": "L2 vermogenssensor",
-          "power_sensor_l3": "L3 vermogenssensor"
+          "power_sensor_l3": "L3 vermogenssensor",
+          "power_sensor_l1_export": "DSMR5 teruglevering L1 (W) — optioneel",
+          "power_sensor_l2_export": "DSMR5 teruglevering L2 (W) — optioneel",
+          "power_sensor_l3_export": "DSMR5 teruglevering L3 (W) — optioneel"
         }
       },
       "solar_ev_opts": {
-        "title": "☀️ Zonne-energie & EV",
+        "title": "EV Laadpaal Instellingen",
         "data": {
           "battery_sensor": "Batterij sensor",
-          "ev_charger_entity": "EV laadpaal entiteit",
-          "enable_solar_dimmer": "Zon afschalen bij negatieve prijs",
-          "negative_price_threshold": "Prijsdrempel (EUR/kWh)",
+          "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
+          "enable_solar_dimmer": "Zonnebegrenzing inschakelen",
+          "negative_price_threshold": "Negatieve prijs drempel (€/kWh)",
           "gas_sensor": "Gasmeter sensor (m³) — optioneel, alternatief voor P1",
           "gas_price_sensor": "Gas prijs sensor (€/m³) — optioneel",
           "gas_price_fixed": "Vaste gasprijs (€/m³) — gebruikt als geen sensor",
@@ -338,10 +357,66 @@
           "price_include_tax": "Inclusief energiebelasting (EB)",
           "price_include_btw": "Inclusief BTW",
           "selected_supplier": "Energieleverancier (voor opslag)",
-          "supplier_markup": "Eigen opslag (€/kWh) — als 'Aangepaste markup' is geselecteerd"
+          "supplier_markup": "Eigen opslag (€/kWh) — als 'Aangepaste markup' is geselecteerd",
+          "contract_type": "Contracttype",
+          "fixed_import_price": "Vast invoertarief (€/kWh)",
+          "fixed_export_price": "Vast teruglevertarief (€/kWh)"
+        }
+      },
+      "gas_opts": {
+        "title": "Gas & Warmte Instellingen",
+        "data": {
+          "gas_sensor": "Gasverbruik sensor",
+          "gas_price_sensor": "Gasprijs sensor",
+          "gas_price_fixed": "Vaste gasprijs (€/m³)",
+          "boiler_efficiency": "Ketelrendement",
+          "heat_pump_cop": "Warmtepomp COP (handmatig)",
+          "heat_pump_power_entity": "Warmtepomp vermogen sensor",
+          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor"
         }
       }
     }
   },
-  "entity": {}
+  "entity": {
+    "sensor": {
+      "cloudems_occupancy": {
+        "name": "Aanwezigheid",
+        "state": {
+          "home": "Thuis",
+          "away": "Weg",
+          "sleeping": "Slapend",
+          "vacation": "Vakantie"
+        }
+      },
+      "cloudems_climate_preheat": {
+        "name": "Klimaat Verwarmingsadvies",
+        "state": {
+          "pre_heat": "Voorverwarmen",
+          "reduce": "Minderen",
+          "normal": "Normaal"
+        }
+      },
+      "cloudems_pv_forecast_accuracy": {
+        "name": "PV Prognose Nauwkeurigheid"
+      },
+      "cloudems_ema_diagnostics": {
+        "name": "Sensor EMA Diagnostiek"
+      },
+      "cloudems_sensor_sanity": {
+        "name": "Sensor Sanity Guard"
+      },
+      "cloudems_heat_pump_cop_current": {
+        "name": "Warmtepomp COP (actueel)",
+        "state": {}
+      },
+      "cloudems_heat_pump_cop_7c": {
+        "name": "Warmtepomp COP bij 7°C",
+        "state": {}
+      },
+      "cloudems_heat_pump_defrost_count": {
+        "name": "Warmtepomp Ontdooicycli Vandaag",
+        "state": {}
+      }
+    }
+  }
 }

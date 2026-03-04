@@ -470,6 +470,7 @@ SUPPLIER_MARKUPS = {
         "budget":     ("Budget Energie", 0.0165),
         "vandebron":  ("Vandebron", 0.0182),
         "tibber":     ("Tibber", 0.0149),
+        "zonneplan":  ("Zonneplan", 0.0169),
         "custom":     ("Aangepaste markup (zie opslag)", 0.0),
     },
     "BE": {
@@ -505,3 +506,25 @@ DEFAULT_PRICE_ALERT_HIGH   = 0.30                          # €/kWh
 CONF_INVERTER_RATED_POWER  = "inverter_rated_power_w"      # per-inverter rated capacity (W)
 
 CONF_NILM_MIN_CONFIDENCE_UI= "nilm_confidence_ui"          # alias for wizard display
+
+# ── v1.15.x additions ────────────────────────────────────────────────────────
+
+# Contract type: dynamic (EPEX day-ahead) or fixed (user-entered price)
+CONF_CONTRACT_TYPE          = "contract_type"
+CONTRACT_TYPE_DYNAMIC       = "dynamic"
+CONTRACT_TYPE_FIXED         = "fixed"
+DEFAULT_CONTRACT_TYPE       = CONTRACT_TYPE_DYNAMIC
+CONF_FIXED_IMPORT_PRICE     = "fixed_import_price"     # €/kWh, used when contract=fixed
+CONF_FIXED_EXPORT_PRICE     = "fixed_export_price"     # €/kWh, feed-in tariff when fixed
+
+# DSMR5 per-phase export sensors (separate from import on meters with bidirectional phases)
+CONF_POWER_L1_EXPORT        = "power_sensor_l1_export"
+CONF_POWER_L2_EXPORT        = "power_sensor_l2_export"
+CONF_POWER_L3_EXPORT        = "power_sensor_l3_export"
+
+# NILM config hash (for soft reset on sensor config change)
+CONF_NILM_CONFIG_HASH       = "nilm_config_hash"
+
+# Heat pump COP learning
+CONF_HEAT_PUMP_ENTITY       = "heat_pump_power_entity"    # entity measuring HP electric power
+CONF_HEAT_PUMP_THERMAL_ENTITY = "heat_pump_thermal_entity"  # optional: measured thermal output

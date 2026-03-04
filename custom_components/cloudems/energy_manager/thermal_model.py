@@ -25,6 +25,7 @@ Copyright © 2025 CloudEMS — https://cloudems.eu
 """
 from __future__ import annotations
 import logging
+import aiohttp
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -115,6 +116,16 @@ class ThermalHouseModel:
             "ThermalModel: geladen — %.0f W/°C (%d samples, %d verwarmingsdagen)",
             self._w_per_k, self._samples, len(self._heating_days_seen),
         )
+        # v1.15.0: Open-Meteo temperature fallback
+        self._openmeteo_temp: float | None = None
+        self._openmeteo_ts:   float = 0.0
+        self._openmeteo_lat:  float | None = None
+        self._openmeteo_lon:  float | None = None
+        try:
+            self._openmeteo_lat = self._hass.config.latitude
+            self._openmeteo_lon = self._hass.config.longitude
+        except Exception:
+            pass
 
     def update(self, heating_w: float, outside_temp_c: float) -> None:
         """
@@ -175,6 +186,46 @@ class ThermalHouseModel:
     def get_state(self) -> float:
         """Sensorwaarde: W/°C (0 als onbekend)."""
         return round(self._w_per_k, 1) if self._w_per_k > 0 else 0.0
+
+
+    async def async_fetch_outdoor_temp(self, session=None) -> float | None:
+        """Fetch current outdoor temperature from Open-Meteo when no HA sensor is configured.
+        
+        Inspired by the boiler project's Open-Meteo integration.
+        Returns cached value if last fetch was < 15 minutes ago.
+        """
+        import time as _t
+        if _t.time() - self._openmeteo_ts < 900:
+            return self._openmeteo_temp  # 15-min cache
+        if not self._openmeteo_lat or not self._openmeteo_lon:
+            return None
+        url = (
+            f"https://api.open-meteo.com/v1/forecast"
+            f"?latitude={self._openmeteo_lat:.4f}&longitude={self._openmeteo_lon:.4f}"
+            f"&current=temperature_2m&timezone=auto"
+        )
+        try:
+            sess = session
+            own_sess = False
+            if not sess:
+                sess = aiohttp.ClientSession()
+                own_sess = True
+            try:
+                async with sess.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    if r.status == 200:
+                        data = await r.json()
+                        t = data.get("current", {}).get("temperature_2m")
+                        if t is not None:
+                            self._openmeteo_temp = float(t)
+                            self._openmeteo_ts   = _t.time()
+                            _LOGGER.debug("ThermalModel: Open-Meteo outdoor temp %.1f°C", t)
+                            return self._openmeteo_temp
+            finally:
+                if own_sess:
+                    await sess.close()
+        except Exception as exc:
+            _LOGGER.debug("ThermalModel: Open-Meteo fetch failed: %s", exc)
+        return self._openmeteo_temp  # Return cached even if stale on failure
 
     async def async_maybe_save(self) -> None:
         """Sla op als er wijzigingen zijn en het interval verstreken is."""

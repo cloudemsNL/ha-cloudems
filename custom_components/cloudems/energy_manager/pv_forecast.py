@@ -33,11 +33,13 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_KEY     = "cloudems_pv_forecast_v1"
 STORAGE_VERSION = 1
 
-OPEN_METEO_URL = (
+# v1.15.0: Use global_tilted_irradiance (panel-angle-corrected) as primary source
+# Fallback cascade: global_tilted → direct_radiation → shortwave_radiation
+OPEN_METEO_URL_BASE = (
     "https://api.open-meteo.com/v1/forecast"
-    "?hourly=shortwave_radiation,diffuse_radiation"
-    "&forecast_days=2&timezone=auto"
+    "?forecast_days=2&timezone=auto"
 )
+OPEN_METEO_URL = OPEN_METEO_URL_BASE  # legacy, unused — URL built dynamically now
 
 # Minimum samples before orientation is "confident"
 MIN_ORIENTATION_SAMPLES = 30
@@ -230,16 +232,48 @@ class PVForecast:
             return
         if time.time() - self._weather_ts < 3600:
             return   # Cache for 1 hour
-        url = f"{OPEN_METEO_URL}&latitude={self._lat}&longitude={self._lon}"
+        # v1.15.0: prefer global_tilted_irradiance with learned orientation
+        # Average tilt/azimuth across all configured inverters
+        avg_tilt = 35.0
+        avg_az   = 180.0
+        profiles_with_data = [
+            p for p in self._profiles.values()
+            if p.effective_tilt is not None and p.effective_azimuth is not None
+        ]
+        if profiles_with_data:
+            avg_tilt = sum(p.effective_tilt or 35.0 for p in profiles_with_data) / len(profiles_with_data)
+            avg_az   = sum(p.effective_azimuth or 180.0 for p in profiles_with_data) / len(profiles_with_data)
+            # Convert HA azimuth (0=N,90=E,180=S,270=W) to Open-Meteo (-180…180, 0=S)
+            avg_az_om = avg_az - 180.0  # 0=S, -90=E, +90=W
+
+        url = (
+            f"{OPEN_METEO_URL_BASE}"
+            f"&latitude={self._lat}&longitude={self._lon}"
+            f"&hourly=global_tilted_irradiance,direct_radiation,shortwave_radiation"
+            f"&tilt={avg_tilt:.0f}&azimuth={avg_az_om:.0f}"
+        )
         try:
             async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
                 if r.status == 200:
                     data  = await r.json()
                     hours = data.get("hourly", {}).get("time", [])
-                    rad   = data.get("hourly", {}).get("shortwave_radiation", [])
-                    self._weather_cache = dict(zip(hours, rad))
+                    # Cascade: global_tilted → direct → shortwave
+                    rad_gti   = data.get("hourly", {}).get("global_tilted_irradiance", [])
+                    rad_dir   = data.get("hourly", {}).get("direct_radiation", [])
+                    rad_sw    = data.get("hourly", {}).get("shortwave_radiation", [])
+                    irradiances = []
+                    for i in range(len(hours)):
+                        gti = rad_gti[i] if i < len(rad_gti) else None
+                        dr  = rad_dir[i] if i < len(rad_dir) else None
+                        sw  = rad_sw[i]  if i < len(rad_sw)  else None
+                        # Use best available, non-null value
+                        irradiances.append(gti if gti is not None else (dr if dr is not None else (sw or 0)))
+                    self._weather_cache = dict(zip(hours, irradiances))
                     self._weather_ts    = time.time()
-                    _LOGGER.debug("CloudEMS PVForecast: weather updated (%d hours)", len(hours))
+                    _LOGGER.debug(
+                        "CloudEMS PVForecast: weather updated (%d hours, tilt=%.0f° az=%.0f°)",
+                        len(hours), avg_tilt, avg_az
+                    )
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("CloudEMS PVForecast: weather fetch failed: %s", exc)
 

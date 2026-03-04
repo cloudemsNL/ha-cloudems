@@ -314,7 +314,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "phase_count": str(phase_count)},
         )
 
-    # ── 4. Solar & EV ─────────────────────────────────────────────────────────
+    # ── 4. EV Charger ──────────────────────────────────────────────────────────
     async def async_step_solar_ev(self, user_input=None):
         s = self._suggestions
         if user_input is not None:
@@ -332,8 +332,6 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 **schema,
                 vol.Optional(CONF_EV_CHARGER_ENTITY):  _ent(["number","input_number"]),
-                vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=False): bool,
-                vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=DEFAULT_NEGATIVE_PRICE_THRESHOLD): vol.Coerce(float),
             }),
         )
 
@@ -672,8 +670,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value="sensors",        label="🔌 Grid Sensors"),
                         selector.SelectOptionDict(value="phase_sensors",  label="⚡ Phase Sensors"),
-                        selector.SelectOptionDict(value="solar_ev_opts",  label="☀️ Solar & EV"),
-                        selector.SelectOptionDict(value="inverters_opts", label="🔆 PV Inverters"),
+                        selector.SelectOptionDict(value="solar_ev_opts",  label="🔌 EV Laadpaal"),
+                        selector.SelectOptionDict(value="gas_opts",        label="🔥 Gas & Warmte"),
+                        selector.SelectOptionDict(value="inverters_opts", label="🔆 PV Omvormers & Zonnebegrenzing"),
                         selector.SelectOptionDict(value="batteries_opts", label="🔋 Batteries"),
                         selector.SelectOptionDict(value="prices_opts",    label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
@@ -724,9 +723,15 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3,
             ]:
                 schema[vol.Optional(k, description={"suggested_value": data.get(k) or None})] = _ent()
+        # v1.15.0: DSMR5 per-phase export sensors (bidirectional meters)
+        # Sommige slimme meters (DSMR5) meten teruglevering per fase apart.
+        # Als geconfigureerd: netto_fase = import_fase − export_fase.
+        for exp_key in ("power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"):
+            schema[vol.Optional(exp_key, description={"suggested_value": data.get(exp_key) or None})] = _ent()
         return self.async_show_form(step_id="phase_sensors", data_schema=vol.Schema(schema))
 
     async def async_step_solar_ev_opts(self, user_input=None):
+        """🔌 EV Laadpaal — options section."""
         data = self._data()
         if user_input is not None:
             return self._save(user_input)
@@ -735,13 +740,39 @@ class CloudEMSOptionsFlow(_OptionsBase):
             data_schema=vol.Schema({
                 vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
+                vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
+                vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
+            }),
+        )
+
+    async def async_step_gas_opts(self, user_input=None):
+        """🔥 Gas & Warmte — aparte sectie voor gas/boiler/warmtepomp."""
+        data = self._data()
+        if user_input is not None:
+            return self._save(user_input)
+        # Import needed constants with safe fallback
+        try:
+            from .const import CONF_GAS_SENSOR, CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED
+            from .const import CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP
+            from .const import DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP
+            from .const import CONF_HEAT_PUMP_ENTITY, CONF_HEAT_PUMP_THERMAL_ENTITY
+        except ImportError:
+            CONF_GAS_SENSOR = "gas_sensor"; CONF_GAS_PRICE_SENSOR = "gas_price_sensor"
+            CONF_GAS_PRICE_FIXED = "gas_price_fixed"; CONF_BOILER_EFFICIENCY = "boiler_efficiency"
+            CONF_HEAT_PUMP_COP = "heat_pump_cop"; DEFAULT_GAS_PRICE_EUR_M3 = 1.05
+            DEFAULT_BOILER_EFFICIENCY = 0.90; DEFAULT_HEAT_PUMP_COP = 3.5
+            CONF_HEAT_PUMP_ENTITY = "heat_pump_power_entity"
+            CONF_HEAT_PUMP_THERMAL_ENTITY = "heat_pump_thermal_entity"
+        return self.async_show_form(
+            step_id="gas_opts",
+            data_schema=vol.Schema({
                 vol.Optional(CONF_GAS_SENSOR, description={"suggested_value": data.get(CONF_GAS_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_GAS_PRICE_SENSOR, description={"suggested_value": data.get(CONF_GAS_PRICE_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_GAS_PRICE_FIXED, default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
                 vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
                 vol.Optional(CONF_HEAT_PUMP_COP, default=float(data.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=8.0)),
-                vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
-                vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
+                vol.Optional(CONF_HEAT_PUMP_ENTITY, description={"suggested_value": data.get(CONF_HEAT_PUMP_ENTITY) or None}): _ent(),
+                vol.Optional(CONF_HEAT_PUMP_THERMAL_ENTITY, description={"suggested_value": data.get(CONF_HEAT_PUMP_THERMAL_ENTITY) or None}): _ent(),
             }),
         )
 
@@ -872,7 +903,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
     # ── 🔋 Batteries (multi-battery, like multi-inverter) ──────────────────────
 
     async def async_step_prices_opts(self, user_input=None):
-        """Prices display: tax, BTW, supplier markup."""
+        """💶 Prijzen & Belasting — incl. contracttype (dynamisch / vast tarief)."""
+        from .const import (CONF_CONTRACT_TYPE, CONTRACT_TYPE_DYNAMIC, CONTRACT_TYPE_FIXED,
+                            DEFAULT_CONTRACT_TYPE, CONF_FIXED_IMPORT_PRICE, CONF_FIXED_EXPORT_PRICE)
         data = self._data()
         country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
         suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
@@ -880,11 +913,22 @@ class CloudEMSOptionsFlow(_OptionsBase):
             selector.SelectOptionDict(value=k, label=v[0])
             for k, v in suppliers.items()
         ]
+        contract_type = data.get(CONF_CONTRACT_TYPE, DEFAULT_CONTRACT_TYPE)
         if user_input is not None:
             return self._save(user_input)
         return self.async_show_form(
             step_id="prices_opts",
             data_schema=vol.Schema({
+                # v1.15.0: contract type — dynamisch (EPEX) of vast tarief
+                vol.Optional(CONF_CONTRACT_TYPE, default=contract_type): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value=CONTRACT_TYPE_DYNAMIC, label="⚡ Dynamisch (EPEX dag-vooruit)"),
+                        selector.SelectOptionDict(value=CONTRACT_TYPE_FIXED,   label="📋 Vast tarief"),
+                    ], mode="list")
+                ),
+                vol.Optional(CONF_FIXED_IMPORT_PRICE, default=float(data.get(CONF_FIXED_IMPORT_PRICE, 0.25))): vol.All(vol.Coerce(float), vol.Range(min=0, max=2.0)),
+                vol.Optional(CONF_FIXED_EXPORT_PRICE, default=float(data.get(CONF_FIXED_EXPORT_PRICE, 0.09))): vol.All(vol.Coerce(float), vol.Range(min=0, max=2.0)),
+                # Existing fields
                 vol.Optional(CONF_PRICE_INCLUDE_TAX, default=bool(data.get(CONF_PRICE_INCLUDE_TAX, False))): bool,
                 vol.Optional(CONF_PRICE_INCLUDE_BTW, default=bool(data.get(CONF_PRICE_INCLUDE_BTW, False))): bool,
                 vol.Optional(CONF_SELECTED_SUPPLIER, default=str(data.get(CONF_SELECTED_SUPPLIER, "none"))):

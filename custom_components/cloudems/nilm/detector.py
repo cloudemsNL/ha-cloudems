@@ -658,9 +658,75 @@ class NILMDetector:
     def get_device(self, device_id: str) -> Optional[DetectedDevice]:
         return self._devices.get(device_id)
 
+    def inject_battery(self, power_w: float, label: str = "Thuisbatterij") -> None:
+        """Directly inject battery as a NILM device (not via edge detection).
+        
+        This avoids battery charge/discharge transitions triggering false NILM events.
+        Battery is shown with 100% confidence and a dynamic power range.
+        """
+        import time as _t
+        device_id = "__battery_injected__"
+        if device_id not in self._devices:
+            from .database import DeviceDatabase
+            dev = DetectedDevice(
+                device_id   = device_id,
+                device_type = "battery",
+                name        = label,
+                confidence  = 1.0,
+                power_w     = abs(power_w),
+                phase       = "ALL",
+                source      = "injected",
+            )
+            self._devices[device_id] = dev
+
+        dev = self._devices[device_id]
+        dev.power_w    = round(abs(power_w), 1)
+        dev.is_on      = abs(power_w) > 50
+        dev.running    = abs(power_w) > 50
+        dev.confidence = 1.0
+        dev.name       = f"{label} ({'laden' if power_w > 0 else 'ontladen'})"
+        dev.last_seen  = _t.time()
+
     def get_devices_for_ha(self) -> List[dict]:
-        """Return all devices as dicts suitable for HA attributes."""
-        return [d.to_dict() for d in self._devices.values()]
+        """Return all devices as dicts suitable for HA attributes.
+        
+        v1.15.1: deduplicates variable-speed heat pump entries — merges
+        all heat_pump/heat type entries on the same phase into one entry
+        showing the power range instead of separate per-step entries.
+        """
+        raw = [d.to_dict() for d in self._devices.values()]
+
+        # Deduplicate heat pump entries per phase
+        hp_by_phase: dict = {}
+        others = []
+        for dev in raw:
+            dtype = dev.get("device_type", "")
+            if dtype in ("heat_pump", "air_source_heat_pump", "ground_source_heat_pump"):
+                phase = dev.get("phase", "ALL")
+                if phase not in hp_by_phase:
+                    hp_by_phase[phase] = []
+                hp_by_phase[phase].append(dev)
+            else:
+                others.append(dev)
+
+        merged_hps = []
+        for phase, devs in hp_by_phase.items():
+            if len(devs) == 1:
+                merged_hps.append(devs[0])
+                continue
+            powers = [d.get("power_w") or d.get("power_min") or 0 for d in devs]
+            base   = max(devs, key=lambda d: d.get("confidence", 0))
+            merged = dict(base)
+            merged["name"]      = "Warmtepomp"
+            merged["power_min"] = round(min(powers), 1)
+            merged["power_max"] = round(max(powers), 1)
+            merged["power_w"]   = round(sum(powers) / len(powers), 1)
+            merged["confidence"] = max(d.get("confidence", 0) for d in devs)
+            merged["is_on"]     = any(d.get("is_on") or d.get("running") for d in devs)
+            merged["running"]   = merged["is_on"]
+            merged_hps.append(merged)
+
+        return others + merged_hps
 
     @property
     def active_mode(self) -> str:
