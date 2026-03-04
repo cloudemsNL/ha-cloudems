@@ -356,7 +356,8 @@
           "inv_label": "Name (e.g. 'Roof South')",
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave empty to self-learn",
-          "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn"
+          "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn",
+          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn"
         }
       },
       "batteries_opts": {

@@ -1,4 +1,4 @@
-"""CloudEMS DataUpdateCoordinator — v1.16.0."""
+"""CloudEMS DataUpdateCoordinator — v1.16.1."""
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 # BUG FIXES in v1.4.1:
 #   - Added confirm_nilm_device(), dismiss_nilm_device(), async_shutdown() methods
@@ -117,6 +117,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._ai_provider = ai_provider
         self._nilm_min_confidence = float(config.get(CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE))
 
+        # v1.16: Ollama health-check state
+        self._ollama_cfg = ollama_cfg
+        self._ollama_health: dict = {
+            "status": "unknown",
+            "models_available": [],
+            "active_model_found": False,
+            "last_check_ts": None,
+            "last_error": None,
+        }
+        self._ollama_health_last_check: float = 0.0
+
         self._nilm = NILMDetector(
             model_path=model_path,
             api_key=config.get(CONF_CLOUD_API_KEY),
@@ -141,6 +152,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         self._prices_last_update: float = 0.0
         self._data: Dict = {}
+        self._last_battery_w: float = 0.0  # v1.16: for consumption category correction
+        self._acc_date: str = ""  # tracks date for pv_accuracy day rollover
 
         # Sub-modules
         self._dynamic_loader    = None
@@ -334,7 +347,55 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "solar_peak_w":    round(solar_peak_w, 0),
         }
 
-    def confirm_nilm_device(self, device_id: str, device_type: str, name: str) -> None:
+    async def async_check_ollama_health(self) -> None:
+        """Ping Ollama /api/tags to verify connectivity and model availability. v1.16"""
+        import time as _t, aiohttp as _aio
+        from datetime import datetime, timezone
+
+        cfg   = self._ollama_cfg
+        host  = cfg.get("host", "localhost")
+        port  = cfg.get("port", 11434)
+        model = cfg.get("model", "llama3")
+        url   = f"http://{host}:{port}/api/tags"
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        try:
+            async with _aio.ClientSession() as s:
+                async with s.get(url, timeout=_aio.ClientTimeout(total=5)) as r:
+                    if r.status == 200:
+                        data   = await r.json()
+                        models = [m.get("name", "") for m in data.get("models", [])]
+                        found  = any(model in m for m in models)
+                        self._ollama_health = {
+                            "status":              "online",
+                            "models_available":    models,
+                            "active_model":        model,
+                            "active_model_found":  found,
+                            "last_check_ts":       now_iso,
+                            "last_error":          None,
+                        }
+                        _LOGGER.debug("Ollama health OK — modellen: %s", models)
+                    else:
+                        self._ollama_health.update({
+                            "status":       "error",
+                            "last_check_ts": now_iso,
+                            "last_error":   f"HTTP {r.status}",
+                        })
+        except _aio.ClientConnectorError:
+            self._ollama_health.update({
+                "status":       "offline",
+                "last_check_ts": now_iso,
+                "last_error":   f"Kan niet verbinden met {host}:{port}",
+            })
+        except Exception as exc:  # noqa: BLE001
+            self._ollama_health.update({
+                "status":       "error",
+                "last_check_ts": now_iso,
+                "last_error":   str(exc),
+            })
+        self._ollama_health_last_check = _t.time()
+
+
         from .const import NILM_FEEDBACK_CORRECT
         self._nilm.set_feedback(device_id, NILM_FEEDBACK_CORRECT,
                                 corrected_name=name, corrected_type=device_type)
@@ -347,7 +408,42 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._nilm.set_feedback(device_id, feedback, corrected_name, corrected_type)
 
     async def async_shutdown(self) -> None:
-        """FIX: Called by __init__.py on unload. Was missing in v1.4.0."""
+        """Called by __init__.py on unload. Flush all dirty learning data before exit."""
+        # Flush every learning module that tracks dirty state
+        flush_targets = [
+            self._solar_learner,
+            self._pv_forecast,
+            self._clipping_loss,
+            self._shadow_detector,
+            self._pv_health,
+            self._device_drift,
+            self._micro_mobility,
+            self._notification_engine,
+            self._categories,
+            self._cost_forecaster,
+            self._thermal_model,
+            self._self_consumption,
+            self._day_classifier,
+            self._pv_accuracy,
+            getattr(self, "_home_baseline", None),
+            getattr(self, "_ev_session", None),
+            getattr(self, "_nilm_schedule", None),
+            getattr(self, "_gas_analysis", None),
+            getattr(self, "_battery_degradation", None),
+            getattr(self, "_sensor_hints", None),
+        ]
+        for module in flush_targets:
+            if module is None:
+                continue
+            for method_name in ("async_maybe_save", "async_save", "_async_save"):
+                method = getattr(module, method_name, None)
+                if callable(method):
+                    try:
+                        await method()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    break  # only call the first available save method
+
         if self._session and not self._session.closed:
             await self._session.close()
         if self._p1_reader:
@@ -576,6 +672,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 await self._prices.update()
                 self._prices_last_update = time.time()
 
+            # v1.16: Ollama health-check every 60 s (only when Ollama is configured)
+            if self._ollama_cfg.get("enabled") and time.time() - self._ollama_health_last_check > 60:
+                await self.async_check_ollama_health()
+
             if self._config.get(CONF_ENABLE_SOLAR_DIMMER, False):
                 threshold = float(self._config.get(CONF_NEGATIVE_PRICE_THRESHOLD, DEFAULT_NEGATIVE_PRICE_THRESHOLD))
                 is_neg    = self._prices.is_negative_price(threshold) if self._prices else False
@@ -699,6 +799,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     total_battery_w += (bw or 0.0)
             if abs(total_battery_w) > 50:
                 self._nilm.inject_battery(total_battery_w, "Thuisbatterij")
+            # v1.16: persist so consumption categories can subtract battery from totals
+            self._last_battery_w = total_battery_w
 
             # Solar learner + PV forecast
             inverter_data      = []
@@ -1364,6 +1466,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         nilm_devices  = nilm_devices_enriched,
                         standby_w     = standby_w,
                         grid_import_w = float((data or {}).get("grid_import_power", 0.0)),
+                        battery_w     = self._last_battery_w,
                     )
                     cat_obj = self._categories.get_data()
                     categories_data = {
@@ -1560,13 +1663,20 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._pv_accuracy:
                 try:
                     solar_w_now = max(0.0, data.get("solar_power", 0.0))
-                    fc_now = sum(h.get("forecast_w", 0) for h in pv_forecast_hourly
-                                 if h.get("hour") == __import__("datetime").datetime.now().hour)
                     # Support both tick() and tick_production() across versions
                     if hasattr(self._pv_accuracy, 'tick_production'):
                         self._pv_accuracy.tick_production(pv_w=solar_w_now)
                     else:
-                        self._pv_accuracy.tick(actual_w=solar_w_now, forecast_w=fc_now)
+                        self._pv_accuracy.tick(actual_w=solar_w_now)
+                    # Day rollover: finalize yesterday and record MAPE
+                    from datetime import datetime as _dt_acc
+                    today_str = _dt_acc.now().strftime("%Y-%m-%d")
+                    if self._acc_date and self._acc_date != today_str and pv_forecast_kwh:
+                        try:
+                            self._pv_accuracy.finalize_day(forecast_kwh=pv_forecast_kwh)
+                        except Exception as _fe:
+                            _LOGGER.debug("CloudEMS: pv_accuracy finalize_day failed: %s", _fe)
+                    self._acc_date = today_str
                     _acc = self._pv_accuracy.get_data()
                     pv_accuracy_data = {
                         "mape_14d_pct":       _acc.mape_14d,
@@ -1626,6 +1736,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "decision_log":         list(self._decision_log),
                 "insights":             self._insights,
                 "nilm_diagnostics":     self._nilm.get_diagnostics(),  # ← v1.7
+                "ollama_health":        self._ollama_health,            # ← v1.16
+                "ollama_diagnostics":   self._nilm.get_ollama_diagnostics(),  # ← v1.16
                 "ev_pid_state":         ev_pid_state,                   # ← v1.8
                 "phase_pid_states":     self._get_phase_pid_states(),   # ← v1.8
                 "co2_info":             co2_info,                       # ← v1.9

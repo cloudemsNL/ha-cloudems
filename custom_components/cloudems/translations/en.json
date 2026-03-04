@@ -312,7 +312,12 @@
           "battery_sensor": "Battery sensor",
           "ev_charger_entity": "EV charger entity",
           "enable_solar_dimmer": "Curtail solar at negative price",
-          "negative_price_threshold": "Negative price threshold (EUR/kWh)"
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)",
+          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1",
+          "gas_price_sensor": "Gas price sensor (€/m³) — optional",
+          "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
+          "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
         },
         "description": "Solar panel sensor, EV charger and solar curtailment."
       },
@@ -372,7 +377,8 @@
           "inv_label": "Name (e.g. 'Roof South')",
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave empty to self-learn",
-          "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn"
+          "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn",
+          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn"
         }
       },
       "inverters_opts": {

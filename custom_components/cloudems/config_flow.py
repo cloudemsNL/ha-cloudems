@@ -188,7 +188,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
       After ai_config    → advanced (P1 toggle → p1_config)
     """
 
-    VERSION = 1
+    VERSION = 3
 
     def __init__(self):
         self._config: Dict[str, Any] = {}
@@ -924,6 +924,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "min_power_pct":  float(user_input.get("inv_min_pct", 0.0)),
                 "azimuth_deg":    user_input.get("inv_azimuth") or None,
                 "tilt_deg":       user_input.get("inv_tilt") or None,
+                "rated_power_w":  float(user_input.get("inv_rated_power", 0)) or None,
             })
             self._inv_step += 1
             if self._inv_step < self._inv_count:
@@ -940,6 +941,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
                 vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
                 vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
+                vol.Optional("inv_rated_power", default=float(existing.get("rated_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
             }),
             description_placeholders={
                 "inverter_num": str(i),

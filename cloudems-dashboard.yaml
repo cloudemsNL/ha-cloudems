@@ -1,5 +1,5 @@
 ##############################################################################
-#  CloudEMS Dashboard — v1.16.0
+#  CloudEMS Dashboard — v1.16.1
 #
 #  Views:
 #    1. 🏠  Overzicht          — real-time huis, dag-type, flex score, alerts
@@ -103,17 +103,21 @@ views:
         content: |
           {% set c = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
           {% set total = state_attr('sensor.cloudems_verbruik_categorien', 'total_kwh_today') or 0 %}
+          {% set total_w = state_attr('sensor.cloudems_verbruik_categorien', 'total_w_now') or 0 %}
           {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') or '' %}
+          {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
+          {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
           {% if c | length == 0 %}
           *Categorieën worden opgebouwd gedurende de dag.*
           {% else %}
-          **Totaal: {{ total | round(1) }} kWh**
+          **Totaal huisverbruik: {{ total | round(1) }} kWh** *(batterijladen niet meegerekend)*
 
           | Categorie | Nu | Vandaag | % |
           |-----------|-----|---------|---|
           {% for cat in c -%}
           | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.kwh }} kWh | {{ cat.pct }}% |
           {% endfor %}
+          {% if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | — | — |{% endif %}
 
           *{{ insight }}*
           {% endif %}
@@ -398,7 +402,7 @@ views:
           |----------|--------|---------|-----------|-----------|
           {% for inv in invs -%}
           {% set conf_icon = '✅' if inv.orientation_confident else '🔍' %}
-          {% set pct = inv.clear_sky_samples / (inv.orientation_samples_needed or 30) * 100 | round(0) | int %}
+          {% set pct = (inv.clear_sky_samples / (inv.orientation_samples_needed or 30) * 100) | round(0) | int %}
           {% set pct = [pct, 100] | min %}
           | **{{ inv.label }}** | {{ inv.azimuth_compass or '?' }} ({{ inv.azimuth_learned | round(0) if inv.azimuth_learned else '?' }}°) | {{ (inv.tilt_learned | round(0) | string ~ '°') if inv.tilt_learned else '?' }} | {{ conf_icon }} | {{ pct }}% ({{ inv.clear_sky_samples }}/{{ inv.orientation_samples_needed }} metingen) |
           {% endfor %}
@@ -746,7 +750,10 @@ views:
           {% set top = state_attr('sensor.cloudems_verbruik_categorien', 'top_category') %}
           {% set pct = state_attr('sensor.cloudems_verbruik_categorien', 'top_category_pct') %}
           {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') %}
-          **Totaal vandaag:** {{ s }} kWh
+          {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
+          {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
+          **Totaal huisverbruik vandaag:** {{ s }} kWh *(excl. batterijladen)*
+          {% if batt_w > 50 %}🔋 Batterij actief: {{ batt_w }} W (niet meegeteld){% endif %}
           {% if top %}| Grootste verbruiker | {{ top }} ({{ pct }}%) |{% endif %}
           {% if insight %}*{{ insight }}*{% endif %}
           {% endif %}
@@ -756,14 +763,17 @@ views:
         content: |
           {% set pie = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
           {% set avg = state_attr('sensor.cloudems_verbruik_categorien', 'avg_breakdown_pct') or {} %}
+          {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
+          {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
           {% if pie | length == 0 %}
           *Categorieën worden opgebouwd gedurende de dag.*
           {% else %}
           | Categorie | Nu (W) | Vandaag | 30d gem. |
           |-----------|--------|---------|----------|
           {% for cat in pie -%}
-          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.pct }}% | – |
+          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.pct }}% | {{ avg[cat.name.split(' ')[-1].lower().replace(' ','_')] | default('—') }}% |
           {% endfor %}
+          {% if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | excl. | excl. |{% endif %}
           {% endif %}
 
       - type: horizontal-stack
@@ -1351,3 +1361,82 @@ views:
             name: L3 stroom (A)
           - entity: sensor.cloudems_grid_phase_l3_voltage
             name: L3 spanning (V)
+
+      # ── Ollama AI Diagnostics ─────────────────────────────────────────────
+      - type: markdown
+        title: "🤖 Ollama AI · Diagnostics"
+        content: |
+          {% set e = 'sensor.cloudems_ollama_diagnostics' %}
+          {% set s = states(e) %}
+          {% if s in ('unavailable', 'unknown') %}
+          ⏳ _Sensor wordt geladen... even geduld na herstart._
+          {% else %}
+          {% set err = state_attr(e, 'last_error') %}
+          {% set model = state_attr(e, 'model') or '—' %}
+          {% set host = state_attr(e, 'host') or '—' %}
+          {% set port = state_attr(e, 'port') or '—' %}
+          {% set found = state_attr(e, 'active_model_found') %}
+          {% set mode = state_attr(e, 'nilm_active_mode') or '—' %}
+          {% set total = state_attr(e, 'calls_total') | int(0) %}
+          {% set success = state_attr(e, 'calls_success') | int(0) %}
+          {% set failed = state_attr(e, 'calls_failed') | int(0) %}
+          {% set rate = state_attr(e, 'success_rate_pct') | float(0) %}
+          {% set last_ms = state_attr(e, 'last_response_ms') %}
+          {% set avg_ms = state_attr(e, 'avg_response_ms') %}
+          {% set last_ok = state_attr(e, 'last_success_ts') %}
+          {% set check_ts = state_attr(e, 'last_check_ts') %}
+          {% set enabled = state_attr(e, 'enabled') %}
+          {% if not enabled %}
+          ⚫ **Ollama is niet ingeschakeld.**
+          Activeer via Instellingen → CloudEMS → Configureren → AI & NILM.
+          {% else %}
+          **Status:** {% if s == 'online' %}🟢 Online{% elif s == 'offline' %}🔴 Offline{% elif s == 'error' %}🟠 Fout{% elif s == 'timeout' %}🟠 Timeout{% else %}⚪ {{ s }}{% endif %} &nbsp;·&nbsp; **NILM:** {% if mode == 'ollama' %}🟢 Ollama{% elif mode == 'database' %}🟡 Database (fallback){% elif mode == 'cloud_ai' %}🔵 Cloud AI{% else %}{{ mode }}{% endif %}
+
+          **Host:** `{{ host }}:{{ port }}` &nbsp;·&nbsp; **Model:** `{{ model }}`{% if s == 'online' %}{% if found %} ✅{% else %} ⚠️ niet gevonden{% endif %}{% endif %}
+
+          **Check:** {{ check_ts or '_nog niet_' }} &nbsp;·&nbsp; **Fout:** {{ err or '_geen_' }}
+
+          **Oproepen:** {{ total }} totaal · {{ success }} ok ({{ rate | round(0) }}%) · {{ failed }} mislukt &nbsp;·&nbsp; **Respons:** {% if last_ms %}{{ last_ms }}ms (nu) · {{ avg_ms }}ms (gem.){% else %}—{% endif %}
+          {% if s in ('offline', 'error', 'timeout') %}
+
+          ---
+          ⚠️ **Ollama niet bereikbaar — database wordt als fallback gebruikt.**
+          Reden: `{{ err or 'onbekend' }}`
+          - Ollama gestopt? → `systemctl status ollama`
+          - Verkeerd adres? → Instellingen → CloudEMS → AI & NILM
+          - Model ontbreekt? → `ollama pull {{ model }}`
+          - Firewall blokkeert poort `{{ port }}`?
+          {% endif %}
+          {% endif %}
+          {% endif %}
+
+      - type: markdown
+        content: |
+          {% set e = 'sensor.cloudems_ollama_diagnostics' %}
+          {% set s = states(e) %}
+          {% if s not in ('unavailable', 'unknown', 'disabled') and state_attr(e, 'enabled') %}
+          **📦 Geladen modellen:**
+          {% set models = state_attr(e, 'models_available') %}
+          {% set active = state_attr(e, 'model') %}
+          {% if models and models | length > 0 %}
+          {% for m in models %}- `{{ m }}`{% if active and active in m %} ✅{% endif %}
+          {% endfor %}
+          {% else %}
+          _Geen modellen gevonden of Ollama offline._
+          {% endif %}
+          {% endif %}
+
+      - type: markdown
+        content: |
+          {% set e = 'sensor.cloudems_ollama_diagnostics' %}
+          {% set s = states(e) %}
+          {% if s not in ('unavailable', 'unknown', 'disabled') and state_attr(e, 'enabled') %}
+          **🕐 Recente classificaties (laatste 10):**
+          {% set calls = state_attr(e, 'recent_calls') %}
+          {% if calls and calls | length > 0 %}
+          {% for c in calls[:10] %}`{{ c.ts }}` · {{ c.phase }} · **{{ c.delta_w }}W** → {{ c.result }}{% if c.ms %} _({{ c.ms }}ms)_{% endif %}
+          {% endfor %}
+          {% else %}
+          _Nog geen Ollama oproepen in deze sessie._
+          {% endif %}
+          {% endif %}

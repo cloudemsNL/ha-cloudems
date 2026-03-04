@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -73,6 +73,7 @@ class InverterProfile:
     label: str
     peak_power_w: float      = 0.0
     peak_power_w_7d: float   = 0.0
+    peak_power_w_7d_ts: str  = ""   # ISO timestamp of last 7d peak — used for sliding window expiry
     estimated_wp: float      = 0.0
     samples: int             = 0
     last_updated: str        = ""
@@ -131,6 +132,7 @@ class SolarPowerLearner:
                     label=d.get("label", label),
                     peak_power_w=float(d.get("peak_power_w", 0)),
                     peak_power_w_7d=float(d.get("peak_power_w_7d", 0)),
+                    peak_power_w_7d_ts=d.get("peak_power_w_7d_ts", ""),
                     estimated_wp=float(d.get("estimated_wp", 0)),
                     samples=int(d.get("samples", 0)),
                     last_updated=d.get("last_updated", ""),
@@ -182,8 +184,22 @@ class SolarPowerLearner:
                     changed = True
 
                 if power_w > profile.peak_power_w_7d:
-                    profile.peak_power_w_7d = round(power_w, 1)
+                    profile.peak_power_w_7d    = round(power_w, 1)
+                    profile.peak_power_w_7d_ts = now.isoformat()
                     changed = True
+                else:
+                    # Expire the 7d peak if it's older than 7 days
+                    if profile.peak_power_w_7d_ts:
+                        try:
+                            ts = datetime.fromisoformat(profile.peak_power_w_7d_ts)
+                            if ts.tzinfo is None:
+                                ts = ts.replace(tzinfo=timezone.utc)
+                            if (now - ts) > timedelta(days=7):
+                                profile.peak_power_w_7d    = round(power_w, 1)
+                                profile.peak_power_w_7d_ts = now.isoformat()
+                                changed = True
+                        except (ValueError, TypeError):
+                            profile.peak_power_w_7d_ts = now.isoformat()
 
                 if power_w > profile.hourly_peak_w.get(hour_key, 0.0):
                     profile.hourly_peak_w[hour_key] = round(power_w, 1)
@@ -359,6 +375,7 @@ class SolarPowerLearner:
                 "label":           p.label,
                 "peak_power_w":    p.peak_power_w,
                 "peak_power_w_7d": p.peak_power_w_7d,
+                "peak_power_w_7d_ts": p.peak_power_w_7d_ts,
                 "estimated_wp":    p.estimated_wp,
                 "samples":         p.samples,
                 "last_updated":    p.last_updated,

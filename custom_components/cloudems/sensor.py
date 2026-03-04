@@ -124,6 +124,8 @@ async def async_setup_entry(
         # v1.16.0: schaduwdetectie & clipping-voorspelling
         CloudEMSShadowDetectionSensor(coordinator, entry),
         CloudEMSClippingForecastSensor(coordinator, entry),
+        # v1.16.0: Ollama AI diagnostics
+        CloudEMSOllamaDiagSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -535,7 +537,7 @@ class CloudEMSInverterSensor(CoordinatorEntity, SensorEntity):
             "samples":             d.get("samples", 0),
             "confident":           d.get("confident", False),
             # Learning progress — how far along the self-learning cycle is (%)
-            "learn_confidence_pct": d.get("learn_pct", 0),
+            "learn_confidence_pct": d.get("orientation_learning_pct", 0),
             "orientation_learned":  d.get("orientation_confident", False),
         }
 
@@ -895,13 +897,27 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         devices = (self.coordinator.data or {}).get("nilm_devices", [])
         d = self.coordinator.data or {}
+        # v1.16.1: trim to essential fields only to stay under HA recorder 16 KB limit
+        slim_devices = [
+            {
+                "name":          dv.get("name", "Unknown"),
+                "device_type":   dv.get("device_type", "unknown"),
+                "is_on":         dv.get("is_on", False),
+                "power_w":       round(dv.get("current_power", 0), 1),
+                "confidence":    round(dv.get("confidence", 0) * 100, 0),
+                "confirmed":     dv.get("confirmed", False),
+                "phase":         dv.get("phase", ""),
+                "source":        dv.get("source", ""),
+            }
+            for dv in devices
+        ]
         return {
-            "devices":         devices,
-            "active_mode":     d.get("nilm_mode","database"),
+            "devices":         slim_devices,
+            "active_mode":     d.get("nilm_mode", "database"),
             "confirmed_count": sum(1 for dv in devices if dv.get("confirmed")),
             "pending_count":   sum(1 for dv in devices if dv.get("pending")),
             "active_count":    sum(1 for dv in devices if dv.get("is_on")),
-            "total_power_w":   sum(dv.get("current_power",0) for dv in devices if dv.get("is_on")),
+            "total_power_w":   sum(dv.get("current_power", 0) for dv in devices if dv.get("is_on")),
         }
 
 
@@ -1673,6 +1689,17 @@ class CloudEMSNILMDiagSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         diag = (self.coordinator.data or {}).get("nilm_diagnostics", {})
+        # v1.16.1: limit recent_events to 10 entries with essential fields only (16 KB recorder limit)
+        raw_events = diag.get("recent_events", [])
+        slim_events = [
+            {
+                "ts":        e.get("ts", ""),
+                "phase":     e.get("phase", ""),
+                "delta_w":   e.get("delta_w", 0),
+                "result":    e.get("result", ""),
+            }
+            for e in raw_events[:10]
+        ]
         return {
             # Summary counters
             "events_total":            diag.get("events_total", 0),
@@ -1694,8 +1721,8 @@ class CloudEMSNILMDiagSensor(CoordinatorEntity, SensorEntity):
             # Settings
             "power_threshold_w": diag.get("power_threshold_w", 25),
             "debounce_s":        diag.get("debounce_s", 2.0),
-            # Recent event log (last 20)
-            "recent_events":     diag.get("recent_events", []),
+            # Recent event log (last 10, trimmed)
+            "recent_events":     slim_events,
         }
 
 
@@ -2040,16 +2067,24 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
             "phases_detected":        phases_known,
             "inverters": [
                 {
-                    "label":             i.get("label"),
-                    "current_w":         i.get("current_w"),
-                    "utilisation_pct":   i.get("utilisation_pct"),
-                    "estimated_wp":      i.get("estimated_wp"),
-                    "azimuth_compass":   i.get("azimuth_compass"),
-                    "tilt_deg":          i.get("tilt_deg"),
-                    "phase":             i.get("phase"),
-                    "phase_certain":     i.get("phase_certain"),
-                    "clipping":          i.get("clipping"),
-                    "orientation_confident": i.get("orientation_confident"),
+                    "label":                    i.get("label"),
+                    "current_w":                i.get("current_w"),
+                    "peak_w":                   i.get("peak_w"),
+                    "peak_w_7d":                i.get("peak_w_7d"),
+                    "rated_power_w":            i.get("rated_power_w"),
+                    "clipping_ceiling_w":       i.get("clipping_ceiling_w"),
+                    "utilisation_pct":          i.get("utilisation_pct"),
+                    "estimated_wp":             i.get("estimated_wp"),
+                    "azimuth_compass":          i.get("azimuth_compass"),
+                    "azimuth_learned":          i.get("azimuth_learned"),
+                    "tilt_deg":                 i.get("tilt_deg"),
+                    "tilt_learned":             i.get("tilt_learned"),
+                    "phase":                    i.get("phase"),
+                    "phase_certain":            i.get("phase_certain"),
+                    "clipping":                 i.get("clipping"),
+                    "orientation_confident":    i.get("orientation_confident"),
+                    "clear_sky_samples":        i.get("clear_sky_samples"),
+                    "orientation_samples_needed": i.get("orientation_samples_needed"),
                 }
                 for i in invs
             ],
@@ -2116,6 +2151,8 @@ class CloudEMSInverterProfileSensor(CoordinatorEntity, SensorEntity):
             # Power & utilisation
             "utilisation_pct":        i.get("utilisation_pct"),
             "clipping":               i.get("clipping", False),
+            "clipping_ceiling_w":     i.get("clipping_ceiling_w"),
+            "rated_power_w":          i.get("rated_power_w"),
             "peak_w_alltime":         i.get("peak_w"),
             "peak_w_7d":              i.get("peak_w_7d"),
             "estimated_wp":           i.get("estimated_wp"),
@@ -2433,7 +2470,11 @@ class CloudEMSNILMScheduleSensor(CoordinatorEntity, SensorEntity):
             if d.get("schedule_unusual")
         ]
         return {
-            "schedules":         schedules,
+            "schedules":         [
+                # v1.16.1: only summary fields — hourly_pattern excluded (too large for recorder)
+                {k: v for k, v in s.items() if k != "hourly_pattern"}
+                for s in schedules
+            ],
             "total_devices":     len(schedules),
             "schedules_ready":   sum(1 for s in schedules if s.get("ready")),
             "unusual_now":       [d.get("name", d.get("device_type")) for d in unusual],
@@ -3089,6 +3130,7 @@ class CloudEMSConsumptionCategoriesSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         c = (self.coordinator.data or {}).get("consumption_categories", {})
         return {
+            "total_kwh_today":   c.get("total_kwh_today", 0.0),   # v1.16 fix: was missing, dashboard showed 0.0
             "top_category":      c.get("top_category", ""),
             "top_category_pct":  c.get("top_category_pct", 0.0),
             "breakdown_pct":     c.get("breakdown_pct", {}),
@@ -3420,4 +3462,85 @@ class CloudEMSClippingForecastSensor(CoordinatorEntity, SensorEntity):
             "forecasts":          forecasts,
             "total_clipped_kwh":  total,
             "advice":             advice,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.16.0 — Ollama AI Diagnostics sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSOllamaDiagSensor(CoordinatorEntity, SensorEntity):
+    """Ollama health + NILM activity diagnostics.
+
+    State  = online / offline / timeout / error / disabled
+    Attributes:
+        host, port, model              — configured Ollama endpoint
+        active_model_found             — is the configured model loaded in Ollama?
+        models_available               — list of all models Ollama reports
+        last_check_ts                  — ISO timestamp of last health-check
+        last_error                     — last error string, if any
+        calls_total                    — number of NILM events sent to Ollama (session)
+        calls_success                  — successful responses
+        calls_failed                   — failed/timeout responses
+        success_rate_pct               — success %
+        last_success_ts                — ISO timestamp of last successful call
+        last_response_ms               — last round-trip time (ms)
+        avg_response_ms                — rolling average round-trip (ms)
+        fallback_to_database           — True when Ollama is down and DB is used
+        recent_calls                   — ring buffer last 20 Ollama queries
+    """
+    _attr_name  = "CloudEMS Ollama · Diagnostics"
+    _attr_icon  = "mdi:head-cog-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ollama_diagnostics"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        health = (self.coordinator.data or {}).get("ollama_health", {})
+        diag   = (self.coordinator.data or {}).get("ollama_diagnostics", {})
+        if not diag.get("enabled"):
+            return "disabled"
+        return health.get("status", "unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d      = self.coordinator.data or {}
+        health = d.get("ollama_health", {})
+        diag   = d.get("ollama_diagnostics", {})
+
+        enabled     = diag.get("enabled", False)
+        total       = diag.get("calls_total", 0)
+        success     = diag.get("calls_success", 0)
+        status      = health.get("status", "unknown")
+        fallback    = enabled and status != "online"
+
+        return {
+            # Connection info
+            "host":                 diag.get("host", "localhost"),
+            "port":                 diag.get("port", 11434),
+            "model":                diag.get("model", "llama3"),
+            "active_model_found":   health.get("active_model_found", False),
+            "models_available":     health.get("models_available", []),
+            "last_check_ts":        health.get("last_check_ts"),
+            "last_error":           health.get("last_error") or diag.get("last_error"),
+            # Call stats
+            "calls_total":          total,
+            "calls_success":        success,
+            "calls_failed":         diag.get("calls_failed", 0),
+            "success_rate_pct":     diag.get("success_rate_pct", 0.0),
+            "last_success_ts":      diag.get("last_success_ts"),
+            "last_response_ms":     diag.get("last_response_ms", 0),
+            "avg_response_ms":      diag.get("avg_response_ms", 0),
+            # Fallback indicator
+            "fallback_to_database": fallback,
+            "nilm_active_mode":     d.get("nilm_mode", "database"),
+            # Recent activity
+            "recent_calls":         diag.get("recent_calls", []),
         }

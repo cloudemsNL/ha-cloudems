@@ -5,7 +5,8 @@
         "title": "⚡ Willkommen bei CloudEMS v1.4",
         "description": "**CloudEMS** ist dein intelligentes Energiemanagementsystem für Home Assistant.\n\n✅ NILM-Geräteerkennung · Phasenbegrenzung · Solar-Curtailment · EPEX-Preise · Dynamisches EV-Laden · Lastspitzenkappung\n\n📖 [Dokumentation & Hilfe]({support_url}) · ☕ [CloudEMS unterstützen]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})\n\n![]({diagram_url})",
         "data": {
-          "energy_prices_country": "Land (EPEX dynamische Preise)"
+          "energy_prices_country": "Land (EPEX dynamische Preise)",
+          "wizard_mode": "Setup mode"
         },
         "data_description": {
           "energy_prices_country": "Wähle dein Land für die korrekten EPEX Day-Ahead-Strompreise. Verfügbar: NL, BE, DE, FR, AT, CH, DK, NO, SE, FI."
@@ -164,7 +165,9 @@
         "description": "CloudEMS kann Geräte aus deinen Leistungsdaten erkennen (NILM).\n\n[CloudEMS API-Schlüssel anfordern]({premium_url})",
         "data": {
           "cloud_api_key": "CloudEMS Cloud-API-Schlüssel (optional)",
-          "ollama_enabled": "Ollama lokale KI für NILM aktivieren"
+          "ollama_enabled": "Ollama lokale KI für NILM aktivieren",
+          "ai_provider": "AI provider for NILM",
+          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)"
         }
       },
       "ollama_config": {
@@ -192,7 +195,44 @@
       },
       "battery_detail": {
         "title": "🔋 Batterij {battery_num} van {total}",
-        "description": "Configureer batterij {battery_num}."
+        "description": "Configureer batterij {battery_num}.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, + = charging, - = discharging)",
+          "bat_soc_sensor": "State of Charge sensor (%) — optional",
+          "bat_capacity_kwh": "Capacity (kWh)",
+          "bat_max_charge_w": "Max charge power (W)",
+          "bat_max_discharge_w": "Max discharge power (W)",
+          "bat_charge_entity": "Charge setpoint entity — optional",
+          "bat_discharge_entity": "Discharge setpoint entity — optional",
+          "bat_label": "Name (e.g. Home Battery)"
+        }
+      },
+      "grid_connection": {
+        "title": "⚡ Grid connection",
+        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
+        "data": {
+          "phase_preset": "Grid connection & fuse size"
+        },
+        "data_description": {
+          "phase_preset": "E.g. 3×25A = 3-phase with 25 A per phase. Select 'Custom' to enter values manually."
+        }
+      },
+      "battery_count": {
+        "title": "🔋 Batteries — Count",
+        "description": "How many battery systems do you want to configure?\n\nEach battery is configured individually with a power sensor, SoC and capacity.",
+        "data": {
+          "battery_count": "Number of batteries"
+        }
+      },
+      "prices": {
+        "title": "💶 Prices & Tax",
+        "description": "Configure energy tax and supplier markup for accurate cost calculations.",
+        "data": {
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT (21%)",
+          "selected_supplier": "Supplier (for default markup)",
+          "supplier_markup": "Manual markup (€/kWh)"
+        }
       }
     }
   },
@@ -227,7 +267,12 @@
           "battery_sensor": "Batterie-Sensor",
           "ev_charger_entity": "E-Ladestation Entity",
           "enable_solar_dimmer": "Solar-Curtailment bei Negativpreis",
-          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)"
+          "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)",
+          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1",
+          "gas_price_sensor": "Gas price sensor (€/m³) — optional",
+          "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
+          "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
         },
         "description": "PV-Sensor, Ladepunkt und Solarabschaltung."
       },
@@ -251,7 +296,9 @@
           "ollama_enabled": "Ollama aktiviert",
           "ollama_host": "Ollama-Host",
           "ollama_port": "Ollama-Port",
-          "ollama_model": "Ollama-Modell"
+          "ollama_model": "Ollama-Modell",
+          "ai_provider": "AI provider",
+          "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)"
         }
       },
       "advanced_opts": {
@@ -259,7 +306,13 @@
         "data": {
           "p1_enabled": "P1 aktiviert",
           "p1_host": "P1-Gateway-IP",
-          "p1_port": "P1-Gateway-Port"
+          "p1_port": "P1-Gateway-Port",
+          "congestion_threshold_w": "Grid congestion threshold (W)",
+          "congestion_price_threshold": "Congestion price threshold (€/kWh)",
+          "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
+          "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
+          "battery_degradation_enabled": "Track battery degradation",
+          "congestion_enabled": "Enable grid congestion detection"
         }
       },
       "inverter_detail_opts": {
@@ -332,7 +385,16 @@
         "data": {
           "power_sensor_l1_export": "DSMR5 Rückspeisung L1 (W) — optional",
           "power_sensor_l2_export": "DSMR5 Rückspeisung L2 (W) — optional",
-          "power_sensor_l3_export": "DSMR5 Rückspeisung L3 (W) — optional"
+          "power_sensor_l3_export": "DSMR5 Rückspeisung L3 (W) — optional",
+          "phase_sensors_L1": "L1 current sensor",
+          "phase_sensors_L2": "L2 current sensor",
+          "phase_sensors_L3": "L3 current sensor",
+          "voltage_sensor_l1": "L1 voltage sensor",
+          "voltage_sensor_l2": "L2 voltage sensor",
+          "voltage_sensor_l3": "L3 voltage sensor",
+          "power_sensor_l1": "L1 power sensor",
+          "power_sensor_l2": "L2 power sensor",
+          "power_sensor_l3": "L3 power sensor"
         },
         "title": "⚡ Phasensensoren",
         "description": "Strom, Spannung und Leistung pro Phase. DSMR5 bidirektionaler Zähler: auch Einspeisesensoren für Nettophasenleistung ausfüllen."

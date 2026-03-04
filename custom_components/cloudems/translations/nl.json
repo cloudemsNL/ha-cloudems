@@ -291,7 +291,12 @@
           "battery_sensor": "Batterij sensor",
           "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
           "enable_solar_dimmer": "Zonnebegrenzing inschakelen",
-          "negative_price_threshold": "Negatieve prijs drempel (€/kWh)"
+          "negative_price_threshold": "Negatieve prijs drempel (€/kWh)",
+          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1",
+          "gas_price_sensor": "Gas price sensor (€/m³) — optional",
+          "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
+          "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
         },
         "description": "Zonnepaneel sensor, EV laadpaal en zonnebegrenzing."
       },

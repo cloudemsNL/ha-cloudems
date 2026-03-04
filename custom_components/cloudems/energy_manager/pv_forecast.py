@@ -39,6 +39,7 @@ from typing import Optional
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+import homeassistant.util.dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ class PVForecast:
             if peak_wp > p._peak_wp:
                 p._peak_wp = peak_wp
 
-            hour_key = str(datetime.now(timezone.utc).hour)
+            hour_key = str(dt_util.now().hour)
             frac     = (power_w / peak_wp) if peak_wp > 10 else 0.0
 
             # Exponential moving average per hour
@@ -379,13 +380,13 @@ class PVForecast:
 
     def get_forecast(self, inverter_id: str) -> list[HourForecast]:
         """Return 24-hour forecast for one inverter starting from the current hour."""
-        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        now = dt_util.now().replace(minute=0, second=0, microsecond=0)
         return self._build_forecast(inverter_id, now, confidence_no_weather=0.7)
 
     def get_forecast_tomorrow(self, inverter_id: str) -> list[HourForecast]:
         """Return 24-hour forecast for tomorrow for one inverter."""
         tomorrow = (
-            datetime.now(timezone.utc)
+            dt_util.now()
             .replace(hour=0, minute=0, second=0, microsecond=0)
             + timedelta(days=1)
         )
@@ -423,7 +424,7 @@ class PVForecast:
             "orientation_confident":   p.orientation_confident,
             "clear_sky_samples":       p.clear_sky_samples,
             "peak_wp":                 p._peak_wp,
-            "samples_needed":          max(0, MIN_ORIENTATION_SAMPLES - p.clear_sky_samples),
+            "samples_needed":          MIN_ORIENTATION_SAMPLES,
         }
 
     def get_all_profiles(self) -> list[dict]:
@@ -442,7 +443,7 @@ class PVForecast:
             if p is None or p._peak_wp < 10:
                 return
 
-            now         = datetime.now(timezone.utc)
+            now         = dt_util.now()
             weather_key = now.strftime(_WEATHER_KEY_FMT)  # unified key format
             irradiance  = self._weather_cache.get(weather_key)
             if irradiance is None or irradiance < 50:

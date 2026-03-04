@@ -16,6 +16,30 @@ Vandaag is CloudEMS uitgegroeid tot een volwaardige energiemanager die draait op
 
 ---
 
+## 🆕 Wat is er nieuw in v1.16.1?
+
+### 🐛 Bugfixes
+
+| # | Probleem | Oplossing |
+|---|----------|-----------|
+| 1 | **Batterij herkend als verwarming** — bij laden/ontladen van de thuisbatterij (~9 kW) detecteerde de NILM-edgedetector een vermogensstap en classificeerde dit als `heat_pump` → categorie "verwarming". De `inject_battery()` call voegde een batterij-device toe maar verwijderde het valse verwarmingsapparaat niet | `inject_battery()` verwijdert nu actief heating/boiler-apparaten waarvan het vermogen binnen ±50% van het batterijvermogen valt. `_async_process_event` slaat events over die overeenkomen met het bekende batterijvermogen |
+| 2 | **Totaal: 0.0 kWh in het dashboard** — het dashboard-template las `state_attr(..., 'total_kwh_today')` maar dit attribuut ontbrak in `extra_state_attributes`; het was alleen de sensor *state value* | `total_kwh_today` toegevoegd aan `extra_state_attributes` van `CloudEMSConsumptionCategoriesSensor` |
+| 3 | **Dubbeltelling batterij in categorieën** — batterijvermogen werd meegeteld in de NILM-apparaatlijst én in `grid_import_w`, waardoor alle categorieën werden opgeblazen | `consumption_categories.tick()` accepteert nu `battery_w`; batterijapparaten worden overgeslagen; `abs(battery_w)` wordt afgetrokken van het nettoverbruik vóór de rest-berekening; totaal wordt gecapt op werkelijk verbruik |
+| 4 | **Categorietotaal groter dan werkelijk verbruik** — de optelsom van alle categorieën kon hoger worden dan het gemeten netverbruik | Nieuw cap-mechanisme: als de som de werkelijke import overschrijdt, worden alle categorieën proportioneel geschaald |
+
+### 🤖 Nieuw: Ollama AI Diagnostics
+
+- Nieuwe sensor `sensor.cloudems_ollama_diagnostics` — toont real-time Ollama-status: `online` / `offline` / `error` / `disabled`
+- Periodieke health-check elke 60 s via Ollama `/api/tags` — toont welke modellen geladen zijn en of het geconfigureerde model beschikbaar is
+- Volledige statistieken: oproepen totaal/geslaagd/mislukt, succespercentage, laatste/gemiddelde responstijd
+- Ring buffer met de laatste 20 classificaties (tijdstip, fase, ΔW, resultaat, responstijd)
+- Automatische fallback-indicator als Ollama offline is
+- Bijgeleverde Lovelace-kaart `cloudems_ollama_diagnostics_card.yaml`
+
+> ⚠️ **Na installatie van v1.16.1:** herstart Home Assistant volledig. Bestaande valse verwarmingsapparaten in de NILM-lijst verdwijnen na de eerste update-cyclus.
+
+---
+
 ## 🆕 Wat is er nieuw in v1.15.4?
 
 ### 🐛 Bugfixes

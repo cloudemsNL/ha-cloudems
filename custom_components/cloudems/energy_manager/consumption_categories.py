@@ -71,6 +71,8 @@ DEVICE_CATEGORY: dict[str, str] = {
     "garden":           "entertainment",
     # Koeling
     "refrigerator":     "koeling",
+    # Opslag — batterij wordt expliciet uitgesloten van verbruikstelling
+    "battery":          "opslag",
     # Overig
     "resistive":        "overig",
     "motor":            "overig",
@@ -84,6 +86,8 @@ ALL_CATEGORIES = [
     "verwarming", "mobiliteit", "wit_goed", "keuken",
     "entertainment", "koeling", "altijd_aan", "overig",
 ]
+# "opslag" is intentionally excluded from ALL_CATEGORIES so battery kWh
+# is never added to the daily consumption totals.
 
 CATEGORY_EMOJI = {
     "verwarming":    "🔥",
@@ -94,6 +98,7 @@ CATEGORY_EMOJI = {
     "koeling":       "❄️",
     "altijd_aan":    "🔌",
     "overig":        "🔧",
+    "opslag":        "🔋",
 }
 
 
@@ -159,6 +164,7 @@ class ConsumptionCategoryTracker:
         nilm_devices:  list[dict],
         standby_w:     float = 0.0,
         grid_import_w: float = 0.0,
+        battery_w:     float = 0.0,
     ) -> None:
         """
         Verwerk huidige NILM-status (elke 10s).
@@ -166,6 +172,7 @@ class ConsumptionCategoryTracker:
         nilm_devices : lijst van NILM device-dicts (uit coordinator)
         standby_w    : geleerde standby (uit home_baseline)
         grid_import_w: totale nettoimport voor 'onbekend' rest
+        battery_w    : huidig batterijvermogen (W) — wordt uitgesloten van verbruikstelling
         """
         now   = datetime.now(timezone.utc)
         today = now.strftime("%Y-%m-%d")
@@ -185,24 +192,40 @@ class ConsumptionCategoryTracker:
         # ── Real-time W per categorie ──────────────────────────────────────
         now_w: dict[str, float] = {c: 0.0 for c in ALL_CATEGORIES}
 
-        # NILM actieve apparaten
-        nilm_total_w = 0.0
+        # Netto verbruik dat we kunnen verklaren vanuit NILM
+        # Batterij (device_type == "battery" of device_id == "__battery_injected__")
+        # wordt volledig uitgesloten — die representeert opgeslagen energie,
+        # geen werkelijk huisverbruik.
         for dev in nilm_devices:
             if not dev.get("is_on"):
                 continue
             dtype = dev.get("device_type", "unknown")
-            cat   = DEVICE_CATEGORY.get(dtype, "overig")
-            pw    = float(dev.get("current_power") or 0)
+            if dtype == "battery" or dev.get("device_id") == "__battery_injected__":
+                continue   # v1.16: batterij nooit meerekenen als verbruik
+            cat = DEVICE_CATEGORY.get(dtype, "overig")
+            if cat == "opslag":
+                continue   # extra veiligheid
+            pw = float(dev.get("current_power") or 0)
             now_w[cat] += pw
-            nilm_total_w += pw
 
         # Standby → altijd_aan
         now_w["altijd_aan"] = max(0.0, standby_w)
 
-        # Niet-verklaarde rest → overig
-        identified_w = sum(now_w.values())
-        rest_w = max(0.0, grid_import_w - identified_w)
-        now_w["overig"] = max(now_w.get("overig", 0.0), rest_w * 0.5)  # 50% van onverklaard naar overig
+        # v1.16: batterijladen verhoogt de grid_import maar is geen huisverbruik.
+        # Trek het af zodat de 'onverklaard rest' berekening klopt.
+        real_consumption_w = max(0.0, grid_import_w - abs(battery_w))
+
+        # Niet-verklaarde rest → overig (maximaal 50% van onverklaard, om dubbeltelling te voorkomen)
+        nilm_total_w = sum(now_w.values())
+        rest_w = max(0.0, real_consumption_w - nilm_total_w)
+        # Overschrijf overig alleen als de rest groter is dan al gescoord
+        now_w["overig"] = max(now_w.get("overig", 0.0), rest_w * 0.5)
+
+        # Cap totaal op het werkelijke verbruik om inflatie te voorkomen
+        current_total = sum(now_w.values())
+        if current_total > real_consumption_w > 0:
+            scale = real_consumption_w / current_total
+            now_w = {c: v * scale for c, v in now_w.items()}
 
         self._now_w = now_w
 

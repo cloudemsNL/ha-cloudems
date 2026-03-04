@@ -289,6 +289,19 @@ class NILMDetector:
         self._diag_last_match: str = ""
         self._diag_log: list = []     # ring buffer, last 20 events
 
+        # v1.16: Ollama-specific diagnostics
+        self._ollama_calls_total: int = 0
+        self._ollama_calls_success: int = 0
+        self._ollama_calls_failed: int = 0
+        self._ollama_last_success_ts: float = 0.0
+        self._ollama_last_error: str = ""
+        self._ollama_last_response_ms: float = 0.0
+        self._ollama_avg_response_ms: float = 0.0
+        self._ollama_log: list = []   # ring buffer, last 20 Ollama decisions
+
+        # v1.16: known battery power — used to skip false NILM edges
+        self._battery_power_w: float = 0.0
+
         _LOGGER.info("CloudEMS NILM Detector v1.8 initialized")
 
     # ── Storage setup ─────────────────────────────────────────────────────────
@@ -395,10 +408,10 @@ class NILMDetector:
                     rms_power   = avg,
                     phase       = phase,
                 )
-                # FIX v1.7: use create_task instead of deprecated ensure_future
+                # Use get_running_loop (Python 3.10+, always available in HA context)
                 import asyncio
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     loop.create_task(self._async_process_event(event))
                 except RuntimeError:
                     asyncio.ensure_future(self._async_process_event(event))
@@ -415,6 +428,16 @@ class NILMDetector:
     # ── Classification ────────────────────────────────────────────────────────
 
     async def _async_process_event(self, event: PowerEvent) -> None:
+        # v1.16: skip events that are caused by battery charge/discharge transitions
+        if self._battery_power_w > 500:
+            ratio = abs(event.delta_power) / self._battery_power_w
+            if 0.6 <= ratio <= 1.4:
+                _LOGGER.debug(
+                    "NILM: event %.0fW overgeslagen — lijkt op batterijovergang (batterij %.0fW)",
+                    event.delta_power, self._battery_power_w,
+                )
+                return
+
         # FIX v1.7: pass scalar args — database.classify(float, float), NOT the PowerEvent object
         lang = getattr(getattr(self._hass, "config", None), "language", "en")
         lang = lang[:2].lower() if lang else "en"
@@ -442,40 +465,131 @@ class NILMDetector:
             self._handle_match(event, matches[0], matches)
 
     async def _classify_ollama(self, event: PowerEvent) -> List[Dict]:
-        """Query local Ollama instance for device classification."""
+        """Query local Ollama instance for device classification — with full diagnostic tracking."""
+        import time as _t, json as _json, re as _re, aiohttp
+        from datetime import datetime, timezone
+
+        host  = self._ollama_config.get("host", "localhost")
+        port  = self._ollama_config.get("port", 11434)
+        model = self._ollama_config.get("model", "llama3")
+        prompt = (
+            f"You are a home energy expert. A power event was detected:\n"
+            f"Delta power: {event.delta_power:.0f}W, Rise time: {event.rise_time:.1f}s, "
+            f"Peak: {event.peak_power:.0f}W\n"
+            f"Reply ONLY with JSON: {{\"device_type\": \"<type>\", \"confidence\": <0.0-1.0>}}\n"
+            f"Valid types: refrigerator, washing_machine, dryer, dishwasher, oven, microwave, "
+            f"kettle, television, computer, heat_pump, boiler, ev_charger, light, unknown"
+        )
+        url = f"http://{host}:{port}/api/generate"
+        self._ollama_calls_total += 1
+        t_start = _t.monotonic()
+        log_entry = {
+            "ts":       datetime.now(tz=timezone.utc).strftime("%H:%M:%S"),
+            "delta_w":  round(event.delta_power, 1),
+            "phase":    event.phase,
+            "result":   "❌ geen antwoord",
+            "device":   None,
+            "conf_pct": None,
+            "ms":       None,
+            "fallback": True,
+        }
         try:
-            import aiohttp
-            host  = self._ollama_config.get("host", "localhost")
-            port  = self._ollama_config.get("port", 11434)
-            model = self._ollama_config.get("model", "llama3")
-            prompt = (
-                f"You are a home energy expert. A power event was detected:\n"
-                f"Delta power: {event.delta_power:.0f}W, Rise time: {event.rise_time:.1f}s, "
-                f"Peak: {event.peak_power:.0f}W\n"
-                f"Reply ONLY with JSON: {{\"device_type\": \"<type>\", \"confidence\": <0.0-1.0>}}\n"
-                f"Valid types: refrigerator, washing_machine, dryer, dishwasher, oven, microwave, "
-                f"kettle, television, computer, heat_pump, boiler, ev_charger, light, unknown"
-            )
-            url = f"http://{host}:{port}/api/generate"
             async with aiohttp.ClientSession() as s:
                 async with s.post(url, json={"model": model, "prompt": prompt, "stream": False},
                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
+                    elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
+                    log_entry["ms"] = elapsed_ms
                     if r.status == 200:
                         data = await r.json()
-                        import json, re
-                        text = data.get("response","")
-                        m    = re.search(r'\{.*\}', text, re.DOTALL)
+                        text = data.get("response", "")
+                        m = _re.search(r'\{.*\}', text, _re.DOTALL)
                         if m:
-                            parsed = json.loads(m.group())
+                            parsed = _json.loads(m.group())
+                            device_type = parsed.get("device_type", "unknown")
+                            confidence  = float(parsed.get("confidence", 0.5))
+                            self._ollama_calls_success += 1
+                            self._ollama_last_success_ts = _t.time()
+                            self._ollama_last_response_ms = elapsed_ms
+                            # Running average response time
+                            n = self._ollama_calls_success
+                            self._ollama_avg_response_ms = round(
+                                ((self._ollama_avg_response_ms * (n - 1)) + elapsed_ms) / n, 1
+                            )
+                            log_entry.update({
+                                "result":   f"✅ {device_type} ({confidence*100:.0f}%)",
+                                "device":   device_type,
+                                "conf_pct": round(confidence * 100, 0),
+                                "fallback": False,
+                            })
+                            self._ollama_log.insert(0, log_entry)
+                            if len(self._ollama_log) > 20:
+                                self._ollama_log.pop()
                             return [{
-                                "device_type": parsed.get("device_type","unknown"),
-                                "confidence":  float(parsed.get("confidence", 0.5)),
-                                "name":        parsed.get("device_type","unknown").replace("_"," ").title(),
+                                "device_type": device_type,
+                                "confidence":  confidence,
+                                "name":        device_type.replace("_", " ").title(),
                                 "source":      NILM_MODE_OLLAMA,
                             }]
+                    # Non-200
+                    elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
+                    log_entry["ms"] = elapsed_ms
+                    self._ollama_calls_failed += 1
+                    self._ollama_last_error = f"HTTP {r.status}"
+                    log_entry["result"] = f"❌ HTTP {r.status}"
+        except asyncio.TimeoutError:
+            elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
+            self._ollama_calls_failed += 1
+            self._ollama_last_error = "timeout"
+            log_entry.update({"result": "⏱️ timeout", "ms": elapsed_ms})
+            _LOGGER.debug("CloudEMS NILM Ollama: timeout na %.0fms", elapsed_ms)
         except Exception as exc:  # noqa: BLE001
+            elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
+            self._ollama_calls_failed += 1
+            self._ollama_last_error = str(exc)
+            log_entry.update({"result": f"❌ {exc}", "ms": elapsed_ms})
             _LOGGER.debug("CloudEMS NILM Ollama: %s", exc)
+
+        self._ollama_log.insert(0, log_entry)
+        if len(self._ollama_log) > 20:
+            self._ollama_log.pop()
         return []
+
+    def get_ollama_diagnostics(self) -> dict:
+        """Return Ollama-specific diagnostics for the dedicated sensor."""
+        import time as _t
+        from datetime import datetime, timezone
+
+        total   = self._ollama_calls_total
+        success = self._ollama_calls_success
+        failed  = self._ollama_calls_failed
+        rate    = round(success / total * 100, 1) if total > 0 else 0.0
+
+        last_ok = None
+        if self._ollama_last_success_ts:
+            last_ok = datetime.fromtimestamp(
+                self._ollama_last_success_ts, tz=timezone.utc
+            ).isoformat()
+
+        host  = self._ollama_config.get("host", "localhost")
+        port  = self._ollama_config.get("port", 11434)
+        model = self._ollama_config.get("model", "llama3")
+        enabled = bool(self._ollama_config.get("enabled", False))
+
+        return {
+            "enabled":              enabled,
+            "host":                 host,
+            "port":                 port,
+            "model":                model,
+            "calls_total":          total,
+            "calls_success":        success,
+            "calls_failed":         failed,
+            "success_rate_pct":     rate,
+            "last_success_ts":      last_ok,
+            "last_error":           self._ollama_last_error or None,
+            "last_response_ms":     self._ollama_last_response_ms,
+            "avg_response_ms":      self._ollama_avg_response_ms,
+            "recent_calls":         self._ollama_log[:20],
+        }
 
     def _merge_matches(self, base: List[Dict], new: List[Dict]) -> List[Dict]:
         merged = {m["device_type"]: m.copy() for m in base}
@@ -663,9 +777,37 @@ class NILMDetector:
         
         This avoids battery charge/discharge transitions triggering false NILM events.
         Battery is shown with 100% confidence and a dynamic power range.
+        v1.16: also removes any heat_pump/boiler device that was caused by battery edges.
         """
         import time as _t
         device_id = "__battery_injected__"
+
+        # v1.16: store battery power so _async_process_event can ignore matching edges
+        self._battery_power_w = abs(power_w)
+
+        # v1.16: if battery is significantly active, remove any heating/boiler NILM device
+        # whose power is within 30% of the battery power — those were false positives from
+        # battery charge/discharge transitions hitting the NILM edge detector.
+        if abs(power_w) > 500:
+            false_pos_types = {"heat_pump", "boiler", "electric_heater", "heat",
+                               "air_source_heat_pump", "ground_source_heat_pump"}
+            to_remove = []
+            for did, dev in self._devices.items():
+                if did == device_id:
+                    continue
+                if dev.device_type not in false_pos_types:
+                    continue
+                # Only purge if the device power is plausibly battery-caused
+                ratio = dev.current_power / abs(power_w) if abs(power_w) > 0 else 0
+                if 0.5 <= ratio <= 1.5:
+                    to_remove.append(did)
+                    _LOGGER.debug(
+                        "NILM: verwijder vals positief '%s' (%.0fW) — veroorzaakt door batterij (%.0fW)",
+                        dev.name, dev.current_power, abs(power_w),
+                    )
+            for did in to_remove:
+                del self._devices[did]
+
         if device_id not in self._devices:
             dev = DetectedDevice(
                 device_id     = device_id,

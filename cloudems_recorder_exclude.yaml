@@ -1,0 +1,24 @@
+recorder:
+  exclude:
+    entities:
+    - sensor.cloudems_actieve_meldingen
+    - sensor.cloudems_apparaat_efficientiedrift
+    - sensor.cloudems_batterij_epex_schema
+    - sensor.cloudems_clipping_verlies
+    - sensor.cloudems_clipping_voorspelling_morgen
+    - sensor.cloudems_energie_kosten_verwachting
+    - sensor.cloudems_energy_epex_today
+    - sensor.cloudems_ev_sessie_leermodel
+    - sensor.cloudems_grid_congestion_utilisation
+    - sensor.cloudems_micro_mobiliteit
+    - sensor.cloudems_nilm_apparaat_schemas
+    - sensor.cloudems_nilm_devices
+    - sensor.cloudems_nilm_diagnostics
+    - sensor.cloudems_ollama_diagnostics
+    - sensor.cloudems_pv_forecast_accuracy
+    - sensor.cloudems_pv_paneelgezondheid
+    - sensor.cloudems_pv_weerkalibratie
+    - sensor.cloudems_solar_system_intelligence
+    - sensor.cloudems_system_decision_log
+    - sensor.cloudems_thermisch_huismodel
+    - sensor.cloudems_verbruik_categorien
