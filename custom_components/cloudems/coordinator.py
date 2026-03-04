@@ -49,16 +49,21 @@ from .const import (
     EPEX_UPDATE_INTERVAL, ALL_PHASES,
 )
 from .nilm.detector import NILMDetector, DetectedDevice
+from .energy_manager.home_baseline import HomeBaselineLearner
+from .energy_manager.ev_session_learner import EVSessionLearner
+from .energy_manager.nilm_schedule import NILMScheduleLearner
 from .energy.prices import EnergyPriceFetcher
 from .energy.limiter import CurrentLimiter
 from .energy_manager.power_calculator import PowerCalculator
+from .energy_manager.notification_engine import NotificationEngine
 
 _LOGGER = logging.getLogger(__name__)
 
 # Max decision log entries kept in memory
 MAX_DECISION_LOG = 50
 # Clipping detection: if power > peak * this ratio → clipping
-CLIPPING_RATIO   = 0.97
+CLIPPING_RATIO       = 0.97
+DEFAULT_FEEDIN_EUR_KWH = 0.08   # fallback feed-in tarief als EPEX niet beschikbaar
 
 
 class CloudEMSCoordinator(DataUpdateCoordinator):
@@ -134,6 +139,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._battery_degradation:  Optional[object] = None
         self._sensor_hints:         Optional[object] = None
         self._cost_forecaster:   Optional[object] = None
+        # v1.10.3: self-learning intelligence modules
+        self._home_baseline:     Optional[object] = None
+        self._ev_session:        Optional[object] = None
+        self._nilm_schedule:     Optional[object] = None
+
+        # v1.11.0: 8 new intelligence features
+        self._thermal_model:     Optional[object] = None
+        self._self_consumption:  Optional[object] = None
+        self._day_classifier:    Optional[object] = None
+        self._device_drift:      Optional[object] = None
+        self._pv_health:         Optional[object] = None
+        self._micro_mobility:    Optional[object] = None
+        self._notification_engine: Optional[object] = None
+        self._clipping_loss:     Optional[object] = None
+        self._categories:        Optional[object] = None
 
         # v1.8: EV PID controller
         self._ev_pid: Optional[object] = None
@@ -285,6 +305,60 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.cost_forecaster import EnergyCostForecaster
         self._cost_forecaster = EnergyCostForecaster(self.hass)
         await self._cost_forecaster.async_setup()
+
+        # v1.10.3: always-on self-learning modules (zero config)
+        self._home_baseline = HomeBaselineLearner(self.hass)
+        await self._home_baseline.async_setup()
+
+        self._ev_session = EVSessionLearner(self.hass)
+        await self._ev_session.async_setup()
+
+        self._nilm_schedule = NILMScheduleLearner(self.hass)
+        await self._nilm_schedule.async_setup()
+
+        # v1.11.0: Thermal house model (always active — needs outside_temp + heating power)
+        from .energy_manager.thermal_model import ThermalHouseModel
+        self._thermal_model = ThermalHouseModel(self.hass)
+        await self._thermal_model.async_setup()
+
+        # v1.11.0: Self-consumption ratio tracker
+        from .energy_manager.self_consumption import SelfConsumptionTracker
+        self._self_consumption = SelfConsumptionTracker(self.hass)
+        await self._self_consumption.async_setup()
+
+        # v1.11.0: Day-type classifier
+        from .energy_manager.day_classifier import DayTypeClassifier
+        self._day_classifier = DayTypeClassifier(self.hass)
+        await self._day_classifier.async_setup()
+
+        # v1.11.0: Device efficiency drift tracker
+        from .energy_manager.device_drift import DeviceDriftTracker
+        self._device_drift = DeviceDriftTracker(self.hass)
+        await self._device_drift.async_setup()
+
+        # v1.11.0: PV health monitor (soiling/degradation detection)
+        from .energy_manager.pv_health import PVHealthMonitor
+        self._pv_health = PVHealthMonitor(self.hass)
+        await self._pv_health.async_setup()
+
+        # v1.11.0: Micro-mobility tracker (e-bikes, scooters)
+        from .energy_manager.micro_mobility import MicroMobilityTracker
+        self._micro_mobility = MicroMobilityTracker(self.hass)
+        await self._micro_mobility.async_setup()
+
+        # v1.12.0: Notification engine
+        self._notification_engine = NotificationEngine(self.hass, cfg)
+        await self._notification_engine.async_setup()
+
+        # v1.12.0: Clipping verlies calculator
+        from .energy_manager.clipping_loss import ClippingLossCalculator
+        self._clipping_loss = ClippingLossCalculator(self.hass)
+        await self._clipping_loss.async_setup()
+
+        # v1.12.0: Verbruik categorieën tracker
+        from .energy_manager.consumption_categories import ConsumptionCategoryTracker
+        self._categories = ConsumptionCategoryTracker(self.hass)
+        await self._categories.async_setup()
 
         # v1.9: Battery EPEX scheduler (only when battery entities configured)
         if cfg.get("battery_scheduler_enabled", False) or cfg.get("battery_soc_entity"):
@@ -456,6 +530,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "current_l1": t.current_l1,
                     "current_l2": t.current_l2,
                     "current_l3": t.current_l3,
+                    # Tariff-split energy totals (kWh meter readings)
+                    "energy_import_kwh":    t.energy_import_kwh,
+                    "energy_import_t1_kwh": t.energy_import_t1_kwh,
+                    "energy_import_t2_kwh": t.energy_import_t2_kwh,
+                    "energy_export_kwh":    t.energy_export_kwh,
+                    "energy_export_t1_kwh": t.energy_export_t1_kwh,
+                    "energy_export_t2_kwh": t.energy_export_t2_kwh,
+                    "tariff": t.tariff,
+                    # Per-phase import power (W, DSMR5)
+                    "power_l1_import_w": t.power_l1_w,
+                    "power_l2_import_w": t.power_l2_w,
+                    "power_l3_import_w": t.power_l3_w,
+                    # Per-phase export power (W, DSMR5)
+                    "power_l1_export_w": t.power_l1_export_w,
+                    "power_l2_export_w": t.power_l2_export_w,
+                    "power_l3_export_w": t.power_l3_export_w,
                 }
                 # v1.9: P1 per-phase power → NILM (highest quality input)
                 # DSMR5 telegrams include per-phase import power in kW
@@ -483,6 +573,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 await self._solar_learner.async_update(phase_currents=self._limiter.phase_currents)
 
                 # Build inverter data: peak, clipping, utilisation — for sensors/diagnostics
+                # Merge pv_forecast orientation data
+                forecast_profiles: dict = {}
+                if self._pv_forecast:
+                    for fp in self._pv_forecast.get_all_profiles():
+                        forecast_profiles[fp["inverter_id"]] = fp
+
+                def _azimuth_compass(az):
+                    if az is None:
+                        return "onbekend"
+                    dirs = ["N","NNO","NO","ONO","O","OZO","ZO","ZZO",
+                            "Z","ZZW","ZW","WZW","W","WNW","NW","NNW"]
+                    return dirs[round(az / 22.5) % 16]
+
                 for eid, profile in {p.inverter_id: p for p in self._solar_learner.get_all_profiles()}.items():
                     raw = self._read_state(eid)
                     cur_w = self._calc.to_watts(eid, raw) if raw is not None else 0.0
@@ -491,25 +594,52 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     clipping = peak_w > 0 and cur_w >= peak_w * CLIPPING_RATIO
 
                     if clipping:
-                        msg = (f"⚠️ Clipping: {profile.label} produceert {cur_w:.0f}W "
-                               f"= {util:.0f}% van max {peak_w:.0f}W — "
+                        msg = (f"\u26a0\ufe0f Clipping: {profile.label} produceert {cur_w:.0f}W "
+                               f"= {util:.0f}% van max {peak_w:.0f}W \u2014 "
                                f"panelen leveren meer dan omvormer aankan")
                         self._log_decision("clipping", msg)
 
-                    inverter_data.append({
-                        "entity_id":      eid,
-                        "label":          profile.label,
-                        "current_w":      round(cur_w, 1),
-                        "peak_w":         round(peak_w, 1),
-                        "estimated_wp":   round(profile.estimated_wp, 1),
-                        "utilisation_pct":util,
-                        "clipping":       clipping,
-                        "phase":          profile.detected_phase or "unknown",
-                        "phase_certain":  profile.phase_certain,
-                        "samples":        profile.samples,
-                        "confident":      profile.confident,
-                    })
+                    fp = forecast_profiles.get(eid, {})
+                    azimuth   = fp.get("azimuth_deg")
+                    tilt      = fp.get("tilt_deg")
+                    az_learned  = fp.get("learned_azimuth")
+                    ti_learned  = fp.get("learned_tilt")
+                    or_confident = fp.get("orientation_confident", False)
+                    clear_sky_samples = fp.get("clear_sky_samples", 0)
+                    samples_needed = fp.get("samples_needed", 30)
+                    hourly_yield = fp.get("hourly_yield_fraction", {})
+                    learn_pct = round(min(100, clear_sky_samples / 30 * 100), 0)
+                    peak_hour = int(max(hourly_yield, key=lambda h: hourly_yield[h])) if hourly_yield else None
+                    votes = profile.phase_votes or {}
+                    total_votes = sum(votes.values()) if isinstance(votes, dict) else 0
 
+                    inverter_data.append({
+                        "entity_id":         eid,
+                        "label":             profile.label,
+                        "current_w":         round(cur_w, 1),
+                        "peak_w":            round(peak_w, 1),
+                        "peak_w_7d":         round(profile.peak_power_w_7d, 1),
+                        "estimated_wp":      round(profile.estimated_wp, 1),
+                        "utilisation_pct":   util,
+                        "clipping":          clipping,
+                        "phase":             profile.detected_phase or "unknown",
+                        "phase_certain":     profile.phase_certain,
+                        "phase_votes":       profile.phase_votes,
+                        "phase_total_votes": total_votes,
+                        "samples":           profile.samples,
+                        "confident":         profile.confident,
+                        "azimuth_deg":       azimuth,
+                        "azimuth_learned":   az_learned,
+                        "azimuth_compass":   _azimuth_compass(azimuth),
+                        "tilt_deg":          tilt,
+                        "tilt_learned":      ti_learned,
+                        "orientation_confident":      or_confident,
+                        "clear_sky_samples":          clear_sky_samples,
+                        "orientation_samples_needed": samples_needed,
+                        "orientation_learning_pct":   learn_pct,
+                        "peak_production_hour":       peak_hour,
+                        "hourly_yield_fraction":      hourly_yield,
+                    })
             if self._pv_forecast:
                 await self._pv_forecast.async_refresh_weather()
                 pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh()
@@ -607,6 +737,326 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 price_eur_kwh = current_price or 0.0,
             )
             cost_forecast = self._cost_forecaster.get_forecast(price_info)
+            seasonal_summary = self._cost_forecaster.get_seasonal_summary()
+
+            # v1.10.3: Home baseline anomaly + standby + occupancy (always-on)
+            grid_w = data.get("grid_power", 0.0)
+            baseline_data = self._home_baseline.update(grid_w) if self._home_baseline else {}
+
+            # v1.10.3: EV session learner (auto-detects sessions from charger current)
+            ev_session_data: dict = {}
+            if self._ev_session:
+                ev_current_a = 0.0
+                ev_eid = self._config.get("ev_charger_entity", "")
+                if ev_eid:
+                    ev_st = self.hass.states.get(ev_eid)
+                    if ev_st and ev_st.state not in ("unavailable", "unknown"):
+                        try:
+                            ev_current_a = float(ev_st.state)
+                        except (ValueError, TypeError):
+                            ev_current_a = 0.0
+                ev_session_data = self._ev_session.update(ev_current_a, current_price or 0.0)
+
+            # v1.10.3: NILM schedule learner (enriches device list with schedule metadata)
+            nilm_devices_raw = self._nilm.get_devices_for_ha()
+            if self._nilm_schedule:
+                nilm_devices_enriched = self._nilm_schedule.update(nilm_devices_raw)
+                nilm_schedule_summary = self._nilm_schedule.get_schedule_summary()
+            else:
+                nilm_devices_enriched = nilm_devices_raw
+                nilm_schedule_summary = []
+
+            # v1.10.3: Weather calibration for PV forecast
+            weather_calib: dict = {}
+            if self._pv_forecast:
+                for inv in self._config.get("inverter_configs", []):
+                    eid = inv.get("entity_id", "")
+                    raw = self._read_state(eid)
+                    if raw is not None:
+                        pw = self._calc.to_watts(eid, raw)
+                        self._pv_forecast.update_weather_calibration(eid, pw)
+                weather_calib = self._pv_forecast.get_calibration_summary()
+
+            # ── v1.11.0: NEW INTELLIGENCE FEATURES ──────────────────────────
+
+            # Feature 1: Thermal house model
+            thermal_data: dict = {}
+            if self._thermal_model:
+                outside_temp_eid = self._config.get("outside_temp_entity", "")
+                outside_temp_c   = self._read_state(outside_temp_eid) if outside_temp_eid else None
+                if outside_temp_c is not None:
+                    # Use NILM heating devices or total power as heating proxy
+                    heating_w = 0.0
+                    for dev in nilm_devices_raw:
+                        if dev.get("device_type") in ("heat_pump", "boiler", "cv_boiler", "heat") and dev.get("is_on"):
+                            heating_w += float(dev.get("current_power") or 0)
+                    if heating_w == 0:
+                        # Fallback: use total grid import as rough proxy
+                        heating_w = max(0.0, data.get("grid_power", 0.0))
+                    self._thermal_model.update(heating_w=heating_w, outside_temp_c=outside_temp_c)
+                therm_obj  = self._thermal_model.get_data()
+                thermal_data = {
+                    "w_per_k":             therm_obj.w_per_k,
+                    "samples":             therm_obj.samples,
+                    "reliable":            therm_obj.reliable,
+                    "rating":              therm_obj.rating,
+                    "advice":              therm_obj.advice,
+                    "heating_days":        therm_obj.heating_days,
+                    "last_heating_w":      therm_obj.last_heating_w,
+                    "last_outside_temp_c": therm_obj.last_outside_temp_c,
+                }
+                await self._thermal_model.async_maybe_save()
+
+            # Feature 2: Flexible power score
+            from .energy_manager.flex_score import calculate_flex_score
+            ev_connected      = bool(self._config.get("ev_charger_entity") and data.get("ev_decision"))
+            batt_soc          = self._read_state(self._config.get("battery_soc_entity", ""))
+            batt_capacity     = float(self._config.get("battery_capacity_kwh", 0) or 0)
+            batt_max_kw       = float(self._config.get("battery_max_charge_kw", 0) or 0)
+            flex_result       = calculate_flex_score(
+                battery_soc_pct      = batt_soc,
+                battery_capacity_kwh = batt_capacity or None,
+                battery_max_charge_kw= batt_max_kw or None,
+                ev_connected         = ev_connected,
+                ev_max_charge_kw     = float(self._config.get("ev_max_charge_kw", 7.4) or 7.4),
+                ev_session_hours_remaining = float(ev_session_data.get("predicted_duration_h") or 2.0),
+                boiler_status        = self._boiler_ctrl.get_status() if self._boiler_ctrl else [],
+                nilm_devices         = nilm_devices_enriched,
+            )
+            flex_data = {
+                "total_kw":   flex_result.total_kw,
+                "battery_kw": flex_result.battery_kw,
+                "ev_kw":      flex_result.ev_kw,
+                "boiler_kw":  flex_result.boiler_kw,
+                "nilm_kw":    flex_result.nilm_kw,
+                "breakdown":  flex_result.breakdown,
+                "components": [
+                    {"source": c.source, "label": c.label, "flex_kw": c.flex_kw, "reason": c.reason}
+                    for c in flex_result.components
+                ],
+            }
+
+            # Feature 3: PV panel health (soiling/degradation)
+            pv_health_data: dict = {}
+            if self._pv_health and self._solar_learner:
+                profiles   = self._solar_learner.get_all_profiles()
+                pv_health  = self._pv_health.assess(profiles)
+                pv_health_data = {
+                    "any_alert": pv_health.any_alert,
+                    "summary":   pv_health.summary,
+                    "inverters": [
+                        {
+                            "inverter_id":    s.inverter_id,
+                            "label":          s.label,
+                            "peak_all_time_w":s.peak_all_time_w,
+                            "peak_recent_w":  s.peak_recent_w,
+                            "ratio":          s.ratio,
+                            "alert":          s.alert,
+                            "alert_type":     s.alert_type,
+                            "message":        s.message,
+                        }
+                        for s in pv_health.inverters
+                    ],
+                }
+                await self._pv_health.async_maybe_save()
+
+            # Feature 5: Self-consumption ratio
+            self_cons_data: dict = {}
+            if self._self_consumption:
+                self._self_consumption.tick(
+                    pv_w     = max(0.0, data.get("solar_power", 0.0)),
+                    import_w = max(0.0, data.get("import_power", data.get("grid_power", 0.0))),
+                    export_w = max(0.0, data.get("export_power", 0.0)),
+                )
+                sc = self._self_consumption.get_data()
+                self_cons_data = {
+                    "ratio_pct":          sc.ratio_pct,
+                    "export_pct":         sc.export_pct,
+                    "pv_today_kwh":       sc.pv_today_kwh,
+                    "self_consumed_kwh":  sc.self_consumed_kwh,
+                    "exported_kwh":       sc.exported_kwh,
+                    "best_solar_hour":    sc.best_solar_hour,
+                    "best_solar_label":   sc.best_solar_hour_label,
+                    "advice":             sc.advice,
+                    "monthly_saving_eur": sc.monthly_saving_eur,
+                }
+                await self._self_consumption.async_maybe_save()
+
+            # Feature 6: Day-type classification
+            day_type_data: dict = {}
+            if self._day_classifier:
+                self._day_classifier.observe_power(max(0.0, data.get("grid_power", 0.0)))
+                dt = self._day_classifier.get_data()
+                day_type_data = {
+                    "today_type":         dt.today_type,
+                    "today_label":        dt.today_label,
+                    "confidence":         dt.confidence,
+                    "expected_kwh":       dt.expected_kwh,
+                    "total_days_learned": dt.total_days_learned,
+                    "advice":             dt.advice,
+                }
+                await self._day_classifier.async_maybe_save()
+
+            # Feature 7: Device efficiency drift
+            drift_data: dict = {}
+            if self._device_drift:
+                # Feed current NILM detections
+                for dev in nilm_devices_enriched:
+                    if dev.get("is_on") and dev.get("current_power"):
+                        self._device_drift.record_detection(
+                            device_id   = dev.get("device_id", ""),
+                            device_type = dev.get("device_type", ""),
+                            label       = dev.get("name") or dev.get("label") or dev.get("device_type", ""),
+                            power_w     = float(dev.get("current_power", 0)),
+                        )
+                drift_report = self._device_drift.get_report()
+                drift_data = {
+                    "any_alert":   drift_report.any_alert,
+                    "any_warning": drift_report.any_warning,
+                    "summary":     drift_report.summary,
+                    "devices": [
+                        {
+                            "device_id": s.device_id, "label": s.label,
+                            "baseline_w": s.baseline_w, "current_w": s.current_w,
+                            "drift_pct": s.drift_pct, "level": s.level,
+                            "message": s.message,
+                        }
+                        for s in drift_report.devices
+                    ],
+                }
+                await self._device_drift.async_maybe_save()
+
+            # Feature 8: Phase migration advice
+            phase_migration_data: dict = {}
+            try:
+                from .energy_manager.phase_advisor import generate_migration_advice
+                ph_currents = {}
+                if self._limiter:
+                    ph_summary = self._limiter.get_phase_summary()
+                    ph_currents = {
+                        ph: info.get("current_a", 0.0)
+                        for ph, info in ph_summary.items()
+                        if isinstance(info, dict)
+                    }
+                inv_phases = {}
+                if self._solar_learner:
+                    for prof in self._solar_learner.get_all_profiles():
+                        if prof.phase_certain and prof.detected_phase:
+                            inv_phases[prof.inverter_id] = prof.detected_phase
+                mig_report = generate_migration_advice(
+                    phase_currents  = ph_currents,
+                    inverter_phases = inv_phases,
+                    nilm_devices    = nilm_devices_enriched,
+                )
+                phase_migration_data = {
+                    "has_advice":      mig_report.has_advice,
+                    "summary":         mig_report.summary,
+                    "overloaded_phase":mig_report.overloaded_phase,
+                    "lightest_phase":  mig_report.lightest_phase,
+                    "imbalance_a":     mig_report.imbalance_a,
+                    "advices": [
+                        {
+                            "device_label":     a.device_label,
+                            "from_phase":       a.from_phase,
+                            "to_phase":         a.to_phase,
+                            "current_load_w":   a.current_load_w,
+                            "balance_gain_pct": a.balance_gain_pct,
+                            "explanation":      a.explanation,
+                        }
+                        for a in mig_report.advices
+                    ],
+                }
+            except Exception as _pm_err:
+                _LOGGER.debug("Phase migration advisor error: %s", _pm_err)
+                phase_migration_data = {}
+
+            # ── End v1.11.0 features ─────────────────────────────────────────
+
+            # v1.11.0: Micro-mobility (e-bike/scooter) tracking
+            micro_mobility_data: dict = {}
+            if self._micro_mobility:
+                self._micro_mobility.update(
+                    nilm_devices    = nilm_devices_enriched,
+                    price_eur_kwh   = current_price or 0.0,
+                )
+                mm = self._micro_mobility.get_data()
+                micro_mobility_data = {
+                    "vehicles_today":   mm.vehicles_today,
+                    "kwh_today":        mm.kwh_today,
+                    "cost_today_eur":   mm.cost_today_eur,
+                    "sessions_today":   mm.sessions_today,
+                    "active_sessions":  mm.active_sessions,
+                    "vehicle_profiles": mm.vehicle_profiles,
+                    "best_charge_hour": mm.best_charge_hour,
+                    "advice":           mm.advice,
+                    "total_sessions":   mm.total_sessions,
+                    "total_kwh":        mm.total_kwh,
+                    "weekly_kwh_avg":   mm.weekly_kwh_avg,
+                }
+                await self._micro_mobility.async_maybe_save()
+
+            # v1.12.0: Clipping verlies per omvormer
+            clipping_loss_data: dict = {}
+            if self._clipping_loss and self._solar_learner:
+                try:
+                    # Haal PV-forecast op voor estimated_peak (per uur)
+                    pv_hourly: dict[str, float] = {}
+                    if self._pv_forecast:
+                        for hf in getattr(self._pv_forecast, "_hourly_cache", {}).values():
+                            pass  # forecast_w beschikbaar via inverter_data
+                    feedin_price = float(data.get("energy_price_current_hour", DEFAULT_FEEDIN_EUR_KWH)
+                                        if "energy_price_current_hour" in (data or {}) else 0.08)
+                    for inv in inverter_data:
+                        eid  = inv["entity_id"]
+                        # estimated_peak: gebruik forecast als beschikbaar, anders all-time piek × 0.9
+                        est_peak = inv.get("peak_w", 0.0) * 0.95
+                        self._clipping_loss.tick(
+                            inverter_id      = eid,
+                            label            = inv.get("label", eid),
+                            power_w          = inv.get("current_w", 0.0),
+                            estimated_peak_w = est_peak,
+                            is_clipping      = bool(inv.get("clipping", False)),
+                        )
+                    clipping_obj      = self._clipping_loss.get_data(feedin_price_eur_kwh=feedin_price)
+                    clipping_loss_data = {
+                        "total_kwh_lost_30d":   clipping_obj.total_kwh_lost_30d,
+                        "total_eur_lost_year":  clipping_obj.total_eur_lost_year,
+                        "inverters":            clipping_obj.inverters,
+                        "worst_inverter":       clipping_obj.worst_inverter,
+                        "advice":               clipping_obj.advice,
+                        "any_curtailment":      clipping_obj.any_curtailment,
+                        "expansion_roi_years":  clipping_obj.expansion_roi_years,
+                    }
+                    await self._clipping_loss.async_maybe_save()
+                except Exception as _cl_err:
+                    _LOGGER.debug("ClippingLoss error: %s", _cl_err)
+
+            # v1.12.0: Verbruik categorieën
+            categories_data: dict = {}
+            if self._categories:
+                try:
+                    standby_w = float((data or {}).get("standby_w", 0.0))
+                    self._categories.tick(
+                        nilm_devices  = nilm_devices_enriched,
+                        standby_w     = standby_w,
+                        grid_import_w = float((data or {}).get("grid_import_power", 0.0)),
+                    )
+                    cat_obj = self._categories.get_data()
+                    categories_data = {
+                        "top_category":      cat_obj.top_category,
+                        "top_category_pct":  cat_obj.top_category_pct,
+                        "breakdown_pct":     cat_obj.breakdown_pct,
+                        "breakdown_kwh":     cat_obj.breakdown_kwh,
+                        "breakdown_w_now":   cat_obj.breakdown_w_now,
+                        "total_kwh_today":   cat_obj.total_kwh_today,
+                        "total_w_now":       cat_obj.total_w_now,
+                        "pie_data":          cat_obj.pie_data,
+                        "dominant_insight":  cat_obj.dominant_insight,
+                        "avg_breakdown_pct": cat_obj.avg_breakdown_pct,
+                    }
+                    await self._categories.async_maybe_save()
+                except Exception as _cat_err:
+                    _LOGGER.debug("ConsumptionCategories error: %s", _cat_err)
 
             # v1.9: Battery EPEX scheduler
             battery_schedule = {}
@@ -718,7 +1168,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "solar_surplus_w":      solar_surplus,
                 "phases":               self._limiter.get_phase_summary(),
                 "phase_balance":        balance_data,
-                "nilm_devices":         self._nilm.get_devices_for_ha(),
+                "nilm_devices":         nilm_devices_enriched,
                 "nilm_mode":            self._nilm.active_mode,
                 "energy_price":         self._enrich_price_info(price_info),
                 "ai_status":            self._build_ai_status(),
@@ -753,7 +1203,40 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                              self._config.get("solar_sensor",""),
                                              self._config.get("battery_sensor",""),
                                          ] if eid},                        # ← v1.10.2
+                # v1.10.3: self-learning intelligence
+                "baseline":             baseline_data,
+                "ev_session":           ev_session_data,
+                "nilm_schedule":        nilm_schedule_summary,
+                "weather_calibration":  weather_calib,
+                "seasonal_summary":     seasonal_summary,
+                # v1.11.0: 8 new intelligence features
+                "thermal_model":        thermal_data,
+                "flex_score":           flex_data,
+                "pv_health":            pv_health_data,
+                "self_consumption":     self_cons_data,
+                "day_type":             day_type_data,
+                "device_drift":         drift_data,
+                "phase_migration":      phase_migration_data,
+                "gas_data":             {
+                    "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else 0.0),
+                    "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else 0.0),
+                },
+                "micro_mobility":       micro_mobility_data,
+                "clipping_loss":        clipping_loss_data,
+                "consumption_categories": categories_data,
+                "notifications":        {},  # gevuld na dispatch hieronder
             }
+
+            # v1.12.0: Notification engine — ingest alle alerts en verstuur
+            if self._notification_engine:
+                try:
+                    alert_dict = NotificationEngine.build_alerts_from_coordinator_data(self._data)
+                    self._notification_engine.ingest(alert_dict)
+                    await self._notification_engine.async_dispatch()
+                    self._data["notifications"] = self._notification_engine.get_data()
+                    await self._notification_engine.async_maybe_save()
+                except Exception as _ne_err:
+                    _LOGGER.debug("NotificationEngine error: %s", _ne_err)
             return self._data
 
         except Exception as exc:

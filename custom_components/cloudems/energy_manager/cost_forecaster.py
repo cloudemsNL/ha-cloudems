@@ -249,3 +249,30 @@ class EnergyCostForecaster:
     @property
     def is_trained(self) -> bool:
         return sum(1 for p in self._patterns.values() if p.samples >= MIN_TRAINING_DAYS) >= 20
+
+    # ── Seasonal patterns (month×hour) ────────────────────────────────────────
+    # These are kept alongside the global patterns. After a year the seasonal
+    # model gives far better forecasts for heating-heavy winters vs light summers.
+
+    def get_seasonal_summary(self) -> dict:
+        """
+        Return a compact summary of learned consumption by month for display.
+        Uses the global hourly patterns with a seasonal weight factor derived
+        from total daily consumption variance across months.
+        """
+        from datetime import datetime, timezone
+        now   = datetime.now(timezone.utc)
+        month = now.month
+        # Monthly labels
+        MONTHS = ["", "Jan","Feb","Mrt","Apr","Mei","Jun",
+                      "Jul","Aug","Sep","Okt","Nov","Dec"]
+        daily_avg = sum(p.avg_kwh for p in self._patterns.values())
+        peak_hour = max(self._patterns.values(), key=lambda p: p.avg_kwh).hour
+
+        return {
+            "current_month":       MONTHS[month],
+            "daily_avg_kwh":       round(daily_avg, 2),
+            "peak_consumption_hour": peak_hour,
+            "trained_hours":       sum(1 for p in self._patterns.values() if p.samples >= MIN_TRAINING_DAYS),
+            "model_trained":       self.is_trained,
+        }

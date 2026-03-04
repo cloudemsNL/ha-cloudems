@@ -344,3 +344,63 @@ class PVForecast:
 
     def get_all_profiles(self) -> list[dict]:
         return [self.get_profile_summary(eid) for eid in self._profiles]
+
+    # ── Weather calibration ───────────────────────────────────────────────────
+    # Learns the ratio actual_output / open_meteo_expected for each irradiance
+    # bucket. After 30+ sunny days this self-calibrates the forecast model to the
+    # specific installation (panel angle, local shading, panel type).
+
+    def update_weather_calibration(self, inverter_id: str, actual_w: float) -> None:
+        """
+        Call each coordinator tick when irradiance data is available.
+        Compares actual inverter output to what the irradiance model predicts
+        and adjusts a per-installation calibration factor.
+        """
+        p = self._profiles.get(inverter_id)
+        if p is None:
+            return
+        if p._peak_wp < 10:
+            return
+        now = datetime.now(timezone.utc)
+        weather_key = now.strftime("%Y-%m-%d %H:00")
+        irradiance  = self._weather_cache.get(weather_key)
+        if irradiance is None or irradiance < 50:
+            return
+        # Maximum possible irradiance (1000 W/m² on a perfect clear day)
+        max_irr = 1000.0
+        expected_frac = min(irradiance / max_irr, 1.0)
+        expected_w    = expected_frac * p._peak_wp
+        if expected_w < 10:
+            return
+        ratio = actual_w / expected_w
+        # Clamp to plausible range (avoid dust/shadow outliers)
+        if not (0.05 <= ratio <= 1.5):
+            return
+        # EMA into per-profile calibration factor
+        cur_factor = getattr(p, "_calib_factor", None)
+        if cur_factor is None:
+            p._calib_factor = ratio
+        else:
+            p._calib_factor = 0.9 * cur_factor + 0.1 * ratio
+        p._calib_samples = getattr(p, "_calib_samples", 0) + 1
+
+    def get_calibration_summary(self) -> dict:
+        """Return calibration info for all inverters."""
+        invs = []
+        for eid, p in self._profiles.items():
+            factor  = getattr(p, "_calib_factor", None)
+            samples = getattr(p, "_calib_samples", 0)
+            invs.append({
+                "inverter_id":   eid,
+                "label":         p.label,
+                "calib_factor":  round(factor, 3) if factor else None,
+                "calib_samples": samples,
+                "calib_confident": samples >= 30,
+                "calib_pct":     round(min(100, samples / 30 * 100), 0),
+            })
+        global_samples = sum(getattr(p, "_calib_samples", 0) for p in self._profiles.values())
+        return {
+            "inverters": invs,
+            "global_confident": global_samples >= 30,
+            "global_samples":   global_samples,
+        }

@@ -38,6 +38,40 @@ async def async_setup_entry(
 
     entities: list = [
         CloudEMSPowerSensor(coordinator, entry),
+        CloudEMSGridImportPowerSensor(coordinator, entry),
+        CloudEMSGridExportPowerSensor(coordinator, entry),
+        CloudEMSGridImportEnergySensor(coordinator, entry, tariff=1),
+        CloudEMSGridImportEnergySensor(coordinator, entry, tariff=2),
+        CloudEMSGridExportEnergySensor(coordinator, entry, tariff=1),
+        CloudEMSGridExportEnergySensor(coordinator, entry, tariff=2),
+        # v1.10.2: NILM top-5 highest-power running devices
+        *[CloudEMSNILMTopDeviceSensor(coordinator, entry, rank) for rank in range(1, 6)],
+        # v1.10.3: Solar ROI sensor
+        CloudEMSSolarROISensor(coordinator, entry),
+        # v1.10.3: Self-learning intelligence sensors (zero-config)
+        CloudEMSHomeBaselineSensor(coordinator, entry),
+        CloudEMSOccupancyBinarySensor(coordinator, entry),
+        CloudEMSAnomalyBinarySensor(coordinator, entry),
+        CloudEMSStandbyHunterSensor(coordinator, entry),
+        CloudEMSEVSessionSensor(coordinator, entry),
+        CloudEMSNILMScheduleSensor(coordinator, entry),
+        CloudEMSWeatherCalibrationSensor(coordinator, entry),
+        # v1.10.3: Solar ROI sensor
+        CloudEMSSolarROISensor(coordinator, entry),
+        # v1.11.0: 8 new intelligence sensors
+        CloudEMSThermalModelSensor(coordinator, entry),
+        CloudEMSFlexScoreSensor(coordinator, entry),
+        CloudEMSPVHealthSensor(coordinator, entry),
+        CloudEMSGasSensor(coordinator, entry),
+        CloudEMSSelfConsumptionSensor(coordinator, entry),
+        CloudEMSDayTypeSensor(coordinator, entry),
+        CloudEMSDeviceDriftSensor(coordinator, entry),
+        CloudEMSPhaseMigrationSensor(coordinator, entry),
+        CloudEMSMicroMobilitySensor(coordinator, entry),
+        CloudEMSNotificationSensor(coordinator, entry),
+        CloudEMSClippingLossSensor(coordinator, entry),
+        CloudEMSConsumptionCategoriesSensor(coordinator, entry),
+        CloudEMSSolarSystemSensor(coordinator, entry),
         # v1.5: dedicated previous / current / next-hour price sensors
         CloudEMSPriceSensor(coordinator, entry),
         CloudEMSPricePreviousHourSensor(coordinator, entry),
@@ -85,6 +119,8 @@ async def async_setup_entry(
         entities.append(CloudEMSPhaseCurrentSensor(coordinator, entry, ph))
         entities.append(CloudEMSPhaseVoltageSensor(coordinator, entry, ph))
         entities.append(CloudEMSPhasePowerSensor(coordinator, entry, ph))
+        entities.append(CloudEMSPhaseImportPowerSensor(coordinator, entry, ph))
+        entities.append(CloudEMSPhaseExportPowerSensor(coordinator, entry, ph))
 
     if phase_count == 3:
         entities.append(CloudEMSPhaseBalanceSensor(coordinator, entry))
@@ -114,6 +150,26 @@ async def async_setup_entry(
             async_add_entities(new_ents)
 
     coordinator.async_add_listener(_nilm_updated)
+
+    # Dynamically add per-inverter profile sensors and clipping binary sensors
+    registered_inv_ids: set = set()
+
+    @callback
+    def _inverters_updated():
+        new_ents = []
+        for inv in (coordinator.data or {}).get("inverter_data", []):
+            eid = inv.get("entity_id", "")
+            uid_sensor  = f"{entry.entry_id}_inv_profile_{eid}"
+            uid_clip    = f"{entry.entry_id}_inv_clipping_{eid}"
+            if uid_sensor not in registered_inv_ids:
+                new_ents.append(CloudEMSInverterProfileSensor(coordinator, entry, eid))
+                new_ents.append(CloudEMSInverterClippingBinarySensor(coordinator, entry, eid))
+                registered_inv_ids.add(uid_sensor)
+                registered_inv_ids.add(uid_clip)
+        if new_ents:
+            async_add_entities(new_ents)
+
+    coordinator.async_add_listener(_inverters_updated)
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -918,6 +974,200 @@ class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Grid Import / Export sensors (power + energy totals per tariff)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Current grid import power in Watt (Energieverbruik)."""
+    _attr_name = "CloudEMS Grid · Import Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_POWER
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_grid_import_power"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        return p1.get("power_import_w") or d.get("import_power_w") or d.get("import_power")
+
+    @property
+    def extra_state_attributes(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return {
+            "energy_total_kwh":  p1.get("energy_import_kwh"),
+            "energy_t1_kwh":     p1.get("energy_import_t1_kwh"),
+            "energy_t2_kwh":     p1.get("energy_import_t2_kwh"),
+            "tariff":            p1.get("tariff"),
+        }
+
+
+class CloudEMSGridExportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Current grid export power in Watt (Energieproductie)."""
+    _attr_name = "CloudEMS Grid · Export Power"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_SOLAR
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_grid_export_power"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        return p1.get("power_export_w") or d.get("export_power_w") or d.get("export_power")
+
+    @property
+    def extra_state_attributes(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return {
+            "energy_total_kwh":  p1.get("energy_export_kwh"),
+            "energy_t1_kwh":     p1.get("energy_export_t1_kwh"),
+            "energy_t2_kwh":     p1.get("energy_export_t2_kwh"),
+            "tariff":            p1.get("tariff"),
+        }
+
+
+class CloudEMSGridImportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Total grid import energy in kWh for a single tariff (meter reading)."""
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = ICON_ENERGY
+
+    def __init__(self, coord, entry, tariff: int):
+        super().__init__(coord)
+        self._entry = entry
+        self._tariff = tariff
+        self._attr_name = f"CloudEMS Grid · Import Energy Tariff {tariff}"
+        self._attr_unique_id = f"{entry.entry_id}_grid_import_energy_t{tariff}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return p1.get(f"energy_import_t{self._tariff}_kwh")
+
+    @property
+    def extra_state_attributes(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return {"tariff": self._tariff, "total_all_tariffs_kwh": p1.get("energy_import_kwh")}
+
+
+class CloudEMSGridExportEnergySensor(CoordinatorEntity, SensorEntity):
+    """Total grid export energy in kWh for a single tariff (meter reading)."""
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_icon = ICON_ENERGY
+
+    def __init__(self, coord, entry, tariff: int):
+        super().__init__(coord)
+        self._entry = entry
+        self._tariff = tariff
+        self._attr_name = f"CloudEMS Grid · Export Energy Tariff {tariff}"
+        self._attr_unique_id = f"{entry.entry_id}_grid_export_energy_t{tariff}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return p1.get(f"energy_export_t{self._tariff}_kwh")
+
+    @property
+    def extra_state_attributes(self):
+        p1 = (self.coordinator.data or {}).get("p1_data", {})
+        return {"tariff": self._tariff, "total_all_tariffs_kwh": p1.get("energy_export_kwh")}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Per-phase import / export power sensors
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Per-phase import power in Watt — zero when exporting (Energieverbruik Fase Lx)."""
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_POWER
+
+    def __init__(self, coord, entry, phase: str):
+        super().__init__(coord)
+        self._entry = entry
+        self._phase = phase
+        self._attr_name = f"CloudEMS Grid · Phase {phase} Import Power"
+        self._attr_unique_id = f"{entry.entry_id}_import_power_{phase.lower()}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        ph_key = f"power_{self._phase.lower()}_import_w"
+        # Prefer direct P1 per-phase import; fall back to max(0, net phase power)
+        val = p1.get(ph_key)
+        if val is not None and val > 0:
+            return round(val, 1)
+        net = d.get("phases", {}).get(self._phase, {}).get("power_w")
+        if net is not None:
+            return round(max(0.0, net), 1)
+        return None
+
+
+class CloudEMSPhaseExportPowerSensor(CoordinatorEntity, SensorEntity):
+    """Per-phase export power in Watt — zero when importing (Energieproductie Fase Lx)."""
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_SOLAR
+
+    def __init__(self, coord, entry, phase: str):
+        super().__init__(coord)
+        self._entry = entry
+        self._phase = phase
+        self._attr_name = f"CloudEMS Grid · Phase {phase} Export Power"
+        self._attr_unique_id = f"{entry.entry_id}_export_power_{phase.lower()}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        ph_key = f"power_{self._phase.lower()}_export_w"
+        # Prefer direct P1 per-phase export (DSMR5); fall back to max(0, -net phase power)
+        val = p1.get(ph_key)
+        if val is not None and val > 0:
+            return round(val, 1)
+        net = d.get("phases", {}).get(self._phase, {}).get("power_w")
+        if net is not None:
+            return round(max(0.0, -net), 1)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # v1.5.0 — Price: Previous / Current / Next hour sensors
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1115,6 +1365,61 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
                 for d in sorted(running, key=lambda x: x.get("current_power", 0), reverse=True)
             ],
         }
+
+
+class CloudEMSNILMTopDeviceSensor(CoordinatorEntity, SensorEntity):
+    """
+    Nth most power-hungry NILM device currently running — for dashboard gauges.
+
+    State = power in Watt of the Nth highest-consuming active device.
+    Attributes contain its name, type, confidence and phase.
+
+    Use 5 of these (rank 1–5) in an entities card or horizontal-stack
+    to always see your top power consumers at a glance, sorted high→low.
+    Returns None (unavailable) when fewer than N devices are active.
+    """
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_NILM
+
+    def __init__(self, coord, entry, rank: int):
+        super().__init__(coord)
+        self._entry = entry
+        self._rank  = rank
+        self._attr_name      = f"CloudEMS NILM · Top {rank} Device"
+        self._attr_unique_id = f"{entry.entry_id}_nilm_top_{rank}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _sorted_running(self) -> list:
+        devices = (self.coordinator.data or {}).get("nilm_devices", [])
+        running = [d for d in devices if d.get("is_on") and d.get("current_power", 0) > 0]
+        return sorted(running, key=lambda x: x.get("current_power", 0), reverse=True)
+
+    @property
+    def native_value(self):
+        top = self._sorted_running()
+        if len(top) >= self._rank:
+            return round(top[self._rank - 1].get("current_power", 0), 1)
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        top = self._sorted_running()
+        if len(top) >= self._rank:
+            d = top[self._rank - 1]
+            return {
+                "name":       d.get("name", d.get("device_type", "Unknown")),
+                "type":       d.get("device_type", "unknown"),
+                "confirmed":  d.get("confirmed", False),
+                "confidence": round(d.get("confidence", 0) * 100, 1),
+                "phase":      d.get("phase", "unknown"),
+                "rank":       self._rank,
+                "total_running": len(top),
+            }
+        return {"rank": self._rank, "name": None, "total_running": len(top)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1562,4 +1867,1004 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             "charge_hours":     bs.get("charge_hours"),
             "discharge_hours":  bs.get("discharge_hours"),
             "plan_accuracy_pct":bs.get("plan_accuracy_pct"),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.10.2 — Solar Intelligence: per-inverter profile + system overview
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
+    """
+    Fleet-wide solar intelligence overview.
+
+    State = total current PV production (W).
+    Attributes expose the combined learned knowledge across all inverters:
+      - Total estimated panel capacity (Wp)
+      - All-time peak production (W)
+      - How many inverters are confident / learning
+      - Whether any inverter is clipping right now
+      - Total orientation learning progress (%)
+
+    This is the 'wow' sensor: shows what the system has learned automatically
+    without any manual configuration.
+    """
+    _attr_name = "CloudEMS Solar · System Intelligence"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_SOLAR
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_solar_system"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def _invs(self) -> list:
+        return (self.coordinator.data or {}).get("inverter_data", [])
+
+    @property
+    def native_value(self):
+        return round(sum(i.get("current_w", 0) for i in self._invs), 1) or None
+
+    @property
+    def extra_state_attributes(self):
+        invs = self._invs
+        total_wp    = sum(i.get("estimated_wp", 0) for i in invs)
+        total_peak  = sum(i.get("peak_w", 0) for i in invs)
+        n_confident = sum(1 for i in invs if i.get("confident"))
+        n_orient    = sum(1 for i in invs if i.get("orientation_confident"))
+        clipping_any = any(i.get("clipping") for i in invs)
+        avg_orient_pct = (
+            round(sum(i.get("orientation_learning_pct", 0) for i in invs) / len(invs))
+            if invs else 0
+        )
+        phases_known = {i.get("label"): i.get("phase") for i in invs if i.get("phase_certain")}
+        return {
+            "inverter_count":         len(invs),
+            "total_estimated_wp":     round(total_wp, 0),
+            "total_peak_w":           round(total_peak, 1),
+            "inverters_confident":    n_confident,
+            "inverters_orient_known": n_orient,
+            "clipping_active":        clipping_any,
+            "orientation_progress_pct": avg_orient_pct,
+            "phases_detected":        phases_known,
+            "inverters": [
+                {
+                    "label":             i.get("label"),
+                    "current_w":         i.get("current_w"),
+                    "utilisation_pct":   i.get("utilisation_pct"),
+                    "estimated_wp":      i.get("estimated_wp"),
+                    "azimuth_compass":   i.get("azimuth_compass"),
+                    "tilt_deg":          i.get("tilt_deg"),
+                    "phase":             i.get("phase"),
+                    "phase_certain":     i.get("phase_certain"),
+                    "clipping":          i.get("clipping"),
+                    "orientation_confident": i.get("orientation_confident"),
+                }
+                for i in invs
+            ],
+        }
+
+
+class CloudEMSInverterProfileSensor(CoordinatorEntity, SensorEntity):
+    """
+    Deep solar intelligence for a single PV inverter.
+
+    State = current power (W).
+
+    Attributes show everything the system has learned automatically:
+      • Peak Wp estimate (no nameplate needed!)
+      • Phase detection via current correlation + vote counts
+      • Azimuth & tilt (manual override OR self-learned from yield curve)
+      • Compass direction label (Z, ZZW, etc.)
+      • Per-hour yield fraction curve (for visualisation)
+      • Peak production hour of the day
+      • Orientation learning progress (%)
+      • Clipping detection
+    """
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = ICON_SOLAR
+
+    def __init__(self, coord, entry, inv_entity_id: str):
+        super().__init__(coord)
+        self._entry  = entry
+        self._inv_id = inv_entity_id
+        self._attr_unique_id = f"{entry.entry_id}_inv_profile_{inv_entity_id}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _inv(self) -> dict:
+        for i in (self.coordinator.data or {}).get("inverter_data", []):
+            if i.get("entity_id") == self._inv_id:
+                return i
+        return {}
+
+    @property
+    def name(self):
+        label = self._inv().get("label") or self._inv_id
+        return f"CloudEMS Solar · {label} Profiel"
+
+    @property
+    def native_value(self):
+        return self._inv().get("current_w")
+
+    @property
+    def extra_state_attributes(self):
+        i = self._inv()
+        az = i.get("azimuth_deg")
+        az_l = i.get("azimuth_learned")
+        ti = i.get("tilt_deg")
+        ti_l = i.get("tilt_learned")
+        az_source = "manueel" if az is not None and az != az_l else ("geleerd" if az_l is not None else "onbekend")
+        ti_source = "manueel" if ti is not None and ti != ti_l else ("geleerd" if ti_l is not None else "onbekend")
+        votes = i.get("phase_votes") or {}
+        total_v = i.get("phase_total_votes", 0) or 1
+        return {
+            # Power & utilisation
+            "utilisation_pct":        i.get("utilisation_pct"),
+            "clipping":               i.get("clipping", False),
+            "peak_w_alltime":         i.get("peak_w"),
+            "peak_w_7d":              i.get("peak_w_7d"),
+            "estimated_wp":           i.get("estimated_wp"),
+            # Orientation
+            "azimuth_deg":            az,
+            "azimuth_learned":        az_l,
+            "azimuth_source":         az_source,
+            "azimuth_compass":        i.get("azimuth_compass", "onbekend"),
+            "tilt_deg":               ti,
+            "tilt_learned":           ti_l,
+            "tilt_source":            ti_source,
+            "orientation_confident":  i.get("orientation_confident", False),
+            "clear_sky_days":         i.get("clear_sky_samples", 0),
+            "clear_sky_days_needed":  i.get("orientation_samples_needed", 30),
+            "orientation_progress_pct": i.get("orientation_learning_pct", 0),
+            "peak_production_hour":   i.get("peak_production_hour"),
+            "hourly_yield_fraction":  i.get("hourly_yield_fraction", {}),
+            # Phase
+            "phase":                  i.get("phase", "unknown"),
+            "phase_certain":          i.get("phase_certain", False),
+            "phase_vote_l1_pct":      round(votes.get("L1", 0) / total_v * 100, 0),
+            "phase_vote_l2_pct":      round(votes.get("L2", 0) / total_v * 100, 0),
+            "phase_vote_l3_pct":      round(votes.get("L3", 0) / total_v * 100, 0),
+            "phase_total_votes":      i.get("phase_total_votes", 0),
+            # Learning
+            "learning_samples":       i.get("samples", 0),
+            "learning_confident":     i.get("confident", False),
+        }
+
+
+class CloudEMSInverterClippingBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """
+    ON when an inverter is actively clipping (panels generate more than inverter capacity).
+    Use in automations or alerts: dim the inverter, alert the user, or log for diagnostics.
+    """
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:solar-panel"
+
+    def __init__(self, coord, entry, inv_entity_id: str):
+        super().__init__(coord)
+        self._entry  = entry
+        self._inv_id = inv_entity_id
+        self._attr_unique_id = f"{entry.entry_id}_inv_clipping_{inv_entity_id}"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _inv(self) -> dict:
+        for i in (self.coordinator.data or {}).get("inverter_data", []):
+            if i.get("entity_id") == self._inv_id:
+                return i
+        return {}
+
+    @property
+    def name(self):
+        label = self._inv().get("label") or self._inv_id
+        return f"CloudEMS Solar · {label} Clipping"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._inv().get("clipping", False))
+
+    @property
+    def extra_state_attributes(self):
+        i = self._inv()
+        return {
+            "current_w":       i.get("current_w"),
+            "peak_w":          i.get("peak_w"),
+            "utilisation_pct": i.get("utilisation_pct"),
+            "estimated_wp":    i.get("estimated_wp"),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.10.3 — Self-learning Intelligence Sensors (zero-config)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSHomeBaselineSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = current deviation from learned normal (W, positive = more than usual).
+    Anomaly = True when consuming significantly more than the learned pattern.
+
+    Attributes contain the full picture: expected, current, standby baseline,
+    occupancy inference, and standby-hunters (always-on wasters).
+    """
+    _attr_name      = "CloudEMS Verbruik · Baseline & Anomalie"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:home-lightning-bolt-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_home_baseline"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def _bl(self) -> dict:
+        return (self.coordinator.data or {}).get("baseline", {})
+
+    @property
+    def native_value(self):
+        return self._bl.get("deviation_w", 0.0)
+
+    @property
+    def extra_state_attributes(self):
+        b = self._bl
+        return {
+            "anomaly":           b.get("anomaly", False),
+            "current_w":         b.get("current_w"),
+            "expected_w":        b.get("expected_w"),
+            "deviation_w":       b.get("deviation_w"),
+            "sigma_w":           b.get("sigma_w"),
+            "sigma_threshold":   b.get("sigma_threshold", 2.5),
+            "standby_w":         b.get("standby_w"),
+            "standby_samples":   b.get("standby_samples"),
+            "is_home":           b.get("is_home"),
+            "model_ready":       b.get("model_ready", False),
+            "trained_slots":     b.get("trained_slots", 0),
+            "total_slots":       168,
+            "training_pct":      round(b.get("trained_slots", 0) / 168 * 100, 0),
+            "standby_hunters":   b.get("standby_hunters", []),
+        }
+
+
+class CloudEMSOccupancyBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """
+    ON when home consumption indicates someone is probably home.
+    Derived purely from power: no motion sensors, no GPS, no phone tracking.
+    Confidence increases as the standby baseline is refined.
+    """
+    _attr_name        = "CloudEMS Aanwezigheid (op basis van stroom)"
+    _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
+    _attr_icon        = "mdi:home-account"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_occupancy"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("baseline", {}).get("is_home", False))
+
+    @property
+    def extra_state_attributes(self):
+        b = (self.coordinator.data or {}).get("baseline", {})
+        return {
+            "current_w":     b.get("current_w"),
+            "standby_w":     b.get("standby_w"),
+            "model_ready":   b.get("model_ready", False),
+            "method":        "power_based",
+        }
+
+
+class CloudEMSAnomalyBinarySensor(CoordinatorEntity, BinarySensorEntity):
+    """
+    ON when power consumption is significantly above the learned normal for
+    this time of day and weekday. Useful for alerts and automations.
+    """
+    _attr_name        = "CloudEMS Verbruik Anomalie"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon        = "mdi:alert-circle-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_anomaly"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def is_on(self) -> bool:
+        return bool((self.coordinator.data or {}).get("baseline", {}).get("anomaly", False))
+
+    @property
+    def extra_state_attributes(self):
+        b = (self.coordinator.data or {}).get("baseline", {})
+        return {
+            "current_w":    b.get("current_w"),
+            "expected_w":   b.get("expected_w"),
+            "deviation_w":  b.get("deviation_w"),
+            "sigma_w":      b.get("sigma_w"),
+            "model_ready":  b.get("model_ready", False),
+        }
+
+
+class CloudEMSStandbyHunterSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = estimated always-on standby load (W).
+    Attributes list individual appliances that appear to never switch off
+    during deep-night hours — candidates for energy waste.
+    """
+    _attr_name = "CloudEMS Standby Verbruik (Altijd Aan)"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:power-sleep"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_standby_hunter"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("baseline", {}).get("standby_w")
+
+    @property
+    def extra_state_attributes(self):
+        b = (self.coordinator.data or {}).get("baseline", {})
+        hunters = b.get("standby_hunters", [])
+        return {
+            "standby_w":       b.get("standby_w"),
+            "standby_samples": b.get("standby_samples", 0),
+            "suspicious_devices": hunters,
+            "suspicious_count":   len(hunters),
+            "tip": "Apparaten die 's nachts meer verbruiken dan de standby-drempel — controleer of ze uit kunnen.",
+        }
+
+
+class CloudEMSEVSessionSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = predicted kWh for the next EV charging session (learned from history).
+    When a session is active, state = kWh loaded so far.
+
+    Attributes include typical schedule, cost history, and current session info.
+    """
+    _attr_name = "CloudEMS EV · Sessie Leermodel"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:ev-plug-type2"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ev_session"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def _ev(self) -> dict:
+        return (self.coordinator.data or {}).get("ev_session", {})
+
+    @property
+    def native_value(self):
+        ev = self._ev
+        if ev.get("session_active"):
+            return ev.get("session_kwh_so_far", 0.0)
+        return ev.get("predicted_kwh")
+
+    @property
+    def extra_state_attributes(self):
+        ev = self._ev
+        return {
+            "session_active":       ev.get("session_active", False),
+            "session_current_a":    ev.get("session_current_a"),
+            "session_kwh_so_far":   ev.get("session_kwh_so_far"),
+            "session_cost_so_far":  ev.get("session_cost_so_far"),
+            "predicted_kwh":        ev.get("predicted_kwh"),
+            "predicted_duration_h": ev.get("predicted_duration_h"),
+            "typical_start_hour":   ev.get("typical_start_hour"),
+            "typical_weekdays":     ev.get("typical_weekdays", []),
+            "sessions_total":       ev.get("sessions_total", 0),
+            "model_ready":          ev.get("model_ready", False),
+            "avg_cost_per_session": ev.get("avg_cost_per_session"),
+            "recent_sessions":      ev.get("recent_sessions", []),
+        }
+
+
+class CloudEMSNILMScheduleSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = number of NILM devices with a reliable learned schedule.
+    Attributes contain the full schedule summary per device:
+    which weekday + hour they typically run.
+    """
+    _attr_name = "CloudEMS NILM · Apparaat Schemas"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_nilm_schedule"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def _schedules(self) -> list:
+        return (self.coordinator.data or {}).get("nilm_schedule", [])
+
+    @property
+    def native_value(self) -> int:
+        return sum(1 for s in self._schedules if s.get("ready"))
+
+    @property
+    def extra_state_attributes(self):
+        schedules = self._schedules
+        # Flag any devices running at unusual times right now
+        unusual = [
+            d for d in (self.coordinator.data or {}).get("nilm_devices", [])
+            if d.get("schedule_unusual")
+        ]
+        return {
+            "schedules":         schedules,
+            "total_devices":     len(schedules),
+            "schedules_ready":   sum(1 for s in schedules if s.get("ready")),
+            "unusual_now":       [d.get("name", d.get("device_type")) for d in unusual],
+            "unusual_count":     len(unusual),
+        }
+
+
+class CloudEMSWeatherCalibrationSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = overall weather calibration factor (actual / open-meteo-expected).
+    <1.0 means the installation produces less than the model expects
+    (e.g. partial shading, non-optimal tilt).
+    >1.0 means it over-performs (e.g. cooler climate, very clean panels).
+
+    After ~30 sunny days this calibration makes the PV forecast significantly
+    more accurate than a generic irradiance model.
+    """
+    _attr_name = "CloudEMS PV · Weerkalibratie"
+    _attr_icon = "mdi:weather-sunny-alert"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_weather_calibration"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def _calib(self) -> dict:
+        return (self.coordinator.data or {}).get("weather_calibration", {})
+
+    @property
+    def native_value(self):
+        invs = self._calib.get("inverters", [])
+        factors = [i["calib_factor"] for i in invs if i.get("calib_factor") is not None]
+        if not factors:
+            return None
+        return round(sum(factors) / len(factors), 3)
+
+    @property
+    def extra_state_attributes(self):
+        c = self._calib
+        return {
+            "global_confident":  c.get("global_confident", False),
+            "global_samples":    c.get("global_samples", 0),
+            "samples_needed":    30,
+            "progress_pct":      round(min(100, c.get("global_samples", 0) / 30 * 100), 0),
+            "inverters":         c.get("inverters", []),
+            "interpretation":    (
+                "installatie presteert beter dan model verwacht" if (self.native_value or 1) > 1.05
+                else "installatie presteert slechter dan model verwacht" if (self.native_value or 1) < 0.90
+                else "installatie presteert conform model"
+            ),
+        }
+
+
+class CloudEMSSolarROISensor(CoordinatorEntity, SensorEntity):
+    """
+    State = total euro saved / earned by the solar installation since CloudEMS
+    started tracking (self-import saving + export revenue).
+
+    Attributes show the daily/monthly rate and an extrapolated payback estimate.
+    This requires no installation cost input — it simply tracks value generated.
+    """
+    _attr_name = "CloudEMS PV · Opbrengst & Terugverdientijd"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon = "mdi:cash-plus"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_solar_roi"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        # Use cost tracking data as proxy for cumulative savings
+        d = self.coordinator.data or {}
+        cost_month = d.get("cost_month_eur", 0.0)
+        # Export revenue estimate: export_kwh × avg_price
+        price_info = d.get("energy_price") or {}
+        avg_price  = price_info.get("avg_today") or 0.12
+        invs = d.get("inverter_data", [])
+        total_peak_w = sum(i.get("peak_w", 0) for i in invs)
+        # Very rough: daily PV value ≈ peak_kWp × 3h_equivalent × avg_price
+        if total_peak_w > 0:
+            daily_eur = (total_peak_w / 1000) * 3.0 * avg_price
+            return round(daily_eur, 2)
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        d  = self.coordinator.data or {}
+        pi = d.get("energy_price") or {}
+        avg_price = pi.get("avg_today") or 0.12
+        invs = d.get("inverter_data", [])
+        total_wp = sum(i.get("estimated_wp", 0) for i in invs)
+        total_peak_w = sum(i.get("peak_w", 0) for i in invs)
+        # Rough annual yield: kWp × 850 kWh (NL average)
+        annual_kwh = (total_wp / 1000) * 850 if total_wp > 0 else None
+        annual_eur = round(annual_kwh * avg_price, 0) if annual_kwh else None
+        cf = d.get("cost_forecast") or {}
+        return {
+            "estimated_wp_total":      round(total_wp, 0),
+            "peak_w_alltime":          round(total_peak_w, 1),
+            "annual_yield_kwh_est":    round(annual_kwh, 0) if annual_kwh else None,
+            "annual_value_eur_est":    annual_eur,
+            "avg_price_eur_kwh":       round(avg_price, 4),
+            "daily_forecast_cost_eur": cf.get("today_forecast_eur"),
+            "monthly_cost_eur":        d.get("cost_month_eur"),
+            "note": "Schatting op basis van gemeten piekvermogen × NL-gemiddeld zonuren × actuele EPEX prijs",
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.11.0 — 8 New Intelligence Sensors
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
+    """Thermische verliescoëfficiënt van het huis in W/°C."""
+    _attr_name = "CloudEMS · Thermisch Huismodel"
+    _attr_native_unit_of_measurement = "W/K"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:home-thermometer"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_thermal_model"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        t = (self.coordinator.data or {}).get("thermal_model", {})
+        v = t.get("w_per_k", 0.0)
+        return round(v, 1) if v else None
+
+    @property
+    def extra_state_attributes(self):
+        t = (self.coordinator.data or {}).get("thermal_model", {})
+        return {
+            "rating":              t.get("rating", "onbekend"),
+            "advice":              t.get("advice", ""),
+            "samples":             t.get("samples", 0),
+            "reliable":            t.get("reliable", False),
+            "heating_days":        t.get("heating_days", 0),
+            "last_heating_w":      t.get("last_heating_w", 0),
+            "last_outside_temp_c": t.get("last_outside_temp_c"),
+            "benchmark_excellent": 100,
+            "benchmark_good":      200,
+            "benchmark_average":   350,
+        }
+
+
+class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
+    """Beschikbaar flexibel vermogen in kW."""
+    _attr_name = "CloudEMS · Flexibel Vermogen"
+    _attr_native_unit_of_measurement = "kW"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_icon = "mdi:lightning-bolt-circle"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_flex_score"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        f = (self.coordinator.data or {}).get("flex_score", {})
+        return f.get("total_kw", 0.0)
+
+    @property
+    def extra_state_attributes(self):
+        f = (self.coordinator.data or {}).get("flex_score", {})
+        return {
+            "battery_kw":   f.get("battery_kw", 0.0),
+            "ev_kw":        f.get("ev_kw", 0.0),
+            "boiler_kw":    f.get("boiler_kw", 0.0),
+            "nilm_kw":      f.get("nilm_kw", 0.0),
+            "breakdown":    f.get("breakdown", ""),
+            "components":   f.get("components", []),
+        }
+
+
+class CloudEMSPVHealthSensor(CoordinatorEntity, SensorEntity):
+    """PV paneel gezondheid — soiling en degradatie detectie."""
+    _attr_name = "CloudEMS PV · Paneelgezondheid"
+    _attr_icon = "mdi:solar-panel"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pv_health"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        p = (self.coordinator.data or {}).get("pv_health", {})
+        if p.get("any_alert"):
+            return "alert"
+        invs = p.get("inverters", [])
+        if not invs:
+            return "onbekend"
+        avg_ratio = sum(i.get("ratio", 1.0) for i in invs) / len(invs)
+        return f"{avg_ratio * 100:.0f}%"
+
+    @property
+    def extra_state_attributes(self):
+        p = (self.coordinator.data or {}).get("pv_health", {})
+        return {
+            "any_alert":  p.get("any_alert", False),
+            "summary":    p.get("summary", ""),
+            "inverters":  p.get("inverters", []),
+        }
+
+
+class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
+    """Gasverbruik meter (m³) uit P1 telegram."""
+    _attr_name = "CloudEMS · Gasstand (m³)"
+    _attr_native_unit_of_measurement = "m³"
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.GAS
+    _attr_icon = "mdi:fire"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_gas_m3"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        g = (self.coordinator.data or {}).get("gas_data", {})
+        v = g.get("gas_m3", 0.0)
+        return round(v, 3) if v else None
+
+    @property
+    def extra_state_attributes(self):
+        g = (self.coordinator.data or {}).get("gas_data", {})
+        return {
+            "gas_kwh":           round(g.get("gas_kwh", 0.0), 3),
+            "conversion_factor": 9.769,
+            "source":            "P1 DSMR (OBIS 0-1:24.2.1)",
+        }
+
+
+class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
+    """Zelfconsumptiegraad: % van PV-productie direct verbruikt."""
+    _attr_name = "CloudEMS PV · Zelfconsumptiegraad"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:home-import-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_self_consumption"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        sc = (self.coordinator.data or {}).get("self_consumption", {})
+        return sc.get("ratio_pct", None)
+
+    @property
+    def extra_state_attributes(self):
+        sc = (self.coordinator.data or {}).get("self_consumption", {})
+        return {
+            "export_pct":         sc.get("export_pct"),
+            "pv_today_kwh":       sc.get("pv_today_kwh"),
+            "self_consumed_kwh":  sc.get("self_consumed_kwh"),
+            "exported_kwh":       sc.get("exported_kwh"),
+            "best_solar_hour":    sc.get("best_solar_hour"),
+            "best_solar_label":   sc.get("best_solar_label"),
+            "advice":             sc.get("advice", ""),
+            "monthly_saving_eur": sc.get("monthly_saving_eur"),
+        }
+
+
+class CloudEMSDayTypeSensor(CoordinatorEntity, SensorEntity):
+    """Dag-type classificatie: werkdag-thuis, kantoor, weekend, vakantie."""
+    _attr_name = "CloudEMS · Dag-type Classificatie"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_day_type"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        dt = (self.coordinator.data or {}).get("day_type", {})
+        return dt.get("today_type", "unknown")
+
+    @property
+    def extra_state_attributes(self):
+        dt = (self.coordinator.data or {}).get("day_type", {})
+        return {
+            "today_label":        dt.get("today_label", "Onbekend"),
+            "confidence":         dt.get("confidence", 0.0),
+            "expected_kwh":       dt.get("expected_kwh"),
+            "total_days_learned": dt.get("total_days_learned", 0),
+            "advice":             dt.get("advice", ""),
+        }
+
+
+class CloudEMSDeviceDriftSensor(CoordinatorEntity, SensorEntity):
+    """Apparaat efficiëntie drift detectie — slijtage, kalk, defect."""
+    _attr_name = "CloudEMS · Apparaat Efficiëntiedrift"
+    _attr_icon = "mdi:chart-timeline-variant-shimmer"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_device_drift"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("device_drift", {})
+        if d.get("any_alert"):
+            return "alert"
+        if d.get("any_warning"):
+            return "warning"
+        devs = d.get("devices", [])
+        return f"ok ({len(devs)} apparaten)" if devs else "geen data"
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("device_drift", {})
+        return {
+            "any_alert":   d.get("any_alert", False),
+            "any_warning": d.get("any_warning", False),
+            "summary":     d.get("summary", ""),
+            "devices":     d.get("devices", []),
+        }
+
+
+class CloudEMSPhaseMigrationSensor(CoordinatorEntity, SensorEntity):
+    """Fase-migratie advies voor betere fase-balans."""
+    _attr_name = "CloudEMS · Fase-Migratie Advies"
+    _attr_icon = "mdi:swap-horizontal-bold"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_phase_migration"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        pm = (self.coordinator.data or {}).get("phase_migration", {})
+        if pm.get("has_advice"):
+            top = (pm.get("advices") or [{}])[0]
+            return (
+                f"Verplaats {top.get('device_label','?')} "
+                f"van {top.get('from_phase','?')} naar {top.get('to_phase','?')} "
+                f"(+{top.get('balance_gain_pct',0):.0f}%)"
+            )
+        return pm.get("summary", "geen advies")
+
+    @property
+    def extra_state_attributes(self):
+        pm = (self.coordinator.data or {}).get("phase_migration", {})
+        return {
+            "has_advice":       pm.get("has_advice", False),
+            "summary":          pm.get("summary", ""),
+            "overloaded_phase": pm.get("overloaded_phase"),
+            "lightest_phase":   pm.get("lightest_phase"),
+            "imbalance_a":      pm.get("imbalance_a", 0.0),
+            "advices":          pm.get("advices", []),
+        }
+
+
+class CloudEMSMicroMobilitySensor(CoordinatorEntity, SensorEntity):
+    """E-bike en scooter laadtracker voor het gezin."""
+    _attr_name = "CloudEMS · Micro-Mobiliteit (e-bike/scooter)"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_icon = "mdi:bicycle-electric"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_micro_mobility"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        m = (self.coordinator.data or {}).get("micro_mobility", {})
+        return m.get("total_kwh", None)
+
+    @property
+    def extra_state_attributes(self):
+        m = (self.coordinator.data or {}).get("micro_mobility", {})
+        return {
+            "vehicles_today":   m.get("vehicles_today", 0),
+            "kwh_today":        m.get("kwh_today", 0.0),
+            "cost_today_eur":   m.get("cost_today_eur", 0.0),
+            "active_sessions":  m.get("active_sessions", []),
+            "sessions_today":   m.get("sessions_today", []),
+            "vehicle_profiles": m.get("vehicle_profiles", []),
+            "best_charge_hour": m.get("best_charge_hour"),
+            "advice":           m.get("advice", ""),
+            "total_sessions":   m.get("total_sessions", 0),
+            "weekly_kwh_avg":   m.get("weekly_kwh_avg", 0.0),
+        }
+
+
+class CloudEMSNotificationSensor(CoordinatorEntity, SensorEntity):
+    """Telt actieve CloudEMS-meldingen en toont ze als attributen."""
+    _attr_name = "CloudEMS · Actieve Meldingen"
+    _attr_native_unit_of_measurement = "meldingen"
+    _attr_icon = "mdi:bell-ring"
+    _attr_state_class = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_notifications"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("notifications", {}).get("active_count", 0)
+
+    @property
+    def state_class(self):
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        n = (self.coordinator.data or {}).get("notifications", {})
+        return {
+            "critical_count":  n.get("critical_count", 0),
+            "warning_count":   n.get("warning_count", 0),
+            "info_count":      n.get("info_count", 0),
+            "muted_count":     n.get("muted_count", 0),
+            "active_alerts":   n.get("active_alerts", []),
+        }
+
+
+class CloudEMSClippingLossSensor(CoordinatorEntity, SensorEntity):
+    """Geschat financieel verlies door PV-clipping per jaar."""
+    _attr_name = "CloudEMS · Clipping Verlies"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:solar-power-variant-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_clipping_loss"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("clipping_loss", {}).get("total_kwh_lost_30d", None)
+
+    @property
+    def extra_state_attributes(self):
+        c = (self.coordinator.data or {}).get("clipping_loss", {})
+        return {
+            "total_eur_lost_year":  c.get("total_eur_lost_year", 0.0),
+            "worst_inverter":       c.get("worst_inverter", ""),
+            "expansion_roi_years":  c.get("expansion_roi_years"),
+            "any_curtailment":      c.get("any_curtailment", False),
+            "inverters":            c.get("inverters", []),
+            "advice":               c.get("advice", ""),
+        }
+
+
+class CloudEMSConsumptionCategoriesSensor(CoordinatorEntity, SensorEntity):
+    """Verbruik uitgesplitst per categorie (verwarming, mobiliteit, wit goed, enz.)."""
+    _attr_name = "CloudEMS · Verbruik Categorieën"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_icon = "mdi:chart-pie"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_consumption_categories"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("consumption_categories", {}).get("total_kwh_today", None)
+
+    @property
+    def extra_state_attributes(self):
+        c = (self.coordinator.data or {}).get("consumption_categories", {})
+        return {
+            "top_category":      c.get("top_category", ""),
+            "top_category_pct":  c.get("top_category_pct", 0.0),
+            "breakdown_pct":     c.get("breakdown_pct", {}),
+            "breakdown_kwh":     c.get("breakdown_kwh", {}),
+            "breakdown_w_now":   c.get("breakdown_w_now", {}),
+            "total_w_now":       c.get("total_w_now", 0.0),
+            "pie_data":          c.get("pie_data", []),
+            "dominant_insight":  c.get("dominant_insight", ""),
+            "avg_breakdown_pct": c.get("avg_breakdown_pct", {}),
         }

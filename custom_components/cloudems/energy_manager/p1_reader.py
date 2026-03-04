@@ -46,8 +46,12 @@ _OBIS = {
     "power_l1_import":  r"1-0:21\.7\.0\((\d+\.\d+)\*kW\)",
     "power_l2_import":  r"1-0:41\.7\.0\((\d+\.\d+)\*kW\)",
     "power_l3_import":  r"1-0:61\.7\.0\((\d+\.\d+)\*kW\)",
-    # Gas (m³) — DSMR MSN telegram
-    "gas_m3":           r"0-1:24\.2\.1\(\d+W\)\(\d+\.\d+\*m3\)",
+    # Per-phase export power (W) DSMR5 (returned to grid per phase)
+    "power_l1_export":  r"1-0:22\.7\.0\((\d+\.\d+)\*kW\)",
+    "power_l2_export":  r"1-0:42\.7\.0\((\d+\.\d+)\*kW\)",
+    "power_l3_export":  r"1-0:62\.7\.0\((\d+\.\d+)\*kW\)",
+    # Gas (m³) — DSMR MSN telegram (timestamp + value)
+    "gas_m3":           r"0-1:24\.2\.1\(\d{12}[SW]\)\((\d+\.\d+)\*m3\)",
     # Tariff indicator (1=low, 2=high)
     "tariff":           r"0-0:96\.14\.0\((\d+)\)",
 }
@@ -70,7 +74,18 @@ class P1Telegram:
     power_l1_w: float = 0.0
     power_l2_w: float = 0.0
     power_l3_w: float = 0.0
+    # Per-phase export power (DSMR5, W)
+    power_l1_export_w: float = 0.0
+    power_l2_export_w: float = 0.0
+    power_l3_export_w: float = 0.0
+    # Tariff-split energy totals (kWh)
+    energy_import_t1_kwh: float = 0.0
+    energy_import_t2_kwh: float = 0.0
+    energy_export_t1_kwh: float = 0.0
+    energy_export_t2_kwh: float = 0.0
     tariff: int = 1
+    gas_m3: float = 0.0        # Gas meter reading in m³ (0 = not available)
+    gas_kwh: float = 0.0       # Gas converted to kWh (1 m³ ≈ 9.769 kWh HHV)
     raw: str = field(default="", repr=False)
 
     @property
@@ -94,10 +109,14 @@ def parse_telegram(raw: str) -> P1Telegram:
     t1 = _get("power_import_t1") or 0.0
     t2 = _get("power_import_t2") or 0.0
     t.energy_import_kwh = t1 + t2
+    t.energy_import_t1_kwh = t1
+    t.energy_import_t2_kwh = t2
 
     x1 = _get("power_export_t1") or 0.0
     x2 = _get("power_export_t2") or 0.0
     t.energy_export_kwh = x1 + x2
+    t.energy_export_t1_kwh = x1
+    t.energy_export_t2_kwh = x2
 
     # Power in kW → W
     imp = _get("power_import_w")
@@ -114,8 +133,18 @@ def parse_telegram(raw: str) -> P1Telegram:
     t.power_l2_w = (_get("power_l2_import") or 0.0) * 1000
     t.power_l3_w = (_get("power_l3_import") or 0.0) * 1000
 
+    # Per-phase export power kW → W (DSMR5)
+    t.power_l1_export_w = (_get("power_l1_export") or 0.0) * 1000
+    t.power_l2_export_w = (_get("power_l2_export") or 0.0) * 1000
+    t.power_l3_export_w = (_get("power_l3_export") or 0.0) * 1000
+
     tariff = _get("tariff")
     t.tariff = int(tariff) if tariff else 1
+
+    gas = _get("gas_m3")
+    if gas is not None:
+        t.gas_m3  = round(gas, 3)
+        t.gas_kwh = round(gas * 9.769, 3)   # HHV conversion factor NL
 
     return t
 

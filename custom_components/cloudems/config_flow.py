@@ -458,6 +458,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _create(self):
+        # When re-running via Reconfigure, update the existing entry instead of creating new
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            return self.async_update_reload_and_abort(
+                self._get_reconfigure_entry(),
+                data=self._config,
+                reason="reconfigure_successful",
+            )
         return self.async_create_entry(title=self._build_title(), data=self._config)
 
     def _build_title(self) -> str:
@@ -467,6 +474,17 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         count = self._config.get(CONF_PHASE_COUNT, "?")
         l1    = self._config.get(CONF_MAX_CURRENT_L1, "?")
         return f"CloudEMS ({count}×{l1} A)"
+
+    # ── Reconfigure: re-run the full wizard on an existing entry ─────────────
+    async def async_step_reconfigure(self, user_input=None):
+        """Re-run the full setup wizard from the Integrations page (⋮ → Reconfigure).
+        Seeds all current values so users only change what they need.
+        """
+        existing = self._get_reconfigure_entry()
+        self._config = {**existing.data, **existing.options}
+        self._inv_count = len(self._config.get(CONF_INVERTER_CONFIGS, []))
+        self._inv_step  = 0
+        return await self.async_step_user()
 
     @staticmethod
     @callback
@@ -483,6 +501,8 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry) -> None:
         self._entry = config_entry
         self._opts: dict = {}
+        self._inv_count = 0
+        self._inv_step  = 0
 
     def _data(self) -> dict:
         return {**self._entry.data, **self._entry.options, **self._opts}
@@ -496,12 +516,13 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Required("section", default="sensors"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
-                        selector.SelectOptionDict(value="sensors",       label="🔌 Grid Sensors"),
-                        selector.SelectOptionDict(value="phase_sensors", label="⚡ Phase Sensors"),
-                        selector.SelectOptionDict(value="solar_ev_opts", label="☀️ Solar & EV"),
-                        selector.SelectOptionDict(value="features_opts", label="🚀 Features"),
-                        selector.SelectOptionDict(value="ai_opts",       label="🤖 AI & NILM"),
-                        selector.SelectOptionDict(value="advanced_opts", label="📡 P1 & Advanced"),
+                        selector.SelectOptionDict(value="sensors",        label="🔌 Grid Sensors"),
+                        selector.SelectOptionDict(value="phase_sensors",  label="⚡ Phase Sensors"),
+                        selector.SelectOptionDict(value="solar_ev_opts",  label="☀️ Solar & EV"),
+                        selector.SelectOptionDict(value="inverters_opts", label="🔆 PV Inverters"),
+                        selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
+                        selector.SelectOptionDict(value="ai_opts",        label="🤖 AI & NILM"),
+                        selector.SelectOptionDict(value="advanced_opts",  label="📡 P1 & Advanced"),
                     ], mode="list"))
             }),
         )
@@ -607,6 +628,81 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
             description_placeholders={
                     "diagram_url": "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNDIwIDEzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+PHJlY3Qgd2lkdGg9IjQyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMiIgZmlsbD0iIzFjMWMyZSIvPjx0ZXh0IHg9IjIxMCIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiIGZvbnQtd2VpZ2h0PSI2MDAiPlAxL0RTTVIgZGlyZWN0ZSBUQ1AgdmVyYmluZGluZzwvdGV4dD48cmVjdCB4PSIyMCIgeT0iMzUiIHdpZHRoPSI5MCIgaGVpZ2h0PSI4MCIgcng9IjkiIGZpbGw9IiMyMmM1NWUxOCIgc3Ryb2tlPSIjMjJjNTVlNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iNjUiIHk9IjY1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjIyIj7wn5SMPC90ZXh0Pjx0ZXh0IHg9IjY1IiB5PSI4MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI4LjUiIGZpbGw9IiM0YWRlODAiIGZvbnQtd2VpZ2h0PSI2MDAiPlNsaW1tZSBtZXRlcjwvdGV4dD48cmVjdCB4PSI0MiIgeT0iOTAiIHdpZHRoPSI0NiIgaGVpZ2h0PSIxNiIgcng9IjQiIGZpbGw9IiMwZjE3MmEiIHN0cm9rZT0iIzIyYzU1ZTU1Ii8+PHRleHQgeD0iNjUiIHk9IjEwMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3IiBmaWxsPSIjNGFkZTgwIj5QMS1wb29ydDwvdGV4dD48bGluZSB4MT0iMTEwIiB5MT0iNzUiIHgyPSIxNjAiIHkyPSI3NSIgc3Ryb2tlPSIjMjJjNTVlIiBzdHJva2Utd2lkdGg9IjIuNSIgc3Ryb2tlLWRhc2hhcnJheT0iNiwzIi8+PHJlY3QgeD0iMTYzIiB5PSI1MCIgd2lkdGg9IjgwIiBoZWlnaHQ9IjUwIiByeD0iOCIgZmlsbD0iIzFlMjkzYiIgc3Ryb2tlPSIjNjM2NmYxNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iMjAzIiB5PSI3MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNCI+8J+ToTwvdGV4dD48dGV4dCB4PSIyMDMiIHk9Ijg2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM4MThjZjgiIGZvbnQtd2VpZ2h0PSI2MDAiPlAxLWxlemVyIChUQ1ApPC90ZXh0PjxsaW5lIHgxPSIyNDMiIHkxPSI3NSIgeDI9IjI5NSIgeTI9Ijc1IiBzdHJva2U9IiM2MzY2ZjEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWRhc2hhcnJheT0iNSwzIi8+PHJlY3QgeD0iMjk4IiB5PSI1MCIgd2lkdGg9IjEwMCIgaGVpZ2h0PSI1MCIgcng9IjgiIGZpbGw9IiM2MzY2ZjExOCIgc3Ryb2tlPSIjNjM2NmYxNTUiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iMzQ4IiB5PSI3MyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNCI+8J+PoDwvdGV4dD48dGV4dCB4PSIzNDgiIHk9Ijg2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM4MThjZjgiIGZvbnQtd2VpZ2h0PSI2MDAiPkNsb3VkRU1TIEhBPC90ZXh0Pjx0ZXh0IHg9IjEzNSIgeT0iMTE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjciIGZpbGw9IiM0NzU1NjkiPlJKMTEgYmVkcmFhZDwvdGV4dD48dGV4dCB4PSIyNzAiIHk9IjExOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3IiBmaWxsPSIjNDc1NTY5Ij5UQ1AgMTkyLjE2OC54Lng6cG9vcnQ8L3RleHQ+PC9zdmc+",
                     "premium_url": "https://cloudems.eu/premium"},
+        )
+
+    # ── PV Inverter management (Options) ──────────────────────────────────────
+
+    def _inv_d(self) -> dict:
+        """Shorthand for combined entry data."""
+        return {**self._entry.data, **self._entry.options, **self._opts}
+
+    async def async_step_inverters_opts(self, user_input=None):
+        """Choose how many PV inverters to configure."""
+        data = self._inv_d()
+        current_cfgs = data.get(CONF_INVERTER_CONFIGS, [])
+        if user_input is not None:
+            self._inv_count = int(user_input.get(CONF_INVERTER_COUNT, 0))
+            self._opts[CONF_INVERTER_COUNT]   = self._inv_count
+            self._opts[CONF_INVERTER_CONFIGS] = []
+            self._inv_step = 0
+            if self._inv_count > 0:
+                return await self.async_step_inverter_detail_opts()
+            # Zero inverters: clear config and finish
+            self._opts[CONF_ENABLE_MULTI_INVERTER] = False
+            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+
+        current_count = str(len(current_cfgs))
+        return self.async_show_form(
+            step_id="inverters_opts",
+            data_schema=vol.Schema({
+                vol.Required(CONF_INVERTER_COUNT, default=current_count): _inverter_count_selector(),
+            }),
+            description_placeholders={
+                "current_count": str(len(current_cfgs)),
+                "inverter_names": ", ".join(c.get("label", f"Inverter {i+1}") for i, c in enumerate(current_cfgs)) or "—",
+            },
+        )
+
+    async def async_step_inverter_detail_opts(self, user_input=None):
+        """Configure each inverter one by one (Options flow)."""
+        i = self._inv_step + 1
+        data = self._inv_d()
+        existing_cfgs = data.get(CONF_INVERTER_CONFIGS, [])
+        # Pre-fill from existing config for this slot if it exists
+        existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
+
+        if user_input is not None:
+            self._opts[CONF_INVERTER_CONFIGS].append({
+                "entity_id":      user_input.get("inv_sensor"),
+                "control_entity": user_input.get("inv_control", ""),
+                "label":          user_input.get("inv_label", f"Inverter {i}"),
+                "priority":       i,
+                "min_power_pct":  float(user_input.get("inv_min_pct", 0.0)),
+                "azimuth_deg":    user_input.get("inv_azimuth") or None,
+                "tilt_deg":       user_input.get("inv_tilt") or None,
+            })
+            self._inv_step += 1
+            if self._inv_step < self._inv_count:
+                return await self.async_step_inverter_detail_opts()
+            self._opts[CONF_ENABLE_MULTI_INVERTER] = len(self._opts[CONF_INVERTER_CONFIGS]) > 0
+            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+
+        return self.async_show_form(
+            step_id="inverter_detail_opts",
+            data_schema=vol.Schema({
+                vol.Required("inv_sensor", description={"suggested_value": existing.get("entity_id")}): _ent(),
+                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch", "number"]),
+                vol.Optional("inv_label",   default=existing.get("label", f"Inverter {i}")): str,
+                vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
+                vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
+                vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
+            }),
+            description_placeholders={
+                "inverter_num": str(i),
+                "total":        str(self._inv_count),
+                "azimuth_tip":  "0=N 90=E 180=S 270=W — leeg = zelf leren",
+                "tilt_tip":     "0=plat 90=verticaal — leeg = zelf leren",
+            },
         )
 
     async def async_step_advanced_opts(self, user_input=None):

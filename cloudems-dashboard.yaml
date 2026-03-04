@@ -1,23 +1,132 @@
-title: ⚡ CloudEMS Dashboard
+##############################################################################
+#  CloudEMS Dashboard — v1.12.0
+#
+#  Views:
+#    1. 🏠  Overzicht          — real-time huis, dag-type, flex score, alerts
+#    2. ☀️  Solar & PV          — productie, forecast, gezondheid, clipping, zelfconsumptie
+#    3. ⚡  Fasen & Net         — stromen, spanning, balans, fase-migratie
+#    4. 💶  Prijzen & Kosten    — EPEX, kosten, gas
+#    5. 🏡  Huis Intelligentie  — thermisch model, dag-type, verbruik-categorieën
+#    6. 🚗  Mobiliteit          — EV auto + e-bike/scooter gezin
+#    7. 🤖  NILM Apparaten      — detectie, top-5, drift, schema's
+#    8. 🔋  Boiler & Batterij   — boilersturing, batterij EPEX, piekafschaving
+#    9. 🧠  Zelflerend          — leervoortgang, anomalie, weerkalibratie
+#   10. 🔔  Meldingen           — notification engine, alle actieve alerts
+#   11. 🔧  Diagnose            — technisch, congestie, PID, hints
+##############################################################################
+
+title: "⚡ CloudEMS"
 views:
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 1 — OVERZICHT
-  # ═══════════════════════════════════════════════════════════
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 1 — 🏠 OVERZICHT
+  # ═══════════════════════════════════════════════════════════════════════════
   - title: Overzicht
     path: cloudems-overzicht
-    icon: mdi:lightning-bolt-circle
+    icon: mdi:home-lightning-bolt
     cards:
-      # ── Energiestroom (Sankey) ──────────────────────────────
+
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.cloudems_actieve_meldingen
+            above: 0
+        card:
+          type: markdown
+          title: "🔔 Actieve Meldingen"
+          content: >
+            {% set n = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+            {% for a in n[:3] %}
+            {% if a.priority == 'critical' %}🔴{% elif a.priority == 'warning' %}🟡{% else %}🔵{% endif %} **{{ a.title }}** — {{ a.message }}
+            {% endfor %}
+            {% if n | length > 3 %}*...en {{ n | length - 3 }} meer. Zie tabblad Meldingen.*{% endif %}
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #2d1515 0%, #3d1f1f 100%);
+              border-left: 4px solid #e74c3c;
+              border-radius: 10px;
+            }
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_grid_import_power
+            name: Afname nu
+            icon: mdi:transmission-tower-import
+          - type: entity
+            entity: sensor.cloudems_grid_export_power
+            name: Teruglevering nu
+            icon: mdi:transmission-tower-export
+          - type: entity
+            entity: sensor.cloudems_grid_net_power
+            name: Netto net
+            icon: mdi:flash
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_dag_type_classificatie
+            name: Dag-type
+            icon: mdi:calendar-clock
+            state_color: true
+          - type: entity
+            entity: sensor.cloudems_flexibel_vermogen
+            name: Flex beschikbaar
+            icon: mdi:lightning-bolt-circle
+          - type: entity
+            entity: binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom
+            name: Waarschijnlijk thuis
+            icon: mdi:home-account
+            state_color: true
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_energy_price_current_hour
+            name: Prijs nu
+            icon: mdi:currency-eur
+            state_color: true
+          - type: entity
+            entity: sensor.cloudems_pv_zelfconsumptiegraad
+            name: Zelfconsumptie
+            icon: mdi:solar-power
+          - type: entity
+            entity: sensor.cloudems_energy_cost
+            name: Kosten /uur
+            icon: mdi:cash
+
+      - type: markdown
+        title: "📊 Verbruik Vandaag per Categorie"
+        content: >
+          {% set c = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
+          {% set total = state_attr('sensor.cloudems_verbruik_categorien', 'total_kwh_today') or 0 %}
+          {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') or '' %}
+          {% if c | length == 0 %}
+          *Categorieën worden opgebouwd gedurende de dag.*
+          {% else %}
+          **Totaal: {{ total | round(1) }} kWh**
+
+          | Categorie | Nu | Vandaag | % |
+          |-----------|-----|---------|---|
+          {% for cat in c -%}
+          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.kwh }} kWh | {{ cat.pct }}% |
+          {% endfor %}
+
+          *{{ insight }}*
+          {% endif %}
+
       - type: custom:mini-graph-card
-        name: "⚡ Net · Zon · Verbruik"
-        icon: mdi:home-lightning-bolt
+        name: "⚡ Import · Export · Net (24u)"
         entities:
-          - entity: sensor.cloudems_net_vermogen
-            name: Net
+          - entity: sensor.cloudems_grid_import_power
+            name: Import
             color: "#e74c3c"
-          - entity: sensor.cloudems_pv_verwachting_vandaag
-            name: Zon
-            color: "#f1c40f"
+          - entity: sensor.cloudems_grid_export_power
+            name: Export
+            color: "#2ecc71"
+          - entity: sensor.cloudems_grid_net_power
+            name: Netto
+            color: "#3498db"
         hours_to_show: 24
         points_per_hour: 4
         line_width: 2
@@ -25,28 +134,10 @@ views:
           extrema: true
           average: true
 
-      # ── Statistieken rij ────────────────────────────────────
-      - type: horizontal-stack
-        cards:
-          - type: entity
-            entity: sensor.cloudems_energieprijs
-            name: Huidige prijs
-            icon: mdi:currency-eur
-            state_color: true
-          - type: entity
-            entity: sensor.cloudems_energiekosten
-            name: Kosten /uur
-            icon: mdi:cash
-          - type: entity
-            entity: sensor.cloudems_pv_verwachting_vandaag
-            name: PV verwacht
-            icon: mdi:solar-power
-
-      # ── Inzicht & Advies ────────────────────────────────────
       - type: markdown
         title: "💡 Inzicht & Advies"
         content: >
-          {{ states('sensor.cloudems_inzicht_advies') }}
+          {{ states('sensor.cloudems_energy_insights') }}
         style: |
           ha-card {
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -55,110 +146,152 @@ views:
             color: #eee;
           }
 
-      # ── Beslissingslog ──────────────────────────────────────
-      - type: entities
-        title: "📋 Beslissingslog"
-        icon: mdi:text-box-multiple
-        entities:
-          - entity: sensor.cloudems_beslissingslog
-            name: Laatste actie
-        footer:
-          type: graph
-          entity: sensor.cloudems_net_vermogen
-          hours_to_show: 6
-
-      # ── Goedkoopste uren ────────────────────────────────────
-      - type: horizontal-stack
-        cards:
-          - type: entity
-            entity: binary_sensor.cloudems_goedkoopste_1_uur
-            name: Goedkoopste uur
-            icon: mdi:clock-check
-            state_color: true
-          - type: entity
-            entity: binary_sensor.cloudems_goedkoopste_2_uur
-            name: Goedkoopste 2u
-            state_color: true
-          - type: entity
-            entity: binary_sensor.cloudems_goedkoopste_3_uur
-            name: Goedkoopste 3u
-            state_color: true
-
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 2 — ZONNE-ENERGIE
-  # ═══════════════════════════════════════════════════════════
-  - title: Zonne-energie
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 2 — ☀️ SOLAR & PV
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Solar & PV
     path: cloudems-zon
     icon: mdi:solar-power-variant
     cards:
-      # ── PV Verwachting grafiek ──────────────────────────────
-      - type: custom:mini-graph-card
-        name: "☀️ PV Verwachting vs Werkelijk"
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_solar_system_intelligence
+            name: PV Nu (W)
+            icon: mdi:solar-power
+          - type: entity
+            entity: sensor.cloudems_solar_pv_forecast_today
+            name: Verwacht vandaag
+            icon: mdi:calendar-today
+          - type: entity
+            entity: sensor.cloudems_solar_pv_forecast_tomorrow
+            name: Verwacht morgen
+            icon: mdi:calendar-arrow-right
+
+      - type: entities
+        title: "🔬 PV Paneelgezondheid"
+        icon: mdi:solar-panel
         entities:
-          - entity: sensor.cloudems_pv_verwachting_vandaag
-            name: Verwacht (kWh)
+          - entity: sensor.cloudems_pv_paneelgezondheid
+            name: Status
+          - type: attribute
+            entity: sensor.cloudems_pv_paneelgezondheid
+            attribute: advice
+            name: Advies
+          - type: attribute
+            entity: sensor.cloudems_pv_paneelgezondheid
+            attribute: any_alert
+            name: Alert actief
+
+      - type: entities
+        title: "✂️ Clipping Verlies & Curtailment"
+        icon: mdi:solar-power-variant-outline
+        entities:
+          - entity: sensor.cloudems_clipping_verlies
+            name: Verlies laatste 30 dagen (kWh)
+          - type: attribute
+            entity: sensor.cloudems_clipping_verlies
+            attribute: total_eur_lost_year
+            name: Geschat verlies per jaar (€)
+          - type: attribute
+            entity: sensor.cloudems_clipping_verlies
+            attribute: worst_inverter
+            name: Grootste verliezer
+          - type: attribute
+            entity: sensor.cloudems_clipping_verlies
+            attribute: expansion_roi_years
+            name: Terugverdientijd uitbreiding (jaar)
+          - type: attribute
+            entity: sensor.cloudems_clipping_verlies
+            attribute: any_curtailment
+            name: Feed-in curtailment vermoed
+          - type: attribute
+            entity: sensor.cloudems_clipping_verlies
+            attribute: advice
+            name: Advies
+
+      - type: entities
+        title: "♻️ Zelfconsumptie"
+        icon: mdi:recycle
+        entities:
+          - entity: sensor.cloudems_pv_zelfconsumptiegraad
+            name: Zelfconsumptiegraad (%)
+          - type: attribute
+            entity: sensor.cloudems_pv_zelfconsumptiegraad
+            attribute: best_solar_hour
+            name: Beste zonuur
+          - type: attribute
+            entity: sensor.cloudems_pv_zelfconsumptiegraad
+            attribute: monthly_saving_eur
+            name: Potentiële besparing/maand (€)
+          - type: attribute
+            entity: sensor.cloudems_pv_zelfconsumptiegraad
+            attribute: advice
+            name: Advies
+
+      - type: markdown
+        title: "🧭 Omvormers — zelf-geleerd"
+        content: >
+          {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
+          {% if invs | length == 0 %}
+          *Geen omvormers geconfigureerd.*
+          {% else %}
+          | Omvormer | W nu | Piek | Richting | Fase | Clipping |
+          |----------|------|------|----------|------|----------|
+          {% for inv in invs -%}
+          | **{{ inv.label }}** | {{ inv.current_w | int }} W | {{ inv.peak_w | int }} W | {{ inv.azimuth_compass or '?' }} | {{ ('✅ ' ~ inv.phase) if inv.phase_certain else ('🔍 ' ~ inv.phase) }} | {{ '⚠️ Ja' if inv.clipping else '✅ Nee' }} |
+          {% endfor %}
+          {% endif %}
+
+      - type: custom:mini-graph-card
+        name: "☀️ Teruglevering naar net (24u)"
+        entities:
+          - entity: sensor.cloudems_grid_export_power
+            name: Export (W)
             color: "#f1c40f"
-          - entity: sensor.cloudems_net_vermogen
-            name: Werkelijk (W)
-            color: "#2ecc71"
         hours_to_show: 24
         points_per_hour: 6
         line_width: 2
         show:
           extrema: true
+          fill: true
 
-      # ── Omvormer kaarten ────────────────────────────────────
       - type: entities
-        title: "🔆 Omvormers — Piekvermogen & Clipping"
-        icon: mdi:solar-panel
+        title: "📊 Energiemeter totalen (kWh)"
         entities:
-          - type: section
-            label: "Status per omvormer"
-          - entity: sensor.cloudems_net_vermogen
-            name: Totaal PV nu
-            icon: mdi:solar-power
+          - entity: sensor.cloudems_grid_import_energy_tariff_1
+            name: Afname Tarief 1 (dal)
+          - entity: sensor.cloudems_grid_import_energy_tariff_2
+            name: Afname Tarief 2 (piek)
+          - entity: sensor.cloudems_grid_export_energy_tariff_1
+            name: Teruglevering Tarief 1
+          - entity: sensor.cloudems_grid_export_energy_tariff_2
+            name: Teruglevering Tarief 2
 
-      # ── Clipping waarschuwing ───────────────────────────────
-      - type: conditional
-        conditions:
-          - condition: template
-            value_template: >
-              {% set invs = state_attr('sensor.cloudems_net_vermogen','inverter_data') or [] %}
-              {{ invs | selectattr('clipping','eq',true) | list | length > 0 }}
-        card:
-          type: markdown
-          title: "⚠️ Clipping gedetecteerd"
-          content: >
-            {% set invs = state_attr('sensor.cloudems_inzicht_advies','all_tips') or [] %}
-            {% for tip in invs %}{% if 'Clipping' in tip %}**{{ tip }}**{% endif %}{% endfor %}
-          style: |
-            ha-card {
-              border-left: 4px solid #e74c3c;
-              background: #2c0000;
-              color: #ff6b6b;
-            }
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_net_co2_intensiteit
+            name: CO2 intensiteit
+            icon: mdi:molecule-co2
+          - type: entity
+            entity: sensor.cloudems_ai_status
+            name: AI modus
+            icon: mdi:robot
 
-      # ── Oriëntatie leerproces ───────────────────────────────
-      - type: entities
-        title: "🧭 Oriëntatie & Azimut (zelf-lerend)"
-        icon: mdi:compass-rose
-        entities:
-          - entity: sensor.cloudems_pv_verwachting_vandaag
-            name: Forecast vandaag
-            secondary_info: last-changed
-
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 3 — FASEN & STROOM
-  # ═══════════════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 3 — ⚡ FASEN & NET
+  # ═══════════════════════════════════════════════════════════════════════════
   - title: Fasen
     path: cloudems-fasen
     icon: mdi:sine-wave
     cards:
-      # ── Fase stroom gauges ──────────────────────────────────
+
       - type: horizontal-stack
         cards:
           - type: gauge
-            entity: sensor.cloudems_fase_l1_stroom
+            entity: sensor.cloudems_grid_phase_l1_current
             name: L1 Stroom
             min: 0
             max: 25
@@ -168,7 +301,7 @@ views:
               yellow: 18
               red: 23
           - type: gauge
-            entity: sensor.cloudems_fase_l2_stroom
+            entity: sensor.cloudems_grid_phase_l2_current
             name: L2 Stroom
             min: 0
             max: 25
@@ -178,7 +311,7 @@ views:
               yellow: 18
               red: 23
           - type: gauge
-            entity: sensor.cloudems_fase_l3_stroom
+            entity: sensor.cloudems_grid_phase_l3_current
             name: L3 Stroom
             min: 0
             max: 25
@@ -188,139 +321,137 @@ views:
               yellow: 18
               red: 23
 
-      # ── Spanning per fase ───────────────────────────────────
       - type: horizontal-stack
         cards:
           - type: entity
-            entity: sensor.cloudems_fase_l1_spanning
+            entity: sensor.cloudems_grid_phase_l1_voltage
             name: Spanning L1
-            icon: mdi:sine-wave
           - type: entity
-            entity: sensor.cloudems_fase_l2_spanning
+            entity: sensor.cloudems_grid_phase_l2_voltage
             name: Spanning L2
-            icon: mdi:sine-wave
           - type: entity
-            entity: sensor.cloudems_fase_l3_spanning
+            entity: sensor.cloudems_grid_phase_l3_voltage
             name: Spanning L3
-            icon: mdi:sine-wave
 
-      # ── Vermogen per fase ───────────────────────────────────
-      - type: horizontal-stack
-        cards:
-          - type: entity
-            entity: sensor.cloudems_fase_l1_vermogen
-            name: Vermogen L1
-            icon: mdi:flash
-          - type: entity
-            entity: sensor.cloudems_fase_l2_vermogen
-            name: Vermogen L2
-            icon: mdi:flash
-          - type: entity
-            entity: sensor.cloudems_fase_l3_vermogen
-            name: Vermogen L3
-            icon: mdi:flash
-
-      # ── Fase onbalans ───────────────────────────────────────
       - type: entity
-        entity: sensor.cloudems_fase_onbalans
-        name: Fase onbalans
+        entity: sensor.cloudems_grid_phase_imbalance
+        name: Fase onbalans (A)
         icon: mdi:scale-unbalanced
 
-      # ── Fase grafiek ────────────────────────────────────────
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: sensor.cloudems_fase_migratie_advies
+            state_not: "geen_advies"
+        card:
+          type: markdown
+          title: "🔀 Fase-migratie Advies"
+          content: >
+            {% set m = state_attr('sensor.cloudems_fase_migratie_advies', 'advices') or [] %}
+            {% set imp = state_attr('sensor.cloudems_fase_migratie_advies', 'imbalance_a') %}
+            **Fase onbalans: {{ imp }} A**
+
+            | Apparaat | Van | Naar | Verbetering |
+            |----------|-----|------|-------------|
+            {% for a in m[:5] -%}
+            | {{ a.device_label }} | {{ a.from_phase }} | {{ a.to_phase }} | {{ a.balance_gain_pct }}% |
+            {% endfor %}
+
       - type: custom:mini-graph-card
-        name: "📈 Fase stromen — 3 uur"
+        name: "📈 Fase stromen L1/L2/L3 (3u)"
         entities:
-          - entity: sensor.cloudems_fase_l1_stroom
+          - entity: sensor.cloudems_grid_phase_l1_current
             name: L1
             color: "#e74c3c"
-          - entity: sensor.cloudems_fase_l2_stroom
+          - entity: sensor.cloudems_grid_phase_l2_current
             name: L2
             color: "#3498db"
-          - entity: sensor.cloudems_fase_l3_stroom
+          - entity: sensor.cloudems_grid_phase_l3_current
             name: L3
             color: "#2ecc71"
         hours_to_show: 3
         points_per_hour: 6
         line_width: 2
 
-      # ── Piekafschaving ──────────────────────────────────────
       - type: entities
         title: "📊 Piekafschaving"
         entities:
-          - entity: sensor.cloudems_piekafschaving
-            name: Piek vandaag
+          - entity: sensor.cloudems_grid_peak_shaving
+            name: Piek vandaag (W)
+          - entity: sensor.cloudems_grid_monthly_peak_import
+            name: Maandpiek import (W)
           - type: attribute
-            entity: sensor.cloudems_piekafschaving
+            entity: sensor.cloudems_grid_peak_shaving
             attribute: limit_w
             name: Pieklimiet (W)
           - type: attribute
-            entity: sensor.cloudems_piekafschaving
+            entity: sensor.cloudems_grid_peak_shaving
             attribute: headroom_w
             name: Ruimte (W)
-          - type: attribute
-            entity: sensor.cloudems_piekafschaving
-            attribute: active
-            name: Actief
 
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 4 — EPEX PRIJZEN
-  # ═══════════════════════════════════════════════════════════
-  - title: Energieprijzen
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 4 — 💶 PRIJZEN & KOSTEN
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Prijzen & Kosten
     path: cloudems-prijzen
     icon: mdi:currency-eur
     cards:
-      # ── Huidige prijs groot ─────────────────────────────────
-      - type: entity
-        entity: sensor.cloudems_energieprijs
-        name: "💶 EPEX Prijs nu"
-        attribute: current
-        state_color: true
 
-      # ── Prijs min/max/gem ───────────────────────────────────
       - type: horizontal-stack
         cards:
           - type: entity
-            entity: sensor.cloudems_energieprijs
+            entity: sensor.cloudems_energy_price_previous_hour
+            name: Vorig uur
+          - type: entity
+            entity: sensor.cloudems_energy_price_current_hour
+            name: "💶 Prijs nu"
+            state_color: true
+          - type: entity
+            entity: sensor.cloudems_energy_price_next_hour
+            name: Volgend uur
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_energy_epex_today
             name: Min vandaag
             attribute: min_today
             icon: mdi:trending-down
           - type: entity
-            entity: sensor.cloudems_energieprijs
+            entity: sensor.cloudems_energy_epex_today
             name: Gem vandaag
             attribute: avg_today
-            icon: mdi:minus
           - type: entity
-            entity: sensor.cloudems_energieprijs
+            entity: sensor.cloudems_energy_epex_today
             name: Max vandaag
             attribute: max_today
             icon: mdi:trending-up
 
-      # ── Goedkoopste uren ────────────────────────────────────
       - type: entities
-        title: "🕐 Goedkoopste uren vandaag"
+        title: "🕐 Goedkoopste uren"
         entities:
-          - entity: binary_sensor.cloudems_goedkoopste_1_uur
-            name: Goedkoopste uur
-            secondary_info: attribute
-            attribute: current_price
-          - entity: binary_sensor.cloudems_goedkoopste_2_uur
-            name: Goedkoopste 2 uur
-          - entity: binary_sensor.cloudems_goedkoopste_3_uur
-            name: Goedkoopste 3 uur
+          - entity: binary_sensor.cloudems_energy_cheapest_1h
+            name: Goedkoopste uur nu
+            state_color: true
+          - entity: binary_sensor.cloudems_energy_cheapest_2h
+            name: Goedkoopste 2u-blok nu
+            state_color: true
+          - entity: binary_sensor.cloudems_energy_cheapest_3h
+            name: Goedkoopste 3u-blok nu
+            state_color: true
           - type: attribute
-            entity: sensor.cloudems_energieprijs
+            entity: sensor.cloudems_energy_epex_today
             attribute: cheapest_2h_start
-            name: "Goedkoopste 2u blok (start)"
+            name: Goedkoopste 2u blok (start)
           - type: attribute
-            entity: sensor.cloudems_energieprijs
+            entity: sensor.cloudems_energy_epex_today
             attribute: cheapest_3h_start
-            name: "Goedkoopste 3u blok (start)"
+            name: Goedkoopste 3u blok (start)
 
-      # ── Prijs grafiek ───────────────────────────────────────
       - type: custom:mini-graph-card
-        name: "📊 EPEX prijsverloop"
+        name: "📊 EPEX prijsverloop vandaag"
         entities:
-          - entity: sensor.cloudems_energieprijs
+          - entity: sensor.cloudems_energy_epex_today
             name: Prijs (€/kWh)
             color: "#f39c12"
         hours_to_show: 24
@@ -330,202 +461,601 @@ views:
           extrema: true
           average: true
 
-      # ── Energiekosten ───────────────────────────────────────
+      - type: entities
+        title: "🔥 Gas (P1 DSMR)"
+        entities:
+          - entity: sensor.cloudems_gasstand
+            name: Gasmeter stand (m³)
+          - type: attribute
+            entity: sensor.cloudems_gasstand
+            attribute: gas_kwh
+            name: Equivalent (kWh)
+
       - type: entities
         title: "💶 Energiekosten"
         entities:
-          - entity: sensor.cloudems_energiekosten
-            name: Kosten per uur
+          - entity: sensor.cloudems_energy_cost
+            name: Kosten per uur (€/u)
           - type: attribute
-            entity: sensor.cloudems_energiekosten
+            entity: sensor.cloudems_energy_cost
             attribute: cost_today_eur
             name: Kosten vandaag (€)
           - type: attribute
-            entity: sensor.cloudems_energiekosten
+            entity: sensor.cloudems_energy_cost
             attribute: cost_month_eur
             name: Kosten deze maand (€)
+          - entity: sensor.cloudems_energie_kosten_verwachting
+            name: Verwachte dagkosten (€)
 
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 5 — NILM APPARATEN
-  # ═══════════════════════════════════════════════════════════
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 5 — 🏡 HUIS INTELLIGENTIE
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Huis Intelligentie
+    path: cloudems-huis
+    icon: mdi:home-analytics
+    cards:
+
+      - type: entities
+        title: "📅 Dag-type Classificatie"
+        entities:
+          - entity: sensor.cloudems_dag_type_classificatie
+            name: Type vandaag
+          - type: attribute
+            entity: sensor.cloudems_dag_type_classificatie
+            attribute: confidence
+            name: Zekerheid (%)
+          - type: attribute
+            entity: sensor.cloudems_dag_type_classificatie
+            attribute: expected_kwh
+            name: Verwacht verbruik (kWh)
+          - type: attribute
+            entity: sensor.cloudems_dag_type_classificatie
+            attribute: advice
+            name: Advies
+
+      - type: entities
+        title: "🌡️ Thermisch Huismodel"
+        entities:
+          - entity: sensor.cloudems_thermisch_huismodel
+            name: Warmteverliescoëfficiënt (W/K)
+          - type: attribute
+            entity: sensor.cloudems_thermisch_huismodel
+            attribute: rating
+            name: Beoordeling
+          - type: attribute
+            entity: sensor.cloudems_thermisch_huismodel
+            attribute: advice
+            name: Advies
+          - type: attribute
+            entity: sensor.cloudems_thermisch_huismodel
+            attribute: heating_days
+            name: Stookdagen geleerd
+
+      - type: entities
+        title: "📊 Verbruik per Categorie — Vandaag"
+        entities:
+          - entity: sensor.cloudems_verbruik_categorien
+            name: Totaal vandaag (kWh)
+          - type: attribute
+            entity: sensor.cloudems_verbruik_categorien
+            attribute: top_category
+            name: Grootste verbruiker
+          - type: attribute
+            entity: sensor.cloudems_verbruik_categorien
+            attribute: top_category_pct
+            name: Aandeel grootste (%)
+          - type: attribute
+            entity: sensor.cloudems_verbruik_categorien
+            attribute: dominant_insight
+            name: Inzicht
+
+      - type: markdown
+        title: "🍕 Verbruiksverdeling (huidig)"
+        content: >
+          {% set pie = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
+          {% set avg = state_attr('sensor.cloudems_verbruik_categorien', 'avg_breakdown_pct') or {} %}
+          {% if pie | length == 0 %}
+          *Categorieën worden opgebouwd gedurende de dag.*
+          {% else %}
+          | Categorie | Nu (W) | Vandaag | 30d gem. |
+          |-----------|--------|---------|----------|
+          {% for cat in pie -%}
+          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.pct }}% | – |
+          {% endfor %}
+          {% endif %}
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom
+            name: Waarschijnlijk thuis
+            state_color: true
+          - type: entity
+            entity: binary_sensor.cloudems_verbruik_anomalie
+            name: Ongewoon verbruik
+            state_color: true
+          - type: entity
+            entity: sensor.cloudems_standby_verbruik_altijd_aan
+            name: Standby (W)
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 6 — 🚗 MOBILITEIT
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Mobiliteit
+    path: cloudems-mobiliteit
+    icon: mdi:car-electric
+    cards:
+
+      - type: entities
+        title: "🚗 EV Sessie Leermodel"
+        icon: mdi:ev-plug-type2
+        entities:
+          - entity: sensor.cloudems_ev_sessie_leermodel
+            name: Verwacht volgende sessie (kWh)
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
+            attribute: session_active
+            name: Sessie actief
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
+            attribute: session_kwh_so_far
+            name: Geladen tot nu (kWh)
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
+            attribute: predicted_duration_h
+            name: Verwachte duur (uur)
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
+            attribute: typical_weekdays
+            name: Typische weekdagen
+          - type: attribute
+            entity: sensor.cloudems_ev_sessie_leermodel
+            attribute: avg_cost_per_session
+            name: Gem. kosten per sessie (€)
+
+      - type: entities
+        title: "🚲 Micro-Mobiliteit (E-bike & Scooter)"
+        icon: mdi:bicycle-electric
+        entities:
+          - entity: sensor.cloudems_micro_mobiliteit
+            name: Totaal geladen (kWh)
+          - type: attribute
+            entity: sensor.cloudems_micro_mobiliteit
+            attribute: vehicles_today
+            name: Voertuigen geladen vandaag
+          - type: attribute
+            entity: sensor.cloudems_micro_mobiliteit
+            attribute: kwh_today
+            name: kWh vandaag
+          - type: attribute
+            entity: sensor.cloudems_micro_mobiliteit
+            attribute: cost_today_eur
+            name: Kosten vandaag (€)
+          - type: attribute
+            entity: sensor.cloudems_micro_mobiliteit
+            attribute: weekly_kwh_avg
+            name: Gemiddeld per week (kWh)
+          - type: attribute
+            entity: sensor.cloudems_micro_mobiliteit
+            attribute: total_sessions
+            name: Sessies totaal
+
+      - type: conditional
+        conditions:
+          - condition: template
+            value_template: >
+              {{ (state_attr('sensor.cloudems_micro_mobiliteit', 'active_sessions') or []) | length > 0 }}
+        card:
+          type: markdown
+          title: "⚡ Nu aan het laden"
+          content: >
+            {% set active = state_attr('sensor.cloudems_micro_mobiliteit', 'active_sessions') or [] %}
+            {% for s in active %}
+            🔌 **{{ s.label }}** ({{ s.vehicle_type }}) — {{ s.kwh_so_far }} kWh in {{ s.duration_min | int }} min — Fase {{ s.phase }}
+            {% endfor %}
+
+      - type: markdown
+        title: "📋 Geleerde Voertuigprofielen"
+        content: >
+          {% set profiles = state_attr('sensor.cloudems_micro_mobiliteit', 'vehicle_profiles') or [] %}
+          {% if profiles | length == 0 %}
+          *Nog geen voertuigen gedetecteerd. CloudEMS herkent e-bike en scooter laders (50–700W) automatisch via NILM.*
+          {% else %}
+          | Voertuig | Type | Sessies | Gem. kWh | Gem. duur | Per week |
+          |----------|------|---------|----------|-----------|----------|
+          {% for p in profiles -%}
+          | {{ p.label }} | {{ p.vehicle_type }} | {{ p.sessions }} | {{ p.avg_kwh }} kWh | {{ p.avg_duration_min | int }} min | {{ p.sessions_per_week }}×/week |
+          {% endfor %}
+          {% endif %}
+
+      - type: entities
+        title: "⚡ Flexibel Vermogen Score"
+        entities:
+          - entity: sensor.cloudems_flexibel_vermogen
+            name: Totaal flex beschikbaar (kW)
+          - type: attribute
+            entity: sensor.cloudems_flexibel_vermogen
+            attribute: components
+            name: Componenten
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 7 — 🤖 NILM APPARATEN
+  # ═══════════════════════════════════════════════════════════════════════════
   - title: NILM Apparaten
     path: cloudems-nilm
     icon: mdi:home-analytics
     cards:
-      # ── Status header ───────────────────────────────────────
+
       - type: horizontal-stack
         cards:
           - type: entity
-            entity: sensor.cloudems_nilm_apparaten
-            name: Gevonden apparaten
-            icon: mdi:home-analytics
-          - type: attribute
-            entity: sensor.cloudems_nilm_apparaten
-            attribute: active_count
+            entity: sensor.cloudems_nilm_devices
+            name: Gevonden
+          - type: entity
+            entity: sensor.cloudems_nilm_running_devices
             name: Nu aan
-            icon: mdi:power
-          - type: attribute
-            entity: sensor.cloudems_nilm_apparaten
-            attribute: total_power_w
-            name: Totaal vermogen
-            icon: mdi:flash
+          - type: entity
+            entity: sensor.cloudems_nilm_running_devices_power
+            name: Totaal (W)
 
-      # ── NILM mode info ──────────────────────────────────────
-      - type: entity
-        entity: sensor.cloudems_nilm_apparaten
-        name: AI modus
-        attribute: active_mode
-        icon: mdi:brain
-
-      # ── Feedback instructie ─────────────────────────────────
-      - type: markdown
-        title: "ℹ️ Apparaat bevestigen"
-        content: >
-          Gebruik de **CloudEMS services** in Ontwikkelaarstools om apparaten te bevestigen:
-
-          - `cloudems.nilm_feedback` met `feedback: correct / incorrect / maybe`
-          - `cloudems.confirm_device` om een apparaat definitief vast te leggen
-          - `cloudems.dismiss_device` om een apparaat te verwijderen
-
-      # ── Apparaten lijst ─────────────────────────────────────
       - type: entities
-        title: "🔌 Gedetecteerde apparaten"
-        icon: mdi:devices
+        title: "🔝 Top 5 — Hoogste verbruikers nu"
         entities:
-          - entity: sensor.cloudems_nilm_apparaten
-            name: Totaal
+          - entity: sensor.cloudems_nilm_top_1_device
+            name: "#1"
             secondary_info: attribute
-            attribute: confirmed_count
+            attribute: name
+          - entity: sensor.cloudems_nilm_top_2_device
+            name: "#2"
+            secondary_info: attribute
+            attribute: name
+          - entity: sensor.cloudems_nilm_top_3_device
+            name: "#3"
+            secondary_info: attribute
+            attribute: name
+          - entity: sensor.cloudems_nilm_top_4_device
+            name: "#4"
+            secondary_info: attribute
+            attribute: name
+          - entity: sensor.cloudems_nilm_top_5_device
+            name: "#5"
+            secondary_info: attribute
+            attribute: name
 
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 6 — BOILER / STOPCONTACT STURING
-  # ═══════════════════════════════════════════════════════════
-  - title: Boiler & Stopcontacten
+      - type: markdown
+        title: "⚙️ Apparaat Efficiëntiedrift"
+        content: >
+          {% set devs = state_attr('sensor.cloudems_apparaat_efficientiedrift', 'devices') or [] %}
+          {% set alerts = devs | selectattr('level', 'ne', 'ok') | list %}
+          {% if alerts | length == 0 %}
+          ✅ *Alle apparaten presteren normaal.*
+          {% else %}
+          | Apparaat | Drift | Status |
+          |----------|-------|--------|
+          {% for d in alerts -%}
+          | {{ d.label }} | {{ d.drift_pct | round(0) }}% | {% if d.level == 'alert' %}🔴{% else %}🟡{% endif %} |
+          {% endfor %}
+          {% endif %}
+
+      - type: custom:mini-graph-card
+        name: "📈 Top verbruikers (2u)"
+        entities:
+          - entity: sensor.cloudems_nilm_top_1_device
+            name: "#1"
+            color: "#e74c3c"
+          - entity: sensor.cloudems_nilm_top_2_device
+            name: "#2"
+            color: "#f39c12"
+          - entity: sensor.cloudems_nilm_top_3_device
+            name: "#3"
+            color: "#3498db"
+        hours_to_show: 2
+        points_per_hour: 4
+        line_width: 2
+
+      - type: markdown
+        title: "📅 Geleerde Apparaat Schema's"
+        content: >
+          {% set scheds = state_attr('sensor.cloudems_nilm_apparaat_schemas', 'schedules') or [] %}
+          {% set ready = scheds | selectattr('ready') | list %}
+          {% if ready | length == 0 %}
+          *Schema's worden geleerd.*
+          {% else %}
+          | Apparaat | Piek dag | Piek uur |
+          |----------|----------|----------|
+          {% for s in ready -%}
+          | {{ s.label or s.device_type }} | {{ s.peak_weekday or '?' }} | {{ (s.peak_hour | string ~ ':00') if s.peak_hour is not none else '?' }} |
+          {% endfor %}
+          {% endif %}
+
+      - type: entities
+        title: "🤖 AI & NILM status"
+        entities:
+          - entity: sensor.cloudems_ai_status
+            name: AI modus
+          - entity: sensor.cloudems_nilm_sensor_input
+            name: Sensor invoermodus
+          - entity: sensor.cloudems_nilm_diagnostics
+            name: Classificatiescore (%)
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 8 — 🔋 BOILER & BATTERIJ
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Boiler & Batterij
     path: cloudems-boiler
     icon: mdi:water-boiler
     cards:
-      # ── Boiler status ───────────────────────────────────────
+
       - type: entity
         entity: sensor.cloudems_boiler_status
         name: "🔌 Boiler sturing status"
         icon: mdi:water-boiler
 
-      # ── Triggers ────────────────────────────────────────────
+      - type: entities
+        title: "🔋 Batterij EPEX Schema"
+        entities:
+          - entity: sensor.cloudems_batterij_epex_schema
+            name: Huidige actie
+          - type: attribute
+            entity: sensor.cloudems_batterij_epex_schema
+            attribute: reason
+            name: Reden
+          - type: attribute
+            entity: sensor.cloudems_batterij_epex_schema
+            attribute: soc_pct
+            name: Batterij SOC (%)
+          - entity: sensor.cloudems_battery_state_of_health
+            name: Batterij gezondheid (SoH %)
+          - type: attribute
+            entity: sensor.cloudems_battery_state_of_health
+            attribute: total_cycles
+            name: Totaal cycli
+          - type: attribute
+            entity: sensor.cloudems_battery_state_of_health
+            attribute: capacity_kwh
+            name: Bruikbare capaciteit (kWh)
+
       - type: entities
         title: "⚡ Actieve sturing-triggers"
         entities:
-          - entity: binary_sensor.cloudems_goedkoopste_3_uur
-            name: Goedkoopste 3u (schakel boiler)
-            secondary_info: attribute
-            attribute: current_price
-          - entity: sensor.cloudems_pv_verwachting_vandaag
-            name: PV verwachting
-          - entity: sensor.cloudems_beslissingslog
+          - entity: binary_sensor.cloudems_energy_cheapest_3h
+            name: Goedkoopste 3u (boiler)
+          - entity: sensor.cloudems_solar_pv_forecast_today
+            name: PV verwachting vandaag
+          - entity: sensor.cloudems_system_decision_log
             name: Laatste actie
 
-      # ── Instructie ──────────────────────────────────────────
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 9 — 🧠 ZELFLEREND
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Zelflerend
+    path: cloudems-intelligence
+    icon: mdi:brain
+    cards:
+
+      - type: entities
+        title: "🧠 Leervoortgang overzicht"
+        entities:
+          - entity: sensor.cloudems_home_baseline_anomalie
+            name: Baseline model
+            secondary_info: attribute
+            attribute: trained_slots
+          - entity: sensor.cloudems_ev_sessie_leermodel
+            name: EV sessies geleerd
+            secondary_info: attribute
+            attribute: sessions_total
+          - entity: sensor.cloudems_solar_system_intelligence
+            name: Oriëntatie leervoortgang (%)
+            secondary_info: attribute
+            attribute: orientation_progress_pct
+          - entity: sensor.cloudems_pv_weerkalibratie
+            name: Weerkalibratie (%)
+            secondary_info: attribute
+            attribute: progress_pct
+          - entity: sensor.cloudems_dag_type_classificatie
+            name: Dag-type zekerheid (%)
+            secondary_info: attribute
+            attribute: confidence
+
+      - type: entities
+        title: "📊 Verbruiksanomalie detail"
+        entities:
+          - entity: sensor.cloudems_home_baseline_anomalie
+            name: Afwijking van normaal (W)
+          - type: attribute
+            entity: sensor.cloudems_home_baseline_anomalie
+            attribute: current_w
+            name: Huidig verbruik (W)
+          - type: attribute
+            entity: sensor.cloudems_home_baseline_anomalie
+            attribute: expected_w
+            name: Verwacht verbruik (W)
+          - type: attribute
+            entity: sensor.cloudems_home_baseline_anomalie
+            attribute: training_pct
+            name: Model compleet (%)
+
       - type: markdown
-        title: "⚙️ Boiler configureren"
+        title: "🔍 Standby Hunters"
         content: >
-          Voeg een **boiler_config** toe aan je CloudEMS configuratie in `configuration.yaml`:
+          {% set hunters = state_attr('sensor.cloudems_standby_verbruik_altijd_aan', 'suspicious_devices') or [] %}
+          {% if hunters | length == 0 %}
+          ✅ *Geen verdachte altijd-aan verbruikers gevonden.*
+          {% else %}
+          ⚠️ **Apparaten die nooit uit lijken te gaan:**
 
-          ```yaml
-          cloudems:
-            boiler_configs:
-              - entity_id: switch.boiler_stopcontact
-                label: Warmwater boiler
-                phase: L2
-                power_w: 2000
-                modes:
-                  - cheap_hours
-                  - negative_price
-                  - pv_surplus
-                  - export_reduce
-                cheap_hours_rank: 3
-                min_on_minutes: 15
-                min_off_minutes: 10
-          ```
+          | Dag | Uur | Gem. (W) |
+          |-----|-----|---------|
+          {% for h in hunters -%}
+          | Weekdag {{ h.weekday }} | {{ h.hour }}:00 | {{ h.avg_w | int }} W |
+          {% endfor %}
+          {% endif %}
 
-          **Modi:**
-          - `cheap_hours` — Aan tijdens goedkoopste N uur
-          - `negative_price` — Aan bij negatieve EPEX prijs
-          - `pv_surplus` — Aan bij zonne-overschot
-          - `export_reduce` — Aan als fase teveel exporteert
+      - type: entities
+        title: "☁️ PV Weerkalibratie"
+        entities:
+          - entity: sensor.cloudems_pv_weerkalibratie
+            name: Kalibratiefactor (gem.)
+          - type: attribute
+            entity: sensor.cloudems_pv_weerkalibratie
+            attribute: global_confident
+            name: Kalibratie betrouwbaar
+          - type: attribute
+            entity: sensor.cloudems_pv_weerkalibratie
+            attribute: interpretation
+            name: Uitleg
 
-  # ═══════════════════════════════════════════════════════════
-  # VIEW 7 — DIAGNOSTICS
-  # ═══════════════════════════════════════════════════════════
+      - type: entities
+        title: "💰 PV Opbrengst & Terugverdientijd"
+        entities:
+          - entity: sensor.cloudems_pv_opbrengst_terugverdientijd
+            name: Dagwaarde PV (€)
+          - type: attribute
+            entity: sensor.cloudems_pv_opbrengst_terugverdientijd
+            attribute: annual_value_eur_est
+            name: Geschatte jaaropbrengst (€)
+          - type: attribute
+            entity: sensor.cloudems_pv_opbrengst_terugverdientijd
+            attribute: estimated_wp_total
+            name: Geschat panelenvermogen (Wp)
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 10 — 🔔 MELDINGEN
+  # ═══════════════════════════════════════════════════════════════════════════
+  - title: Meldingen
+    path: cloudems-meldingen
+    icon: mdi:bell-ring
+    cards:
+
+      - type: horizontal-stack
+        cards:
+          - type: entity
+            entity: sensor.cloudems_actieve_meldingen
+            name: Totaal actief
+            icon: mdi:bell-ring
+          - type: attribute
+            entity: sensor.cloudems_actieve_meldingen
+            attribute: critical_count
+            name: "🔴 Kritiek"
+          - type: attribute
+            entity: sensor.cloudems_actieve_meldingen
+            attribute: warning_count
+            name: "🟡 Waarschuwing"
+
+      - type: markdown
+        title: "🔔 Alle Actieve Meldingen"
+        content: >
+          {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+          {% if alerts | length == 0 %}
+          ✅ **Geen actieve meldingen.** CloudEMS bewaakt alles en geeft een seintje als er iets is.
+          {% else %}
+          {% for a in alerts %}
+          {% if a.priority == 'critical' %}🔴 **KRITIEK**{% elif a.priority == 'warning' %}🟡 **Waarschuwing**{% else %}🔵 **Info**{% endif %} — **{{ a.title }}**
+          {{ a.message }}
+          *({{ a.age_h }} uur geleden gedetecteerd)*
+
+          ---
+          {% endfor %}
+          {% endif %}
+
+      - type: entities
+        title: "📋 Alert-status per systeem"
+        entities:
+          - entity: sensor.cloudems_pv_paneelgezondheid
+            name: PV paneelgezondheid
+          - entity: sensor.cloudems_clipping_verlies
+            name: Clipping verlies
+          - entity: sensor.cloudems_apparaat_efficientiedrift
+            name: Apparaat drift
+          - entity: sensor.cloudems_battery_state_of_health
+            name: Batterij gezondheid
+          - entity: binary_sensor.cloudems_verbruik_anomalie
+            name: Verbruiksanomalie
+            state_color: true
+
+      - type: markdown
+        title: "ℹ️ Hoe werken CloudEMS Meldingen?"
+        content: >
+          CloudEMS detecteert automatisch problemen en meldt via:
+
+          - **HA Persistent Notifications** (sidebar): altijd actief
+          - **Mobiele push** (optioneel): stel `notification_service` in via CloudEMS configuratie
+
+          **Prioriteiten:**
+          🔴 Kritiek → direct + herinnering na 6u
+          🟡 Waarschuwing → maximaal 1× per dag
+          🔵 Info → gebundeld in avonddigest (20:00)
+
+          Dempen: gebruik `cloudems.mute_alert` service met de alert-key als parameter.
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VIEW 11 — 🔧 DIAGNOSE
+  # ═══════════════════════════════════════════════════════════════════════════
   - title: Diagnose
     path: cloudems-diagnose
     icon: mdi:stethoscope
     cards:
-      # ── Systeem status ──────────────────────────────────────
+
       - type: entities
         title: "🔧 Systeem"
         entities:
-          - entity: sensor.cloudems_net_vermogen
+          - entity: sensor.cloudems_grid_net_power
             name: Net vermogen (W)
-          - entity: sensor.cloudems_p1_net_vermogen
-            name: P1 net vermogen (W)
-          - entity: sensor.cloudems_energieprijs
-            name: EPEX prijs
+          - entity: sensor.cloudems_grid_import_power
+            name: Afname (W)
+          - entity: sensor.cloudems_grid_export_power
+            name: Teruglevering (W)
+          - entity: sensor.cloudems_energy_price_current_hour
+            name: EPEX prijs nu
 
-      # ── Omvormer diagnostics ────────────────────────────────
       - type: entities
-        title: "☀️ Omvormer diagnostics (piekvermogen)"
-        icon: mdi:solar-panel
+        title: "🚦 Netcongestie"
         entities:
-          - entity: sensor.cloudems_pv_verwachting_vandaag
-            name: PV forecast vandaag (kWh)
-          - entity: sensor.cloudems_inzicht_advies
-            name: Clipping / advies
-
-      # ── Decision log volledig ───────────────────────────────
-      - type: entities
-        title: "📋 Beslissingen (laatste 10)"
-        entities:
-          - entity: sensor.cloudems_beslissingslog
-            name: Laatste beslissing
-            secondary_info: last-changed
-
-      # ── Inzichten ───────────────────────────────────────────
-      - type: entities
-        title: "💡 Alle inzichten"
-        entities:
-          - entity: sensor.cloudems_inzicht_advies
-            name: Inzicht & advies
-
-      # ── NILM apparaat energie ───────────────────────────────
-      - type: entities
-        title: "📊 NILM energie verbruik"
-        icon: mdi:lightning-bolt-circle
-        entities:
-          - entity: sensor.cloudems_nilm_apparaten
-            name: Totaal apparaten
+          - entity: sensor.cloudems_grid_congestion_utilisation
+            name: Netbenutting (%)
           - type: attribute
-            entity: sensor.cloudems_nilm_apparaten
-            attribute: total_power_w
-            name: Totaal vermogen nu (W)
+            entity: sensor.cloudems_grid_congestion_utilisation
+            attribute: active
+            name: Congestie actief
+          - type: attribute
+            entity: sensor.cloudems_grid_congestion_utilisation
+            attribute: today_events
+            name: Events vandaag
 
-      # ── Fase details ────────────────────────────────────────
       - type: entities
-        title: "⚡ Fase details"
+        title: "🔬 NILM Diagnostics"
         entities:
-          - entity: sensor.cloudems_fase_l1_stroom
+          - entity: sensor.cloudems_nilm_diagnostics
+            name: Classificatiescore (%)
+          - entity: sensor.cloudems_nilm_sensor_input
+            name: Invoermodus
+          - type: attribute
+            entity: sensor.cloudems_nilm_diagnostics
+            attribute: events_total
+            name: Events totaal
+
+      - type: entity
+        entity: sensor.cloudems_system_pid_diagnostics
+        name: "PID Diagnostics (EV uitgang A)"
+        icon: mdi:chart-bell-curve-cumulative
+
+      - type: entity
+        entity: sensor.cloudems_sensor_hints
+        name: Sensor configuratie hints
+        icon: mdi:lightbulb-alert
+
+      - type: entities
+        title: "⚡ Alle fase details"
+        entities:
+          - entity: sensor.cloudems_grid_phase_l1_current
             name: L1 stroom (A)
-          - entity: sensor.cloudems_fase_l1_spanning
+          - entity: sensor.cloudems_grid_phase_l1_voltage
             name: L1 spanning (V)
-          - entity: sensor.cloudems_fase_l1_vermogen
-            name: L1 vermogen (W)
-          - entity: sensor.cloudems_fase_l2_stroom
+          - entity: sensor.cloudems_grid_phase_l2_current
             name: L2 stroom (A)
-          - entity: sensor.cloudems_fase_l2_spanning
+          - entity: sensor.cloudems_grid_phase_l2_voltage
             name: L2 spanning (V)
-          - entity: sensor.cloudems_fase_l2_vermogen
-            name: L2 vermogen (W)
-          - entity: sensor.cloudems_fase_l3_stroom
+          - entity: sensor.cloudems_grid_phase_l3_current
             name: L3 stroom (A)
-          - entity: sensor.cloudems_fase_l3_spanning
+          - entity: sensor.cloudems_grid_phase_l3_voltage
             name: L3 spanning (V)
-          - entity: sensor.cloudems_fase_l3_vermogen
-            name: L3 vermogen (W)
