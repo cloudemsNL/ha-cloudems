@@ -176,12 +176,15 @@
       "solar_ev_opts": {
         "title": "☀️ Solar & E-Fahrzeug",
         "data": {
-          "solar_sensor": "Wechselrichter-Sensor",
           "battery_sensor": "Batterie-Sensor",
           "ev_charger_entity": "E-Ladestation Entity",
           "enable_solar_dimmer": "Solar-Curtailment bei Negativpreis",
           "negative_price_threshold": "Negativpreis-Schwellwert (EUR/kWh)",
-          "gas_sensor": "Gaszähler-Sensor (m³) — optional, Alternative zu P1"
+          "gas_sensor": "Gaszähler-Sensor (m³) — optional, Alternative zu P1",
+          "gas_price_sensor": "Gaspreissensor (€/m³) — optional",
+          "gas_price_fixed": "Fester Gaspreis (€/m³) — verwendet wenn kein Sensor",
+          "boiler_efficiency": "Elektrischer Boiler Wirkungsgrad (0.5–1.0)",
+          "heat_pump_cop": "Wärmepumpe COP (1.0–8.0)"
         }
       },
       "features_opts": {
@@ -225,6 +228,37 @@
           "inv_min_pct": "Mindestleistung bei Abregelung (%)",
           "inv_azimuth": "Azimut (°) — optional, leer lassen für automatisches Lernen",
           "inv_tilt": "Neigungswinkel (°) — optional, leer lassen für automatisches Lernen"
+        }
+      },
+      "batteries_opts": {
+        "title": "🔋 Batterien",
+        "description": "Wie viele Batterien möchten Sie konfigurieren?",
+        "data": {
+          "battery_count": "Anzahl Batterien"
+        }
+      },
+      "battery_detail_opts": {
+        "title": "🔋 Batterie {battery_num} von {total}",
+        "description": "Konfiguriere Batterie **{battery_num}**.\n\nKapazität und Leistung auf 0 lassen — CloudEMS lernt sie automatisch.",
+        "data": {
+          "bat_power_sensor": "Leistungssensor (W, positiv=laden)",
+          "bat_soc_sensor": "Ladezustandssensor (%, optional)",
+          "bat_capacity_kwh": "Batteriekapazität (kWh) — 0 = selbst lernen",
+          "bat_max_charge_w": "Max. Ladeleistung (W) — 0 = selbst lernen",
+          "bat_max_discharge_w": "Max. Entladeleistung (W) — 0 = selbst lernen",
+          "bat_charge_entity": "Ladesteuerung (optional)",
+          "bat_discharge_entity": "Entladesteuerung (optional)",
+          "bat_label": "Name (z.B. 'Hausbatterie')"
+        }
+      },
+      "prices_opts": {
+        "title": "💶 Preise & Steuern",
+        "description": "Einstellung ob Energiepreise inkl. Steuern und MwSt. angezeigt werden.",
+        "data": {
+          "price_include_tax": "Inkl. Energiesteuer",
+          "price_include_btw": "Inkl. MwSt.",
+          "selected_supplier": "Energieversorger (für Aufschlag)",
+          "supplier_markup": "Eigener Aufschlag (€/kWh)"
         }
       }
     }

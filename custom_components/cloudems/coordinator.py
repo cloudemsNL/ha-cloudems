@@ -48,6 +48,10 @@ from .const import (
     CONF_PEAK_SHAVING_ENABLED, CONF_PEAK_SHAVING_LIMIT_W, CONF_PEAK_SHAVING_ASSETS,
     EPEX_UPDATE_INTERVAL, ALL_PHASES,
     CONF_GAS_SENSOR,
+    CONF_BATTERY_CONFIGS, CONF_ENABLE_MULTI_BATTERY,
+    CONF_PRICE_INCLUDE_TAX, CONF_PRICE_INCLUDE_BTW, CONF_SUPPLIER_MARKUP, CONF_SELECTED_SUPPLIER,
+    ENERGY_TAX_PER_COUNTRY, VAT_RATE_PER_COUNTRY, SUPPLIER_MARKUPS,
+    CONF_ENERGY_PRICES_COUNTRY,
 )
 from .nilm.detector import NILMDetector, DetectedDevice
 from .energy_manager.home_baseline import HomeBaselineLearner
@@ -62,8 +66,12 @@ _LOGGER = logging.getLogger(__name__)
 
 # Max decision log entries kept in memory
 MAX_DECISION_LOG = 50
-# Clipping detection: if power > peak * this ratio → clipping
-CLIPPING_RATIO       = 0.97
+# Clipping detection: plateau-based (flat top in power curve)
+# A rolling window of recent readings per inverter; if stddev < PLATEAU_STABILITY_PCT
+# AND power > PLATEAU_MIN_FRACTION of the seen peak → clipping detected.
+PLATEAU_WINDOW_SIZE    = 6      # number of readings (~60s at 10s interval)
+PLATEAU_STABILITY_PCT  = 0.015  # max stddev/mean allowed (1.5%)
+PLATEAU_MIN_FRACTION   = 0.80   # must be at least 80% of seen peak to count
 DEFAULT_FEEDIN_EUR_KWH = 0.08   # fallback feed-in tarief als EPEX niet beschikbaar
 
 
@@ -169,6 +177,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._decision_log: deque = deque(maxlen=MAX_DECISION_LOG)
         # Insights text
         self._insights: str = ""
+        # Per-inverter rolling power window for plateau/clipping detection
+        self._plateau_windows: dict = {}  # entity_id → deque of float
+        # Per-battery learned stats: {sensor_id: {max_charge_w, max_discharge_w, energy_accum_wh}}
+        self._battery_learned: dict = {}
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -232,6 +244,51 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "rank_today":      rank,
             "is_cheap_hour":   is_cheap,
         }
+
+    def _apply_price_components(self, price_info: dict) -> dict:
+        """Add tax/BTW/supplier markup fields to price_info without changing the base EPEX price."""
+        cfg     = self._config
+        country = cfg.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+
+        include_tax  = bool(cfg.get(CONF_PRICE_INCLUDE_TAX, False))
+        include_btw  = bool(cfg.get(CONF_PRICE_INCLUDE_BTW, False))
+        supplier_key = cfg.get(CONF_SELECTED_SUPPLIER, "none")
+        custom_markup = float(cfg.get(CONF_SUPPLIER_MARKUP, 0.0))
+
+        tax  = ENERGY_TAX_PER_COUNTRY.get(country, 0.0)
+        vat  = VAT_RATE_PER_COUNTRY.get(country, 0.21)
+        suppliers  = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
+        sup_markup = suppliers.get(supplier_key, ("", 0.0))[1]
+        if supplier_key == "custom":
+            sup_markup = custom_markup
+
+        def _enrich(base):
+            tax_c   = tax if include_tax else 0.0
+            sub     = base + tax_c + sup_markup
+            btw_c   = sub * vat if include_btw else 0.0
+            all_in  = sub + btw_c
+            return round(all_in, 5)
+
+        cur = price_info.get("current")
+        today_display = []
+        for slot in price_info.get("today_all", []):
+            today_display.append({**slot,
+                "price_display": _enrich(slot["price"]),
+                "price_all_in":  _enrich(slot["price"])})
+
+        return {
+            **price_info,
+            "tax_per_kwh":         round(tax, 5),
+            "vat_rate":            round(vat, 4),
+            "supplier_markup_kwh": round(sup_markup, 5),
+            "price_include_tax":   include_tax,
+            "price_include_btw":   include_btw,
+            "country":             country,
+            "current_all_in":      _enrich(cur) if cur is not None else None,
+            "current_display":     _enrich(cur) if cur is not None else cur,
+            "today_all_display":   today_display,
+        }
+
 
     def _build_ai_status(self) -> dict:
         """Build AI/NILM status dict for the AI Status sensor."""
@@ -488,6 +545,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # EPEX price info (FIX: get_price_info() now exists)
             price_info: dict = self._prices.get_price_info() if self._prices else {}
 
+            # v1.13.0: apply tax/BTW/markup to produce all-in price fields
+            price_info = self._apply_price_components(price_info)
+
             # Dynamic loader (threshold-based, keeps running for price logic)
             ev_decision = {}
             if self._dynamic_loader:
@@ -592,7 +652,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     cur_w = self._calc.to_watts(eid, raw) if raw is not None else 0.0
                     peak_w = profile.peak_power_w
                     util   = round(cur_w / peak_w * 100, 1) if peak_w > 0 else 0.0
-                    clipping = peak_w > 0 and cur_w >= peak_w * CLIPPING_RATIO
+
+                    # ── Plateau-based clipping detection ─────────────────────
+                    # Clipping = inverter output is FLAT at its rated limit even
+                    # as irradiance rises. Detect via rolling stddev on a ~60s window.
+                    win = self._plateau_windows.setdefault(eid, deque(maxlen=PLATEAU_WINDOW_SIZE))
+                    if cur_w > 0:
+                        win.append(cur_w)
+                    clipping = False
+                    if len(win) >= PLATEAU_WINDOW_SIZE and peak_w > 0:
+                        mean_w = sum(win) / len(win)
+                        variance = sum((x - mean_w) ** 2 for x in win) / len(win)
+                        stddev_w = variance ** 0.5
+                        stability = stddev_w / mean_w if mean_w > 0 else 1.0
+                        # Flat AND at/near the seen peak power
+                        if stability < PLATEAU_STABILITY_PCT and mean_w >= peak_w * PLATEAU_MIN_FRACTION:
+                            clipping = True
 
                     if clipping:
                         msg = (f"\u26a0\ufe0f Clipping: {profile.label} produceert {cur_w:.0f}W "
@@ -1222,6 +1297,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else self._read_gas_sensor()),
                     "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
                 },
+                "batteries":            self._collect_multi_battery_data(),
                 "micro_mobility":       micro_mobility_data,
                 "clipping_loss":        clipping_loss_data,
                 "consumption_categories": categories_data,
@@ -1272,6 +1348,62 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return float(state.state)
         except (ValueError, TypeError):
             return None
+
+    def _collect_multi_battery_data(self) -> list:
+        """Collect and self-learn stats for all configured batteries."""
+        configs = self._config.get(CONF_BATTERY_CONFIGS, [])
+        results = []
+        for cfg in configs:
+            eid = cfg.get("power_sensor", "")
+            soc_eid = cfg.get("soc_sensor", "")
+            label = cfg.get("label", "Batterij")
+
+            raw_power = self._read_state(eid) if eid else None
+            power_w = self._calc.to_watts(eid, raw_power) if raw_power is not None else None
+            soc_pct = self._read_state(soc_eid) if soc_eid else None
+
+            # Self-learn max charge/discharge power
+            learned = self._battery_learned.setdefault(eid, {
+                "max_charge_w": 0.0, "max_discharge_w": 0.0,
+                "energy_wh": 0.0, "soc_samples": [],
+            })
+            if power_w is not None:
+                if power_w > 0:
+                    learned["max_charge_w"] = max(learned["max_charge_w"], power_w)
+                elif power_w < 0:
+                    learned["max_discharge_w"] = max(learned["max_discharge_w"], abs(power_w))
+
+            # Use configured values with learned fallbacks
+            max_charge_w    = float(cfg.get("max_charge_w", 0)) or learned["max_charge_w"]
+            max_discharge_w = float(cfg.get("max_discharge_w", 0)) or learned["max_discharge_w"]
+            capacity_kwh    = float(cfg.get("capacity_kwh", 0))
+
+            # Estimate capacity from SoC swing if not configured
+            if soc_pct is not None:
+                learned["soc_samples"].append(soc_pct)
+                if len(learned["soc_samples"]) > 1000:
+                    learned["soc_samples"] = learned["soc_samples"][-1000:]
+                if not capacity_kwh and len(learned["soc_samples"]) >= 20:
+                    soc_range = max(learned["soc_samples"]) - min(learned["soc_samples"])
+                    if soc_range > 10 and max_charge_w > 0:
+                        # Very rough: assume 1h at half power ≈ half of soc_range % capacity
+                        pass  # Better estimation needs energy integration — leave as 0 for now
+
+            results.append({
+                "label":            label,
+                "entity_id":        eid,
+                "power_w":          round(power_w, 1) if power_w is not None else None,
+                "soc_pct":          round(soc_pct, 1) if soc_pct is not None else None,
+                "capacity_kwh":     capacity_kwh,
+                "max_charge_w":     round(max_charge_w, 0),
+                "max_discharge_w":  round(max_discharge_w, 0),
+                "learned_max_charge_w":    round(learned["max_charge_w"], 0),
+                "learned_max_discharge_w": round(learned["max_discharge_w"], 0),
+                "charging":         power_w is not None and power_w > 50,
+                "discharging":      power_w is not None and power_w < -50,
+                "priority":         cfg.get("priority", 1),
+            })
+        return results
 
     async def _gather_power_data(self) -> Dict:
         cfg      = self._config

@@ -29,10 +29,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = CloudEMSCoordinator(hass, {**entry.data, **entry.options})
     await coordinator.async_setup()
-    await coordinator.async_config_entry_first_refresh()
+    # Use async_refresh (not first_refresh) so a slow/failing first update
+    # does NOT mark all entities unavailable — they will recover on the next poll.
+    try:
+        await coordinator.async_refresh()
+    except Exception:  # noqa: BLE001
+        _LOGGER.warning("CloudEMS: first refresh failed, entities will recover on next poll")
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass, entry, coordinator)

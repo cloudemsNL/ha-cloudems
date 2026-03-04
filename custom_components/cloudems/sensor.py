@@ -21,6 +21,9 @@ from .const import (
     ICON_POWER, ICON_FORECAST, ICON_ENERGY, ICON_PEAK,
     CONF_PHASE_COUNT, CONF_INVERTER_CONFIGS,
     DEVICE_ICONS,
+    GAS_KWH_PER_M3, GAS_BOILER_EFFICIENCY,
+    DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP, DEFAULT_GAS_PRICE_EUR_M3,
+    CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED, CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP,
 )
 from .coordinator import CloudEMSCoordinator
 
@@ -62,6 +65,7 @@ async def async_setup_entry(
         CloudEMSFlexScoreSensor(coordinator, entry),
         CloudEMSPVHealthSensor(coordinator, entry),
         CloudEMSGasSensor(coordinator, entry),
+        CloudEMSEnergySourceSensor(coordinator, entry),
         CloudEMSSelfConsumptionSensor(coordinator, entry),
         CloudEMSDayTypeSensor(coordinator, entry),
         CloudEMSDeviceDriftSensor(coordinator, entry),
@@ -1283,19 +1287,29 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        p = (self.coordinator.data or {}).get("energy_price", {}).get("current")
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        # Show all-in price (with tax/BTW/markup) if toggles are on, else base EPEX
+        p = ep.get("current_display") or ep.get("current")
         return round(p, 5) if p is not None else None
 
     @property
     def extra_state_attributes(self):
         ep = (self.coordinator.data or {}).get("energy_price", {})
         return {
-            "is_negative":    ep.get("is_negative", False),
-            "is_cheap":       ep.get("is_cheap_hour", False),
-            "rank_today":     ep.get("rank_today"),
-            "min_today":      ep.get("min_today"),
-            "max_today":      ep.get("max_today"),
-            "avg_today":      ep.get("avg_today"),
+            "is_negative":         ep.get("is_negative", False),
+            "is_cheap":            ep.get("is_cheap_hour", False),
+            "rank_today":          ep.get("rank_today"),
+            "min_today":           ep.get("min_today"),
+            "max_today":           ep.get("max_today"),
+            "avg_today":           ep.get("avg_today"),
+            # Tax breakdown
+            "base_epex_price":     ep.get("current"),
+            "price_all_in":        ep.get("current_all_in"),
+            "tax_per_kwh":         ep.get("tax_per_kwh"),
+            "vat_rate":            ep.get("vat_rate"),
+            "supplier_markup_kwh": ep.get("supplier_markup_kwh"),
+            "price_include_tax":   ep.get("price_include_tax", False),
+            "price_include_btw":   ep.get("price_include_btw", False),
         }
 
 
@@ -2653,7 +2667,130 @@ class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.13.0 — Energie bronvergelijking: elektriciteit vs. gas per kWh warmte
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
+    """
+    Vergelijkt de actuele kosten van elektriciteit vs. gas per kWh warmte.
+
+    Rekent gas om van €/m³ → €/kWh (calorische waarde 9,769 kWh/m³, NL-standaard)
+    en houdt rekening met rendementen:
+      - Gas CV-ketel:         90% rendement → effectief €/kWh = (€/m³ / 9,769) / 0,90
+      - Elektrische boiler:   95% rendement (instelbaar)
+      - Warmtepomp:           COP 3,5 (instelbaar)
+
+    State = "elektriciteit" | "gas" | "gelijk"
+    Gebruik dit voor automaties: verhit boiler via stroom als sensor = "elektriciteit".
+    """
+    _attr_name      = "CloudEMS · Goedkoopste Warmtebron"
+    _attr_icon      = "mdi:heat-wave"
+    _attr_device_class = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_energy_source_compare"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _get_electricity_price(self) -> Optional[float]:
+        """Current electricity price from EPEX sensor (€/kWh, incl. tax)."""
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        return ep.get("current")
+
+    def _get_gas_price_m3(self) -> float:
+        """Gas price per m³. Try HA sensor first, then fixed config, then default."""
+        cfg = self.coordinator._config
+        # 1. HA sensor (energy provider app, DSMR, etc.)
+        sensor_eid = cfg.get(CONF_GAS_PRICE_SENSOR, "")
+        if sensor_eid:
+            state = self.hass.states.get(sensor_eid)
+            if state and state.state not in ("unavailable", "unknown", ""):
+                try:
+                    return float(state.state)
+                except (ValueError, TypeError):
+                    pass
+        # 2. Fixed value from config
+        fixed = cfg.get(CONF_GAS_PRICE_FIXED, 0.0)
+        if fixed and float(fixed) > 0:
+            return float(fixed)
+        # 3. Default NL indicative price
+        return DEFAULT_GAS_PRICE_EUR_M3
+
+    @property
+    def native_value(self) -> Optional[str]:
+        elec = self._get_electricity_price()
+        if elec is None:
+            return None
+
+        gas_m3        = self._get_gas_price_m3()
+        cfg           = self.coordinator._config
+        boiler_eff    = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
+        hp_cop        = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
+
+        # Gas: €/kWh warmte via CV-ketel (90% rendement)
+        gas_kwh_heat  = (gas_m3 / GAS_KWH_PER_M3) / GAS_BOILER_EFFICIENCY
+
+        # Electricity options — use the cheapest electric option for comparison
+        elec_boiler   = elec / boiler_eff    # direct elektrische verwarming
+        elec_hp       = elec / hp_cop        # warmtepomp
+
+        # Primary comparison: gas CV vs. best electric option
+        best_electric = min(elec_boiler, elec_hp)
+
+        if best_electric < gas_kwh_heat * 0.98:
+            return "elektriciteit"
+        elif gas_kwh_heat < best_electric * 0.98:
+            return "gas"
+        else:
+            return "gelijk"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        elec = self._get_electricity_price()
+        gas_m3 = self._get_gas_price_m3()
+        cfg = self.coordinator._config
+        boiler_eff = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
+        hp_cop     = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
+
+        gas_kwh_raw   = round(gas_m3 / GAS_KWH_PER_M3, 5)
+        gas_kwh_heat  = round(gas_kwh_raw / GAS_BOILER_EFFICIENCY, 5)
+        elec_boiler   = round(elec / boiler_eff, 5) if elec else None
+        elec_hp       = round(elec / hp_cop, 5) if elec else None
+        savings_boiler = round(gas_kwh_heat - elec_boiler, 5) if elec_boiler else None
+        savings_hp     = round(gas_kwh_heat - elec_hp, 5) if elec_hp else None
+
+        source_eid = cfg.get(CONF_GAS_PRICE_SENSOR, "")
+        source = "sensor" if source_eid else ("config" if cfg.get(CONF_GAS_PRICE_FIXED) else "default")
+
+        return {
+            # Elektriciteit
+            "elec_price_kwh":           elec,
+            "elec_boiler_per_kwh_heat": elec_boiler,
+            "elec_hp_per_kwh_heat":     elec_hp,
+            "electric_boiler_efficiency_pct": round(boiler_eff * 100),
+            "heat_pump_cop":            hp_cop,
+            # Gas
+            "gas_price_m3":             round(gas_m3, 4),
+            "gas_kwh_per_m3":           GAS_KWH_PER_M3,
+            "gas_price_per_kwh_raw":    gas_kwh_raw,
+            "gas_cv_efficiency_pct":    round(GAS_BOILER_EFFICIENCY * 100),
+            "gas_per_kwh_heat":         gas_kwh_heat,
+            "gas_price_source":         source,
+            # Vergelijking
+            "savings_electric_boiler_vs_gas": savings_boiler,
+            "savings_heat_pump_vs_gas":       savings_hp,
+            "recommendation":          (
+                "Verwarm boiler via stroom — goedkoper dan gas op dit moment."
+                if self.native_value == "elektriciteit" else
+                "Gebruik gas — goedkoper dan stroom op dit moment."
+                if self.native_value == "gas" else
+                "Elektriciteit en gas zijn nagenoeg even duur per kWh warmte."
+            ),
+        }
     """Zelfconsumptiegraad: % van PV-productie direct verbruikt."""
     _attr_name = "CloudEMS PV · Zelfconsumptiegraad"
     _attr_native_unit_of_measurement = "%"

@@ -242,12 +242,15 @@
       "solar_ev_opts": {
         "title": "☀️ Solar & EV",
         "data": {
-          "solar_sensor": "Solar inverter sensor",
           "battery_sensor": "Battery sensor",
           "ev_charger_entity": "EV charger entity",
           "enable_solar_dimmer": "Curtail solar at negative price",
           "negative_price_threshold": "Negative price threshold (EUR/kWh)",
-          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1"
+          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1",
+          "gas_price_sensor": "Gas price sensor (€/m³) — optional",
+          "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
+          "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
         }
       },
       "features_opts": {
@@ -307,6 +310,37 @@
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave empty to self-learn",
           "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn"
+        }
+      },
+      "batteries_opts": {
+        "title": "🔋 Batteries",
+        "description": "How many batteries do you want to configure?",
+        "data": {
+          "battery_count": "Number of batteries"
+        }
+      },
+      "battery_detail_opts": {
+        "title": "🔋 Battery {battery_num} of {total}",
+        "description": "Configure battery **{battery_num}**.\n\nLeave capacity and power at 0 — CloudEMS will self-learn them.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, positive=charging)",
+          "bat_soc_sensor": "State of charge sensor (%, optional)",
+          "bat_capacity_kwh": "Battery capacity (kWh) — 0 = self-learn",
+          "bat_max_charge_w": "Max charge power (W) — 0 = self-learn",
+          "bat_max_discharge_w": "Max discharge power (W) — 0 = self-learn",
+          "bat_charge_entity": "Charge control entity (optional)",
+          "bat_discharge_entity": "Discharge control entity (optional)",
+          "bat_label": "Name (e.g. 'Home Battery')"
+        }
+      },
+      "prices_opts": {
+        "title": "💶 Prices & Tax",
+        "description": "Set whether energy prices are shown including tax and VAT.\n\nThe supplier markup is indicative — verify your own contract.",
+        "data": {
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT",
+          "selected_supplier": "Energy supplier (for markup)",
+          "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected"
         }
       }
     }

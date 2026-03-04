@@ -36,12 +36,18 @@ from .const import (
     PHASE_PRESETS, PHASE_PRESET_LABELS,
     GRID_SENSOR_KEYWORDS,
     PHASE_SENSOR_KEYWORDS_L1, PHASE_SENSOR_KEYWORDS_L2, PHASE_SENSOR_KEYWORDS_L3,
+    GRID_EXCLUDE_KEYWORDS, PHASE_EXCLUDE_KEYWORDS, CURRENT_EXCLUDE_KEYWORDS,
     CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED,
     CONF_AI_PROVIDER, AI_PROVIDER_NONE, AI_PROVIDER_CLOUDEMS,
     AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC, AI_PROVIDER_OLLAMA,
     AI_PROVIDER_LABELS, AI_PROVIDERS_NEEDING_KEY,
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
     CONF_GAS_SENSOR,
+    CONF_BATTERY_CONFIGS, CONF_ENABLE_MULTI_BATTERY, CONF_BATTERY_COUNT,
+    CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED, CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP,
+    DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP,
+    CONF_PRICE_INCLUDE_TAX, CONF_PRICE_INCLUDE_BTW, CONF_SUPPLIER_MARKUP, CONF_SELECTED_SUPPLIER,
+    SUPPLIER_MARKUPS, CONF_ENERGY_PRICES_COUNTRY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,26 +103,43 @@ def _best(pool, keywords):
     scored.sort(key=lambda x: (-x[1], len(x[0]), x[0]))
     return scored[0][0]
 
+def _exclude(pool: list, exclude_kws: list) -> list:
+    """Remove entities whose id contains any exclusion keyword."""
+    ex = [kw.lower() for kw in exclude_kws]
+    return [e for e in pool if not any(kw in e.lower() for kw in ex)]
+
 def _detect_sensors(hass, phase_count: int) -> dict:
-    power   = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") in ("W","kW")]
-    current = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "A"]
-    voltage = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "V"]
+    # Raw pools by unit
+    all_power   = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") in ("W","kW")]
+    all_current = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "A"]
+    all_voltage = [s.entity_id for s in hass.states.async_all("sensor") if s.attributes.get("unit_of_measurement") == "V"]
+
+    # Filtered pools — exclude obvious false-positives for each role
+    grid_power    = _exclude(all_power,   GRID_EXCLUDE_KEYWORDS)
+    phase_power   = _exclude(all_power,   PHASE_EXCLUDE_KEYWORDS)
+    phase_current = _exclude(all_current, CURRENT_EXCLUDE_KEYWORDS)
+    phase_voltage = _exclude(all_voltage, PHASE_EXCLUDE_KEYWORDS)
+
+    # Dedicated pools for PV / battery — use the full list so we can still find them
+    pv_power   = all_power
+    batt_power = all_power
+
     p3 = phase_count == 3
     return {
-        CONF_GRID_SENSOR:            _best(power,   GRID_SENSOR_KEYWORDS),
-        CONF_IMPORT_SENSOR:          _best(power,   ["import","levering","power_delivered","consume"]),
-        CONF_EXPORT_SENSOR:          _best(power,   ["export","teruglevering","power_returned","feed"]),
-        CONF_SOLAR_SENSOR:           _best(power,   ["solar","pv","zon","inverter","omvormer","yield"]),
-        CONF_BATTERY_SENSOR:         _best(power,   ["battery","batterij","accu","batt","storage"]),
-        CONF_PHASE_SENSORS+"_L1":    _best(current, PHASE_SENSOR_KEYWORDS_L1),
-        CONF_PHASE_SENSORS+"_L2":    _best(current, PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
-        CONF_PHASE_SENSORS+"_L3":    _best(current, PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
-        CONF_VOLTAGE_L1:             _best(voltage, ["l1","phase1","phase_1","fase_1"]),
-        CONF_VOLTAGE_L2:             _best(voltage, ["l2","phase2","phase_2","fase_2"]) if p3 else None,
-        CONF_VOLTAGE_L3:             _best(voltage, ["l3","phase3","phase_3","fase_3"]) if p3 else None,
-        CONF_POWER_L1:               _best(power,   PHASE_SENSOR_KEYWORDS_L1),
-        CONF_POWER_L2:               _best(power,   PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
-        CONF_POWER_L3:               _best(power,   PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
+        CONF_GRID_SENSOR:            _best(grid_power,    GRID_SENSOR_KEYWORDS),
+        CONF_IMPORT_SENSOR:          _best(grid_power,    ["import","levering","power_delivered","consume"]),
+        CONF_EXPORT_SENSOR:          _best(grid_power,    ["export","teruglevering","power_returned","feed"]),
+        CONF_SOLAR_SENSOR:           _best(pv_power,      ["solar","pv","zon","inverter","omvormer","yield"]),
+        CONF_BATTERY_SENSOR:         _best(batt_power,    ["battery","batterij","accu","batt","storage"]),
+        CONF_PHASE_SENSORS+"_L1":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L1),
+        CONF_PHASE_SENSORS+"_L2":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
+        CONF_PHASE_SENSORS+"_L3":    _best(phase_current, PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
+        CONF_VOLTAGE_L1:             _best(phase_voltage, ["l1","phase1","phase_1","fase_1"]),
+        CONF_VOLTAGE_L2:             _best(phase_voltage, ["l2","phase2","phase_2","fase_2"]) if p3 else None,
+        CONF_VOLTAGE_L3:             _best(phase_voltage, ["l3","phase3","phase_3","fase_3"]) if p3 else None,
+        CONF_POWER_L1:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L1),
+        CONF_POWER_L2:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L2) if p3 else None,
+        CONF_POWER_L3:               _best(phase_power,   PHASE_SENSOR_KEYWORDS_L3) if p3 else None,
     }
 
 
@@ -521,6 +544,8 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
                         selector.SelectOptionDict(value="phase_sensors",  label="⚡ Phase Sensors"),
                         selector.SelectOptionDict(value="solar_ev_opts",  label="☀️ Solar & EV"),
                         selector.SelectOptionDict(value="inverters_opts", label="🔆 PV Inverters"),
+                        selector.SelectOptionDict(value="batteries_opts", label="🔋 Batteries"),
+                        selector.SelectOptionDict(value="prices_opts",    label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
                         selector.SelectOptionDict(value="ai_opts",        label="🤖 AI & NILM"),
                         selector.SelectOptionDict(value="advanced_opts",  label="📡 P1 & Advanced"),
@@ -578,10 +603,13 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="solar_ev_opts",
             data_schema=vol.Schema({
-                vol.Optional(CONF_SOLAR_SENSOR,   description={"suggested_value": data.get(CONF_SOLAR_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
                 vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
                 vol.Optional(CONF_GAS_SENSOR, description={"suggested_value": data.get(CONF_GAS_SENSOR) or None}): _ent(),
+                vol.Optional(CONF_GAS_PRICE_SENSOR, description={"suggested_value": data.get(CONF_GAS_PRICE_SENSOR) or None}): _ent(),
+                vol.Optional(CONF_GAS_PRICE_FIXED, default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+                vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
+                vol.Optional(CONF_HEAT_PUMP_COP, default=float(data.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=8.0)),
                 vol.Optional(CONF_ENABLE_SOLAR_DIMMER, default=bool(data.get(CONF_ENABLE_SOLAR_DIMMER, False))): bool,
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
             }),
@@ -704,6 +732,96 @@ class CloudEMSOptionsFlow(config_entries.OptionsFlow):
                 "total":        str(self._inv_count),
                 "azimuth_tip":  "0=N 90=E 180=S 270=W — leeg = zelf leren",
                 "tilt_tip":     "0=plat 90=verticaal — leeg = zelf leren",
+            },
+        )
+
+
+    # ── 🔋 Batteries (multi-battery, like multi-inverter) ──────────────────────
+
+    async def async_step_prices_opts(self, user_input=None):
+        """Prices display: tax, BTW, supplier markup."""
+        data = self._data()
+        country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+        suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
+        sup_options = [
+            selector.SelectOptionDict(value=k, label=v[0])
+            for k, v in suppliers.items()
+        ]
+        if user_input is not None:
+            return self.async_create_entry(title="", data={**self._entry.options, **user_input})
+        return self.async_show_form(
+            step_id="prices_opts",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_PRICE_INCLUDE_TAX, default=bool(data.get(CONF_PRICE_INCLUDE_TAX, False))): bool,
+                vol.Optional(CONF_PRICE_INCLUDE_BTW, default=bool(data.get(CONF_PRICE_INCLUDE_BTW, False))): bool,
+                vol.Optional(CONF_SELECTED_SUPPLIER, default=str(data.get(CONF_SELECTED_SUPPLIER, "none"))):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=sup_options, mode="dropdown")),
+                vol.Optional(CONF_SUPPLIER_MARKUP, default=float(data.get(CONF_SUPPLIER_MARKUP, 0.0))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
+            }),
+        )
+
+
+    async def async_step_batteries_opts(self, user_input=None):
+        """How many batteries do you have?"""
+        data = self._data()
+        current_count = len(data.get(CONF_BATTERY_CONFIGS, []))
+        if user_input is not None:
+            self._inv_count = int(user_input.get(CONF_BATTERY_COUNT, 0))
+            self._opts[CONF_BATTERY_COUNT]   = self._inv_count
+            self._opts[CONF_BATTERY_CONFIGS] = []
+            self._inv_step = 0
+            if self._inv_count > 0:
+                return await self.async_step_battery_detail_opts()
+            self._opts[CONF_ENABLE_MULTI_BATTERY] = False
+            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+        return self.async_show_form(
+            step_id="batteries_opts",
+            data_schema=vol.Schema({
+                vol.Required(CONF_BATTERY_COUNT, default=current_count): _inverter_count_selector(),
+            }),
+        )
+
+    async def async_step_battery_detail_opts(self, user_input=None):
+        """Configure one battery at a time."""
+        data = self._data()
+        i = self._inv_step + 1
+        existing_cfgs = data.get(CONF_BATTERY_CONFIGS, [])
+        existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
+
+        if user_input is not None:
+            self._opts[CONF_BATTERY_CONFIGS].append({
+                "power_sensor":     user_input.get("bat_power_sensor"),
+                "soc_sensor":       user_input.get("bat_soc_sensor"),
+                "capacity_kwh":     float(user_input.get("bat_capacity_kwh", 0.0)),
+                "max_charge_w":     float(user_input.get("bat_max_charge_w", 0.0)),
+                "max_discharge_w":  float(user_input.get("bat_max_discharge_w", 0.0)),
+                "charge_entity":    user_input.get("bat_charge_entity", ""),
+                "discharge_entity": user_input.get("bat_discharge_entity", ""),
+                "label":            user_input.get("bat_label", f"Batterij {i}"),
+                "priority":         i,
+            })
+            self._inv_step += 1
+            if self._inv_step < self._inv_count:
+                return await self.async_step_battery_detail_opts()
+            self._opts[CONF_ENABLE_MULTI_BATTERY] = len(self._opts[CONF_BATTERY_CONFIGS]) > 0
+            return self.async_create_entry(title="", data={**self._entry.options, **self._opts})
+
+        return self.async_show_form(
+            step_id="battery_detail_opts",
+            data_schema=vol.Schema({
+                vol.Required("bat_power_sensor", default=existing.get("power_sensor", vol.UNDEFINED)): _ent(),
+                vol.Optional("bat_soc_sensor", description={"suggested_value": existing.get("soc_sensor")}): _ent(),
+                vol.Optional("bat_capacity_kwh", default=float(existing.get("capacity_kwh", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=1000)),
+                vol.Optional("bat_max_charge_w", default=float(existing.get("max_charge_w", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("bat_max_discharge_w", default=float(existing.get("max_discharge_w", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("bat_charge_entity", description={"suggested_value": existing.get("charge_entity") or None}): _ent(["number", "input_number"]),
+                vol.Optional("bat_discharge_entity", description={"suggested_value": existing.get("discharge_entity") or None}): _ent(["number", "input_number"]),
+                vol.Optional("bat_label", default=existing.get("label", f"Batterij {i}")): str,
+            }),
+            description_placeholders={
+                "battery_num": str(i),
+                "total":       str(self._inv_count),
             },
         )
 

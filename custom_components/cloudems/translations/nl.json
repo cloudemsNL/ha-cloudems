@@ -199,12 +199,15 @@
       "solar_ev_opts": {
         "title": "☀️ Zonne-energie & EV",
         "data": {
-          "solar_sensor": "Omvormer sensor",
           "battery_sensor": "Batterij sensor",
           "ev_charger_entity": "EV laadpaal entiteit",
           "enable_solar_dimmer": "Zon afschalen bij negatieve prijs",
           "negative_price_threshold": "Prijsdrempel (EUR/kWh)",
-          "gas_sensor": "Gasmeter sensor (m³) — optioneel, alternatief voor P1"
+          "gas_sensor": "Gasmeter sensor (m³) — optioneel, alternatief voor P1",
+          "gas_price_sensor": "Gas prijs sensor (€/m³) — optioneel",
+          "gas_price_fixed": "Vaste gasprijs (€/m³) — gebruikt als geen sensor",
+          "boiler_efficiency": "Elektrische boiler rendement (0.5–1.0)",
+          "heat_pump_cop": "Warmtepomp COP (1.0–8.0)"
         }
       },
       "features_opts": {
@@ -261,6 +264,37 @@
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
           "inv_azimuth": "Azimut (°) — optioneel, leeg laten voor automatisch leren",
           "inv_tilt": "Hellingshoek (°) — optioneel, leeg laten voor automatisch leren"
+        }
+      },
+      "batteries_opts": {
+        "title": "🔋 Batterijen",
+        "description": "Hoeveel batterijen wil je configureren?",
+        "data": {
+          "battery_count": "Aantal batterijen"
+        }
+      },
+      "battery_detail_opts": {
+        "title": "🔋 Batterij {battery_num} van {total}",
+        "description": "Configureer batterij **{battery_num}**.\n\nLaat capaciteit en vermogen op 0 staan — CloudEMS leert ze automatisch.",
+        "data": {
+          "bat_power_sensor": "Vermogenssensor (W, positief=laden)",
+          "bat_soc_sensor": "Laadniveau sensor (%, optioneel)",
+          "bat_capacity_kwh": "Batterijcapaciteit (kWh) — 0 = zelf leren",
+          "bat_max_charge_w": "Max. laadvermogen (W) — 0 = zelf leren",
+          "bat_max_discharge_w": "Max. ontlaadvermogen (W) — 0 = zelf leren",
+          "bat_charge_entity": "Laadbesturing entiteit (optioneel)",
+          "bat_discharge_entity": "Ontlaadbesturing entiteit (optioneel)",
+          "bat_label": "Naam (bijv. 'Thuisbatterij')"
+        }
+      },
+      "prices_opts": {
+        "title": "💶 Prijzen & Belasting",
+        "description": "Stel in of energieprijzen inclusief belasting en BTW worden getoond.\n\nDe leveranciersopslag is een indicatieve schatting — controleer je eigen contract.",
+        "data": {
+          "price_include_tax": "Inclusief energiebelasting (EB)",
+          "price_include_btw": "Inclusief BTW",
+          "selected_supplier": "Energieleverancier (voor opslag)",
+          "supplier_markup": "Eigen opslag (€/kWh) — als 'Aangepaste markup' is geselecteerd"
         }
       }
     }

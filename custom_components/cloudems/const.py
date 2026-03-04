@@ -339,6 +339,15 @@ PHASE_SENSOR_KEYWORDS_L1 = ["l1","fase_1","phase_1","phase1","stroom_l1","curren
 PHASE_SENSOR_KEYWORDS_L2 = ["l2","fase_2","phase_2","phase2","stroom_l2","current_l2"]
 PHASE_SENSOR_KEYWORDS_L3 = ["l3","fase_3","phase_3","phase3","stroom_l3","current_l3"]
 
+# Auto-detect exclusion keywords — entity_ids containing these are EXCLUDED
+# from grid/phase pools to avoid false-positive matches on PV/battery/EV sensors
+GRID_EXCLUDE_KEYWORDS    = ["solar","pv","zon","inverter","omvormer","battery","batterij","accu",
+                             "batt","storage","ev","charger","laadpaal","yield","feedin","feed_in",
+                             "clipping","forecast","predicted","estimated"]
+PHASE_EXCLUDE_KEYWORDS   = ["solar","pv","zon","inverter","omvormer","battery","batterij","accu",
+                             "batt","storage","ev","charger","laadpaal"]
+CURRENT_EXCLUDE_KEYWORDS = ["solar","pv","zon","inverter","battery","batt","storage","ev","charger"]
+
 # ── v1.9.0 — CO2, battery scheduler, cost forecast, boiler learning ───────────
 CONF_CO2_COUNTRY              = "co2_country"       # ISO2 country for CO2 API
 CONF_BATTERY_CAPACITY_KWH     = "battery_capacity_kwh"
@@ -383,3 +392,92 @@ BATTERY_CHEMISTRIES = ["LFP", "NMC", "NCA", "LTO"]
 
 # ── v1.13.0 — Standalone gas sensor ──────────────────────────────────────────
 CONF_GAS_SENSOR = "gas_sensor"
+
+# ── v1.13.0 — Multi-battery support (like multi-inverter) ────────────────────
+CONF_BATTERY_CONFIGS           = "battery_configs"
+CONF_ENABLE_MULTI_BATTERY      = "enable_multi_battery"
+CONF_BATTERY_COUNT             = "battery_count"
+
+# ── v1.13.0 — Energy source comparison (electricity vs gas) ──────────────────
+CONF_GAS_PRICE_SENSOR          = "gas_price_sensor"       # HA sensor reporting €/m³
+CONF_GAS_PRICE_FIXED           = "gas_price_fixed"        # fixed €/m³ fallback
+CONF_BOILER_EFFICIENCY         = "boiler_efficiency"       # electric boiler COP (default 0.95)
+CONF_HEAT_PUMP_COP             = "heat_pump_cop"           # heat pump COP (default 3.5)
+GAS_KWH_PER_M3                 = 9.769                    # calorific value (Groningen gas)
+GAS_BOILER_EFFICIENCY          = 0.90                     # conventional gas boiler efficiency
+DEFAULT_BOILER_EFFICIENCY      = 0.95                     # electric boiler/immersion heater
+DEFAULT_HEAT_PUMP_COP          = 3.5
+DEFAULT_GAS_PRICE_EUR_M3       = 1.25                     # fallback if no sensor configured
+
+# ── v1.13.0 — Electricity price display: tax + BTW + supplier markup ─────────
+CONF_PRICE_INCLUDE_TAX     = "price_include_tax"     # bool: add energy tax
+CONF_PRICE_INCLUDE_BTW     = "price_include_btw"     # bool: add VAT
+CONF_SUPPLIER_MARKUP       = "supplier_markup"        # float: €/kWh markup
+CONF_SELECTED_SUPPLIER     = "selected_supplier"      # str: supplier key
+
+# Energy tax (energiebelasting) per country in €/kWh (2024 values)
+ENERGY_TAX_PER_COUNTRY = {
+    "NL": 0.12599,   # €/kWh excl. BTW (2024, first 2900 kWh band)
+    "BE": 0.0445,
+    "DE": 0.02050,   # reduced since 2023
+    "FR": 0.0225,
+    "AT": 0.0150,
+    "CH": 0.0,       # no federal energy tax
+    "DK": 0.0836,
+    "NO": 0.1591,
+    "SE": 0.0431,
+    "FI": 0.02372,
+}
+
+# VAT rates per country
+VAT_RATE_PER_COUNTRY = {
+    "NL": 0.21,
+    "BE": 0.21,
+    "DE": 0.19,
+    "FR": 0.20,
+    "AT": 0.20,
+    "CH": 0.081,
+    "DK": 0.25,
+    "NO": 0.25,
+    "SE": 0.25,
+    "FI": 0.255,
+}
+
+# Supplier markups per country: { "supplier_key": ("Label", markup_eur_per_kwh) }
+SUPPLIER_MARKUPS = {
+    "NL": {
+        "none":       ("Geen leverancier markup", 0.0),
+        "vattenfall": ("Vattenfall", 0.0215),
+        "eneco":      ("Eneco", 0.0189),
+        "essent":     ("Essent", 0.0201),
+        "greenchoice":("Greenchoice", 0.0175),
+        "budget":     ("Budget Energie", 0.0165),
+        "vandebron":  ("Vandebron", 0.0182),
+        "tibber":     ("Tibber", 0.0149),
+        "custom":     ("Aangepaste markup (zie opslag)", 0.0),
+    },
+    "BE": {
+        "none":       ("Geen leverancier markup", 0.0),
+        "engie":      ("Engie", 0.0220),
+        "luminus":    ("Luminus", 0.0210),
+        "elia":       ("Elia (netbeheerder)", 0.0180),
+        "custom":     ("Aangepaste markup", 0.0),
+    },
+    "DE": {
+        "none":       ("Kein Aufschlag", 0.0),
+        "eon":        ("E.ON", 0.0250),
+        "rwe":        ("RWE / innogy", 0.0230),
+        "tibber":     ("Tibber", 0.0160),
+        "custom":     ("Eigener Aufschlag", 0.0),
+    },
+    "FR": {
+        "none":       ("Pas de majoration", 0.0),
+        "edf":        ("EDF", 0.0200),
+        "total":      ("TotalEnergies", 0.0210),
+        "custom":     ("Majoration personnalisée", 0.0),
+    },
+    "default": {
+        "none":       ("No supplier markup", 0.0),
+        "custom":     ("Custom markup", 0.0),
+    },
+}

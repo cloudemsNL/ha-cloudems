@@ -346,6 +346,9 @@ class NotificationEngine:
         drift = data.get("device_drift", {})
         for dev in drift.get("devices", []):
             level = dev.get("level", "ok")
+            # Only alert if device has a frozen baseline (enough history)
+            if not dev.get("baseline_frozen", False):
+                continue
             if level in ("warning", "alert"):
                 key = f"device_drift:{dev.get('device_id', 'unknown')}"
                 alerts[key] = {
