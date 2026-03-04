@@ -1488,26 +1488,33 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # v1.15.0: PV forecast accuracy tracker
             pv_accuracy_data: dict = {}
             if self._pv_accuracy:
-                solar_w_now = max(0.0, data.get("solar_power", 0.0))
-                fc_now = sum(h.get("forecast_w", 0) for h in pv_forecast_hourly
-                             if h.get("hour") == __import__("datetime").datetime.now().hour)
-                self._pv_accuracy.tick_production(pv_w=solar_w_now)
-                _acc = self._pv_accuracy.get_data()
-                pv_accuracy_data = {
-                    "mape_14d_pct":       _acc.mape_14d,
-                    "mape_30d_pct":       _acc.mape_30d,
-                    "bias_factor":        _acc.bias_factor,
-                    "samples":            _acc.days_with_data,
-                    "last_day_mape":      _acc.last_day_error_pct,
-                    "quality_label":      _acc.quality_label,
-                    "advice":             _acc.advice,
-                    "days_tracked":       _acc.days_tracked,
-                    "calibration_month":  _acc.calibration_month,
-                    "consecutive_over":   _acc.consecutive_over,
-                    "consecutive_under":  _acc.consecutive_under,
-                    "monthly_bias":       _acc.monthly_bias,
-                }
-                await self._pv_accuracy.async_maybe_save()
+                try:
+                    solar_w_now = max(0.0, data.get("solar_power", 0.0))
+                    fc_now = sum(h.get("forecast_w", 0) for h in pv_forecast_hourly
+                                 if h.get("hour") == __import__("datetime").datetime.now().hour)
+                    # Support both tick() and tick_production() across versions
+                    if hasattr(self._pv_accuracy, 'tick_production'):
+                        self._pv_accuracy.tick_production(pv_w=solar_w_now)
+                    else:
+                        self._pv_accuracy.tick(actual_w=solar_w_now, forecast_w=fc_now)
+                    _acc = self._pv_accuracy.get_data()
+                    pv_accuracy_data = {
+                        "mape_14d_pct":       _acc.mape_14d,
+                        "mape_30d_pct":       _acc.mape_30d,
+                        "bias_factor":        _acc.bias_factor,
+                        "samples":            _acc.days_with_data,
+                        "last_day_mape":      _acc.last_day_error_pct,
+                        "quality_label":      _acc.quality_label,
+                        "advice":             _acc.advice,
+                        "days_tracked":       _acc.days_tracked,
+                        "calibration_month":  _acc.calibration_month,
+                        "consecutive_over":   _acc.consecutive_over,
+                        "consecutive_under":  _acc.consecutive_under,
+                        "monthly_bias":       _acc.monthly_bias,
+                    }
+                    await self._pv_accuracy.async_maybe_save()
+                except Exception as _pvacc_err:
+                    _LOGGER.warning("CloudEMS: pv_accuracy skipped: %s", _pvacc_err)
 
             # Generate insights
             self._insights = self._generate_insights(

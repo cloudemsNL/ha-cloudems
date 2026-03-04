@@ -139,6 +139,10 @@ class PVForecastAccuracyTracker:
             len(self._history), self._today_kwh,
         )
 
+    def tick(self, actual_w: float = 0.0, forecast_w: float = 0.0, pv_w: float = 0.0) -> None:
+        """Compatibility alias — accepts both old .tick(actual_w=) and new .tick_production(pv_w=) signatures."""
+        self.tick_production(pv_w=actual_w or pv_w)
+
     def tick_production(self, pv_w: float) -> None:
         """Registreer huidige PV-productie (elke 10s)."""
         now   = datetime.now(timezone.utc)
