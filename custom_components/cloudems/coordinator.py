@@ -1,4 +1,4 @@
-"""CloudEMS DataUpdateCoordinator — v1.15.5."""
+"""CloudEMS DataUpdateCoordinator — v1.16.0."""
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 # BUG FIXES in v1.4.1:
 #   - Added confirm_nilm_device(), dismiss_nilm_device(), async_shutdown() methods
@@ -174,6 +174,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._notification_engine: Optional[object] = None
         self._clipping_loss:     Optional[object] = None
         self._categories:        Optional[object] = None
+        self._shadow_detector:   Optional[object] = None
 
         # v1.8: EV PID controller
         self._ev_pid: Optional[object] = None
@@ -434,6 +435,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.clipping_loss import ClippingLossCalculator
         self._clipping_loss = ClippingLossCalculator(self.hass)
         await self._clipping_loss.async_setup()
+
+        # v1.16.0: Structurele schaduwdetector
+        from .energy_manager.shadow_detector import ShadowDetector
+        self._shadow_detector = ShadowDetector(self.hass)
+        await self._shadow_detector.async_setup()
 
         # v1.12.0: Verbruik categorieën tracker
         from .energy_manager.consumption_categories import ConsumptionCategoryTracker
@@ -1281,9 +1287,73 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "any_curtailment":      clipping_obj.any_curtailment,
                         "expansion_roi_years":  clipping_obj.expansion_roi_years,
                     }
+                    # v1.16.0: Clipping forecast voor morgen
+                    clipping_forecast_list = []
+                    if self._pv_forecast:
+                        for inv in inverter_data:
+                            eid  = inv["entity_id"]
+                            lbl  = inv.get("label", eid)
+                            # Haal het uurlijkse forecast op voor morgen (24 waarden)
+                            tomorrow_fc = self._pv_forecast.get_forecast_tomorrow(eid)
+                            fc_w_list   = [hf.forecast_w for hf in tomorrow_fc] if tomorrow_fc else []
+                            if fc_w_list:
+                                cf = self._clipping_loss.get_clipping_forecast(
+                                    inverter_id       = eid,
+                                    forecast_hourly_w = fc_w_list,
+                                    label             = lbl,
+                                )
+                                clipping_forecast_list.append(cf)
+                    clipping_loss_data["clipping_forecast_tomorrow"] = clipping_forecast_list
                     await self._clipping_loss.async_maybe_save()
                 except Exception as _cl_err:
                     _LOGGER.debug("ClippingLoss error: %s", _cl_err)
+
+            # v1.16.0: Schaduwdetectie
+            shadow_data: dict = {}
+            if self._shadow_detector and self._solar_learner and self._pv_forecast:
+                try:
+                    hour_utc = datetime.now(timezone.utc).hour
+                    for inv in inverter_data:
+                        eid    = inv["entity_id"]
+                        fp     = {}
+                        for p in self._pv_forecast.get_all_profiles():
+                            if p["inverter_id"] == eid:
+                                fp = p
+                                break
+                        # Verwacht fractie uit het geleerde uurprofiel van pv_forecast
+                        hyf          = fp.get("hourly_yield_fraction", {})
+                        expected_frac = float(hyf.get(str(hour_utc), 0.0))
+                        peak_wp      = inv.get("estimated_wp") or inv.get("peak_w", 0.0)
+                        self._shadow_detector.tick(
+                            inverter_id   = eid,
+                            label         = inv.get("label", eid),
+                            current_w     = inv.get("current_w", 0.0),
+                            peak_wp       = float(peak_wp),
+                            expected_frac = expected_frac,
+                            hour_utc      = hour_utc,
+                        )
+                    shadow_obj = self._shadow_detector.get_result()
+                    shadow_data = {
+                        "any_shadow":         shadow_obj.any_shadow,
+                        "total_lost_kwh_day": shadow_obj.total_lost_kwh_day,
+                        "summary":            shadow_obj.summary,
+                        "inverters": [
+                            {
+                                "inverter_id":     r.inverter_id,
+                                "label":           r.label,
+                                "shadowed_hours":  r.shadowed_hours,
+                                "partial_hours":   r.partial_hours,
+                                "direction":       r.direction,
+                                "severity":        r.severity,
+                                "lost_kwh_day_est":r.lost_kwh_day_est,
+                                "advice":          r.advice,
+                            }
+                            for r in shadow_obj.inverters
+                        ],
+                    }
+                    await self._shadow_detector.async_maybe_save()
+                except Exception as _sd_err:
+                    _LOGGER.debug("ShadowDetector error: %s", _sd_err)
 
             # v1.12.0: Verbruik categorieën
             categories_data: dict = {}
@@ -1592,6 +1662,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "batteries":            self._collect_multi_battery_data(),
                 "micro_mobility":       micro_mobility_data,
                 "clipping_loss":        clipping_loss_data,
+                "shadow_detection":     shadow_data,
                 "consumption_categories": categories_data,
                 # v1.15.0: new intelligence
                 "heat_pump_cop":    hp_cop_data,

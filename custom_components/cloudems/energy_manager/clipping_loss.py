@@ -411,6 +411,68 @@ class ClippingLossCalculator:
             expansion_roi_years = best_roi,
         )
 
+    def get_clipping_forecast(
+        self,
+        inverter_id: str,
+        forecast_hourly_w: list[float],   # 24 waarden: verwacht vermogen per uur (vandaag of morgen)
+        label: str = "",
+    ) -> dict:
+        """
+        Voorspel hoeveel kWh er geclipped wordt op basis van de PV-forecast
+        en de geleerde clipping-grens (ceiling) van deze omvormer.
+
+        Args:
+            inverter_id:       HA entity_id van de omvormer
+            forecast_hourly_w: lijst van 24 floats (uur 0-23), verwacht vermogen in W
+            label:             leesbare naam voor het advies
+
+        Returns dict met:
+            ceiling_w:         geleerde clipping-grens (W), None als onbekend
+            predicted_clip_kwh: verwacht geclipped energie (kWh)
+            clipped_hours:     lijst van uren (0-23) met verwachte clipping
+            advice:            tekstadvies
+        """
+        ceiling_w = self.get_learned_ceiling(inverter_id)
+        if ceiling_w is None or ceiling_w < 100:
+            return {
+                "ceiling_w":          None,
+                "predicted_clip_kwh": 0.0,
+                "clipped_hours":      [],
+                "advice":             "Onvoldoende data om clipping te voorspellen (nog geen geleerde grens).",
+            }
+
+        clipped_hours: list[int] = []
+        total_clip_kwh = 0.0
+
+        for hour, forecast_w in enumerate(forecast_hourly_w[:24]):
+            if forecast_w > ceiling_w:
+                clip_w       = forecast_w - ceiling_w
+                clip_kwh     = clip_w / 1000.0   # 1 uur = 1 kWh per kW
+                total_clip_kwh += clip_kwh
+                clipped_hours.append(hour)
+
+        total_clip_kwh = round(total_clip_kwh, 2)
+        lbl = label or inverter_id[-8:]
+
+        if total_clip_kwh < 0.05:
+            advice = f"{lbl}: geen significante clipping verwacht (grens {ceiling_w:.0f} W)."
+        else:
+            uren_str = ", ".join(f"{h}:00" for h in clipped_hours)
+            advice = (
+                f"{lbl}: ~{total_clip_kwh:.1f} kWh clipping verwacht op uren {uren_str}. "
+                f"Omvormergrens: {ceiling_w:.0f} W. "
+                f"Tip: laad de batterij vóór {min(clipped_hours):02d}:00 om de geclipte energie op te vangen."
+                if clipped_hours else
+                f"{lbl}: ~{total_clip_kwh:.1f} kWh clipping verwacht (grens {ceiling_w:.0f} W)."
+            )
+
+        return {
+            "ceiling_w":          round(ceiling_w, 0),
+            "predicted_clip_kwh": total_clip_kwh,
+            "clipped_hours":      clipped_hours,
+            "advice":             advice,
+        }
+
     async def async_maybe_save(self) -> None:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
             await self._store.async_save({

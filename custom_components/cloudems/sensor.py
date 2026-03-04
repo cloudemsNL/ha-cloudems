@@ -121,6 +121,9 @@ async def async_setup_entry(
         CloudEMSPVForecastAccuracySensor(coordinator, entry),
         CloudEMSEMADiagnosticsSensor(coordinator, entry),
         CloudEMSSanitySensor(coordinator, entry),
+        # v1.16.0: schaduwdetectie & clipping-voorspelling
+        CloudEMSShadowDetectionSensor(coordinator, entry),
+        CloudEMSClippingForecastSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -3313,4 +3316,108 @@ class CloudEMSSanitySensor(CoordinatorEntity, SensorEntity):
             "has_warning":  s.get("has_warning", False),
             "summary":      s.get("summary", "Alle sensoren OK"),
             "issues":       s.get("issues", []),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.16.0: Schaduwdetectie & Clipping-voorspelling
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSShadowDetectionSensor(CoordinatorEntity, SensorEntity):
+    """Structurele schaduwdetectie per omvormer.
+
+    State  = geschat totaal dagelijks verlies door schaduw (kWh).
+    Attributes:
+        any_shadow          — True als er schaduw gedetecteerd is
+        summary             — leesbare samenvatting
+        inverters           — per-omvormer details:
+            label, shadowed_hours, partial_hours, direction,
+            severity, lost_kwh_day_est, advice
+    """
+    _attr_name       = "CloudEMS Schaduwdetectie"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon       = "mdi:weather-partly-cloudy"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_shadow_detection"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        s = (self.coordinator.data or {}).get("shadow_detection", {})
+        return s.get("total_lost_kwh_day", None)
+
+    @property
+    def extra_state_attributes(self):
+        s = (self.coordinator.data or {}).get("shadow_detection", {})
+        return {
+            "any_shadow": s.get("any_shadow", False),
+            "summary":    s.get("summary", "Onvoldoende data voor schaduwanalyse."),
+            "inverters":  s.get("inverters", []),
+        }
+
+
+class CloudEMSClippingForecastSensor(CoordinatorEntity, SensorEntity):
+    """Clipping-voorspelling voor morgen op basis van PV-forecast en geleerde omvormergrens.
+
+    State  = totaal verwacht geclipte energie morgen (kWh, som over alle omvormers).
+    Attributes:
+        forecasts           — per-omvormer:
+            ceiling_w, predicted_clip_kwh, clipped_hours, advice
+        total_clipped_kwh   — som over alle omvormers
+        advice              — gecombineerd advies
+    """
+    _attr_name       = "CloudEMS Clipping Voorspelling Morgen"
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_icon       = "mdi:solar-power-variant-outline"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_clipping_forecast"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        forecasts = (
+            (self.coordinator.data or {})
+            .get("clipping_loss", {})
+            .get("clipping_forecast_tomorrow", [])
+        )
+        if not forecasts:
+            return None
+        return round(sum(f.get("predicted_clip_kwh", 0.0) for f in forecasts), 2)
+
+    @property
+    def extra_state_attributes(self):
+        forecasts = (
+            (self.coordinator.data or {})
+            .get("clipping_loss", {})
+            .get("clipping_forecast_tomorrow", [])
+        )
+        total = round(sum(f.get("predicted_clip_kwh", 0.0) for f in forecasts), 2)
+        # Combineer adviezen — toon alleen omvormers met verwachte clipping
+        clipping_fcasts = [f for f in forecasts if f.get("predicted_clip_kwh", 0) > 0.05]
+        if clipping_fcasts:
+            advice = " | ".join(f.get("advice", "") for f in clipping_fcasts)
+        elif forecasts:
+            advice = "Geen significante clipping verwacht morgen."
+        else:
+            advice = "Onvoldoende data voor voorspelling."
+        return {
+            "forecasts":          forecasts,
+            "total_clipped_kwh":  total,
+            "advice":             advice,
         }

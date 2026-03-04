@@ -1,9 +1,10 @@
 ##############################################################################
-#  CloudEMS Dashboard — v1.13.0
+#  CloudEMS Dashboard — v1.16.0
 #
 #  Views:
 #    1. 🏠  Overzicht          — real-time huis, dag-type, flex score, alerts
-#    2. ☀️  Solar & PV          — productie, forecast, gezondheid, clipping, zelfconsumptie
+#    2. ☀️  Solar & PV          — productie, forecast, gezondheid, clipping,
+#                                 schaduwdetectie, clipping-voorspelling
 #    3. ⚡  Fasen & Net         — stromen, spanning, balans, fase-migratie
 #    4. 💶  Prijzen & Kosten    — EPEX, kosten, gas
 #    5. 🏡  Huis Intelligentie  — thermisch model, dag-type, verbruik-categorieën
@@ -293,6 +294,78 @@ views:
             entity: sensor.cloudems_clipping_verlies
             attribute: advice
             name: Advies
+
+      # ── Clipping voorspelling morgen ───────────────────────────────────────
+      - type: conditional
+        conditions:
+          - condition: numeric_state
+            entity: sensor.cloudems_clipping_voorspelling_morgen
+            above: 0.05
+        card:
+          type: markdown
+          title: "⚡ Clipping verwacht morgen"
+          content: |
+            {% set forecasts = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'forecasts') or [] %}
+            {% set total = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'total_clipped_kwh') or 0 %}
+            **Totaal verwacht geclipte energie morgen: {{ total }} kWh**
+
+            {% for f in forecasts if f.predicted_clip_kwh > 0.05 %}
+            🔶 **{{ f.advice }}**
+            {% endfor %}
+
+            💡 *Tip: laad de batterij vóór de clippinguren volledig op om geclipte energie optimaal te benutten.*
+          style: |
+            ha-card {
+              background: linear-gradient(135deg, #2d2200 0%, #3d3000 100%);
+              border-left: 4px solid #f39c12;
+              border-radius: 10px;
+            }
+
+      # ── Schaduwdetectie ────────────────────────────────────────────────────
+      - type: markdown
+        title: "🌥️ Structurele Schaduwdetectie"
+        content: |
+          {% set s = state_attr('sensor.cloudems_schaduwdetectie', 'inverters') or [] %}
+          {% set any_shadow = state_attr('sensor.cloudems_schaduwdetectie', 'any_shadow') %}
+          {% set summary = state_attr('sensor.cloudems_schaduwdetectie', 'summary') %}
+          {% set total_loss = states('sensor.cloudems_schaduwdetectie') | float(0) %}
+
+          {% if s | length == 0 %}
+          *Onvoldoende data — schaduwanalyse is beschikbaar na ~5 zonnige dagen.*
+          {% elif not any_shadow %}
+          ✅ **Geen structurele schaduw gedetecteerd** op de geconfigureerde omvormers.
+          {% else %}
+          ⚠️ **{{ summary }}**
+
+          | Omvormer | Beschaduwd | Gedeeltelijk | Richting | Ernst | Verlies/dag |
+          |----------|-----------|--------------|----------|-------|-------------|
+          {% for inv in s -%}
+          {% set dir_icon = '🌅' if inv.direction == 'oost' else '🌇' if inv.direction == 'west' else '☀️' if inv.direction == 'midden' else '🔀' if inv.direction == 'multi' else '✅' %}
+          {% set sev_icon = '🔴' if inv.severity == 'ernstig' else '🟡' if inv.severity == 'matig' else '🟢' if inv.severity == 'licht' else '✅' %}
+          {% set sh_uren = inv.shadowed_hours | map('string') | list | join(', ') ~ 'u' if inv.shadowed_hours else '—' %}
+          {% set pt_uren = inv.partial_hours | map('string') | list | join(', ') ~ 'u' if inv.partial_hours else '—' %}
+          | **{{ inv.label }}** | {{ sh_uren }} | {{ pt_uren }} | {{ dir_icon }} {{ inv.direction }} | {{ sev_icon }} {{ inv.severity }} | {{ inv.lost_kwh_day_est }} kWh |
+          {% endfor %}
+
+          {% for inv in s if inv.shadowed_hours or inv.partial_hours %}
+          > 💬 {{ inv.advice }}
+          {% endfor %}
+          {% endif %}
+
+      - type: entities
+        title: "🌥️ Schaduw — Details per omvormer"
+        icon: mdi:weather-partly-cloudy
+        entities:
+          - entity: sensor.cloudems_schaduwdetectie
+            name: Totaal geschat verlies (kWh/dag)
+          - type: attribute
+            entity: sensor.cloudems_schaduwdetectie
+            attribute: any_shadow
+            name: Schaduw gedetecteerd
+          - type: attribute
+            entity: sensor.cloudems_schaduwdetectie
+            attribute: summary
+            name: Samenvatting
 
       # ── Zelfconsumptie ─────────────────────────────────────────────────────
       - type: entities
