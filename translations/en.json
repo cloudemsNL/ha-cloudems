@@ -1,0 +1,496 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "⚡ Welcome to CloudEMS v1.5",
+        "description": "**CloudEMS** is your smart energy management system for Home Assistant.\n\n✅ NILM device detection · Phase limiting · Solar curtailment · EPEX prices · Dynamic EV charging · Peak shaving\n\n📖 [Documentation]({support_url}) · ☕ [Support CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})\n\n![]({diagram_url})",
+        "data": {
+          "energy_prices_country": "Country (EPEX dynamic prices)",
+          "wizard_mode": "Setup mode"
+        },
+        "data_description": {
+          "energy_prices_country": "Select your country to fetch the correct EPEX day-ahead electricity prices.",
+          "wizard_mode": "Basic: quick setup with essential sensors. Advanced: full control over all sensors, inverters and P1.",
+          "battery_sensor": "⚠️ Cloud batteries (e.g. Zonneplan) may have 30–300s delay. CloudEMS applies EMA smoothing automatically.",
+          "grid_sensor": "Must be in Watts (W), not kWh or kW. P1 sensors typically report in W.",
+          "solar_sensor": "Must be in Watts (W). Some inverters report in kW — use a template to multiply by 1000."
+        }
+      },
+      "grid_connection": {
+        "title": "⚡ Grid connection",
+        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
+        "data": {
+          "phase_preset": "Grid connection & fuse size"
+        },
+        "data_description": {
+          "phase_preset": "E.g. 3×25A = 3-phase with 25 A per phase. Select 'Custom' to enter values manually."
+        }
+      },
+      "phase_custom": {
+        "title": "⚡ Custom current limits",
+        "description": "Enter the maximum current allowed per phase. CloudEMS will never exceed these values.",
+        "data": {
+          "phase_count": "Number of phases",
+          "max_current_l1": "Max current L1 (A)",
+          "max_current_l2": "Max current L2 (A)",
+          "max_current_l3": "Max current L3 (A)"
+        },
+        "data_description": {
+          "max_current_l1": "Maximum grid current on phase L1 — typically your fuse rating (e.g. 25 A).",
+          "max_current_l2": "Maximum grid current on phase L2. Only relevant for 3-phase installations.",
+          "max_current_l3": "Maximum grid current on phase L3. Only relevant for 3-phase installations."
+        }
+      },
+      "grid_sensors": {
+        "title": "🔌 Grid sensors",
+        "description": "CloudEMS detected **{detected}** sensor(s) automatically.\n\n**Net sensor:** Use a single sensor reporting net grid power (positive = import).\n**Separate import / export:** Use this if your integration reports them as two sensors.\n\nThe fallback voltage ({mains_voltage} V) is used to calculate power from current (P = V × I) when no direct power sensor is available.\n\n![]({diagram_url})",
+        "data": {
+          "use_separate_import_export": "Use separate import and export sensors",
+          "grid_sensor": "Net power sensor (W or kW)",
+          "import_power_sensor": "Import / consumption sensor (W or kW)",
+          "export_power_sensor": "Export / feed-in sensor (W or kW)",
+          "mains_voltage": "Fallback mains voltage (V)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
+        },
+        "data_description": {
+          "use_separate_import_export": "⚙️ Use separate sensors if your meter measures import and export separately (e.g. DSMR5)",
+          "grid_sensor": "🔌 Single bidirectional sensor (positive = import, negative = export)",
+          "import_power_sensor": "🔌 Sensor for grid import power",
+          "export_power_sensor": "Sensor for grid export / feed-in power",
+          "mains_voltage": "─────────── Grid voltage ───────────",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
+        }
+      },
+      "phase_sensors": {
+        "title": "⚡ Phase Sensors",
+        "description": "Current (A), voltage (V) and power (W) per phase. DSMR5 meters with separate import/export per phase: fill in the export sensors.\n\nShowing {phase_count} phase(s) based on your grid connection.\n\n![]({diagram_url})",
+        "data": {
+          "phase_sensors_L1": "L1 current sensor (A)",
+          "phase_sensors_L2": "L2 current sensor (A)",
+          "phase_sensors_L3": "L3 current sensor (A)",
+          "voltage_sensor_l1": "L1 voltage sensor (V)",
+          "voltage_sensor_l2": "L2 voltage sensor (V)",
+          "voltage_sensor_l3": "L3 voltage sensor (V)",
+          "power_sensor_l1": "L1 power sensor (W)",
+          "power_sensor_l2": "L2 power sensor (W)",
+          "power_sensor_l3": "L3 power sensor (W)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
+        },
+        "data_description": {
+          "phase_sensors_L1": "─────────── Current sensors (A) ───────────",
+          "phase_sensors_L2": "Current in amperes on phase L2.",
+          "phase_sensors_L3": "Current in amperes on phase L3.",
+          "voltage_sensor_l1": "─────────── Voltage sensors (V) ───────────",
+          "voltage_sensor_l2": "Actual voltage on L2.",
+          "voltage_sensor_l3": "Actual voltage on L3.",
+          "power_sensor_l1": "─────────── Power sensors (W) ───────────",
+          "power_sensor_l2": "Direct power measurement on L2 (W).",
+          "power_sensor_l3": "Direct power measurement on L3 (W).",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
+        }
+      },
+      "solar_ev": {
+        "title": "🌞 Solar & EV",
+        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.",
+        "data": {
+          "solar_sensor": "Solar inverter power sensor (W or kW)",
+          "battery_sensor": "Battery / storage power sensor (W or kW)",
+          "ev_charger_entity": "EV charger setpoint entity (number)",
+          "enable_solar_dimmer": "Curtail solar when EPEX price is negative",
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)"
+        },
+        "data_description": {
+          "solar_sensor": "☀️ Total PV power sensor (use sum sensor if you have multiple inverters)",
+          "battery_sensor": "─────────── Storage ───────────",
+          "ev_charger_entity": "─────────── EV Charging ───────────",
+          "enable_solar_dimmer": "Curtail or switch off your inverter during hours with negative EPEX prices to prevent paying to export.",
+          "negative_price_threshold": "Price level below which solar curtailment activates. Default: 0.00 EUR/kWh."
+        }
+      },
+      "inverter_count": {
+        "title": "☀️ How many inverters?",
+        "description": "Select the number of PV inverters in your installation. Select **0** to skip inverter management.\n\nCloudEMS will self-learn azimuth, tilt and peak power from your production history.\n\n📖 [Multi-inverter docs]({docs_url})",
+        "data": {
+          "inverter_count": "Number of inverters (0–9)"
+        }
+      },
+      "inverter_detail": {
+        "title": "☀️ Inverter {inverter_num} of {total}",
+        "description": "Configure inverter **{inverter_num}**.\n\n**Azimuth:** {azimuth_tip}\n**Tilt:** {tilt_tip}\n\nLeave azimuth and tilt blank to let CloudEMS self-learn them.\n\n![]({diagram_url})",
+        "data": {
+          "inv_sensor": "Power sensor (W or kW)",
+          "inv_control": "Control entity — switch or dimmer (optional)",
+          "inv_label": "Name (e.g. 'Roof South')",
+          "inv_min_pct": "Minimum power during curtailment (%)",
+          "inv_azimuth": "Azimuth (°) — optional, leave blank to self-learn",
+          "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn",
+          "inv_rated_power": "Rated inverter power (W) — optional, for accurate clipping detection"
+        },
+        "data_description": {
+          "inv_sensor": "🔌 Connect the power sensor of this inverter (W or kW)",
+          "inv_label": "─────────── Identification ───────────",
+          "inv_rated_power": "Peak rated power in Wp — leave 0 to let CloudEMS learn this automatically",
+          "inv_azimuth": "─────────── Orientation (leave blank to self-learn) ───────────",
+          "inv_tilt": "Tilt angle: 0 = flat roof · 30 = typical pitch · 90 = vertical",
+          "inv_min_pct": "─────────── Curtailment ───────────",
+          "inv_control": "Connect a switch or number entity to limit inverter output power"
+        }
+      },
+      "features": {
+        "title": "🚀 Features",
+        "description": "Enable the features you need. You can change these at any time via Settings → Integrations → CloudEMS → Configure.",
+        "data": {
+          "dynamic_loading": "Dynamic loading — charge EV during cheapest EPEX hours",
+          "dynamic_load_price_threshold": "Cheap price threshold (EUR/kWh)",
+          "cost_tracking_enabled": "Energy cost tracking",
+          "phase_balance_enabled": "Phase balancing (3-phase only)",
+          "phase_balance_threshold_a": "Max phase imbalance (A)",
+          "peak_shaving_enabled": "Peak shaving — stay under monthly peak demand limit",
+          "battery_scheduler_enabled": "Enable battery scheduling based on prices",
+          "congestion_enabled": "Enable grid congestion management",
+          "battery_degradation_enabled": "Track battery degradation",
+          "price_alert_high_eur_kwh": "Price alert threshold (€/kWh)",
+          "nilm_min_confidence": "Minimum device confidence (0.0–1.0)"
+        },
+        "data_description": {
+          "dynamic_loading": "Increase EV charging current during the cheapest EPEX hours and reduce it during expensive hours.",
+          "dynamic_load_price_threshold": "Price at or below which an hour is considered 'cheap' for EV charging.",
+          "cost_tracking_enabled": "Track daily, monthly and yearly energy costs using live EPEX prices.",
+          "phase_balance_enabled": "Automatically redistribute loads to keep phase imbalance within the threshold.",
+          "phase_balance_threshold_a": "Maximum allowed current difference between phases before rebalancing is triggered (A).",
+          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR).",
+          "price_alert_high_eur_kwh": "Send an alert when the EPEX price exceeds this value. Default 0.30 €/kWh.",
+          "nilm_min_confidence": "Devices with lower confidence are hidden in the dashboard. Default 0.65."
+        }
+      },
+      "peak_config": {
+        "title": "📊 Peak shaving settings",
+        "description": "Configure the peak demand limit and which loads CloudEMS may switch off to stay under it.",
+        "data": {
+          "peak_shaving_limit_w": "Peak demand limit (W)",
+          "peak_shaving_assets": "Sheddable loads (entities to switch off during peak)"
+        },
+        "data_description": {
+          "peak_shaving_limit_w": "Maximum allowed grid import power in Watt. When exceeded, CloudEMS will switch off sheddable loads.",
+          "peak_shaving_assets": "Select switches, lights, or other controllable entities that may be turned off to reduce peak demand."
+        }
+      },
+      "ai_config": {
+        "title": "🤖 AI & NILM",
+        "description": "CloudEMS can identify appliances from your power data (NILM — Non-Intrusive Load Monitoring).\n\n**Priority:** Built-in pattern matching → Ollama (local) → Cloud AI\n\n**None:** Pattern matching only, no external calls.\n**Ollama:** Local LLM on your own hardware — privacy-first.\n**CloudEMS / OpenAI / Anthropic:** Cloud AI for highest accuracy.\n\n🔑 [Get a CloudEMS API key]({premium_url})",
+        "data": {
+          "ai_provider": "AI provider for NILM",
+          "cloud_api_key": "API key (required for CloudEMS, OpenAI and Anthropic)",
+          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)"
+        },
+        "data_description": {
+          "ai_provider": "Select which AI backend CloudEMS uses to identify appliances. Ollama and built-in are local; cloud options require an API key.",
+          "cloud_api_key": "Enter your API key for the selected cloud provider. Leave blank when using None or Ollama.",
+          "nilm_min_confidence": "Detections below this confidence are ignored. Lower = more results but more false positives. Default: 0.65."
+        }
+      },
+      "ollama_config": {
+        "title": "🤖 Ollama settings",
+        "description": "Configure the Ollama server that CloudEMS will use for local AI inference.",
+        "data": {
+          "ollama_host": "Ollama host (e.g. localhost or 192.168.1.x)",
+          "ollama_port": "Ollama port (default 11434)",
+          "ollama_model": "Ollama model (e.g. llama3, mistral, phi3)"
+        },
+        "data_description": {
+          "ollama_host": "Hostname or IP address of your Ollama instance.",
+          "ollama_port": "TCP port Ollama listens on. Default is 11434.",
+          "ollama_model": "Name of the Ollama model to use. Recommended: llama3, mistral or phi3 (smallest)."
+        }
+      },
+      "advanced": {
+        "title": "📡 P1 smart meter",
+        "description": "Optionally connect a P1/DSMR smart meter directly via TCP. Most users already have P1 data via the DSMR integration — only enable this if you want a direct TCP connection.",
+        "data": {
+          "p1_enabled": "Enable direct P1 TCP connection"
+        }
+      },
+      "p1_config": {
+        "title": "📡 P1 connection settings",
+        "data": {
+          "p1_host": "P1 gateway IP address",
+          "p1_port": "P1 gateway TCP port"
+        },
+        "data_description": {
+          "p1_host": "IP address of your P1 gateway (e.g. HomeWizard P1, DSMR-reader).",
+          "p1_port": "TCP port of the P1 gateway. Default is 8088."
+        },
+        "description": "\n\n![]({diagram_url})"
+      },
+      "battery_count": {
+        "title": "🔋 Batteries — Count",
+        "description": "How many battery systems do you want to configure?\n\nEach battery is configured individually with a power sensor, SoC and capacity.",
+        "data": {
+          "battery_count": "Number of batteries"
+        }
+      },
+      "battery_detail": {
+        "title": "🔋 Battery {battery_num} of {total}",
+        "description": "Configure battery {battery_num}.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, + = charging, - = discharging)",
+          "bat_soc_sensor": "State of Charge sensor (%) — optional",
+          "bat_capacity_kwh": "Capacity (kWh)",
+          "bat_max_charge_w": "Max charge power (W)",
+          "bat_max_discharge_w": "Max discharge power (W)",
+          "bat_charge_entity": "Charge setpoint entity — optional",
+          "bat_discharge_entity": "Discharge setpoint entity — optional",
+          "bat_label": "Name (e.g. Home Battery)"
+        }
+      },
+      "prices": {
+        "title": "💶 Prices & Tax",
+        "description": "Configure energy tax and supplier markup for accurate cost calculations.",
+        "data": {
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT (21%)",
+          "selected_supplier": "Supplier (for default markup)",
+          "supplier_markup": "Manual markup (€/kWh)"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "⚙️ CloudEMS — Configure",
+        "description": "Select the section you want to edit.",
+        "data": {
+          "section": "Settings section"
+        }
+      },
+      "sensors": {
+        "title": "🔌 Grid Sensors",
+        "description": "Grid connection, voltage and phase settings.",
+        "data": {
+          "use_separate_import_export": "Use separate import and export sensors",
+          "grid_sensor": "Net power sensor",
+          "import_power_sensor": "Import sensor",
+          "export_power_sensor": "Export sensor",
+          "mains_voltage": "Fallback mains voltage (V)",
+          "phase_count": "Number of phases",
+          "max_current_l1": "Max current L1 (A)",
+          "max_current_l2": "Max current L2 (A)",
+          "max_current_l3": "Max current L3 (A)"
+        }
+      },
+      "phase_sensors": {
+        "title": "⚡ Phase Sensors",
+        "description": "Per-phase current, voltage and power. DSMR5 bidirectional meter: also fill in the export sensors for net phase power.",
+        "data": {
+          "phase_sensors_L1": "L1 current sensor",
+          "phase_sensors_L2": "L2 current sensor",
+          "phase_sensors_L3": "L3 current sensor",
+          "voltage_sensor_l1": "L1 voltage sensor",
+          "voltage_sensor_l2": "L2 voltage sensor",
+          "voltage_sensor_l3": "L3 voltage sensor",
+          "power_sensor_l1": "L1 power sensor",
+          "power_sensor_l2": "L2 power sensor",
+          "power_sensor_l3": "L3 power sensor",
+          "power_sensor_l1_export": "DSMR5 export L1 (W) — optional",
+          "power_sensor_l2_export": "DSMR5 export L2 (W) — optional",
+          "power_sensor_l3_export": "DSMR5 export L3 (W) — optional"
+        }
+      },
+      "solar_ev_opts": {
+        "title": "☀️ PV & EV Charging",
+        "data": {
+          "solar_sensor": "PV / inverter sensor (W or kW)",
+          "battery_sensor": "Battery sensor",
+          "ev_charger_entity": "EV charger entity",
+          "enable_solar_dimmer": "Curtail solar at negative price",
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)",
+          "gas_sensor": "Gas meter sensor (m³) — optional, alternative to P1",
+          "gas_price_sensor": "Gas price sensor (€/m³) — optional",
+          "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
+          "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
+        },
+        "description": "Solar panel sensor, EV charger and solar curtailment."
+      },
+      "features_opts": {
+        "title": "🚀 Features",
+        "data": {
+          "dynamic_loading": "Dynamic loading",
+          "dynamic_load_price_threshold": "Cheap price threshold (EUR/kWh)",
+          "cost_tracking_enabled": "Cost tracking",
+          "peak_shaving_enabled": "Peak shaving",
+          "peak_shaving_limit_w": "Peak limit (W)",
+          "peak_shaving_assets": "Sheddable loads",
+          "phase_balance_enabled": "Phase balancing",
+          "phase_balance_threshold_a": "Imbalance threshold (A)"
+        }
+      },
+      "ai_opts": {
+        "title": "🤖 AI & NILM",
+        "description": "Select the AI provider and adjust NILM detection settings. NILM-detected devices appear as sensors under Settings → Devices → CloudEMS. You can confirm, rename or dismiss them there.",
+        "data": {
+          "ai_provider": "AI provider",
+          "cloud_api_key": "API key",
+          "ollama_host": "Ollama host",
+          "ollama_port": "Ollama port",
+          "ollama_model": "Ollama model",
+          "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)"
+        },
+        "data_description": {
+          "nilm_min_confidence": "Detections below this confidence score are ignored. 0.65 is a good default."
+        }
+      },
+      "advanced_opts": {
+        "title": "📡 P1 & Advanced",
+        "data": {
+          "p1_enabled": "Direct P1 connection enabled",
+          "p1_host": "P1 gateway IP",
+          "p1_port": "P1 gateway port",
+          "congestion_threshold_w": "Grid congestion threshold (W)",
+          "congestion_price_threshold": "Congestion price threshold (€/kWh)",
+          "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
+          "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
+          "battery_degradation_enabled": "Track battery degradation",
+          "congestion_enabled": "Enable grid congestion detection"
+        },
+        "data_description": {
+          "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
+          "battery_chemistry": "Select your battery chemistry. LFP degrades slower than NMC.",
+          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low."
+        }
+      },
+      "inverter_detail_opts": {
+        "title": "☀️ Inverter {inverter_num} of {total}",
+        "description": "Configure inverter **{inverter_num}**.\n\n**Azimuth:** {azimuth_tip}\n**Tilt:** {tilt_tip}\n\nLeave azimuth and tilt empty — CloudEMS will self-learn them.",
+        "data": {
+          "inv_sensor": "Power sensor (W or kW)",
+          "inv_control": "Control entity — switch or dimmer (optional)",
+          "inv_label": "Name (e.g. 'Roof South')",
+          "inv_min_pct": "Minimum power during curtailment (%)",
+          "inv_azimuth": "Azimuth (°) — optional, leave empty to self-learn",
+          "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn",
+          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn"
+        }
+      },
+      "inverters_opts": {
+        "title": "🔆 PV Inverters",
+        "description": "How many inverters do you want to configure? Current: {inverter_names}",
+        "data": {
+          "inverter_count": "Number of inverters (0–9)"
+        }
+      },
+      "batteries_opts": {
+        "title": "🔋 Batteries",
+        "description": "Currently configured: **{battery_names}** ({current_count} battery/batteries).\n\nSet count to 0 to remove all. Increasing the count adds new batteries; decreasing removes the last ones.",
+        "data": {
+          "battery_count": "Number of batteries"
+        }
+      },
+      "battery_detail_opts": {
+        "title": "🔋 Battery {battery_num} of {total}",
+        "description": "Configure battery **{battery_num}**.\n\nLeave capacity and power at 0 — CloudEMS will self-learn them.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, positive=charging)",
+          "bat_soc_sensor": "State of charge sensor (%, optional)",
+          "bat_capacity_kwh": "Battery capacity (kWh) — 0 = self-learn",
+          "bat_max_charge_w": "Max charge power (W) — 0 = self-learn",
+          "bat_max_discharge_w": "Max discharge power (W) — 0 = self-learn",
+          "bat_charge_entity": "Charge control entity (optional)",
+          "bat_discharge_entity": "Discharge control entity (optional)",
+          "bat_label": "Name (e.g. 'Home Battery')"
+        }
+      },
+      "prices_opts": {
+        "title": "💶 Prices & Tax",
+        "description": "Set whether energy prices are shown including tax and VAT.\n\nThe supplier markup is indicative — verify your own contract.",
+        "data": {
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT",
+          "selected_supplier": "Energy supplier (for markup)",
+          "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected",
+          "contract_type": "Contract type",
+          "fixed_import_price": "Fixed import tariff (€/kWh)",
+          "fixed_export_price": "Fixed feed-in tariff (€/kWh)"
+        }
+      },
+      "gas_opts": {
+        "title": "Gas & Heating Settings",
+        "data": {
+          "gas_sensor": "Gas meter sensor",
+          "gas_price_sensor": "Gas price sensor",
+          "gas_price_fixed": "Fixed gas price (€/m³)",
+          "boiler_efficiency": "Boiler efficiency",
+          "heat_pump_cop": "Heat pump COP (manual)",
+          "heat_pump_power_entity": "Heat pump power sensor (W)",
+          "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cloudems_occupancy": {
+        "name": "Occupancy",
+        "state": {
+          "home": "Home",
+          "away": "Away",
+          "sleeping": "Sleeping",
+          "vacation": "Vacation"
+        }
+      },
+      "cloudems_climate_preheat": {
+        "name": "Climate Pre-Heat Advice",
+        "state": {
+          "pre_heat": "Pre-heat",
+          "reduce": "Reduce",
+          "normal": "Normal"
+        }
+      },
+      "cloudems_pv_forecast_accuracy": {
+        "name": "PV Forecast Accuracy"
+      },
+      "cloudems_ema_diagnostics": {
+        "name": "Sensor EMA Diagnostics"
+      },
+      "cloudems_sensor_sanity": {
+        "name": "Sensor Sanity Guard"
+      },
+      "cloudems_heat_pump_cop_current": {
+        "name": "Heat Pump COP (current)",
+        "state": {}
+      },
+      "cloudems_heat_pump_cop_7c": {
+        "name": "Heat Pump COP at 7°C",
+        "state": {}
+      },
+      "cloudems_heat_pump_defrost_count": {
+        "name": "Heat Pump Defrost Cycles Today",
+        "state": {}
+      },
+      "absence_detector": {
+        "name": "Occupancy"
+      },
+      "climate_preheat": {
+        "name": "Climate Pre-heat Advice"
+      },
+      "pv_forecast_accuracy": {
+        "name": "PV Forecast Accuracy"
+      },
+      "ema_diagnostics": {
+        "name": "Sensor EMA Diagnostics"
+      },
+      "sensor_sanity": {
+        "name": "Sensor Sanity"
+      }
+    }
+  }
+}

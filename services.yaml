@@ -1,0 +1,138 @@
+confirm_device:
+  name: Bevestig NILM apparaat
+  description: Bevestigt een door NILM gedetecteerd apparaat en traint het lokale AI model.
+  fields:
+    device_id:
+      name: Apparaat ID
+      description: Het unieke ID van het gedetecteerde apparaat
+      required: true
+      selector:
+        text:
+    device_type:
+      name: Apparaattype
+      description: Het type van het apparaat
+      required: true
+      selector:
+        select:
+          options:
+            - refrigerator
+            - washing_machine
+            - dryer
+            - dishwasher
+            - oven
+            - microwave
+            - kettle
+            - television
+            - computer
+            - heat_pump
+            - boiler
+            - ev_charger
+            - light
+            - unknown
+    name:
+      name: Naam
+      description: Aangepaste naam voor het apparaat
+      required: false
+      selector:
+        text:
+
+dismiss_device:
+  name: Verwijder NILM apparaat
+  description: Verwijdert een gedetecteerd apparaat.
+  fields:
+    device_id:
+      name: Apparaat ID
+      required: true
+      selector:
+        text:
+
+set_phase_max_current:
+  name: Stel max stroom fase in
+  description: Stel de maximale stroom in voor een specifieke fase.
+  fields:
+    phase:
+      name: Fase
+      required: true
+      selector:
+        select:
+          options: [L1, L2, L3]
+    max_current:
+      name: Max stroom (A)
+      required: true
+      selector:
+        number:
+          min: 6
+          max: 63
+          unit_of_measurement: A
+
+force_price_update:
+  name: Energieprijzen bijwerken
+  description: Forceert een directe update van de energieprijzen.
+
+generate_report:
+  name: Genereer diagnoserapport
+  description: Genereert een CloudEMS status rapport als persistente notificatie.
+  fields: {}
+
+nilm_feedback:
+  name: NILM apparaat feedback
+  description: Geeft feedback (correct/incorrect/maybe) voor een NILM-detectie.
+  fields:
+    device_id:
+      name: Apparaat ID
+      required: true
+      selector:
+        text:
+    feedback:
+      name: Feedback
+      required: true
+      selector:
+        select:
+          options: [correct, incorrect, maybe]
+    name:
+      name: Naam
+      required: false
+      selector:
+        text:
+    device_type:
+      name: Apparaattype
+      required: false
+      selector:
+        text:
+
+boiler_override:
+  name: Boiler handmatig aansturen
+  description: Forceert de boiler aan of uit.
+  fields:
+    entity_id:
+      name: Entiteit
+      required: true
+      selector:
+        entity:
+          domain: [switch, input_boolean]
+    state:
+      name: Status
+      required: false
+      selector:
+        select:
+          options: [on, off]
+
+reset_drift_baseline:
+  name: Reset drift basislijn
+  description: Reset de efficiëntie-basislijn van één of alle apparaten.
+  fields:
+    device_id:
+      name: Apparaat ID
+      required: false
+      selector:
+        text:
+
+mute_alert:
+  name: Stil CloudEMS melding
+  description: Dempt een CloudEMS melding voor 24 uur.
+  fields:
+    alert_key:
+      name: Melding sleutel
+      required: true
+      selector:
+        text:

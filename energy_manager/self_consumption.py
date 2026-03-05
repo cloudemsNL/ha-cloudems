@@ -1,0 +1,207 @@
+"""
+CloudEMS Zelfconsumptie Tracker — v1.0.0
+
+Houdt bij welk percentage van de PV-productie direct zelf wordt verbruikt
+versus teruggeleverd aan het net.
+
+Formule:
+  zelfconsumptie_ratio = (pv_totaal − export) / pv_totaal
+  = directe_consumptie / pv_totaal
+
+Aanvullend:
+  • Trackt per uur welke NILM-apparaten draaiden tijdens PV-piekproductie
+  • Berekent potentiële besparing als apparaten verschoven worden naar piektijd
+  • Geeft concrete aanbeveling met geschatte maandelijkse besparing
+
+Salderingscontext (NL 2025):
+  Terugleververgoeding ≈ EPEX (variabel) maar doorgaans lager dan inkoopprijs.
+  Verschil inkoop vs teruglevering = de directe besparing van hogere zelfconsumptie.
+
+Copyright © 2025 CloudEMS — https://cloudems.eu
+"""
+from __future__ import annotations
+import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
+
+_LOGGER = logging.getLogger(__name__)
+
+STORAGE_KEY     = "cloudems_self_consumption_v1"
+STORAGE_VERSION = 1
+
+SAVE_INTERVAL_S = 600
+MIN_PV_W        = 50     # Minimale PV-productie voor meting
+# Aanname: verschil inkoop vs teruglevering (€/kWh)
+PRICE_SPREAD_EUR_KWH = 0.08   # indicatief voordeel per kWh zelfverbruik
+
+
+@dataclass
+class HourlyConsumptionSlot:
+    """Bijgehouden statistieken per uur van de dag (0-23)."""
+    pv_wh:     float = 0.0    # PV energie in dit uur (Wh)
+    export_wh: float = 0.0    # Teruggeleverd in dit uur (Wh)
+    import_wh: float = 0.0    # Afgenomen van net in dit uur (Wh)
+    samples:   int   = 0      # Aantal 10s-ticks
+
+
+@dataclass
+class SelfConsumptionData:
+    """Output van de zelfconsumptie-tracker."""
+    ratio_pct: float              # % direct verbruikt van PV
+    export_pct: float             # % teruggeleverd
+    pv_today_kwh: float
+    self_consumed_kwh: float
+    exported_kwh: float
+    best_solar_hour: Optional[int]    # uur met hoogste PV-productie
+    best_solar_hour_label: str
+    advice: str
+    monthly_saving_eur: float     # geschatte extra maandelijkse besparing bij optimale verschuiving
+    hourly_pv_wh: list[float]     # 24-uurs profiel van PV (Wh)
+
+
+class SelfConsumptionTracker:
+    """
+    Houdt zelfconsumptieratio bij en berekent optimalisatiepotentieel.
+
+    Gebruik vanuit coordinator (elke 10s):
+        tracker.tick(pv_w=2400, import_w=0, export_w=800)
+        data = tracker.get_data()
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+
+        # Huidige dag accumulatie
+        self._today_pv_wh     = 0.0
+        self._today_export_wh = 0.0
+        self._today_import_wh = 0.0
+        self._today_date       = ""
+
+        # Uurprofiel (rolling 30-dag gemiddelde)
+        self._hourly: list[HourlyConsumptionSlot] = [HourlyConsumptionSlot() for _ in range(24)]
+
+        self._dirty    = False
+        self._last_save = 0.0
+        self._tick_interval_s = 10.0
+
+    async def async_setup(self) -> None:
+        saved: dict = await self._store.async_load() or {}
+        hourly_raw  = saved.get("hourly", [])
+        if len(hourly_raw) == 24:
+            self._hourly = [
+                HourlyConsumptionSlot(**h) for h in hourly_raw
+            ]
+        _LOGGER.info("SelfConsumptionTracker: geladen (%d uur-slots)", len(self._hourly))
+
+    def tick(self, pv_w: float, import_w: float, export_w: float) -> None:
+        """
+        Verwerk één 10-secondenmeting.
+
+        Parameters
+        ----------
+        pv_w      : huidig PV-vermogen (W)
+        import_w  : huidig netvermogen import (W, >= 0)
+        export_w  : huidig netvermogen export (W, >= 0)
+        """
+        now  = datetime.now(timezone.utc)
+        hour = now.hour
+        today = now.strftime("%Y-%m-%d")
+
+        # Dag-reset
+        if today != self._today_date:
+            self._today_pv_wh     = 0.0
+            self._today_export_wh = 0.0
+            self._today_import_wh = 0.0
+            self._today_date      = today
+
+        # Accumuleer Wh (10s interval → /360 uur)
+        factor = self._tick_interval_s / 3600.0
+
+        if pv_w >= MIN_PV_W:
+            self._today_pv_wh     += pv_w     * factor
+            self._today_export_wh += export_w  * factor
+            self._today_import_wh += import_w  * factor
+            self._dirty = True
+
+        # Update uurprofiel (exponentieel voortschrijdend gemiddelde)
+        slot = self._hourly[hour]
+        alpha = 0.05   # trage leer-snelheid
+        if slot.samples == 0:
+            slot.pv_wh     = pv_w * factor
+            slot.export_wh = export_w * factor
+            slot.import_wh = import_w * factor
+        else:
+            slot.pv_wh     = alpha * pv_w * factor     + (1 - alpha) * slot.pv_wh
+            slot.export_wh = alpha * export_w * factor + (1 - alpha) * slot.export_wh
+            slot.import_wh = alpha * import_w * factor + (1 - alpha) * slot.import_wh
+        slot.samples += 1
+
+    def get_data(self) -> SelfConsumptionData:
+        """Geef huidige zelfconsumptie-analyse."""
+        pv_kwh  = round(self._today_pv_wh / 1000, 3)
+        exp_kwh = round(self._today_export_wh / 1000, 3)
+        sc_kwh  = round(max(0.0, pv_kwh - exp_kwh), 3)
+
+        ratio_pct  = round(sc_kwh / pv_kwh * 100, 1) if pv_kwh > 0 else 0.0
+        export_pct = round(100.0 - ratio_pct, 1)
+
+        # Beste zonne-uur
+        best_hour = max(range(24), key=lambda h: self._hourly[h].pv_wh)
+        best_wh   = self._hourly[best_hour].pv_wh
+        if best_wh < 1:
+            best_hour = None
+            best_label = "Onbekend"
+        else:
+            best_label = f"{best_hour:02d}:00–{best_hour+1:02d}:00"
+
+        # Schatting maandelijks voordeel bij verschuiven apparaten
+        # Als export_pct > 30%: gemiddeld 1 apparaatcyclus per dag is verschuifbaar (~1.5 kWh)
+        shiftable_kwh_day = max(0.0, (export_pct - 20) / 100 * pv_kwh * 0.5)
+        monthly_saving    = round(shiftable_kwh_day * 30 * PRICE_SPREAD_EUR_KWH, 2)
+
+        if pv_kwh < 0.1:
+            advice = "Vandaag nog geen PV-productie gemeten."
+        elif ratio_pct >= 70:
+            advice = f"Uitstekend! Je verbruikt {ratio_pct:.0f}% van je PV-productie direct zelf."
+        elif ratio_pct >= 40:
+            advice = (
+                f"Je zelfconsumptiegraad is {ratio_pct:.0f}%. Door apparaten zoals wasmachine of vaatwasser "
+                f"te plannen rond {best_label} kun je dit verder verbeteren."
+            )
+        else:
+            advice = (
+                f"Je stuurt {export_pct:.0f}% van je PV-productie terug. "
+                f"Piekproductie is rond {best_label}. "
+                f"Verschuif energieverbruik naar dit uur voor ~€{monthly_saving:.2f}/maand extra besparing."
+            )
+
+        return SelfConsumptionData(
+            ratio_pct          = ratio_pct,
+            export_pct         = export_pct,
+            pv_today_kwh       = pv_kwh,
+            self_consumed_kwh  = sc_kwh,
+            exported_kwh       = exp_kwh,
+            best_solar_hour    = best_hour,
+            best_solar_hour_label = best_label,
+            advice             = advice,
+            monthly_saving_eur = monthly_saving,
+            hourly_pv_wh       = [round(self._hourly[h].pv_wh * 100, 1) for h in range(24)],
+        )
+
+    async def async_maybe_save(self) -> None:
+        if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
+            await self._store.async_save({
+                "hourly": [
+                    {"pv_wh": s.pv_wh, "export_wh": s.export_wh,
+                     "import_wh": s.import_wh, "samples": s.samples}
+                    for s in self._hourly
+                ],
+            })
+            self._dirty     = False
+            self._last_save = time.time()
