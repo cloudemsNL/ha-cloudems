@@ -55,10 +55,12 @@ SHADOW_THRESHOLD      = 0.72   # < 72% van verwacht = schaduw-kandidaat
 PARTIAL_SHADOW_THRESH = 0.88   # 72-88% = gedeeltelijke schaduw
 
 # Minimale dagen met data voordat een conclusie wordt getrokken
-MIN_SHADOW_DAYS = 5
+MIN_SHADOW_DAYS = 3   # sneller detecteren: 3 zonnige dagen volstaan
 
-# EMA alpha: hoe snel nieuw bewijs ouder bewijs vervangt (hoog = snel)
-EMA_ALPHA = 0.08   # ≈ 12 meetdagen tijdconstante
+# Adaptive EMA alpha: snel bij weinig data, stabiel daarna
+EMA_ALPHA_FAST = 0.25   # eerste 5 samples per uur-slot
+EMA_ALPHA_MID  = 0.12   # samples 5-15
+EMA_ALPHA_SLOW = 0.05   # daarna (stabiel, ≈ 20 meetdagen tijdconstante)
 
 # Uren die tellen als 'ochtend', 'middag', 'namiddag' in lokale UTC-offset
 # (voor NL/BE: UTC+1 winter, UTC+2 zomer — we werken in UTC, offset ~0-2)
@@ -214,9 +216,19 @@ class ShadowDetector:
                 profiles[hour_utc] = HourShadowProfile(hour=hour_utc, yield_ratio_ema=ratio)
             else:
                 p = profiles[hour_utc]
-                p.yield_ratio_ema = p.yield_ratio_ema * (1 - EMA_ALPHA) + ratio * EMA_ALPHA
+                n = p.samples
+                ema_a = EMA_ALPHA_FAST if n < 5 else (EMA_ALPHA_MID if n < 15 else EMA_ALPHA_SLOW)
+                p.yield_ratio_ema = p.yield_ratio_ema * (1 - ema_a) + ratio * ema_a
 
             profiles[hour_utc].samples += 1
+            total_samples = sum(p.samples for p in profiles.values())
+            trained_hours = sum(1 for p in profiles.values() if p.samples >= MIN_SHADOW_DAYS)
+            _LOGGER.debug(
+                "ShadowDetector '%s': uur %02d:00 sample %d — yield_ratio=%.2f | "
+                "%d uren getraind, %d metingen totaal",
+                label, hour_utc, profiles[hour_utc].samples, ratio,
+                trained_hours, total_samples,
+            )
             self._dirty = True
 
         except Exception as exc:

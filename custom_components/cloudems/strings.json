@@ -144,7 +144,8 @@
           "peak_shaving_enabled": "Peak shaving — stay under monthly peak demand limit",
           "battery_scheduler_enabled": "Enable battery scheduling based on prices",
           "congestion_enabled": "Enable grid congestion management",
-          "battery_degradation_enabled": "Track battery degradation"
+          "battery_degradation_enabled": "Track battery degradation",
+          "nilm_min_confidence": "NILM minimum confidence (0.70–0.99)"
         },
         "data_description": {
           "dynamic_loading": "Increase EV charging current during the cheapest EPEX hours and reduce it during expensive hours.",
@@ -152,7 +153,8 @@
           "cost_tracking_enabled": "Track daily, monthly and yearly energy costs using live EPEX prices.",
           "phase_balance_enabled": "Automatically redistribute loads to keep phase imbalance within the threshold.",
           "phase_balance_threshold_a": "Maximum allowed current difference between phases before rebalancing is triggered (A).",
-          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR)."
+          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR).",
+          "nilm_min_confidence": "Only detections at or above this confidence are shown. 0.80 is recommended — lower values increase false positives significantly."
         }
       },
       "peak_config": {
@@ -173,12 +175,12 @@
         "data": {
           "ai_provider": "AI provider for NILM",
           "cloud_api_key": "API key (required for CloudEMS, OpenAI and Anthropic)",
-          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)"
+          "nilm_min_confidence": "Minimum confidence for NILM detections (0.70–0.99). Higher = fewer false positives. Default: 0.80."
         },
         "data_description": {
           "ai_provider": "Select which AI backend CloudEMS uses to identify appliances. Ollama and built-in are local; cloud options require an API key.",
           "cloud_api_key": "Enter your API key for the selected cloud provider. Leave blank when using None or Ollama.",
-          "nilm_min_confidence": "Detections below this confidence are ignored. Lower = more results but more false positives. Default: 0.65."
+          "nilm_min_confidence": "Only detections at or above this confidence are shown. 0.80 gives reliable results with few false positives. 0.92+ for maximum precision."
         }
       },
       "ollama_config": {
@@ -322,10 +324,10 @@
           "ollama_host": "Ollama host",
           "ollama_port": "Ollama port",
           "ollama_model": "Ollama model",
-          "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)"
+          "nilm_min_confidence": "NILM minimum confidence (0.70–0.99)"
         },
         "data_description": {
-          "nilm_min_confidence": "Detections below this confidence score are ignored. 0.65 is a good default."
+          "nilm_min_confidence": "Only detections at or above this confidence are shown. 0.80 is recommended — lower values increase false positives significantly."
         }
       },
       "advanced_opts": {
@@ -390,7 +392,15 @@
           "selected_supplier": "Energy supplier (for markup)",
           "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected"
         }
+      },
+      "nilm_devices_opts": {
+        "title": "🏷️ Manage NILM Devices",
+        "description": "Below are all detected NILM appliances.\n\n**Current overview:**\n```\n{devices_overview}\n```\n\n**Rename** — use the service `{rename_service}`:\n- `device_id`: the ID shown in brackets above\n- `name`: new display name (max. 60 characters)\n- `device_type`: optionally correct the device type\n\n**Hide/show** — use the service `{hide_service}`:\n- `device_id`: the ID shown in brackets above\n- `hidden`: `true` to hide, `false` to show\n\n👉 [Open Developer Tools → Services]({devtools_url})",
+        "data": {}
       }
+    },
+    "abort": {
+      "nilm_manage_via_services": "Gebruik de services cloudems.rename_nilm_device en cloudems.hide_nilm_device in de HA Ontwikkeltools om apparaten te beheren."
     }
   },
   "entity": {}

@@ -89,6 +89,8 @@ class GasAnalysisData:
     anomaly_message:     str
     advice:              str
     records_count:       int
+    isolation_advice:    str = ""
+    isolation_saving_pct: float = 0.0
 
 
 def _efficiency_rating(m3_per_hdd: float) -> str:
@@ -128,6 +130,9 @@ class GasAnalyzer:
 
         self._dirty    = False
         self._last_save = 0.0
+        # v1.18.1: isolatie-investering tracking
+        self._isolation_date: str = ""      # datum van geregistreerde isolatie-investering
+        self._pre_isolation_eff: float = 0.0  # gemiddelde m³/HDD vóór de ingreep
 
     async def async_setup(self) -> None:
         saved: dict = await self._store.async_load() or {}
@@ -136,8 +141,30 @@ class GasAnalyzer:
                 self._records.append(GasDayRecord(**d))
             except Exception:
                 pass
-        self._last_gas_m3 = float(saved.get("last_gas_m3", 0.0))
-        _LOGGER.info("GasAnalyzer: %d dagrecords geladen", len(self._records))
+        self._last_gas_m3      = float(saved.get("last_gas_m3", 0.0))
+        self._isolation_date   = saved.get("isolation_date", "")
+        self._pre_isolation_eff = float(saved.get("pre_isolation_eff", 0.0))
+        _LOGGER.info("GasAnalyzer: %d dagrecords geladen (isolatiedatum: %s)",
+                     len(self._records), self._isolation_date or "geen")
+
+    def register_isolation_investment(self, date_str: str = "") -> None:
+        """
+        Registreer een isolatie-investering. Sla de huidige efficiëntie op als baseline.
+        date_str: datum in YYYY-MM-DD formaat (default: vandaag)
+        """
+        from datetime import datetime, timezone
+        if not date_str:
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        heating_records = [r for r in self._records[-30:] if r.hdd > 1.0 and r.efficiency > 0]
+        if heating_records:
+            self._pre_isolation_eff = sum(r.efficiency for r in heating_records) / len(heating_records)
+        self._isolation_date = date_str
+        self._dirty = True
+        _LOGGER.info(
+            "GasAnalyzer: isolatie-investering geregistreerd op %s "
+            "(baseline efficiëntie: %.4f m³/HDD)",
+            date_str, self._pre_isolation_eff,
+        )
 
     def tick(self, gas_m3_cumulative: float, outside_temp_c: float) -> None:
         """
@@ -269,6 +296,36 @@ class GasAnalyzer:
         if anomaly:
             advice = "⚠️ ANOMALIE GEDETECTEERD: " + anomaly_msg
 
+        # v1.18.1: isolatie-investering terugverdiencheck
+        isolation_advice = ""
+        isolation_saving_pct = 0.0
+        if self._isolation_date and self._pre_isolation_eff > 0 and eff > 0:
+            post_records = [
+                r for r in self._records
+                if r.date >= self._isolation_date and r.hdd > 1.0 and r.efficiency > 0
+            ]
+            if len(post_records) >= 5:
+                post_eff = sum(r.efficiency for r in post_records) / len(post_records)
+                saving_pct = (self._pre_isolation_eff - post_eff) / self._pre_isolation_eff * 100
+                isolation_saving_pct = round(saving_pct, 1)
+                if saving_pct > 5:
+                    isolation_advice = (
+                        f"✅ Na isolatie-ingreep ({self._isolation_date}): "
+                        f"{saving_pct:.0f}% minder gas/graaddag "
+                        f"({self._pre_isolation_eff:.4f} → {post_eff:.4f} m³/HDD)."
+                    )
+                elif saving_pct > -5:
+                    isolation_advice = (
+                        f"⚠️ Isolatie ({self._isolation_date}): nog geen significant "
+                        f"verbruiksverschil meetbaar ({len(post_records)} meetdagen). "
+                        "Meer stookdagen nodig voor betrouwbare analyse."
+                    )
+                else:
+                    isolation_advice = (
+                        f"⚠️ Isolatie ({self._isolation_date}): verbruik is {abs(saving_pct):.0f}% "
+                        f"GESTEGEN na ingreep. Controleer of de meting klopt."
+                    )
+
         return GasAnalysisData(
             gas_m3_today         = round(gas_today, 3),
             gas_m3_month         = round(gas_month, 1),
@@ -283,13 +340,17 @@ class GasAnalyzer:
             anomaly_message      = anomaly_msg,
             advice               = advice,
             records_count        = len(self._records),
+            isolation_advice     = isolation_advice,
+            isolation_saving_pct = isolation_saving_pct,
         )
 
     async def async_maybe_save(self) -> None:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
             await self._store.async_save({
-                "records":      [r.to_dict() for r in self._records],
-                "last_gas_m3":  round(self._last_gas_m3, 3),
+                "records":           [r.to_dict() for r in self._records],
+                "last_gas_m3":       round(self._last_gas_m3, 3),
+                "isolation_date":    self._isolation_date,
+                "pre_isolation_eff": round(self._pre_isolation_eff, 6),
             })
             self._dirty     = False
             self._last_save = time.time()

@@ -43,8 +43,10 @@ STORAGE_VERSION = 1
 MIN_HEATING_W           = 500     # Minimaal verwarmingsvermogen om meting te doen
 MIN_DELTA_TEMP_K        = 3.0     # Minimaal temperatuurverschil voor betrouwbare meting
 INDOOR_SETPOINT_C       = 20.0    # Aangenomen binnentemperatuur setpoint
-ALPHA_EMA               = 0.05    # EMA smoothing (traag leren = stabiele schatting)
-MIN_SAMPLES_RELIABLE    = 50      # Metingen voor betrouwbare schatting
+ALPHA_EMA_FAST          = 0.25    # Snel leren bij weinig data
+ALPHA_EMA_MID           = 0.10    # Middel tempo
+ALPHA_EMA_SLOW          = 0.05    # Traag leren zodra model stabiel is
+MIN_SAMPLES_RELIABLE    = 20      # Metingen voor betrouwbare schatting
 SAVE_INTERVAL_S         = 300
 
 # Benchmarks W/°C
@@ -146,10 +148,11 @@ class ThermalHouseModel:
 
         measured_w_per_k = heating_w / delta_k
 
+        alpha = ALPHA_EMA_FAST if self._samples < 5 else (ALPHA_EMA_MID if self._samples < 20 else ALPHA_EMA_SLOW)
         if self._samples == 0:
             self._w_per_k = measured_w_per_k
         else:
-            self._w_per_k = ALPHA_EMA * measured_w_per_k + (1 - ALPHA_EMA) * self._w_per_k
+            self._w_per_k = alpha * measured_w_per_k + (1 - alpha) * self._w_per_k
 
         self._samples += 1
         self._dirty = True
@@ -158,10 +161,15 @@ class ThermalHouseModel:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._heating_days_seen.add(today)
 
-        if self._samples % 100 == 0:
+        reliable = self._samples >= MIN_SAMPLES_RELIABLE
+        bar = '#' * min(self._samples, MIN_SAMPLES_RELIABLE) + '.' * max(0, MIN_SAMPLES_RELIABLE - self._samples)
+        if self._samples <= MIN_SAMPLES_RELIABLE or self._samples % 10 == 0:
             _LOGGER.info(
-                "ThermalModel: schatting %.0f W/°C na %d samples (%d verwarmingsdagen)",
-                self._w_per_k, self._samples, len(self._heating_days_seen),
+                "ThermalModel: leren %d/%d [%s] — %.0f W/°C%s (%d verwarmingsdagen)",
+                min(self._samples, MIN_SAMPLES_RELIABLE), MIN_SAMPLES_RELIABLE, bar,
+                self._w_per_k,
+                " ✅ betrouwbaar" if reliable and self._samples == MIN_SAMPLES_RELIABLE else "",
+                len(self._heating_days_seen),
             )
 
     def get_data(self) -> ThermalModelData:

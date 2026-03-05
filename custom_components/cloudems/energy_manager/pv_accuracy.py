@@ -41,7 +41,7 @@ STORAGE_KEY     = "cloudems_pv_accuracy_v1"
 STORAGE_VERSION = 1
 
 SAVE_INTERVAL_S = 600
-MIN_DAYS_MAPE   = 7     # minimum dagen voor betrouwbare MAPE
+MIN_DAYS_MAPE   = 3     # minimum zonnige dagen voor eerste MAPE-schatting
 MIN_KWH_DAY     = 0.5   # minimale dagproductie om mee te tellen (bewolkte dag)
 
 
@@ -180,10 +180,14 @@ class PVForecastAccuracyTracker:
         self._history = self._history[-365:]
         self._dirty   = True
 
+        n_days = len(self._history)
+        bar = '#' * min(n_days, MIN_DAYS_MAPE) + '.' * max(0, MIN_DAYS_MAPE - n_days)
         _LOGGER.info(
-            "PVAccuracy: %s | voorspeld %.2f kWh | werkelijk %.2f kWh | fout %.1f%%",
-            entry.date, forecast_kwh, self._today_kwh, error_pct,
+            "PVAccuracy: dag %d/%d [%s] | %s | voorspeld %.2f kWh | werkelijk %.2f kWh | fout %.1f%%",
+            n_days, MIN_DAYS_MAPE, bar, entry.date, forecast_kwh, self._today_kwh, error_pct,
         )
+        if n_days == MIN_DAYS_MAPE:
+            _LOGGER.info("PVAccuracy: ✅ voldoende data — MAPE-kalibratie actief")
 
     def get_calibration_factor(self, month: Optional[int] = None) -> float:
         """

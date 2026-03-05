@@ -179,6 +179,13 @@ class DetectedDevice:
     user_name:      str   = ""      # user-corrected name
     user_type:      str   = ""      # user-corrected device type
 
+    # v1.20 — user label management
+    user_hidden:    bool  = False   # user explicitly hid this device from dashboard
+    user_suppressed: bool = False   # user declined/suppressed this detection — never show again
+
+    # v1.20 — room meter: originating HA entity for area registry lookup
+    source_entity_id: str = ""      # entity_id of smart plug / power sensor that anchored this device
+
     # v1.4 — energy tracking (runtime; persisted separately)
     energy: DeviceEnergy = field(default_factory=lambda: DeviceEnergy(device_id=""))
     _on_start_ts: float  = field(default=0.0, repr=False, compare=False)
@@ -223,6 +230,9 @@ class DetectedDevice:
             "user_feedback":  self.user_feedback,
             "user_name":      self.user_name,
             "user_type":      self.user_type,
+            "user_hidden":    self.user_hidden,
+            "user_suppressed": self.user_suppressed,
+            "source_entity_id": self.source_entity_id,
             "energy":         self.energy.to_dict(),
         }
 
@@ -305,6 +315,10 @@ class NILMDetector:
         # v1.17: Hybride NILM verrijkingslaag (optioneel — wordt gezet door coordinator)
         self._hybrid: Optional[Any] = None
 
+        # v1.20: entity_ids van door de gebruiker geconfigureerde sensoren (grid, PV, P1,
+        # gas, warmtepomp) — worden altijd gefilterd uit NILM-detecties.
+        self._config_sensor_eids: set = set()
+
         _LOGGER.info("CloudEMS NILM Detector v1.8 initialized")
 
     # ── Storage setup ─────────────────────────────────────────────────────────
@@ -312,6 +326,23 @@ class NILMDetector:
     def set_stores(self, store_devices: Store, store_energy: Store) -> None:
         self._store_devices = store_devices
         self._store_energy  = store_energy
+
+    def set_config_sensor_eids(self, entity_ids: set) -> None:
+        """Register entity_ids of CloudEMS-configured sensors (grid, PV, P1, gas, etc.).
+
+        v1.20: These are definitively NOT household appliances — filter them from
+        get_devices_for_ha() even if the NILM algorithm accidentally learned them.
+        Also removes any already-stored devices whose device_id matches these eids.
+        """
+        self._config_sensor_eids = {e for e in entity_ids if e}
+        # Purge any devices already learned from these sensors
+        to_remove = [
+            did for did, dev in self._devices.items()
+            if getattr(dev, "source_entity_id", "") in self._config_sensor_eids
+        ]
+        for did in to_remove:
+            _LOGGER.info("NILM: verwijder config-sensor apparaat '%s' uit _devices", did)
+            self._devices.pop(did, None)
 
     async def async_load(self) -> None:
         if self._store_devices:
@@ -334,6 +365,9 @@ class NILMDetector:
                     user_feedback  = dev_data.get("user_feedback",""),
                     user_name      = dev_data.get("user_name",""),
                     user_type      = dev_data.get("user_type",""),
+                    user_hidden    = dev_data.get("user_hidden", False),
+                    user_suppressed = dev_data.get("user_suppressed", False),
+                    source_entity_id = dev_data.get("source_entity_id", ""),
                 )
                 dev.energy.device_id = dev.device_id
                 self._devices[dev.device_id] = dev
@@ -452,11 +486,17 @@ class NILMDetector:
         # v1.17: Hybride verrijking — ankering + contextpriors + 3-fase balans
         if self._hybrid is not None:
             try:
+                # v1.20: geef bevestigde apparaten mee zodat duplicaat-detectie werkt
+                _confirmed = [
+                    d.to_dict() for d in self._devices.values()
+                    if d.confirmed and d.is_on and d.phase == event.phase
+                ]
                 matches = self._hybrid.enrich_matches(
-                    matches   = matches,
-                    delta_w   = event.delta_power,
-                    phase     = event.phase,
-                    timestamp = event.timestamp,
+                    matches            = matches,
+                    delta_w            = event.delta_power,
+                    phase              = event.phase,
+                    timestamp          = event.timestamp,
+                    confirmed_devices  = _confirmed,
                 )
             except Exception as _he:
                 _LOGGER.debug("HybridNILM enrich fout: %s", _he)
@@ -643,7 +683,7 @@ class NILMDetector:
             dev = DetectedDevice(
                 device_id      = dev_id,
                 device_type    = best["device_type"],
-                name           = best.get("name", best["device_type"].replace("_"," ").title()),
+                name           = best.get("name", (best.get("device_type") or "unknown").replace("_"," ").title()),
                 confidence     = best["confidence"],
                 current_power  = abs(event.delta_power) if is_on else 0.0,
                 is_on          = is_on,
@@ -855,9 +895,24 @@ class NILMDetector:
         AND have confidence ≥ NILM_MIN_CONFIDENCE to appear.
         Smart plug anchors (source="smart_plug") are always shown.
         """
-        MIN_ON_EVENTS_REQUIRED = 2   # seen at least twice before showing
+        MIN_ON_EVENTS_REQUIRED = 3   # seen at least 3× before showing — reduces false positives
 
         raw = [d.to_dict() for d in self._devices.values()]
+
+        # Filter: verwijder altijd device-types die nooit huishoudapparaten zijn.
+        # solar_inverter → PV-omvormer (coordinator geeft dit zelf al door)
+        # battery        → thuisbatterij (al apart gemeten)
+        # solar_inverter kan ook door AI worden geclassificeerd op grote negatieve delta
+        ALWAYS_EXCLUDE_TYPES = {"solar_inverter", "battery", "opslag"}
+        raw = [d for d in raw if d.get("device_type", "") not in ALWAYS_EXCLUDE_TYPES]
+
+        # Filter: verwijder apparaten waarvan het source_entity_id een geconfigureerde
+        # CloudEMS-sensor is (grid, import, export, solar, P1, gas, warmtepomp, enz.)
+        if self._config_sensor_eids:
+            raw = [
+                d for d in raw
+                if d.get("source_entity_id", "") not in self._config_sensor_eids
+            ]
 
         # Filter: skip devices that have too low confidence or too few on-events,
         # unless they come from a smart plug anchor (those are always reliable).
@@ -869,6 +924,26 @@ class NILMDetector:
                 and d.get("on_events", 0) >= MIN_ON_EVENTS_REQUIRED
             )
         ]
+
+        # Filter: verberg nog-onbevestigde (pending) apparaten tenzij ze al
+        # bevestigd zijn door de gebruiker of via smart plug verankerd zijn.
+        # Pending = lage zekerheid, nooit bevestigd — tonen leidt tot verwarring.
+        raw = [
+            d for d in raw
+            if d.get("source") == "smart_plug"
+            or d.get("confirmed", False)
+            or d.get("user_feedback") == "correct"
+            or (
+                not d.get("pending", False)
+                and d.get("confidence", 0) >= NILM_HIGH_CONFIDENCE
+            )
+        ]
+
+        # Filter: skip devices hidden by the user (via rename_nilm_device service)
+        raw = [d for d in raw if not d.get("user_hidden", False)]
+
+        # Filter: skip devices suppressed/declined by the user — never show again
+        raw = [d for d in raw if not d.get("user_suppressed", False)]
 
         # Deduplicate heat pump entries per phase
         hp_by_phase: dict = {}

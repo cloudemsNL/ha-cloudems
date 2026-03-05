@@ -51,8 +51,10 @@ NIGHT_HOURS = {0, 1, 2, 3, 4}
 OCCUPANCY_RATIO = 2.2
 # Standby hunter: flag if night-average > STANDBY_HUNTER_W watts
 STANDBY_HUNTER_W = 50.0
-# EMA alpha for standby model (slow, stable)
-STANDBY_ALPHA = 0.05
+# Adaptive EMA alpha for standby model
+STANDBY_ALPHA_FAST = 0.20   # eerste 5 nachten
+STANDBY_ALPHA_MID  = 0.10   # nachten 5-15
+STANDBY_ALPHA_SLOW = 0.05   # daarna (stabiel)
 # Save interval
 SAVE_INTERVAL_S = 300
 
@@ -166,8 +168,16 @@ class HomeBaselineLearner:
         if slot_key_changed:
             if self._slot_key is not None and self._slot_buffer:
                 avg = sum(self._slot_buffer) / len(self._slot_buffer)
+                s_prev = self._slots[self._slot_key].count
                 self._slots[self._slot_key].update(avg)
                 self._dirty = True
+                trained_now = sum(1 for s in self._slots.values() if s.count >= MIN_SAMPLES_FOR_ANOMALY)
+                total_slots = len(self._slots)
+                if self._slots[self._slot_key].count == MIN_SAMPLES_FOR_ANOMALY and s_prev < MIN_SAMPLES_FOR_ANOMALY:
+                    _LOGGER.info(
+                        "HomeBaseline: slot %s bereikt drempel — %d/%d slots klaar voor anomaliedetectie",
+                        self._slot_key, trained_now, total_slots,
+                    )
             self._slot_buffer = []
             self._slot_key = slot
         self._slot_buffer.append(max(0.0, power_w))
@@ -191,12 +201,18 @@ class HomeBaselineLearner:
                     night_avg = sum(self._night_buffer) / len(self._night_buffer)
                     # Only use if plausible standby range (< 500W, > 5W)
                     if 5.0 < night_avg < 500.0:
+                        n = self._standby_samples
+                        sa = STANDBY_ALPHA_FAST if n < 5 else (STANDBY_ALPHA_MID if n < 15 else STANDBY_ALPHA_SLOW)
                         self._standby_w = (
-                            (1 - STANDBY_ALPHA) * self._standby_w
-                            + STANDBY_ALPHA * night_avg
+                            (1 - sa) * self._standby_w
+                            + sa * night_avg
                         )
                         self._standby_samples += 1
                         self._dirty = True
+                        _LOGGER.info(
+                            "HomeBaseline: standby nacht #%d — %.0f W gemeten, EMA → %.0f W",
+                            self._standby_samples, night_avg, self._standby_w,
+                        )
                 self._night_buffer = [power_w]
                 self._current_night_hour = h
             else:

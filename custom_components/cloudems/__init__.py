@@ -23,6 +23,45 @@ PLATFORMS = [
     Platform.SELECT,
 ]
 
+LOVELACE_RESOURCE_URL  = f"/cloudems/cloudems-card.js?v={VERSION}"
+LOVELACE_RESOURCE_TYPE = "module"
+
+
+async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
+    """Register the CloudEMS card JS as a Lovelace resource if not already present."""
+    try:
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            _LOGGER.debug("CloudEMS: lovelace not available yet, skipping resource registration")
+            return
+
+        resources = lovelace.get("resources")
+        if resources is None:
+            _LOGGER.debug("CloudEMS: lovelace resources not available, skipping")
+            return
+
+        await resources.async_load()
+        existing = [r for r in resources.async_items() if "cloudems-card.js" in r.get("url", "")]
+        if existing:
+            item = existing[0]
+            if item.get("url") != LOVELACE_RESOURCE_URL:
+                await resources.async_update_item(item["id"], {
+                    "res_type": LOVELACE_RESOURCE_TYPE,
+                    "url": LOVELACE_RESOURCE_URL,
+                })
+                _LOGGER.info("CloudEMS: Lovelace resource updated → %s", LOVELACE_RESOURCE_URL)
+            else:
+                _LOGGER.debug("CloudEMS: Lovelace resource already up-to-date")
+            return
+
+        await resources.async_create_item({
+            "res_type": LOVELACE_RESOURCE_TYPE,
+            "url": LOVELACE_RESOURCE_URL,
+        })
+        _LOGGER.info("CloudEMS: Lovelace resource registered → %s", LOVELACE_RESOURCE_URL)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("CloudEMS: could not auto-register Lovelace resource: %s", err)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _LOGGER.info("Setting up CloudEMS integration v%s", VERSION)
@@ -41,6 +80,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _register_services(hass, entry, coordinator)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+    # Auto-register the Lovelace card resource so users don't have to do it manually
+    hass.async_create_task(_async_register_lovelace_resource(hass))
+
     return True
 
 
@@ -63,6 +106,32 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             call.data["feedback"],          # correct | incorrect | maybe
             call.data.get("name",""),
             call.data.get("device_type",""),
+        )
+
+    async def rename_nilm_device(call: ServiceCall):
+        """v1.20: Rename a NILM device (display name + optional type)."""
+        coordinator.rename_nilm_device(
+            call.data["device_id"],
+            call.data["name"],
+            call.data.get("device_type", ""),
+        )
+
+    async def hide_nilm_device(call: ServiceCall):
+        """v1.20: Hide or unhide a NILM device from dashboards."""
+        coordinator.hide_nilm_device(
+            call.data["device_id"],
+            call.data.get("hidden", True),
+        )
+
+    async def suppress_nilm_device(call: ServiceCall):
+        """v1.20: Decline/suppress a NILM device — never show again."""
+        coordinator.suppress_nilm_device(call.data["device_id"])
+
+    async def assign_device_to_room(call: ServiceCall):
+        """v1.20: Manually assign a NILM device to a room."""
+        coordinator.assign_device_to_room(
+            call.data["device_id"],
+            call.data.get("room", ""),
         )
 
     async def set_phase_max_current(call: ServiceCall):
@@ -92,6 +161,10 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "confirm_device",         confirm_device)
     hass.services.async_register(DOMAIN, "dismiss_device",         dismiss_device)
     hass.services.async_register(DOMAIN, "nilm_feedback",          nilm_feedback)
+    hass.services.async_register(DOMAIN, "rename_nilm_device",     rename_nilm_device)
+    hass.services.async_register(DOMAIN, "hide_nilm_device",       hide_nilm_device)
+    hass.services.async_register(DOMAIN, "suppress_nilm_device",   suppress_nilm_device)
+    hass.services.async_register(DOMAIN, "assign_device_to_room",  assign_device_to_room)
     hass.services.async_register(DOMAIN, "set_phase_max_current",  set_phase_max_current)
     hass.services.async_register(DOMAIN, "force_price_update",     force_price_update)
     hass.services.async_register(DOMAIN, "generate_report",        generate_report)
@@ -133,6 +206,132 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
 
     hass.services.async_register(DOMAIN, "reset_drift_baseline",   reset_drift_baseline)
     hass.services.async_register(DOMAIN, "mute_alert",             mute_alert)
+
+    # ── v1.18.1: Nieuwe services ──────────────────────────────────────────────
+
+    async def export_learning_data(call: ServiceCall) -> None:
+        """
+        Exporteer alle geleerde data naar /config/cloudems_export.json.
+        Gebruik bij HA-migratie of nieuwe installatie om opnieuw te beginnen.
+        """
+        import json, os, time as _time
+        export = {
+            "version":   "1.18.1",
+            "exported":  _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+            "modules":   {},
+        }
+        sl = getattr(coordinator, "_solar_learner", None)
+        if sl:
+            export["modules"]["solar_learner"] = sl._build_save_data()
+
+        pv = getattr(coordinator, "_pv_forecast", None)
+        if pv:
+            pv_data = {}
+            for eid, p in pv._profiles.items():
+                pv_data[eid] = {
+                    "learned_azimuth":       p.learned_azimuth,
+                    "learned_tilt":          p.learned_tilt,
+                    "orientation_confident": p.orientation_confident,
+                    "clear_sky_samples":     p.clear_sky_samples,
+                    "hourly_yield_fraction": p.hourly_yield_fraction,
+                    "peak_wp":               p._peak_wp,
+                }
+            export["modules"]["pv_forecast"] = pv_data
+
+        path = os.path.join(hass.config.config_dir, "cloudems_export.json")
+        try:
+            def _write():
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(export, f, indent=2, default=str)
+            await hass.async_add_executor_job(_write)
+            _LOGGER.info("CloudEMS: leerdata geëxporteerd naar %s", path)
+            from homeassistant.components.persistent_notification import async_create
+            async_create(hass, f"Leerdata opgeslagen in `{path}`",
+                         title="CloudEMS Export", notification_id="cloudems_export")
+        except Exception as exc:
+            _LOGGER.error("CloudEMS export mislukt: %s", exc)
+
+    async def import_learning_data(call: ServiceCall) -> None:
+        """
+        Importeer eerder geëxporteerde leerdata.
+        Parameters:
+          path (optional): pad naar het JSON-bestand (default: /config/cloudems_export.json)
+        """
+        import json, os
+        path = call.data.get("path") or os.path.join(hass.config.config_dir, "cloudems_export.json")
+        try:
+            def _read():
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            export = await hass.async_add_executor_job(_read)
+        except Exception as exc:
+            _LOGGER.error("CloudEMS import lezen mislukt (%s): %s", path, exc)
+            return
+
+        modules = export.get("modules", {})
+        imported = []
+
+        sl = getattr(coordinator, "_solar_learner", None)
+        if sl and "solar_learner" in modules:
+            store_data = modules["solar_learner"]
+            await sl._store.async_save(store_data)
+            await sl.async_setup(backup=getattr(coordinator, "_learning_backup", None))
+            imported.append("solar_learner")
+
+        pv = getattr(coordinator, "_pv_forecast", None)
+        if pv and "pv_forecast" in modules:
+            await pv._store.async_save(modules["pv_forecast"])
+            await pv.async_setup(backup=getattr(coordinator, "_learning_backup", None))
+            imported.append("pv_forecast")
+
+        _LOGGER.info("CloudEMS import: %s geladen uit %s", imported, path)
+        from homeassistant.components.persistent_notification import async_create
+        async_create(hass,
+            f"Leerdata hersteld: {', '.join(imported)} (uit `{path}`)",
+            title="CloudEMS Import", notification_id="cloudems_import")
+
+    async def register_isolation_investment(call: ServiceCall) -> None:
+        """Registreer een isolatie-investering voor gasverbruikstracking."""
+        gas = getattr(coordinator, "_gas_analysis", None)
+        if gas:
+            gas.register_isolation_investment(call.data.get("date", ""))
+            _LOGGER.info("CloudEMS: isolatie-investering geregistreerd")
+
+    async def health_check(call: ServiceCall) -> None:
+        """Log de status van alle zelflerende modules als persistent_notification."""
+        lines = ["## 🩺 CloudEMS Health Check", ""]
+        mods = {
+            "solar_learner":   getattr(coordinator, "_solar_learner", None),
+            "pv_forecast":     getattr(coordinator, "_pv_forecast", None),
+            "battery_degrad":  getattr(coordinator, "_battery_degradation", None),
+            "thermal_model":   getattr(coordinator, "_thermal_model", None),
+            "hp_cop":          getattr(coordinator, "_hp_cop", None),
+            "gas_analysis":    getattr(coordinator, "_gas_analysis", None),
+            "clipping_loss":   getattr(coordinator, "_clipping_loss", None),
+            "shadow_detect":   getattr(coordinator, "_shadow_detector", None),
+            "device_drift":    getattr(coordinator, "_device_drift", None),
+            "pv_health":       getattr(coordinator, "_pv_health", None),
+            "pv_accuracy":     getattr(coordinator, "_pv_accuracy", None),
+            "cost_forecaster": getattr(coordinator, "_cost_forecaster", None),
+        }
+        for name, mod in mods.items():
+            if mod is None:
+                lines.append(f"- ⬜ **{name}**: niet actief")
+            else:
+                dirty = getattr(mod, "_dirty", None)
+                last  = getattr(mod, "_last_save", None)
+                import time as _t
+                age   = f"{int((_t.time() - last) / 60)}m geleden" if last else "?"
+                lines.append(f"- ✅ **{name}**: actief | dirty={dirty} | opgeslagen: {age}")
+
+        from homeassistant.components.persistent_notification import async_create
+        async_create(hass, "\n".join(lines), title="CloudEMS Health", notification_id="cloudems_health")
+        _LOGGER.info("CloudEMS health check uitgevoerd")
+
+    hass.services.async_register(DOMAIN, "export_learning_data",         export_learning_data)
+    hass.services.async_register(DOMAIN, "import_learning_data",         import_learning_data)
+    hass.services.async_register(DOMAIN, "register_isolation_investment", register_isolation_investment)
+    hass.services.async_register(DOMAIN, "health_check",                 health_check)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

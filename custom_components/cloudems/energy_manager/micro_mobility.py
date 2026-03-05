@@ -219,31 +219,32 @@ class MicroMobilityTracker:
             # Sluit expliciet bekende niet-lader types uit (veiligheidsnet naast dtype-check)
             if dtype in EXCLUDED_DEVICE_TYPES:
                 is_micro = False
-            # ── Naam-gebaseerde uitsluiting ────────────────────────────────────
-        # Als NILM of de gebruiker al een naam heeft gegeven die duidelijk
-        # geen lader is, nooit als micro-EV behandelen.
-        _NON_CHARGER_NAME_KEYWORDS = (
-            "purifier", "luchtreiniger", "heater", "verwarming", "lamp",
-            "light", "koelkast", "fridge", "freezer", "vriezer",
-            "tv", "television", "audio", "speaker", "printer",
-            "router", "modem", "nas", "server", "computer",
-            "wasmachine", "washing", "droger", "dryer", "vaatwasser", "dishwasher",
-            "oven", "magnetron", "microwave", "kettle", "waterkoker",
-            "boiler", "warmtepomp",
-        )
-        label_low = label.lower()
-        if any(kw in label_low for kw in _NON_CHARGER_NAME_KEYWORDS):
-            is_micro = False
+            # ── Naam-gebaseerde uitsluiting ──────────────────────────────────────
+            # Als NILM of de gebruiker al een naam heeft gegeven die duidelijk
+            # geen lader is, nooit als micro-EV behandelen.
+            _NON_CHARGER_NAME_KEYWORDS = (
+                "purifier", "luchtreiniger", "heater", "verwarming", "lamp",
+                "light", "koelkast", "fridge", "freezer", "vriezer",
+                "tv", "television", "audio", "speaker", "printer",
+                "router", "modem", "nas", "server", "computer",
+                "wasmachine", "washing", "droger", "dryer", "vaatwasser", "dishwasher",
+                "oven", "magnetron", "microwave", "kettle", "waterkoker",
+                "boiler", "warmtepomp",
+            )
+            # label ophalen vóór de naamcheck (fix: label was niet gedefinieerd op dit punt)
+            did         = dev.get("device_id", "")
+            label       = dev.get("name") or dev.get("label") or f"Micro-EV {did[-4:]}"
+            label_low = label.lower()
+            if any(kw in label_low for kw in _NON_CHARGER_NAME_KEYWORDS):
+                is_micro = False
 
-        if not is_micro or not dev.get("is_on"):
+            if not is_micro or not dev.get("is_on"):
                 # Apparaat uit → sluit actieve sessie
-                did = dev.get("device_id", "")
                 if did in self._active:
                     self._close_session(did, now, price_eur_kwh)
                 continue
 
-            did         = dev.get("device_id", "")
-            label       = dev.get("name") or dev.get("label") or f"Micro-EV {did[-4:]}"
+
             vtype       = _classify_vehicle(power_w)
             active_ids.add(did)
 

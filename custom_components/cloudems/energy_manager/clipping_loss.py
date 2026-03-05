@@ -270,9 +270,13 @@ class ClippingLossCalculator:
         if len(recent_plateaus) < 3:
             return None  # not enough data yet
 
-        # Use the median plateau as the learned ceiling — robust to outliers
+        # Use the 90th-percentile plateau as the learned ceiling.
+        # The median would underestimate the true hardware limit because cloudy clipping
+        # events tend to produce lower plateaus. The highest confirmed plateaus are the
+        # best approximation of the actual inverter ceiling.
         sorted_p = sorted(recent_plateaus)
-        return round(sorted_p[len(sorted_p) // 2], 1)
+        idx = max(0, int(len(sorted_p) * 0.90) - 1)
+        return round(sorted_p[idx], 1)
 
     def get_learned_scale_factor(self, inverter_id: str) -> float:
         """

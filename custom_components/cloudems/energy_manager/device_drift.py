@@ -35,9 +35,11 @@ STORAGE_VERSION = 1
 DRIFT_THRESHOLD     = 1.30   # 30% boven referentie → drift warning
 ALERT_THRESHOLD     = 1.50   # 50% boven referentie → alert
 DUTY_DRIFT_THRESH   = 0.25   # Duty cycle 25% hoger dan referentie → alert (koelkast)
-MIN_BASELINE_SAMPLES = 40    # Metingen nodig voor baseline (meer data = stabielere baseline)
-ALPHA_CURRENT       = 0.08   # EMA voor huidig verbruik (verlaagd → minder vals alarm op piekbelasting)
-ALPHA_BASELINE      = 0.02   # EMA voor baseline (traag leren)
+MIN_BASELINE_SAMPLES = 15    # Metingen nodig voor baseline — 15 NILM-detecties = ~1 week normaal gebruik
+ALPHA_CURRENT       = 0.10   # EMA voor huidig verbruik
+ALPHA_BASELINE_FAST = 0.15   # EMA baseline eerste 7 samples (snel convergeren)
+ALPHA_BASELINE_MID  = 0.05   # EMA baseline samples 7-15
+ALPHA_BASELINE_SLOW = 0.02   # EMA baseline na freeze (langzame drift-correctie)
 SAVE_INTERVAL_S     = 600
 
 # Apparaattypen met van nature hoog variabel vermogen — hogere drempel nodig
@@ -175,19 +177,27 @@ class DeviceDriftTracker:
         profile.device_type = device_type
 
         if not profile.baseline_frozen:
-            # Leer baseline: EMA maar traag, vries na genoeg samples
-            if profile.samples_total == 0:
-                profile.baseline_w   = power_w
+            # Adaptive EMA: fast at first, slows as baseline stabilises
+            n = profile.samples_total
+            alpha_bl = ALPHA_BASELINE_FAST if n < 7 else (ALPHA_BASELINE_MID if n < 15 else ALPHA_BASELINE_SLOW)
+            if n == 0:
+                profile.baseline_w    = power_w
                 profile.current_avg_w = power_w
             else:
-                profile.baseline_w   = ALPHA_BASELINE * power_w + (1 - ALPHA_BASELINE) * profile.baseline_w
+                profile.baseline_w    = alpha_bl * power_w + (1 - alpha_bl) * profile.baseline_w
                 profile.current_avg_w = ALPHA_CURRENT * power_w + (1 - ALPHA_CURRENT) * profile.current_avg_w
 
-            if profile.samples_total >= MIN_BASELINE_SAMPLES:
+            bar = '#' * (n + 1) + '.' * max(0, MIN_BASELINE_SAMPLES - n - 1)
+            _LOGGER.info(
+                "DeviceDrift '%s': baseline leren %d/%d [%s] — huidig gemiddelde %.0f W",
+                label, n + 1, MIN_BASELINE_SAMPLES, bar, profile.baseline_w,
+            )
+
+            if profile.samples_total + 1 >= MIN_BASELINE_SAMPLES:
                 profile.baseline_frozen = True
                 _LOGGER.info(
-                    "DeviceDrift '%s': baseline vastgezet op %.0f W (na %d metingen)",
-                    label, profile.baseline_w, profile.samples_total,
+                    "DeviceDrift '%s': ✅ baseline vastgezet op %.0f W (na %d metingen)",
+                    label, profile.baseline_w, profile.samples_total + 1,
                 )
         else:
             # Update lopend gemiddelde (sneller dan baseline)
@@ -215,7 +225,8 @@ class DeviceDriftTracker:
             profile.duty_cycle_ref = duty_cycle
             profile.duty_cycle_now = duty_cycle
         elif not profile.baseline_frozen:
-            profile.duty_cycle_ref = 0.02 * duty_cycle + 0.98 * profile.duty_cycle_ref
+            dc_alpha = 0.10 if profile.duty_samples < 5 else 0.03
+            profile.duty_cycle_ref = dc_alpha * duty_cycle + (1 - dc_alpha) * profile.duty_cycle_ref
             profile.duty_cycle_now = duty_cycle
         else:
             profile.duty_cycle_now = 0.05 * duty_cycle + 0.95 * profile.duty_cycle_now

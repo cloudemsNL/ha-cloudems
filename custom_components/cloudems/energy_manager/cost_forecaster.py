@@ -39,7 +39,7 @@ STORAGE_KEY     = "cloudems_cost_history_v1"
 STORAGE_VERSION = 1
 
 # Minimum days of data before model is considered "trained"
-MIN_TRAINING_DAYS = 5
+MIN_TRAINING_DAYS = 3   # 3 dagen genoeg voor eerste patroonschatting
 # Days of history to keep for the learning model
 HISTORY_DAYS = 30
 # Periodic save interval — persist learned data even without a clean HA shutdown
@@ -180,11 +180,17 @@ class EnergyCostForecaster:
 
     async def _finalize_day(self) -> None:
         """Called at day rollover — log accuracy and reset."""
-        # Nothing to log yet (first run)
         self._today_kwh_actual  = 0.0
         self._today_cost_actual = 0.0
         self._dirty = True
-        _LOGGER.info("CloudEMS CostForecaster: nieuwe dag, accumulatoren gereset")
+        trained_hours = sum(1 for p in self._patterns.values() if p.samples >= MIN_TRAINING_DAYS)
+        total_hours = len(self._patterns)
+        bar = '#' * trained_hours + '.' * max(0, 24 - trained_hours)
+        _LOGGER.info(
+            "CostForecaster: nieuwe dag — %d/24 uren getraind [%s]%s",
+            trained_hours, bar,
+            " ✅ volledig getraind" if trained_hours >= 20 else "",
+        )
 
     # ── Forecast ───────────────────────────────────────────────────────────────
 

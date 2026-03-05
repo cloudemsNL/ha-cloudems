@@ -403,6 +403,9 @@ CONF_BATTERY_CHEMISTRY         = "battery_chemistry"
 CONF_OUTSIDE_TEMP_ENTITY       = "outside_temp_entity"
 CONF_BATTERY_DEGRADATION_ENABLED = "battery_degradation_enabled"
 
+# v1.20: Goedkope uren schakelaar planner
+CONF_CHEAP_SWITCHES              = "cheap_switches"   # list of dicts
+
 DEFAULT_CONGESTION_THRESHOLD_W = 5000
 DEFAULT_OUTSIDE_TEMP_ENTITY    = ""
 

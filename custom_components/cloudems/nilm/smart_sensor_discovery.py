@@ -35,6 +35,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # keyword → (device_type, confidence_boost)
 # Termen worden vergeleken tegen entity_id en friendly_name (lowercase)
+# v1.20: socket-keywords op 1.0 — als naam/platform expliciet op smart plug wijst
+# is er geen twijfel. Andere apparaten houden hun bestaande confidence-waarden.
 DEVICE_KEYWORDS: List[Tuple[str, str, float]] = [
     # Wasmachine
     ("washing_machine",   "washing_machine",  0.90),
@@ -123,14 +125,15 @@ DEVICE_KEYWORDS: List[Tuple[str, str, float]] = [
     ("ac_unit",           "heat_pump",        0.85),
     ("klimaat",           "heat_pump",        0.70),
 
-    # Generieke stopcontacten / onbekend apparaat
-    ("socket",            "socket",           0.65),
-    ("stopcontact",       "socket",           0.70),
-    ("stekker",           "socket",           0.70),
-    ("plug",              "socket",           0.60),
-    ("outlet",            "socket",           0.60),
-    ("wcd",               "socket",           0.80),   # Wandcontactdoos (NL)
-    ("wandcontactdoos",   "socket",           0.90),
+    # Generieke stopcontacten / slimme stekkers — altijd 1.0 (v1.20)
+    # Als naam of entity_id expliciet op stopcontact wijst, is het zeker een smart plug.
+    ("socket",            "socket",           1.0),
+    ("stopcontact",       "socket",           1.0),
+    ("stekker",           "socket",           1.0),
+    ("plug",              "socket",           1.0),
+    ("outlet",            "socket",           1.0),
+    ("wcd",               "socket",           1.0),   # Wandcontactdoos (NL)
+    ("wandcontactdoos",   "socket",           1.0),
 ]
 
 # Weersensor herkenning
@@ -431,7 +434,9 @@ class SmartSensorDiscovery:
         platform = self._get_platform(entity_id)
         if best_type is None and platform in SMART_PLUG_PLATFORMS:
             best_type = "socket"
-            best_conf = 0.60
+            # v1.20: als het platform een bekend smart plug platform is, is dit 100% zeker
+            # een slim stopcontact — geen twijfel meer over het apparaattype.
+            best_conf = 1.0
 
         # ── Stap 4 + 5: device registry ────────────────────────────────────
         if best_type is None:
@@ -440,11 +445,13 @@ class SmartSensorDiscovery:
                 platform = plat
             if has_switch:
                 # Switch-sibling = vrijwel zeker smart plug (aan/uit + vermogen)
+                # v1.20: schakelaar + vermogensmeting = definitief smart plug → 1.0
                 best_type = "socket"
-                best_conf = 0.82
+                best_conf = 1.0
             elif plat in SMART_PLUG_PLATFORMS:
                 best_type = "socket"
-                best_conf = 0.58
+                # v1.20: bekend platform zonder switch = waarschijnlijk smart plug → 1.0
+                best_conf = 1.0
 
         # ── Stap 6: attribuut-fallback ─────────────────────────────────────
         # v1.17.3: elke sensor met device_class=power + state_class=measurement

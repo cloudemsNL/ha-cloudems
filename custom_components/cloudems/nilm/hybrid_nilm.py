@@ -423,13 +423,25 @@ class HybridNILM:
         delta_w:   float,
         phase:     str,
         timestamp: float,
+        confirmed_devices: list = None,
     ) -> List[dict]:
         """
         Verrijkt matches met ankering, contextpriors en fase-balans.
         Aanroepen vóór _handle_match() in NILMDetector._async_process_event().
+
+        v1.20 verbeteringen:
+        - confirmed_devices: lijst van reeds bevestigde apparaten op dezelfde fase.
+          Als een bevestigd apparaat al ~dit vermogen gebruikt, penalty voor dezelfde
+          device_type (voorkomt dubbel leren van hetzelfde apparaat).
+        - Power-history prior: als dit vermogensniveau eerder exact is gezien voor
+          een device_type, boost confidence (herkenning op basis van patroon).
         """
         self._stats["enrich_calls"] += 1
         self.record_phase_delta(phase, delta_w)
+
+        # v1.20: penalty voor types die al bevestigd zijn op deze fase
+        if confirmed_devices:
+            matches = self._apply_confirmed_exclusion(matches, delta_w, phase, confirmed_devices)
 
         matches = self._apply_anchor_filter(matches, phase)
         matches = self._apply_context_priors(matches, delta_w, phase, timestamp)
@@ -463,6 +475,7 @@ class HybridNILM:
                 "on_events":     max(a.on_events, 1),  # minstens 1: ontdekt = gezien
                 "power_min":     round(a.power_max_w, 1),
                 "entity_id":     a.entity_id,
+                "source_entity_id": a.entity_id,   # v1.20: room meter area lookup
             }
             for a in self._anchors.values()
             if not a.is_stale
@@ -516,6 +529,61 @@ class HybridNILM:
             "weather_sensors":       weather_sensors,
             "stats":                 dict(self._stats),
         }
+
+    # ── Stap 0: Bevestigde apparaten uitsluiten (v1.20) ──────────────────────
+
+    def _apply_confirmed_exclusion(
+        self,
+        matches: List[dict],
+        delta_w: float,
+        phase: str,
+        confirmed_devices: list,
+    ) -> List[dict]:
+        """Geef penalty aan device_types die al bevestigd aanwezig zijn op deze fase.
+
+        Logica:
+        - Als een bevestigd apparaat op dezelfde fase actief is EN vergelijkbaar
+          vermogen heeft als delta_w (±40%), is het hoogstwaarschijnlijk hetzelfde
+          apparaat dat opnieuw getriggerd wordt → zware penalty voor dat type.
+        - Dit voorkomt dat de NILM dezelfde koelkast 3x registreert met verschillende
+          namen omdat elke compressor-start opnieuw gematched wordt.
+
+        Uitzondering: apparaten die meerdere exemplaren kunnen hebben (socket, light,
+        entertainment) krijgen geen penalty — een huis kan meerdere lampen hebben.
+        """
+        MULTI_INSTANCE_TYPES = {"socket", "light", "entertainment", "power_tool", "unknown"}
+        TOLERANCE = 0.40  # ±40% vermogensmarge
+
+        confirmed_on_phase: dict[str, float] = {}  # device_type → power_w
+        for dev in confirmed_devices:
+            dev_phase = dev.get("phase", "")
+            if dev_phase not in (phase, "ALL"):
+                continue
+            if not dev.get("is_on", False):
+                continue
+            dt = dev.get("device_type", "")
+            pw = float(dev.get("current_power", 0) or dev.get("power_w", 0) or 0)
+            if dt and pw > 0:
+                confirmed_on_phase[dt] = pw
+
+        if not confirmed_on_phase:
+            return matches
+
+        abs_delta = abs(delta_w)
+        out = []
+        for m in matches:
+            dt = m.get("device_type", "")
+            if dt in MULTI_INSTANCE_TYPES or dt not in confirmed_on_phase:
+                out.append(m)
+                continue
+            existing_w = confirmed_on_phase[dt]
+            if existing_w > 0 and abs(abs_delta - existing_w) / existing_w < TOLERANCE:
+                # Zelfde type, vergelijkbaar vermogen → waarschijnlijk duplicaat
+                m = {**m,
+                     "confidence": m["confidence"] * 0.20,
+                     "hybrid_note": (m.get("hybrid_note", "") + ",confirmed_dupe").lstrip(",")}
+            out.append(m)
+        return out
 
     # ── Stap 1: Ankering ──────────────────────────────────────────────────────
 

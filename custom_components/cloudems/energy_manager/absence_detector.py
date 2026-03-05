@@ -29,7 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 
 VACATION_H    = 8       # hours of continuous away → vacation
 WINDOW_MIN    = 30      # minutes of data needed before trusting state
-STANDBY_ALPHA = 0.005   # very slow EMA for standby baseline
+STANDBY_ALPHA_FAST = 0.15   # eerste 10 nacht-metingen
+STANDBY_ALPHA_MID  = 0.03   # metingen 10-40
+STANDBY_ALPHA_SLOW = 0.005  # daarna (seizoensrobuust)
 WEEK_SLOTS    = 24 * 7  # hourly slots per week
 AWAY_RATIO    = 0.25    # consumption at or below 25% of normal → away
 NIGHT_HOURS   = (22, 7) # inclusive range for sleeping check
@@ -76,15 +78,26 @@ class AbsenceDetector:
         if is_night and grid_w > 0:
             if self._standby_ema is None:
                 self._standby_ema = grid_w
+                self._standby_n = 1
             else:
-                self._standby_ema = (STANDBY_ALPHA * grid_w
-                                     + (1.0 - STANDBY_ALPHA) * self._standby_ema)
+                sn = getattr(self, '_standby_n', 0)
+                sa = STANDBY_ALPHA_FAST if sn < 10 else (STANDBY_ALPHA_MID if sn < 40 else STANDBY_ALPHA_SLOW)
+                self._standby_ema = sa * grid_w + (1.0 - sa) * self._standby_ema
+                self._standby_n = sn + 1
+                if self._standby_n <= 20 or self._standby_n % 10 == 0:
+                    import logging as _log
+                    _log.getLogger(__name__).info(
+                        "AbsenceDetector: standby nacht #%d — %.0f W gemeten, EMA → %.0f W",
+                        self._standby_n, grid_w, self._standby_ema,
+                    )
 
         # Update weekly slot (slow EMA per slot)
         if self._weekly[slot] is None:
             self._weekly[slot] = grid_w
         else:
-            self._weekly[slot] = 0.02 * grid_w + 0.98 * self._weekly[slot]
+            wn = self._weekly_n[slot]
+            wa = 0.20 if wn < 5 else (0.07 if wn < 20 else 0.02)
+            self._weekly[slot] = wa * grid_w + (1.0 - wa) * self._weekly[slot]
         self._weekly_n[slot] += 1
 
         self._recent.append(grid_w)

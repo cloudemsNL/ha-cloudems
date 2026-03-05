@@ -27,6 +27,7 @@ from .const import (
     CONF_HEAT_PUMP_ENTITY,
 )
 from .coordinator import CloudEMSCoordinator
+from .coordinator import _get_nilm_guard  # v1.21.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ async def async_setup_entry(
         CloudEMSNotificationSensor(coordinator, entry),
         CloudEMSClippingLossSensor(coordinator, entry),
         CloudEMSConsumptionCategoriesSensor(coordinator, entry),
+        CloudEMSRoomMeterOverviewSensor(coordinator, entry),     # v1.20
         CloudEMSSolarSystemSensor(coordinator, entry),
         # v1.5: dedicated previous / current / next-hour price sensors
         CloudEMSPriceSensor(coordinator, entry),
@@ -104,6 +106,10 @@ async def async_setup_entry(
         CloudEMSAIStatusSensor(coordinator, entry),
         # v1.6: EPEX all-hours chart sensor
         CloudEMSEPEXTodaySensor(coordinator, entry),
+        # v1.20: dedicated goedkoopste 4-uursblok sensor
+        CloudEMSCheapest4hBlockSensor(coordinator, entry),
+        # v1.20: goedkope uren schakelaar planner status
+        CloudEMSCheapSwitchesSensor(coordinator, entry),
         # v1.7: NILM Diagnostics sensor
         CloudEMSNILMDiagSensor(coordinator, entry),
         # v1.8: PID diagnostics sensor
@@ -129,6 +135,8 @@ async def async_setup_entry(
         CloudEMSOllamaDiagSensor(coordinator, entry),
         # v1.17.0: Hybride NILM diagnostics
         CloudEMSHybridNILMSensor(coordinator, entry),
+        # v1.21.0: NILM Engine diagnostics
+        CloudEMSNILMEngineSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -196,6 +204,23 @@ async def async_setup_entry(
             async_add_entities(new_ents)
 
     coordinator.async_add_listener(_inverters_updated)
+
+    # v1.20: Dynamically add per-room sensors when rooms are detected
+    registered_room_ids: set = set(_existing_uids)
+
+    @callback
+    def _rooms_updated():
+        new_ents = []
+        room_data = (coordinator.data or {}).get("room_meter", {}).get("rooms", {})
+        for room_name in room_data:
+            uid = f"{entry.entry_id}_room_{room_name}"
+            if uid not in registered_room_ids:
+                new_ents.append(CloudEMSRoomMeterSensor(coordinator, entry, room_name))
+                registered_room_ids.add(uid)
+        if new_ents:
+            async_add_entities(new_ents)
+
+    coordinator.async_add_listener(_rooms_updated)
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -538,6 +563,9 @@ class CloudEMSInverterSensor(CoordinatorEntity, SensorEntity):
             "clipping_ceiling_w":  d.get("clipping_ceiling_w"),
             "phase":               d.get("phase", "unknown"),
             "phase_certain":       d.get("phase_certain", False),
+            "phase_display":       d.get("phase_display"),
+            "phase_confidence":    d.get("phase_confidence", 0.0),
+            "phase_provisional":   d.get("phase_provisional", True),
             "samples":             d.get("samples", 0),
             "confident":           d.get("confident", False),
             # Learning progress — how far along the self-learning cycle is (%)
@@ -906,24 +934,18 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                     "cloud_ai":"cloud_ai","ollama":"ollama","local_ai":"local_ai"}
         slim_devices = [
             {
-                "name":          dv.get("name", "Unknown"),
-                "device_type":   dv.get("device_type", "unknown"),
-                "type":          dv.get("device_type", "unknown"),   # alias for card
-                "is_on":         dv.get("is_on", False),
-                "state":         "on" if dv.get("is_on") else "off",
-                "running":       dv.get("is_on", False),
-                "power_w":       round(dv.get("current_power", 0), 1),
-                "power_min":     round(dv.get("power_min", dv.get("current_power", 0)), 1),
-                "confidence":    round(dv.get("confidence", 0) * 100, 0),
-                "confirmed":     dv.get("confirmed", False),
-                "on_events":     dv.get("on_events", 0),
-                "dismissed":     dv.get("dismissed", False),
-                # v1.17: fase + bron
-                "phase":         dv.get("phase", "L1") or "L1",
-                "phase_label":   dv.get("phase", "L1") if dv.get("phase","L1") not in ("ALL","") else "3∅",
-                "phase_confirmed": dv.get("phase_confirmed", False),
-                "source":        dv.get("source", "database"),
-                "source_type":   _src_map.get(dv.get("source",""), "nilm"),
+                # v1.20.2: ultra-lean keys — 74+ devices × full names ≈ 32 KB → truncated by HA
+                # Short keys keep 74 devices under ~13 KB
+                "name": dv.get("name", "Unknown"),
+                "type": dv.get("device_type", "unknown"),
+                "on":   1 if dv.get("is_on") else 0,
+                "w":    round(dv.get("current_power", 0)),
+                "ph":   dv.get("phase", "L1") or "L1",
+                "src":  _src_map.get(dv.get("source", ""), "nilm"),
+                "c":    round(dv.get("confidence", 0) * 100),
+                "ok":   1 if dv.get("confirmed") else 0,
+                "sup":  1 if dv.get("user_suppressed") else 0,
+                "id":   dv.get("device_id", dv.get("name", "unknown")),
             }
             for dv in devices
         ]
@@ -991,6 +1013,8 @@ class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
             }.get(src_type, "NILM"),
             "confirmed":        dev.confirmed,
             "user_feedback":    dev.user_feedback,
+            "pending":          dev.pending_confirmation,
+            "user_suppressed":  dev.user_suppressed,
             "phase":            dev.phase,
             "phase_label":      dev.phase if dev.phase not in ("ALL", "") else "3∅",
             "on_events":        dev.on_events,
@@ -1464,10 +1488,10 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         running = self._running
         return {
-            "device_names": [d.get("name", d.get("device_type", "Unknown")) for d in running],
+            "device_names": [d.get("user_name") or d.get("name", d.get("device_type", "Unknown")) for d in running],
             "device_list": [
                 {
-                    "name":         d.get("name", "Unknown"),
+                    "name":         d.get("user_name") or d.get("name", "Unknown"),
                     "type":         d.get("device_type", "unknown"),
                     "confirmed":    d.get("confirmed", False),
                     "confidence":   round(d.get("confidence", 0) * 100, 0),
@@ -1490,7 +1514,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
             # Backward-compat alias: oudere kaartversies lezen "devices"
             "devices": [
                 {
-                    "name":         d.get("name", "Unknown"),
+                    "name":         d.get("user_name") or d.get("name", "Unknown"),
                     "device_type":  d.get("device_type", "unknown"),
                     "type":         d.get("device_type", "unknown"),
                     "state":        "on",
@@ -1546,7 +1570,7 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
         return {
             "devices": [
                 {
-                    "name":        d.get("name", "Unknown"),
+                    "name":        d.get("user_name") or d.get("name", "Unknown"),
                     "type":        d.get("device_type", "unknown"),
                     "power_w":     round(d.get("current_power", 0), 1),
                     "confirmed":   d.get("confirmed", False),
@@ -1612,7 +1636,7 @@ class CloudEMSNILMTopDeviceSensor(CoordinatorEntity, SensorEntity):
         if len(top) >= self._rank:
             d = top[self._rank - 1]
             return {
-                "name":       d.get("name", d.get("device_type", "Unknown")),
+                "name":       d.get("user_name") or d.get("name", d.get("device_type", "Unknown")),
                 "type":       d.get("device_type", "unknown"),
                 "confirmed":  d.get("confirmed", False),
                 "confidence": round(d.get("confidence", 0) * 100, 1),
@@ -1725,6 +1749,72 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "data_source":        ep.get("source", "unknown"),
             "country":            ep.get("country", ""),
             "slot_count":         ep.get("slot_count", 0),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.20 — Goedkoopste 4-uursblok sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSCheapest4hBlockSensor(CoordinatorEntity, SensorEntity):
+    """Dedicated sensor voor het goedkoopste aaneengesloten 4-uursblok vandaag.
+
+    State  = starttijd als string "HH:00" (bijv. "14:00"), of "onbekend"
+    Attrs  = volledig blok: uren, prijzen per uur, gemiddelde prijs, label,
+             in_block (True als huidig uur in blok valt), minuten tot start
+
+    Ideaal voor Lovelace: toon als entity-card of in een markdown card.
+    Gebruik binary_sensor.cloudems_energy_cheapest_4h voor automations.
+    """
+    _attr_name  = "CloudEMS Energy · Goedkoopste 4u Blok"
+    _attr_icon  = "mdi:clock-star-four-points"
+    _attr_device_class = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_cheapest_4h_block"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _block(self) -> dict:
+        ep = (self.coordinator.data or {}).get("energy_price", {})
+        return ep.get("cheapest_4h_block") or {}
+
+    @property
+    def native_value(self) -> str:
+        b = self._block()
+        if not b:
+            return "onbekend"
+        return f"{b['start_hour']:02d}:00"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        from datetime import datetime, timezone
+        ep  = (self.coordinator.data or {}).get("energy_price", {})
+        b   = self._block()
+        if not b:
+            return {"beschikbaar": False}
+
+        now_h   = datetime.now(timezone.utc).hour
+        in_block = now_h in b.get("hours", [])
+        start_h  = b.get("start_hour", 0)
+        mins_to_start = ((start_h - now_h) % 24) * 60 if not in_block else 0
+
+        return {
+            "label":          b.get("label"),          # "14:00–18:00"
+            "start_hour":     b.get("start_hour"),
+            "end_hour":       b.get("end_hour"),
+            "hours":          b.get("hours", []),
+            "prices":         b.get("prices", []),
+            "avg_price":      b.get("avg_price"),
+            "total_cost":     b.get("total_cost"),
+            "in_block":       in_block,
+            "mins_to_start":  mins_to_start,
+            # context
+            "avg_today":      ep.get("avg_today"),
+            "current_price":  ep.get("current"),
         }
 
 
@@ -2080,6 +2170,11 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             "charge_hours":     bs.get("charge_hours"),
             "discharge_hours":  bs.get("discharge_hours"),
             "plan_accuracy_pct":bs.get("plan_accuracy_pct"),
+            # v1.20 seasonal
+            "season":           bs.get("season"),
+            "season_reason":    bs.get("season_reason"),
+            "season_auto":      bs.get("season_auto"),
+            "discharge_window": bs.get("discharge_window"),
         }
 
 
@@ -2162,8 +2257,12 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
                     "tilt_learned":             i.get("tilt_learned"),
                     "phase":                    i.get("phase"),
                     "phase_certain":            i.get("phase_certain"),
+                    "phase_display":            i.get("phase_display"),
+                    "phase_confidence":         i.get("phase_confidence", 0.0),
+                    "phase_provisional":        i.get("phase_provisional", True),
                     "clipping":                 i.get("clipping"),
                     "orientation_confident":    i.get("orientation_confident"),
+                    "orientation_learning_pct": i.get("orientation_learning_pct", 0),
                     "clear_sky_samples":        i.get("clear_sky_samples"),
                     "orientation_samples_needed": i.get("orientation_samples_needed"),
                 }
@@ -2224,8 +2323,35 @@ class CloudEMSInverterProfileSensor(CoordinatorEntity, SensorEntity):
         az_l = i.get("azimuth_learned")
         ti = i.get("tilt_deg")
         ti_l = i.get("tilt_learned")
-        az_source = "manueel" if az is not None and az != az_l else ("geleerd" if az_l is not None else "onbekend")
-        ti_source = "manueel" if ti is not None and ti != ti_l else ("geleerd" if ti_l is not None else "onbekend")
+        confident = i.get("orientation_confident", False)
+        n_samples = i.get("clear_sky_samples", 0)
+
+        # Effective values: manual config > learned > None
+        az_eff = az if az is not None else az_l
+        ti_eff = ti if ti is not None else ti_l
+
+        if az is not None and az != az_l:
+            az_source = "manueel"
+        elif az_l is not None:
+            az_source = "bevestigd" if confident else f"voorlopig ({n_samples} metingen)"
+        else:
+            az_source = "onbekend"
+
+        if ti is not None and ti != ti_l:
+            ti_source = "manueel"
+        elif ti_l is not None:
+            ti_source = "bevestigd" if confident else f"voorlopig ({n_samples} metingen)"
+        else:
+            ti_source = "onbekend"
+
+        # Compass label for provisional azimuth
+        def _az_compass(deg):
+            if deg is None:
+                return "onbekend"
+            dirs = ["N","NNO","NO","ONO","O","OZO","ZO","ZZO","Z","ZZW","ZW","WZW","W","WNW","NW","NNW"]
+            return dirs[round(deg / 22.5) % 16]
+
+        az_compass = i.get("azimuth_compass") or _az_compass(az_eff)
         votes = i.get("phase_votes") or {}
         total_v = i.get("phase_total_votes", 0) or 1
         return {
@@ -2238,11 +2364,11 @@ class CloudEMSInverterProfileSensor(CoordinatorEntity, SensorEntity):
             "peak_w_7d":              i.get("peak_w_7d"),
             "estimated_wp":           i.get("estimated_wp"),
             # Orientation
-            "azimuth_deg":            az,
+            "azimuth_deg":            az_eff,
             "azimuth_learned":        az_l,
             "azimuth_source":         az_source,
-            "azimuth_compass":        i.get("azimuth_compass", "onbekend"),
-            "tilt_deg":               ti,
+            "azimuth_compass":        az_compass,
+            "tilt_deg":               ti_eff,
             "tilt_learned":           ti_l,
             "tilt_source":            ti_source,
             "orientation_confident":  i.get("orientation_confident", False),
@@ -2558,7 +2684,7 @@ class CloudEMSNILMScheduleSensor(CoordinatorEntity, SensorEntity):
             ],
             "total_devices":     len(schedules),
             "schedules_ready":   sum(1 for s in schedules if s.get("ready")),
-            "unusual_now":       [d.get("name", d.get("device_type")) for d in unusual],
+            "unusual_now":       [d.get("user_name") or d.get("name", d.get("device_type")) for d in unusual],
             "unusual_count":     len(unusual),
         }
 
@@ -2708,6 +2834,8 @@ class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
             "rating":              t.get("rating", "onbekend"),
             "advice":              t.get("advice", ""),
             "samples":             t.get("samples", 0),
+            "samples_needed":      t.get("samples_needed", 20),
+            "progress_pct":        t.get("progress_pct", 0),
             "reliable":            t.get("reliable", False),
             "heating_days":        t.get("heating_days", 0),
             "last_heating_w":      t.get("last_heating_w", 0),
@@ -3082,9 +3210,11 @@ class CloudEMSDeviceDriftSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         d = (self.coordinator.data or {}).get("device_drift", {})
         return {
-            "any_alert":   d.get("any_alert", False),
-            "any_warning": d.get("any_warning", False),
-            "summary":     d.get("summary", ""),
+            "any_alert":    d.get("any_alert", False),
+            "any_warning":  d.get("any_warning", False),
+            "summary":      d.get("summary", ""),
+            "trained_count":d.get("trained_count", 0),
+            "total_count":  d.get("total_count", 0),
             "devices":     d.get("devices", []),
         }
 
@@ -3527,9 +3657,12 @@ class CloudEMSShadowDetectionSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         s = (self.coordinator.data or {}).get("shadow_detection", {})
         return {
-            "any_shadow": s.get("any_shadow", False),
-            "summary":    s.get("summary", "Onvoldoende data voor schaduwanalyse."),
-            "inverters":  s.get("inverters", []),
+            "any_shadow":    s.get("any_shadow", False),
+            "summary":       s.get("summary", "Onvoldoende data voor schaduwanalyse."),
+            "trained_hours": s.get("trained_hours", 0),
+            "total_hours":   s.get("total_hours", 0),
+            "progress_pct":  s.get("progress_pct", 0),
+            "inverters":     s.get("inverters", []),
         }
 
 
@@ -3724,4 +3857,193 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
             "stat_prior_penalties":    stats.get("prior_penalties", 0),
             "stat_phase_balance_hints":stats.get("phase_balance_hints", 0),
             "stat_discoveries":        stats.get("discoveries", 0),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.20 — Virtuele Stroommeter per Kamer
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSRoomMeterOverviewSensor(CoordinatorEntity, SensorEntity):
+    """Master overview sensor: kamer met hoogste huidig verbruik.
+
+    State  = naam van de kamer met meeste verbruik op dit moment
+    Attrs  = verbruik, kWh en percentage per kamer (tabel voor Lovelace)
+    """
+    _attr_name       = "CloudEMS Kamers · Overzicht"
+    _attr_icon       = "mdi:home-lightning-bolt"
+    _attr_device_class = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_room_overview"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        ov = (self.coordinator.data or {}).get("room_meter", {}).get("overview", {})
+        return ov.get("top_room", "onbekend")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        ov = (self.coordinator.data or {}).get("room_meter", {}).get("overview", {})
+        return {
+            "top_room":      ov.get("top_room"),
+            "total_power_w": ov.get("total_power_w"),
+            "room_count":    ov.get("room_count", 0),
+            "rooms":         ov.get("rooms", []),
+        }
+
+
+class CloudEMSRoomMeterSensor(CoordinatorEntity, SensorEntity):
+    """Per-kamer stroomverbruik sensor — dynamisch aangemaakt per ontdekte kamer.
+
+    State  = huidig verbruik (W)
+    Attrs  = apparaten in de kamer, kWh vandaag/maand, % van totaal
+    """
+    _attr_device_class   = SensorDeviceClass.POWER
+    _attr_state_class    = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+
+    def __init__(self, coord, entry, room_name: str):
+        super().__init__(coord)
+        self._entry     = entry
+        self._room_name = room_name
+        self._attr_unique_id = f"{entry.entry_id}_room_{room_name}"
+        self._attr_name      = f"CloudEMS Kamer · {room_name.title()}"
+
+        from .energy_manager.room_meter import ROOM_ICONS
+        self._attr_icon = ROOM_ICONS.get(room_name, "mdi:home-outline")
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _room_data(self) -> dict:
+        return (self.coordinator.data or {}) \
+            .get("room_meter", {}) \
+            .get("rooms", {}) \
+            .get(self._room_name, {})
+
+    @property
+    def native_value(self) -> float:
+        return self._room_data().get("current_power_w", 0.0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rd = self._room_data()
+        ov = (self.coordinator.data or {}).get("room_meter", {}).get("overview", {})
+        total_w = ov.get("total_power_w", 1) or 1
+        pct = round(rd.get("current_power_w", 0) / total_w * 100, 1)
+        return {
+            "room":          self._room_name,
+            "kwh_today":     rd.get("kwh_today", 0),
+            "kwh_this_month":rd.get("kwh_this_month", 0),
+            "pct_of_total":  pct,
+            "devices":       rd.get("devices", []),
+            "device_count":  len(rd.get("devices", [])),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.20 — Goedkope Uren Schakelaar Status sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSCheapSwitchesSensor(CoordinatorEntity, SensorEntity):
+    """Overzicht van alle aan goedkope uren gekoppelde schakelaars.
+
+    State  = aantal geconfigureerde schakelaars
+    Attrs  = per schakelaar: entiteit, blok, huidige staat, actie-log
+    """
+    _attr_name = "CloudEMS · Goedkope Uren Schakelaars"
+    _attr_icon = "mdi:clock-check-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_cheap_switches"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> int:
+        cs = (self.coordinator.data or {}).get("cheap_switches", {})
+        return cs.get("count", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        cs = (self.coordinator.data or {}).get("cheap_switches", {})
+        return {
+            "switches": cs.get("switches", []),
+            "last_actions": cs.get("actions", []),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.21.0 — NILM Engine Diagnostics sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSNILMEngineSensor(CoordinatorEntity, SensorEntity):
+    """Live status van NilmEnhancer + NilmCpuGuard (v1.21.0).
+
+    State  = gemiddelde NILM-confidence (%)
+    Attribs = CPU-modus, Kalman-baselines, events, FSM, Seq2Point
+    """
+    _attr_name  = "CloudEMS NILM · Engine Diagnostics"
+    _attr_icon  = "mdi:engine"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_nilm_engine"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("nilm_diagnostics", {})
+        return round((d.get("engine_avg_confidence") or 0.0) * 100, 1)
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("nilm_diagnostics", {})
+        s = (self.coordinator.data or {}).get("nilm_engine_stats", {})
+        try:
+            g = _get_nilm_guard().stats()
+        except Exception:
+            g = {}
+        return {
+            "engine_version":        d.get("engine_version", "-"),
+            "avg_confidence_pct":    round((d.get("engine_avg_confidence") or 0.0) * 100, 1),
+            "low_conf_devices":      d.get("engine_low_conf_devices", 0),
+            "cpu_mode":              g.get("current_mode", d.get("engine_cpu_mode", "?")),
+            "cpu_ewa_pct":           g.get("cpu_ewa_pct", 0.0),
+            "cpu_normalized_pct":    g.get("cpu_normalized_pct", 0.0),
+            "cpu_peak_pct":          g.get("peak_cpu_pct", 0.0),
+            "cpu_cores":             g.get("cores", 1),
+            "cpu_nilm_budget_pct":   g.get("nilm_budget_pct", 35),
+            "cpu_mode_full_pct":     round(g.get("mode_full_pct", 0.0) * 100, 1),
+            "cpu_mode_normal_pct":   round(g.get("mode_normal_pct", 0.0) * 100, 1),
+            "cpu_mode_lite_pct":     round(g.get("mode_lite_pct", 0.0) * 100, 1),
+            "cpu_mode_changes":      g.get("mode_changes", 0),
+            "cpu_pauses":            g.get("pauses", 0),
+            "scipy_events_total":    s.get("scipy_events_up", 0) + s.get("scipy_events_down", 0),
+            "kalman_baselines_w":    d.get("engine_kalman_baselines_w", {}),
+            "noise_p80_w":           d.get("engine_noise_p80_w", {}),
+            "recent_events":         d.get("engine_recent_events", []),
+            "fsm_transitions":       s.get("fsm_transitions", 0),
+            "evidence_hints":        s.get("evidence_hints", 0),
+            "overlap_rescales":      s.get("overlap_rescales", 0),
+            "conf_adjustments":      s.get("conf_adjustments", 0),
+            "cluster_retrains":      s.get("cluster_retrains", 0),
+            "seq2point_inferences":  s.get("seq2point_inferences", 0),
+            "seq2point_corrections": s.get("seq2point_corrections", 0),
+            "seq2point_models":      d.get("engine_seq2point_models", []),
         }

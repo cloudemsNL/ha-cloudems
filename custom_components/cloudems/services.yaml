@@ -74,6 +74,67 @@ generate_report:
   description: Genereert een CloudEMS status rapport als persistente notificatie.
   fields: {}
 
+rename_nilm_device:
+  name: Hernoem NILM apparaat
+  description: >
+    Geeft een gedetecteerd NILM-apparaat een eigen weergavenaam (en optioneel een
+    gecorrigeerd apparaattype). De naam is zichtbaar in het dashboard, sensoren en
+    notificaties. Gebruik de apparaat-ID uit het attribuut van de NILM-sensor.
+  fields:
+    device_id:
+      name: Apparaat ID
+      description: Uniek ID van het gedetecteerde apparaat (zie NILM sensor attributen)
+      required: true
+      selector:
+        text:
+    name:
+      name: Nieuwe naam
+      description: Weergavenaam, max. 60 tekens (bijv. "Wasmachine badkamer")
+      required: true
+      selector:
+        text:
+    device_type:
+      name: Apparaattype (optioneel)
+      description: Corrigeer het apparaattype als NILM het verkeerd heeft herkend
+      required: false
+      selector:
+        select:
+          options:
+            - refrigerator
+            - washing_machine
+            - dryer
+            - dishwasher
+            - oven
+            - microwave
+            - kettle
+            - television
+            - computer
+            - heat_pump
+            - boiler
+            - ev_charger
+            - light
+            - unknown
+
+hide_nilm_device:
+  name: Verberg/toon NILM apparaat
+  description: >
+    Verbergt een NILM-apparaat uit het dashboard en sensoren zonder het te verwijderen.
+    Handig voor valse positieven of apparaten die je niet wilt zien. Gebruik hidden: false
+    om een verborgen apparaat weer zichtbaar te maken.
+  fields:
+    device_id:
+      name: Apparaat ID
+      description: Uniek ID van het gedetecteerde apparaat
+      required: true
+      selector:
+        text:
+    hidden:
+      name: Verbergen
+      description: "true = verbergen, false = weer weergeven (standaard: true)"
+      required: false
+      selector:
+        boolean:
+
 nilm_feedback:
   name: NILM apparaat feedback
   description: Geeft feedback (correct/incorrect/maybe) voor een NILM-detectie.
@@ -134,5 +195,27 @@ mute_alert:
     alert_key:
       name: Melding sleutel
       required: true
+      selector:
+        text:
+
+assign_device_to_room:
+  name: Wijs NILM apparaat toe aan kamer
+  description: >
+    Wijst een NILM-apparaat toe aan een specifieke kamer voor de virtuele stroommeter.
+    Overschrijft de automatisch gedetecteerde ruimte (via HA area registry of heuristiek).
+    Laat 'room' leeg om de handmatige toewijzing te verwijderen.
+  fields:
+    device_id:
+      name: Apparaat ID
+      description: Uniek ID van het NILM-apparaat (zie NILM sensor attributen)
+      required: true
+      selector:
+        text:
+    room:
+      name: Kamernaam
+      description: >
+        Naam van de kamer (bijv. woonkamer, keuken, slaapkamer, badkamer, bijkeuken,
+        garage, kantoor). Leeg laten om automatische detectie te herstellen.
+      required: false
       selector:
         text:

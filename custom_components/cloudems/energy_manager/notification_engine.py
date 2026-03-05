@@ -247,6 +247,57 @@ class NotificationEngine:
         alert.send_count   += 1
         _LOGGER.info("CloudEMS notificatie verstuurd [%s]: %s", alert.priority, alert.title)
 
+    async def send_daily_learning_report(self, report: dict) -> None:
+        """
+        Stuur het dagelijkse leerrapport als persistent_notification.
+        Aanroepen vanuit coordinator rond 20:00 of bij day-rollover.
+        """
+        lines = ["## ☀️ CloudEMS Dagelijks Leerrapport", ""]
+
+        # PV oriëntatie
+        for inv in report.get("orientation_progress", []):
+            pct   = inv.get("pct", 0)
+            label = inv.get("label", "?")
+            have  = inv.get("samples", 0)
+            need  = inv.get("needed", 1800)
+            icon  = "✅" if inv.get("confident") else ("🟡" if pct >= 50 else "🔴")
+            lines.append(f"- {icon} **{label}**: oriëntatie {pct}% ({have}/{need} zonneminuten)")
+
+        # Fase leren
+        for inv in report.get("phase_progress", []):
+            label = inv.get("label", "?")
+            phase = inv.get("phase")
+            certain = inv.get("certain", False)
+            if certain and phase:
+                lines.append(f"- ✅ **{label}**: fase {phase} bevestigd")
+            elif phase:
+                conf = inv.get("confidence", 0)
+                lines.append(f"- 🔍 **{label}**: fase ~{phase} ({conf:.0f}% betrouwbaar)")
+
+        # Vandaag geleerde zonneminuten
+        samples_today = report.get("samples_today", 0)
+        if samples_today:
+            lines.append(f"- ☀️ Vandaag **{samples_today}** nieuwe zonneminuten geleerd")
+
+        # Thermisch model
+        thermal = report.get("thermal_samples", 0)
+        if thermal:
+            lines.append(f"- 🏠 Thermisch model: {thermal} metingen bijgewerkt")
+
+        lines.append("")
+        lines.append("*CloudEMS leert elke dag automatisch — prognoses worden steeds nauwkeuriger.*")
+
+        msg = "\n".join(lines)
+        try:
+            async_create(
+                self._hass,
+                message         = msg,
+                title           = "☀️ CloudEMS Leerrapport",
+                notification_id = "cloudems_learning_report",
+            )
+        except Exception as exc:
+            _LOGGER.debug("LearningReport sturen mislukt: %s", exc)
+
     async def _send_digest(self, alerts: list[Alert]) -> None:
         if not alerts:
             return
@@ -448,6 +499,94 @@ class NotificationEngine:
         elif "price_alert_high" in alerts:
             # Price has dropped below threshold — deactivate
             alerts["price_alert_high"]["active"] = False
+
+        # PV terugverdientijd informatief bericht (1× inzicht)
+        pv_pay = data.get("pv_payback", {})
+        if pv_pay.get("payback_years") and pv_pay.get("investment_eur", 0) > 0:
+            yrs = pv_pay["payback_years"]
+            rev = pv_pay.get("annual_revenue_eur", 0)
+            wp  = pv_pay.get("total_wp_est", 0)
+            alerts["pv_payback_info"] = {
+                "priority": "info",
+                "category": "pv",
+                "title":    f"PV terugverdientijd: {yrs} jaar",
+                "message":  (
+                    f"Geschatte jaaropbrengst €{rev:.0f} op basis van {wp:.0f} Wp geleerd vermogen. "
+                    f"Investering van €{pv_pay['investment_eur']:.0f} terugverdiend in ~{yrs} jaar. "
+                    f"10-jaar ROI: {pv_pay.get('roi_10y_pct', 0):.0f}%."
+                ),
+                "active": True,
+            }
+
+        # Fase-conflict alerts (cross-validatie solar_learner)
+        for conflict in data.get("phase_conflict_alerts", []):
+            key = f"phase_conflict:{conflict.get('inverter_id', 'unknown')}"
+            alerts[key] = {
+                "priority": "warning",
+                "category": "pv",
+                "title":    f"Fase-conflict: {conflict.get('label', '')}",
+                "message":  (
+                    f"Omvormer {conflict.get('label','')} is bevestigd op fase "
+                    f"{conflict.get('detected_phase','?')}, maar {conflict.get('conflict_pct',0):.0f}% "
+                    f"van recente metingen wijst naar een andere fase. "
+                    f"CloudEMS herstart het leerproces automatisch. "
+                    f"Controleer de bekabeling als dit herhaaldelijk voorkomt "
+                    f"(herstart #{conflict.get('relearn_events', 0)})."
+                ),
+                "active": True,
+            }
+
+        # Nieuwe-panelen-detectie alerts
+        for reset in data.get("new_panel_resets", []):
+            key = f"new_panels:{reset.get('inverter_id', 'unknown')}"
+            alerts[key] = {
+                "priority": "info",
+                "category": "pv",
+                "title":    f"Nieuwe panelen gedetecteerd: {reset.get('label', '')}",
+                "message":  (
+                    f"Vermogen van {reset.get('label','')} overschreed herhaaldelijk "
+                    f"het geleerde piekvermogen (reset #{reset.get('reset_count', 1)}). "
+                    f"CloudEMS leert automatisch het nieuwe piekvermogen."
+                ),
+                "active": True,
+            }
+
+        # Stroomuitval
+        if data.get("outage_detected"):
+            alerts["power_outage"] = {
+                "priority": "critical",
+                "category": "system",
+                "title":    "Mogelijke stroomstoring",
+                "message":  data.get("outage_message", "Geen PV- of netverbruik gedetecteerd overdag."),
+                "active":   True,
+            }
+        elif "power_outage" in alerts:
+            alerts["power_outage"]["active"] = False
+
+        # Warmtepomp COP degradatie
+        hp_cop = data.get("heat_pump_cop", {})
+        if hp_cop.get("degradation_detected"):
+            alerts["hp_cop_degradation"] = {
+                "priority": "warning",
+                "category": "appliance",
+                "title":    "Warmtepomp efficiëntie gedaald",
+                "message":  hp_cop.get("degradation_advice", "COP is gedaald. Overweeg onderhoud."),
+                "active":   True,
+            }
+        elif "hp_cop_degradation" in alerts:
+            alerts["hp_cop_degradation"]["active"] = False
+
+        # Isolatie-investering — geen resultaat
+        gas = data.get("gas_analysis", {})
+        iso_advice = gas.get("isolation_advice", "")
+        if "⚠️ Isolatie" in iso_advice and "gestegen" in iso_advice:
+            alerts["isolation_no_effect"] = {
+                "priority": "warning",
+                "category": "gas",
+                "title":    "Isolatie: geen verbruiksdaling",
+                "message":  iso_advice,
+                "active":   True,
+            }
 
         return alerts
 

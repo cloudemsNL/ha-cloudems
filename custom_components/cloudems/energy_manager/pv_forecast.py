@@ -1,5 +1,5 @@
 """
-CloudEMS PV Forecasting — v1.4.1
+CloudEMS PV Forecasting — v1.4.2
 
 Two-layer forecast engine:
   Layer 1: Statistical model using historically learned hourly yield curves
@@ -11,8 +11,17 @@ Self-learning orientation / azimuth / tilt:
   - CloudEMS measures actual peak irradiance times throughout the day.
   - The hour with the highest yield → solar noon → azimuth is derived.
   - Morning-heavy vs afternoon-heavy yield → east vs west bias.
-  - After ~30 clear days the orientation estimate becomes "confident".
+  - After ~30 clear days (1800 minutes) the orientation estimate becomes "confident".
   - Users can fill in values manually; tooltip says "leave blank to self-learn".
+
+Changelog (v1.4.3):
+  - FIX: clear_sky_samples reset to 0 after every HA restart because PVForecast
+         had no periodic auto-save — only saved at async_shutdown (clean stop only).
+         Added dirty-flag + _SAVE_INTERVAL_S=120s auto-save inside async_update,
+         identical to the pattern used in solar_learner.py. Data now survives crashes.
+         for a much more reliable azimuth/tilt estimate before "confident" is set.
+  - CHG: Log progress bar capped at 30 chars (was unbounded, causing 1800-char lines).
+  - CHG: Log frequency changed from every 10 to every 30 samples.
 
 Changelog (v1.4.1):
   - FIX: avg_az_om / _azom UnboundLocalError (was only assigned inside if-block)
@@ -54,8 +63,15 @@ OPEN_METEO_URL_BASE = (
 )
 OPEN_METEO_URL = OPEN_METEO_URL_BASE  # legacy, unused — URL built dynamically now
 
-# Minimum samples before orientation is "confident"
-MIN_ORIENTATION_SAMPLES = 30
+# Minimum samples before orientation is "confident".
+# Each sample = one clear-sky *minute* (sampled once per minute).
+# 30 hours × 60 min = 1800 samples → confirmed after ~5 sunny days (conservative).
+# This ensures the learned azimuth/tilt is based on enough diverse sun positions.
+MIN_ORIENTATION_SAMPLES = 1800
+
+# Minimum yield fraction (power/peak) to count as a learning sample.
+# 0.10 = 10% of peak — filters night/standby but includes overcast mornings.
+CLEAR_SKY_MIN_FRAC = 0.10
 
 # Hours considered "morning" and "afternoon" for azimuth heuristic
 MORNING_HOURS   = list(range(6, 11))
@@ -114,10 +130,13 @@ class InverterOrientation:
 
 
 @dataclass
+@dataclass
 class HourForecast:
     hour: int           # 0-23
     forecast_w: float
     confidence: float   # 0-1
+    low_w: float = 0.0   # pessimistisch (p25)
+    high_w: float = 0.0  # optimistisch (p75)
 
 
 class PVForecast:
@@ -149,11 +168,29 @@ class PVForecast:
         self._configs  = inverter_configs or []
         self._weather_cache: dict = {}
         self._weather_ts:   float = 0.0
+        self._dirty:        bool  = False
+        self._last_save:    float = 0.0
+        self._backup             = None  # LearningBackup — injected via async_setup
+
+    # Save interval: write to HA Store at most every 2 minutes when data changed.
+    _SAVE_INTERVAL_S: int = 120
+    _BACKUP_KEY: str      = "pv_forecast"
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def async_setup(self) -> None:
+    async def async_setup(self, backup=None) -> None:
+        self._backup = backup
         saved: dict = await self._store.async_load() or {}
+
+        # Fallback naar backup als Store leeg is
+        if not saved and backup is not None:
+            fallback = await backup.async_read(self._BACKUP_KEY)
+            if fallback:
+                saved = fallback
+                _LOGGER.warning(
+                    "CloudEMS PVForecast: HA Store leeg — data hersteld uit backup (%d profielen)",
+                    len(saved),
+                )
         for cfg in self._configs:
             eid = cfg.get("entity_id", "")
             if not eid:
@@ -189,6 +226,11 @@ class PVForecast:
                 "calib_samples":         p._calib_samples,
             }
         await self._store.async_save(data)
+        self._dirty     = False
+        self._last_save = time.time()
+        _LOGGER.debug("CloudEMS PVForecast: %d profielen opgeslagen", len(data))
+        if self._backup is not None:
+            await self._backup.async_write(self._BACKUP_KEY, data)
 
     # ── Update (called every 10 s from coordinator) ───────────────────────────
 
@@ -204,66 +246,97 @@ class PVForecast:
             if peak_wp > p._peak_wp:
                 p._peak_wp = peak_wp
 
-            hour_key = str(dt_util.now().hour)
+            now      = dt_util.now()
+            hour_key = str(now.hour)
             frac     = (power_w / peak_wp) if peak_wp > 10 else 0.0
 
-            # Exponential moving average per hour
+            # Exponential moving average per hour.
+            # Use a faster alpha while we have little data so the first clear days
+            # are learned quickly; slow down once the profile has stabilised.
+            n_hours = len(p.hourly_yield_fraction)
+            alpha   = 0.30 if n_hours < 8 else (0.15 if n_hours < 16 else 0.05)
             prev = float(p.hourly_yield_fraction.get(hour_key, frac))
-            p.hourly_yield_fraction[hour_key] = round(prev * 0.95 + frac * 0.05, 4)
+            p.hourly_yield_fraction[hour_key] = round(prev * (1.0 - alpha) + frac * alpha, 4)
 
-            # Orientation learning — run once per hour when power > 5% of peak
-            if frac > 0.05:
+            # Orientation learning — at most ONCE per minute, only when sun is up.
+            # CLEAR_SKY_MIN_FRAC filters out night/standby readings.
+            # Per-minute sampling means 1 sunny hour = 60 samples, visible progress
+            # every minute in the dashboard (1800 samples = 30 hours = confident).
+            cur_min = now.hour * 60 + now.minute
+            last_learn_min = getattr(p, "_last_learn_min", -1)
+            if frac > CLEAR_SKY_MIN_FRAC and cur_min != last_learn_min:
+                p._last_learn_min = cur_min  # type: ignore[attr-defined]
                 await self._learn_orientation(p, power_w, peak_wp)
 
             p._prev_power_w = power_w
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("CloudEMS PVForecast: async_update failed for %s: %s", inverter_id, exc)
 
+        # Periodiek opslaan zodra er iets veranderd is (max elke 2 min)
+        if self._dirty and (time.time() - self._last_save) >= self._SAVE_INTERVAL_S:
+            await self.async_save()
+
     # ── Orientation learning ──────────────────────────────────────────────────
 
     async def _learn_orientation(
         self, p: InverterOrientation, power_w: float, peak_wp: float
     ) -> None:
-        """Infer azimuth and tilt from daily yield shape."""
+        """Infer azimuth and tilt from daily yield shape on clear-sky hours."""
         try:
-            if peak_wp < 100:
+            if peak_wp < 10:
                 return
 
             hf = p.hourly_yield_fraction
-            if len(hf) < 8:
-                return  # Not enough data yet
-
-            # Solar noon = hour of maximum yield
-            # Guard: hf must be non-empty (already checked above, but be safe)
             if not hf:
                 return
-            best_hour = max(hf, key=lambda h: hf[h], default=None)
-            if best_hour is None:
-                return
+
+            # Solar noon = hour of maximum yield fraction seen so far.
+            # Even with a single hour of data we can make a provisional estimate —
+            # it will refine itself as more hours accumulate.
+            best_hour = max(hf, key=lambda h: hf[h])
             solar_noon = int(best_hour)
 
-            # Azimuth: noon at 12 UTC ≈ south (180°), each hour offset shifts 15°
-            noon_offset = solar_noon - 12          # -4 → east, +4 → west
-            learned_az  = 180.0 + noon_offset * 15.0
-            learned_az  = max(0.0, min(360.0, learned_az))
+            # Azimuth: noon at 12 UTC ≈ south (180°), each hour shifts 15°
+            noon_offset = solar_noon - 12
+            learned_az  = max(0.0, min(360.0, 180.0 + noon_offset * 15.0))
 
-            # Tilt: estimated from peak yield fraction relative to horizontal
-            hf_values = list(hf.values())
-            peak_frac  = max(hf_values) if hf_values else 0.0
+            # Tilt: peak yield fraction → tilt angle (rough linear mapping)
+            hf_values    = list(hf.values())
+            peak_frac    = max(hf_values)
             learned_tilt = round(min(90.0, max(0.0, peak_frac * 90.0)), 1)
 
             p.learned_azimuth = round(learned_az, 1)
             p.learned_tilt    = learned_tilt
             p.clear_sky_samples += 1
+            self._dirty = True
 
-            if p.clear_sky_samples >= MIN_ORIENTATION_SAMPLES:
+            just_confident = False
+            if p.clear_sky_samples >= MIN_ORIENTATION_SAMPLES and not p.orientation_confident:
                 p.orientation_confident = True
+                just_confident = True
 
-            if p.clear_sky_samples % 10 == 0:
+            # Log on first sample, every 30 after that, and at confirmation
+            # Progress bar is capped at 30 chars for readability
+            BAR_LEN = 30
+            filled = min(round(p.clear_sky_samples / MIN_ORIENTATION_SAMPLES * BAR_LEN), BAR_LEN)
+            bar = '#' * filled + '.' * (BAR_LEN - filled)
+            n_hours = len(hf)
+            if just_confident:
                 _LOGGER.info(
-                    "CloudEMS PVForecast [%s]: azimuth=%.0f° tilt=%.0f° (samples=%d confident=%s)",
-                    p.label, learned_az, learned_tilt, p.clear_sky_samples, p.orientation_confident
+                    "CloudEMS PVForecast [%s]: ✅ oriëntatie BEVESTIGD — "
+                    "azimuth=%.0f° tilt=%.0f° (na %d minuten zon)",
+                    p.label, learned_az, learned_tilt, p.clear_sky_samples,
                 )
+            elif p.clear_sky_samples == 1 or p.clear_sky_samples % 30 == 0:
+                provisional = " (voorlopig)" if n_hours < 4 else ""
+                _LOGGER.info(
+                    "CloudEMS PVForecast [%s]: leren %d/%d (%.0f%%) [%s] — "
+                    "azimuth=%.0f°%s tilt=%.0f° (%d uur data)",
+                    p.label, p.clear_sky_samples, MIN_ORIENTATION_SAMPLES,
+                    p.clear_sky_samples / MIN_ORIENTATION_SAMPLES * 100,
+                    bar, learned_az, provisional, learned_tilt, n_hours,
+                )
+
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("CloudEMS PVForecast: _learn_orientation failed for %s: %s", p.label, exc)
 
@@ -374,7 +447,18 @@ class PVForecast:
                 conf = confidence_no_weather
 
             forecast_w = round(max(0.0, p._peak_wp * blended), 1)
-            forecasts.append(HourForecast(hour=target.hour, forecast_w=forecast_w, confidence=conf))
+            # Confidence interval: spread gebaseerd op confidence en historische spread
+            # Lage confidence → bredere band; hoge confidence → smalle band
+            spread_factor = max(0.15, 1.0 - conf) * 0.8  # 8-80% spread
+            low_w  = round(max(0.0, forecast_w * (1.0 - spread_factor)), 1)
+            high_w = round(forecast_w * (1.0 + spread_factor * 0.6), 1)  # upside kleiner dan downside
+            forecasts.append(HourForecast(
+                hour=target.hour,
+                forecast_w=forecast_w,
+                confidence=conf,
+                low_w=low_w,
+                high_w=high_w,
+            ))
 
         return forecasts
 

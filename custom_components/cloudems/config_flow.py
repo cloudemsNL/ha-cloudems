@@ -513,7 +513,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_BATTERY_DEGRADATION_ENABLED, default=False): bool,
             vol.Optional("price_alert_high_eur_kwh", default=0.30):
                 vol.All(vol.Coerce(float), vol.Range(min=0.01, max=5.0)),
-            vol.Optional("nilm_min_confidence", default=0.65):
+            vol.Optional("nilm_min_confidence", default=0.80):
                 vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         }
         if phase_count == 3:
@@ -719,7 +719,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="batteries_opts", label="🔋 Batteries"),
                         selector.SelectOptionDict(value="prices_opts",    label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
+                        selector.SelectOptionDict(value="cheap_switches_opts", label="⚡ Goedkope Uren Schakelaars"),
                         selector.SelectOptionDict(value="ai_opts",        label="🤖 AI & NILM"),
+                        selector.SelectOptionDict(value="nilm_devices_opts", label="🏷️ NILM Apparaten beheren"),
                         selector.SelectOptionDict(value="advanced_opts",  label="📡 P1 & Advanced"),
                     ], mode="list"))
             }),
@@ -840,6 +842,15 @@ class CloudEMSOptionsFlow(_OptionsBase):
             vol.Optional(CONF_BATTERY_SCHEDULER_ENABLED, default=bool(data.get(CONF_BATTERY_SCHEDULER_ENABLED, False))): bool,
             vol.Optional(CONF_CONGESTION_ENABLED,         default=bool(data.get(CONF_CONGESTION_ENABLED, False))): bool,
             vol.Optional(CONF_BATTERY_DEGRADATION_ENABLED, default=bool(data.get(CONF_BATTERY_DEGRADATION_ENABLED, False))): bool,
+            # v1.20: Batterij seizoensstrategie override
+            vol.Optional("battery_season_override", default=str(data.get("battery_season_override", "auto"))): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=[
+                    selector.SelectOptionDict(value="auto",       label="🔄 Automatisch detecteren (aanbevolen)"),
+                    selector.SelectOptionDict(value="summer",     label="☀️ Zomer (minder nachtladen, meer ontladen avond)"),
+                    selector.SelectOptionDict(value="winter",     label="❄️ Winter (meer goedkoop laden, vroeg ontladen)"),
+                    selector.SelectOptionDict(value="transition", label="🍂 Overgang (standaard balans)"),
+                ], mode="list"),
+            ),
         }
         if phase_count == 3:
             schema[vol.Optional(CONF_PHASE_BALANCE, default=bool(data.get(CONF_PHASE_BALANCE, True)))] = bool
@@ -847,7 +858,78 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.All(vol.Coerce(float), vol.Range(min=1, max=20))
         return self.async_show_form(step_id="features_opts", data_schema=vol.Schema(schema))
 
-    async def async_step_ai_opts(self, user_input=None):
+    async def async_step_cheap_switches_opts(self, user_input=None):
+        """Wizard stap: koppel schakelaars aan goedkoopste uren.
+
+        Toont 4 slots. Per slot: entiteit + venstergrootte + vroegste/laatste uur.
+        Lege entiteit = slot niet actief.
+        """
+        import json
+        data = self._data()
+
+        if user_input is not None:
+            # Bouw cheap_switches lijst uit de slot-velden
+            cheap_switches = []
+            for i in range(1, 5):
+                eid = user_input.get(f"slot{i}_entity", "")
+                if not eid:
+                    continue
+                cheap_switches.append({
+                    "entity_id":     eid,
+                    "window_hours":  int(user_input.get(f"slot{i}_window", 4)),
+                    "earliest_hour": int(user_input.get(f"slot{i}_earliest", 0)),
+                    "latest_hour":   int(user_input.get(f"slot{i}_latest", 23)),
+                    "active":        True,
+                })
+            return self._save({"cheap_switches": cheap_switches})
+
+        # Bestaande configuratie terugzetten in slots
+        existing = data.get("cheap_switches", []) or []
+        defaults: list[dict] = (list(existing) + [{}, {}, {}, {}])[:4]
+
+        def _slot_eid(i):
+            return defaults[i].get("entity_id", "") if i < len(defaults) else ""
+        def _slot_win(i):
+            return int(defaults[i].get("window_hours", 4)) if i < len(defaults) else 4
+        def _slot_ear(i):
+            return int(defaults[i].get("earliest_hour", 0)) if i < len(defaults) else 0
+        def _slot_lat(i):
+            return int(defaults[i].get("latest_hour", 23)) if i < len(defaults) else 23
+
+        _window_opts = selector.SelectSelectorConfig(options=[
+            selector.SelectOptionDict(value="1", label="Goedkoopste 1 uur"),
+            selector.SelectOptionDict(value="2", label="Goedkoopste 2 aaneengesloten uren"),
+            selector.SelectOptionDict(value="3", label="Goedkoopste 3 aaneengesloten uren"),
+            selector.SelectOptionDict(value="4", label="Goedkoopste 4 aaneengesloten uren"),
+        ], mode="list")
+
+        _entity_sel = selector.EntitySelectorConfig(
+            domain=["switch", "input_boolean", "light", "script", "automation"],
+            multiple=False,
+        )
+
+        schema = {}
+        for i in range(1, 5):
+            schema[vol.Optional(f"slot{i}_entity",   default=_slot_eid(i-1))] = \
+                selector.EntitySelector(_entity_sel)
+            schema[vol.Optional(f"slot{i}_window",   default=str(_slot_win(i-1)))] = \
+                selector.SelectSelector(_window_opts)
+            schema[vol.Optional(f"slot{i}_earliest", default=_slot_ear(i-1))] = \
+                vol.All(vol.Coerce(int), vol.Range(min=0, max=23))
+            schema[vol.Optional(f"slot{i}_latest",   default=_slot_lat(i-1))] = \
+                vol.All(vol.Coerce(int), vol.Range(min=0, max=23))
+
+        return self.async_show_form(
+            step_id="cheap_switches_opts",
+            data_schema=vol.Schema(schema),
+            description_placeholders={
+                "info": (
+                    "Koppel tot 4 schakelaars aan het goedkoopste stroomblok. "
+                    "CloudEMS zet de schakelaar automatisch AAN zodra het goedkope blok begint — "
+                    "nooit UIT. Laat een slot leeg om het niet te gebruiken."
+                )
+            },
+        )
         data = self._data()
         if user_input is not None:
             provider = user_input.get(CONF_AI_PROVIDER, AI_PROVIDER_NONE)
@@ -870,6 +952,54 @@ class CloudEMSOptionsFlow(_OptionsBase):
         )
 
     # ── PV Inverter management (Options) ──────────────────────────────────────
+
+    async def async_step_nilm_devices_opts(self, user_input=None):
+        """🏷️ NILM Apparaten beheren — hernoem of verberg gedetecteerde apparaten.
+
+        v1.20: This step shows a summary of currently known NILM devices and
+        provides instructions for renaming/hiding via HA developer tools.
+        Direct per-device editing is not possible in the HA options flow UI
+        (no dynamic forms), so we guide the user to the service calls.
+        """
+        from homeassistant.loader import async_get_integration
+        if user_input is not None:
+            # Nothing to save — this is an informational step
+            return self.async_abort(reason="nilm_manage_via_services")
+
+        # Build a human-readable overview of current devices
+        entry = getattr(self, "config_entry", self._entry)
+        hass  = self.hass  # available on OptionsFlow
+
+        # Try to get live device list from coordinator
+        device_lines = []
+        try:
+            from homeassistant.helpers import entity_registry as er
+            from . import DOMAIN
+            coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if coordinator and hasattr(coordinator, "_nilm"):
+                devices = coordinator._nilm.get_devices_for_ha()
+                # Also include hidden devices so user can un-hide them
+                all_devs = [d.to_dict() for d in coordinator._nilm._devices.values()]
+                for dev in all_devs:
+                    uid  = dev.get("device_id", "?")
+                    name = dev.get("user_name") or dev.get("name", dev.get("device_type", "?"))
+                    hidden = "🙈 verborgen" if dev.get("user_hidden") else "✅ zichtbaar"
+                    device_lines.append(f"{name}  [{uid}]  {hidden}")
+        except Exception:
+            pass
+
+        devices_text = "\n".join(device_lines) if device_lines else "(nog geen apparaten gedetecteerd)"
+
+        return self.async_show_form(
+            step_id="nilm_devices_opts",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "devices_overview": devices_text,
+                "rename_service":   "cloudems.rename_nilm_device",
+                "hide_service":     "cloudems.hide_nilm_device",
+                "devtools_url":     "/developer-tools/service",
+            },
+        )
 
     def _inv_d(self) -> dict:
         """Shorthand for combined entry data."""

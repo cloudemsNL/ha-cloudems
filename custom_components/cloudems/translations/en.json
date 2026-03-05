@@ -433,7 +433,15 @@
           "heat_pump_power_entity": "Heat pump power sensor (W)",
           "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)"
         }
+      },
+      "nilm_devices_opts": {
+        "title": "🏷️ NILM Apparaten beheren",
+        "description": "Hieronder staan alle gedetecteerde NILM-apparaten.\n\n**Huidig overzicht:**\n```\n{devices_overview}\n```\n\n**Hernoemen** — gebruik de service `{rename_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `name`: nieuwe weergavenaam (max. 60 tekens)\n- `device_type`: optioneel het type corrigeren\n\n**Verbergen/tonen** — gebruik de service `{hide_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `hidden`: `true` om te verbergen, `false` om te tonen\n\n👉 [Open Ontwikkeltools → Services]({devtools_url})",
+        "data": {}
       }
+    },
+    "abort": {
+      "nilm_manage_via_services": "Gebruik de services cloudems.rename_nilm_device en cloudems.hide_nilm_device in de HA Ontwikkeltools om apparaten te beheren."
     }
   },
   "entity": {

@@ -50,8 +50,10 @@ BUCKET_SIZE_C   = 2.0       # Group measurements per 2°C bucket
 MIN_ELECTRIC_W  = 100       # Ignore readings below 100 W (standby/off)
 DEFROST_COP     = 0.8       # COP below this = likely defrost cycle
 DEFROST_MAX_C   = 5.0       # Only flag defrost below 5°C outdoor
-COP_EMA_ALPHA   = 0.05      # Slow EMA per bucket (seasonal stability)
-MIN_SAMPLES_RELIABLE = 20   # Minimum samples per bucket for reliability
+MIN_SAMPLES_RELIABLE = 8    # Minimum samples per bucket for reliability
+COP_EMA_ALPHA_FAST = 0.25   # Fast EMA when bucket has few samples
+COP_EMA_ALPHA_MID  = 0.10   # Mid EMA
+COP_EMA_ALPHA_SLOW = 0.05   # Slow EMA once bucket is reliable (seasonal stability)
 SAVE_INTERVAL_S = 300       # Save every 5 minutes
 
 
@@ -62,6 +64,17 @@ class BucketData:
     samples:    int   = 0
     sum_cop:    float = 0.0
     defrost_n:  int   = 0
+    # Tijdreeks voor degradatiedetectie (max 60 metingen)
+    recent_cops: list = None
+
+    def __post_init__(self):
+        if self.recent_cops is None:
+            self.recent_cops = []
+
+    def add_cop(self, cop: float) -> None:
+        self.recent_cops.append(cop)
+        if len(self.recent_cops) > 60:
+            self.recent_cops = self.recent_cops[-60:]
 
 
 @dataclass
@@ -76,6 +89,9 @@ class COPReport:
     reliable:        bool
     method:          str      # "direct" | "thermal_model" | "formula"
     curve:           Dict[float, float]   # temp → cop_ema
+    degradation_detected: bool = False   # COP structureel gedaald vs baseline
+    degradation_pct: float = 0.0        # hoeveel % gedaald (positief = slechter)
+    degradation_advice: str = ""        # adviestekst
 
 
 class HeatPumpCOPLearner:
@@ -163,7 +179,16 @@ class HeatPumpCOPLearner:
             bkt.samples  += 1
             bkt.sum_cop  += cop
             bkt.cop_mean  = bkt.sum_cop / bkt.samples
-            bkt.cop_ema   = COP_EMA_ALPHA * cop + (1.0 - COP_EMA_ALPHA) * bkt.cop_ema
+            cop_alpha = COP_EMA_ALPHA_FAST if bkt.samples < 5 else (COP_EMA_ALPHA_MID if bkt.samples < 15 else COP_EMA_ALPHA_SLOW)
+            bkt.cop_ema   = cop_alpha * cop + (1.0 - cop_alpha) * bkt.cop_ema
+            bkt.add_cop(cop)
+            total_samples = sum(b.samples for b in self._buckets.values())
+            reliable_buckets = sum(1 for b in self._buckets.values() if b.samples >= MIN_SAMPLES_RELIABLE)
+            _LOGGER.info(
+                "HeatPumpCOP: %d°C-bucket sample %d — COP=%.2f (EMA=%.2f) | "
+                "%d buckets betrouwbaar, %d metingen totaal",
+                int(bkey), bkt.samples, cop, bkt.cop_ema, reliable_buckets, total_samples,
+            )
 
         return self._make_report(outdoor_temp_c, cop)
 
@@ -210,6 +235,30 @@ class HeatPumpCOPLearner:
         if cold_buckets:
             defrost_thresh = min(cold_buckets)
 
+        # Degradatiedetectie: vergelijk recente COP met vroegere baseline
+        degradation_detected = False
+        degradation_pct = 0.0
+        degradation_advice = ""
+        if reliable and outdoor_c is not None:
+            bkey = round(math.floor(outdoor_c / BUCKET_SIZE_C) * BUCKET_SIZE_C, 1)
+            bkt = self._buckets.get(bkey)
+            if bkt and len(bkt.recent_cops) >= 20:
+                recent_10  = bkt.recent_cops[-10:]
+                baseline_10 = bkt.recent_cops[-30:-20] if len(bkt.recent_cops) >= 30 else bkt.recent_cops[:10]
+                avg_recent   = sum(recent_10) / len(recent_10)
+                avg_baseline = sum(baseline_10) / len(baseline_10)
+                if avg_baseline > 0:
+                    drop_pct = (avg_baseline - avg_recent) / avg_baseline * 100
+                    if drop_pct > 15:
+                        degradation_detected = True
+                        degradation_pct = round(drop_pct, 1)
+                        degradation_advice = (
+                            f"Warmtepomp COP is {degradation_pct:.0f}% lager dan eerder "
+                            f"bij {outdoor_c:.0f}°C (van {avg_baseline:.2f} naar {avg_recent:.2f}). "
+                            "Mogelijke oorzaken: ijsvorming op buitenunit, filter vervuild, "
+                            "koudemiddel verlaagd. Overweeg onderhoud."
+                        )
+
         return COPReport(
             cop_current     = cop_now,
             cop_at_7c       = self._interpolate_cop(7.0),
@@ -221,6 +270,9 @@ class HeatPumpCOPLearner:
             reliable        = reliable,
             method          = self._method,
             curve           = curve,
+            degradation_detected = degradation_detected,
+            degradation_pct      = degradation_pct,
+            degradation_advice   = degradation_advice,
         )
 
     def _dump_state(self) -> dict:
@@ -232,6 +284,7 @@ class HeatPumpCOPLearner:
                     "samples":  v.samples,
                     "sum_cop":  v.sum_cop,
                     "defrost_n":v.defrost_n,
+                    "recent_cops": v.recent_cops[-30:] if v.recent_cops else [],
                 }
                 for k, v in self._buckets.items()
             }
@@ -245,6 +298,7 @@ class HeatPumpCOPLearner:
             bkt.samples   = v.get("samples",  0)
             bkt.sum_cop   = v.get("sum_cop",  0.0)
             bkt.defrost_n = v.get("defrost_n",0)
+            bkt.recent_cops = v.get("recent_cops", [])
             try:
                 self._buckets[float(k_str)] = bkt
             except ValueError:

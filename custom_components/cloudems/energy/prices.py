@@ -111,6 +111,7 @@ class EnergyPriceFetcher:
         cheapest_2h     = _find_cheapest_window(next_hours, 2)
         cheapest_3h     = _find_cheapest_window(next_hours, 3)
         cheapest_4h     = _find_cheapest_window(next_hours, 4)
+        cheapest_4h_block = _cheapest_window_detail(next_hours, 4)  # v1.20: rich detail
         now_hour        = datetime.now(timezone.utc).hour
 
         today_all = []
@@ -147,6 +148,7 @@ class EnergyPriceFetcher:
             "cheapest_2h_start":  cheapest_2h,
             "cheapest_3h_start":  cheapest_3h,
             "cheapest_4h_start":  cheapest_4h,
+            "cheapest_4h_block":  cheapest_4h_block,       # v1.20: volledige blok-info
             "in_cheapest_1h":     now_hour in cheapest_hours[:1],
             "in_cheapest_2h":     now_hour in cheapest_hours[:2],
             "in_cheapest_3h":     now_hour in cheapest_hours[:3],
@@ -371,6 +373,49 @@ def _find_cheapest_window(hours: list, window: int) -> Optional[int]:
             best_cost  = cost
             best_start = h_sorted[i].get("hour")
     return best_start
+
+
+def _cheapest_window_detail(hours: list, window: int) -> Optional[dict]:
+    """Like _find_cheapest_window but returns a rich detail dict.
+
+    Returns:
+        {
+          "start_hour":  14,           # first hour of block (0-23)
+          "end_hour":    18,           # exclusive end (start + window)
+          "hours":       [14,15,16,17],
+          "prices":      [0.08, 0.07, 0.09, 0.08],   # EUR/kWh per hour
+          "avg_price":   0.080,        # average over block
+          "total_cost":  0.320,        # sum (useful for full-charge cost estimate)
+          "label":       "14:00–18:00",
+        }
+        or None if not enough data.
+    """
+    if len(hours) < window:
+        return None
+    h_sorted   = sorted(hours, key=lambda h: h.get("hour", 0))
+    best_cost  = float("inf")
+    best_idx   = 0
+    for i in range(len(h_sorted) - window + 1):
+        cost = sum(h_sorted[j].get("price", 0) for j in range(i, i + window))
+        if cost < best_cost:
+            best_cost = cost
+            best_idx  = i
+
+    slot_hours  = [h_sorted[best_idx + k].get("hour") for k in range(window)]
+    slot_prices = [round(h_sorted[best_idx + k].get("price", 0), 5) for k in range(window)]
+    start_h     = slot_hours[0]
+    end_h       = start_h + window
+    avg_p       = round(best_cost / window, 5)
+
+    return {
+        "start_hour": start_h,
+        "end_hour":   end_h,
+        "hours":      slot_hours,
+        "prices":     slot_prices,
+        "avg_price":  avg_p,
+        "total_cost": round(best_cost, 5),
+        "label":      f"{start_h:02d}:00–{end_h:02d}:00",
+    }
 
 
 # Backwards compatibility alias
