@@ -247,6 +247,8 @@ DEVICE_ICONS = {
     DEVICE_TYPE_SOLAR_INVERTER: "mdi:solar-power",
     DEVICE_TYPE_LIGHT:          "mdi:lightbulb",
     DEVICE_TYPE_UNKNOWN:        "mdi:help-circle",
+    # v1.1.0: generiek stopcontact
+    "socket":                   "mdi:power-socket-eu",
 }
 
 # ── Timing ────────────────────────────────────────────────────────────────────

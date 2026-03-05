@@ -51,7 +51,7 @@ async def async_setup_entry(
         CloudEMSGridExportEnergySensor(coordinator, entry, tariff=1),
         CloudEMSGridExportEnergySensor(coordinator, entry, tariff=2),
         # v1.10.2: NILM top-5 highest-power running devices
-        *[CloudEMSNILMTopDeviceSensor(coordinator, entry, rank) for rank in range(1, 6)],
+        *[CloudEMSNILMTopDeviceSensor(coordinator, entry, rank) for rank in range(1, 16)],
         # v1.10.3: Solar ROI sensor
         CloudEMSSolarROISensor(coordinator, entry),
         # v1.10.3: Self-learning intelligence sensors (zero-config)
@@ -919,6 +919,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 # v1.17: fase + bron
                 "phase":         dv.get("phase", "L1") or "L1",
                 "phase_label":   dv.get("phase", "L1") if dv.get("phase","L1") not in ("ALL","") else "3∅",
+                "phase_confirmed": dv.get("phase_confirmed", False),
                 "source":        dv.get("source", "database"),
                 "source_type":   _src_map.get(dv.get("source",""), "nilm"),
             }

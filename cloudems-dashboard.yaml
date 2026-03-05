@@ -29,6 +29,34 @@ views:
     icon: mdi:home-lightning-bolt
     cards:
 
+      # ── CloudEMS Kaart — geanimeerd stroomdiagram + NILM apparaten ──────────
+      - type: custom:cloudems-card
+        grid_sensor:       sensor.cloudems_grid_power_w
+        solar_sensor:      sensor.cloudems_solar_power_w
+        battery_soh:       sensor.cloudems_battery_state_of_health
+        congestion:        sensor.cloudems_grid_congestion_utilisation
+        nilm_sensor:       sensor.cloudems_nilm_running_devices
+        price_sensor:      sensor.cloudems_energieprijs
+        forecast_sensor:   sensor.cloudems_solar_pv_forecast_today
+        hints_sensor:      sensor.cloudems_sensor_hints
+        ev_sensor:         sensor.cloudems_ev_laadstroom_dynamisch
+        occupancy_sensor:  sensor.cloudems_occupancy
+        preheat_sensor:    sensor.cloudems_climate_preheat
+        pv_accuracy_sensor: sensor.cloudems_pv_forecast_accuracy
+        ema_diag_sensor:   sensor.cloudems_ema_diagnostics
+        sanity_sensor:     sensor.cloudems_sensor_sanity
+        thermal_sensor:    sensor.cloudems_thermal_model
+        phase_sensors:
+          - label: "L1"
+            entity: sensor.cloudems_fase_l1_stroom
+            max_a: 25
+          - label: "L2"
+            entity: sensor.cloudems_fase_l2_stroom
+            max_a: 25
+          - label: "L3"
+            entity: sensor.cloudems_fase_l3_stroom
+            max_a: 25
+
       - type: conditional
         conditions:
           - condition: numeric_state
@@ -761,20 +789,27 @@ views:
       - type: markdown
         title: "🍕 Verbruiksverdeling (huidig)"
         content: |
-          {% set pie = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
-          {% set avg = state_attr('sensor.cloudems_verbruik_categorien', 'avg_breakdown_pct') or {} %}
+          {% set c = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
+          {% set total = state_attr('sensor.cloudems_verbruik_categorien', 'total_kwh_today') or 0 %}
+          {% set total_w = state_attr('sensor.cloudems_verbruik_categorien', 'total_w_now') or 0 %}
+          {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') or '' %}
           {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
           {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
-          {% if pie | length == 0 %}
+          {% if c | length == 0 %}
           *Categorieën worden opgebouwd gedurende de dag.*
           {% else %}
-          | Categorie | Nu (W) | Vandaag | 30d gem. |
-          |-----------|--------|---------|----------|
-          {% for cat in pie -%}
-          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.pct }}% | {{ avg[cat.name.split(' ')[-1].lower().replace(' ','_')] | default('—') }}% |
+          **Totaal huisverbruik: {{ total | round(1) }} kWh** *(batterijladen niet meegerekend)*
+
+          | Categorie | Nu | Vandaag | % |
+          |-----------|-----|---------|---|
+          {% for cat in c -%}
+          | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.kwh }} kWh | {{ cat.pct }}% |
           {% endfor %}
-          {% if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | excl. | excl. |{% endif %}
+          {% if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | — | — |{% endif %}
+
+          *{{ insight }}*
           {% endif %}
+
 
       - type: horizontal-stack
         cards:
@@ -910,6 +945,7 @@ views:
     icon: mdi:home-analytics
     cards:
 
+      # ── Tellers ────────────────────────────────────────────────────────────
       - type: horizontal-stack
         cards:
           - type: entity
@@ -917,50 +953,82 @@ views:
             name: Gevonden
           - type: entity
             entity: sensor.cloudems_nilm_running_devices
-            name: Nu aan
+            name: Nu actief
           - type: entity
             entity: sensor.cloudems_grid_import_power
-            name: Afname nu (W)
+            name: Afname (W)
 
+      # ── Top 10 hoogste verbruikers ─────────────────────────────────────────
       - type: markdown
-        title: "🔝 Top 5 — Hoogste verbruikers nu"
+        title: "🔝 Top 10 — Hoogste verbruikers nu"
         content: |
           {% set min_conf = 30 %}
           {% set top = namespace(rows=[]) %}
-          {% for rank in range(1, 6) %}
-            {% set entity = 'sensor.cloudems_nilm_top_' ~ rank ~ '_device' %}
-            {% set w = states(entity) %}
-            {% set nm = state_attr(entity, 'name') %}
-            {% set conf = state_attr(entity, 'confidence') | float(0) %}
-            {% if w not in ('unknown','unavailable','none','') and nm and conf >= min_conf %}
-              {% set top.rows = top.rows + [{'rank': rank, 'name': nm, 'w': w | float(0), 'conf': conf | round(0) | int, 'confirmed': state_attr(entity, 'confirmed')}] %}
-            {% endif %}
-          {% endfor %}
+          {% for rank in range(1, 16) -%}
+          {%- set entity = 'sensor.cloudems_nilm_top_' ~ rank ~ '_device' -%}
+          {%- set w = states(entity) | float(0) -%}
+          {%- set nm = state_attr(entity, 'name') -%}
+          {%- set conf = state_attr(entity, 'confidence') | float(0) -%}
+          {%- set phase = state_attr(entity, 'phase') or 'L1' -%}
+          {%- set src = state_attr(entity, 'source') or 'database' -%}
+          {%- if states(entity) not in ('unknown','unavailable','none','') and nm and conf >= min_conf and 'atterij' not in nm and top.rows | length < 10 -%}
+          {%- set top.rows = top.rows + [{'rank': top.rows | length + 1, 'name': nm, 'w': w, 'conf': conf | round(0) | int, 'phase': phase, 'source': src}] -%}
+          {%- endif -%}
+          {%- endfor %}
           {% if top.rows | length == 0 %}
-          *Geen actieve apparaten gedetecteerd (of zekerheid < {{ min_conf }}%).*
+          *Geen actieve apparaten.*
           {% else %}
-          | # | Apparaat | Vermogen | Zekerheid |
-          |---|----------|----------|-----------|
+          | # | Apparaat | W | Fase | Bron | % |
+          |---|----------|---|------|------|---|
           {% for r in top.rows -%}
-          | **{{ r.rank }}** | {{ '✅ ' if r.confirmed else '' }}{{ r.name }} | {{ r.w | int }} W | {{ '🟢' if r.conf >= 70 else '🟡' if r.conf >= 50 else '🔴' }} {{ r.conf }}% |
+          | **{{ r.rank }}** | {{ r.name }} | {{ r.w | int }} | {{ '🔵' if r.phase == 'L1' else '🟡' if r.phase == 'L2' else '🟢' if r.phase == 'L3' else '⚪' }} {{ r.phase }} | {{ '🔌' if r.source == 'smart_plug' else '🔍' }} | {{ '✅' if r.source == 'smart_plug' else ('🟢' if r.conf >= 70 else '🟡' if r.conf >= 50 else '🔴') }}{% if r.source != 'smart_plug' %} {{ r.conf }}%{% endif %} |
           {% endfor %}
           {% endif %}
 
+      # ── Efficiëntiedrift ───────────────────────────────────────────────────
       - type: markdown
         title: "⚙️ Apparaat Efficiëntiedrift"
         content: |
           {% set devs = state_attr('sensor.cloudems_apparaat_efficientiedrift', 'devices') or [] %}
           {% set alerts = devs | selectattr('level', 'ne', 'ok') | list %}
-          {% if alerts | length == 0 %}
-          ✅ *Alle apparaten presteren normaal.*
+          {% if devs | length == 0 %}
+          *Nog geen data — wacht op ± 40 metingen per apparaat.*
+          {% elif alerts | length == 0 %}
+          ✅ *Alle {{ devs | length }} apparaten presteren normaal.*
           {% else %}
-          | Apparaat | Drift | Status |
-          |----------|-------|--------|
-          {% for d in alerts -%}
-          | {{ d.label }} | {{ d.drift_pct | round(0) }}% | {% if d.level == 'alert' %}🔴{% else %}🟡{% endif %} |
+          *Drift > 30% = waarschuwing · > 50% = alert*
+
+          | Apparaat | Referentie | Huidig | Drift |
+          |----------|-----------|--------|-------|
+          {% for d in alerts | sort(attribute='drift_pct', reverse=true) -%}
+          | {{ '🔴' if d.level == 'alert' else '🟡' }} {{ d.label }} | {{ d.baseline_w }} W | {{ d.current_w }} W | {{ '⬆' if d.drift_pct > 0 else '⬇' }} {{ d.drift_pct | round(0) | abs }}% |
           {% endfor %}
           {% endif %}
 
+      # ── Nu actief ─────────────────────────────────────────────────────────
+      - type: markdown
+        title: "🔌 Nu actief — Fase & Bron"
+        content: |
+          {% set devs = state_attr('sensor.cloudems_nilm_running_devices','device_list') or state_attr('sensor.cloudems_nilm_running_devices','devices') or [] %}
+          {% set active = devs | selectattr('state','eq','on') | list if devs | selectattr('state','defined') | list | length > 0 else devs %}
+          {% if active | length == 0 %}
+          *Geen actieve apparaten.*
+          {% else %}
+          {% set plugs = active | selectattr('source_type','eq','smart_plug') | list %}
+          {% set nilms  = active | rejectattr('source_type','eq','smart_plug') | list %}
+          {% set l1w = active | selectattr('phase','eq','L1') | sum(attribute='power_w') | int %}
+          {% set l2w = active | selectattr('phase','eq','L2') | sum(attribute='power_w') | int %}
+          {% set l3w = active | selectattr('phase','eq','L3') | sum(attribute='power_w') | int %}
+          🔵 **{{ l1w }} W** · 🟡 **{{ l2w }} W** · 🟢 **{{ l3w }} W** &nbsp;·&nbsp; 🔌 {{ plugs|length }} · 🔍 {{ nilms|length }}
+
+          | Apparaat | W | Fase | Bron | % |
+          |----------|---|------|------|---|
+          {% for d in active | sort(attribute='power_w', reverse=true) -%}
+          | {{ d.name or d.type }} | {{ d.power_w | int }} | {{ '🔵' if (d.phase or 'L1') == 'L1' else '🟡' if (d.phase or 'L1') == 'L2' else '🟢' if (d.phase or 'L1') == 'L3' else '⚪' }} {{ d.phase or 'L1' }} | {{ '🔌' if (d.source_type or 'nilm') == 'smart_plug' else '🔍' }} | {{ '✅' if (d.source_type or 'nilm') == 'smart_plug' else ('🟢' if d.confidence | int(0) >= 70 else '🟡' if d.confidence | int(0) >= 50 else '🔴') }}{% if (d.source_type or 'nilm') != 'smart_plug' %} {{ d.confidence | int(0) }}%{% endif %} |
+          {% endfor %}
+          {% endif %}
+
+      # ── Top verbruikers grafiek ────────────────────────────────────────────
       - type: custom:mini-graph-card
         name: "📈 Top verbruikers (2u)"
         entities:
@@ -977,6 +1045,7 @@ views:
         points_per_hour: 4
         line_width: 2
 
+      # ── Geleerde schema's ──────────────────────────────────────────────────
       - type: markdown
         title: "📅 Geleerde Apparaat Schema's"
         content: |
@@ -992,6 +1061,7 @@ views:
           {% endfor %}
           {% endif %}
 
+      # ── AI & NILM status ───────────────────────────────────────────────────
       - type: entities
         title: "🤖 AI & NILM status"
         entities:

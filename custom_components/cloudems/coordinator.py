@@ -1077,11 +1077,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._hybrid:
                 await self._hybrid.async_tick()
                 anchored = self._hybrid.get_anchored_devices()
-                # Voeg ankers toe — verwijder eventuele NILM-dubbelingen op zelfde device_type+phase
-                anchored_keys = {(a["device_type"], a["phase"]) for a in anchored}
+                # Verwijder NILM-dubbelingen op basis van entity_id (v1.17.1 fix:
+                # niet op device_type+phase — alle stopcontacten hebben device_type='socket'
+                # en dat zou alle maar 1 weggooien).
+                anchored_eids = {a["entity_id"] for a in anchored if "entity_id" in a}
+                # Verwijder ook NILM-apparaten die hetzelfde NAMED apparaat zijn als een anker
+                # (bijv. als NILM ook een "washing_machine" detecteert die al via stekker gemeten wordt)
+                anchored_named = {
+                    (a["device_type"], a["phase"])
+                    for a in anchored
+                    if a.get("device_type") not in ("socket", "unknown", None)
+                }
                 nilm_devices_raw = [
                     d for d in nilm_devices_raw
-                    if (d.get("device_type"), d.get("phase")) not in anchored_keys
+                    if d.get("entity_id") not in anchored_eids
+                    and (d.get("device_type"), d.get("phase")) not in anchored_named
                 ] + anchored
 
             if self._nilm_schedule:
@@ -2017,7 +2027,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # no per-phase sensors are installed.
             phase_pw = resolved.get("power_w")
             if phase_pw is not None:
-                self._nilm.update_power(ph, phase_pw, source="per_phase")
+                # v1.17.1 — Aftrekken van bekende stopcontact-vermogens per fase
+                # zodat NILM alleen op het restsignaal hoeft te werken.
+                # Apparaten die al exact gemeten worden via een smart plug hoeven
+                # niet opnieuw door NILM gedetecteerd te worden.
+                if self._hybrid:
+                    anchored_by_phase = self._hybrid.get_anchored_power_per_phase()
+                    socket_w = anchored_by_phase.get(ph, 0.0)
+                    nilm_input_w = max(0.0, phase_pw - socket_w)
+                    if socket_w > 10.0:
+                        _LOGGER.debug(
+                            "NILM %s: fase=%.0fW − stopcontact=%.0fW = restsignaal=%.0fW",
+                            ph, phase_pw, socket_w, nilm_input_w,
+                        )
+                else:
+                    nilm_input_w = phase_pw
+                self._nilm.update_power(ph, nilm_input_w, source="per_phase")
             # (fallback handled below after all phases are processed)
 
         # v1.8: NILM fallback — if no per-phase power sensors, use total grid

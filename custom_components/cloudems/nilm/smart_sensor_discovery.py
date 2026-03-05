@@ -1,18 +1,21 @@
 """
-CloudEMS Smart Sensor Discovery — v1.0.0
+CloudEMS Smart Sensor Discovery — v1.1.0
 
 Scant automatisch alle Home Assistant entiteiten en herkent:
   1. Smart plug vermogenssensoren  → NILM-ankers (bekend apparaat, bekende fase)
   2. Weersensoren                  → temperatuur, zonnestraling voor contextpriors
   3. Apparaatnamen in entiteit-ID  → koppel aan NILM device_type
+  4. Generieke stekkers (fallback) → platform-match zonder naamkeyword → device_type "socket"
+
+Wijzigingen v1.1.0:
+  - Alle vermogenssensoren van bekende smart-plug platforms worden gevonden,
+    ook als ze geen apparaatspecifieke naam hebben (bijv. sensor.shelly_pm_1_power).
+    Deze worden als device_type "socket" aangemeld.
+  - Hiermee worden ALLE stopcontacten met energiemeting zichtbaar als NILM-anker,
+    niet alleen degenen met een herkenbare apparaatnaam.
 
 Geen configuratie nodig: de discovery draait bij opstart en elke 5 minuten.
 Nieuwe sensoren worden automatisch opgepikt zodra ze in HA verschijnen.
-
-Hoe werkt de koppeling:
-  - Entiteit-ID of friendly_name wordt vergeleken met een keywdord-tabel
-  - Apparaten met een `device_class: power` en bekende naam → anker
-  - Weersensoren met `device_class: temperature / irradiance` → context
 
 Copyright © 2025 CloudEMS — https://cloudems.eu
 """
@@ -23,6 +26,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
+
+from homeassistant.helpers import entity_registry as er
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +57,10 @@ DEVICE_KEYWORDS: List[Tuple[str, str, float]] = [
     ("elektrische_boiler","boiler",           0.95),
     ("immersion",         "boiler",           0.80),
     ("thermex",           "boiler",           0.85),
+    ("quooker",           "boiler",           0.88),   # Quooker kokendwaterkraan
+    ("bosch_therm",       "boiler",           0.80),
+    ("cv_ketel",          "boiler",           0.90),
+    ("geiser",            "boiler",           0.88),
 
     # Warmtepomp
     ("heat_pump",         "heat_pump",        0.90),
@@ -113,6 +122,15 @@ DEVICE_KEYWORDS: List[Tuple[str, str, float]] = [
     ("air_conditioner",   "heat_pump",        0.85),
     ("ac_unit",           "heat_pump",        0.85),
     ("klimaat",           "heat_pump",        0.70),
+
+    # Generieke stopcontacten / onbekend apparaat
+    ("socket",            "socket",           0.65),
+    ("stopcontact",       "socket",           0.70),
+    ("stekker",           "socket",           0.70),
+    ("plug",              "socket",           0.60),
+    ("outlet",            "socket",           0.60),
+    ("wcd",               "socket",           0.80),   # Wandcontactdoos (NL)
+    ("wandcontactdoos",   "socket",           0.90),
 ]
 
 # Weersensor herkenning
@@ -317,37 +335,110 @@ class SmartSensorDiscovery:
 
         return False
 
+    def _get_platform(self, entity_id: str) -> str:
+        """
+        Zoek het integratie-platform van een entity via de HA entity registry.
+        Geeft de platform-string terug (bijv. 'shelly', 'zha') of '' als onbekend.
+        Dit is de correcte methode: entity_id's bevatten de platformnaam niet altijd.
+        """
+        try:
+            entity_reg = er.async_get(self._hass)
+            entry = entity_reg.async_get(entity_id)
+            if entry and entry.platform:
+                return entry.platform.lower()
+        except Exception:
+            pass
+        # Fallback: doorzoek entity_id-string als registry niet beschikbaar is
+        eid_low = entity_id.lower()
+        for plat in SMART_PLUG_PLATFORMS:
+            if plat in eid_low:
+                return plat
+        return ""
+
+    # Patronen die bij een bekende vermogenssensor horen die GEEN stopcontact is.
+    # Gebruikt scheidingstekens i.p.v. \b zodat 'solar_power' ook gematcht wordt.
+    _EXCLUDE_PATTERNS = re.compile(
+        r'(^|[_\s\.])('
+        r'grid|solar|pv|fase|phase|net(?=_)|l[123](?=_)|totaal|total|'
+        r'cloudems|import|export|teruglevering|afname|mains|house_total|'
+        r'verbruik_totaal|zon(?=_)|omvorm'
+        r')([_\s\.]|$)',
+        re.IGNORECASE,
+    )
+
     def _classify_plug(self, entity_id: str, attrs: dict) -> Optional[DiscoveredPlug]:
         """
-        Probeer de sensor te koppelen aan een bekend apparaattype.
-        Geeft None terug als geen match gevonden.
+        Koppel een vermogenssensor aan een apparaattype.
+
+        Beslisboom:
+          1. Expliciete uitsluiting: bekende niet-stekker patronen → None
+          2. Keyword-match op entity_id + friendly_name → specifiek type
+          3. Platform via entity registry → 'socket' als het een smartplug-platform is
+          4. Platform via device registry (config_entry domain) → 'socket'
+          5. Switch-sibling: als hetzelfde HA-device ook een switch-entiteit heeft
+             is het vrijwel zeker een smart plug → 'socket' met conf 0.80
+          6. Attribuut-fallback: device_class=power + state_class=measurement
+             + 'vermogen'/'power'/'watt' in naam → 'socket' conf 0.42
+          7. Geen match → None
         """
         friendly = str(attrs.get("friendly_name", entity_id)).lower()
         eid_low  = entity_id.lower()
         search   = f"{eid_low} {friendly}"
 
+        # ── Stap 1: uitsluitfilter ─────────────────────────────────────────
+        if self._EXCLUDE_PATTERNS.search(search):
+            return None
+
         best_type = None
         best_conf = 0.0
 
+        # ── Stap 2: keyword-match ──────────────────────────────────────────
         for keyword, device_type, conf in DEVICE_KEYWORDS:
-            # Gebruik regex-woordgrens om bijv. "nas" niet te matchen in "dynasolar"
             pattern = r'(^|[_\s\-\.])' + re.escape(keyword) + r'($|[_\s\-\.\d])'
             if re.search(pattern, search):
                 if conf > best_conf:
                     best_conf = conf
                     best_type = device_type
 
+        # ── Stap 3: platform via entity registry ───────────────────────────
+        platform = self._get_platform(entity_id)
+        if best_type is None and platform in SMART_PLUG_PLATFORMS:
+            best_type = "socket"
+            best_conf = 0.60
+
+        # ── Stap 4 + 5: device registry ────────────────────────────────────
+        if best_type is None:
+            plat, has_switch = self._check_device_registry(entity_id)
+            if plat:
+                platform = plat
+            if has_switch:
+                # Switch-sibling = vrijwel zeker smart plug (aan/uit + vermogen)
+                best_type = "socket"
+                best_conf = 0.82
+            elif plat in SMART_PLUG_PLATFORMS:
+                best_type = "socket"
+                best_conf = 0.58
+
+        # ── Stap 6: attribuut-fallback ─────────────────────────────────────
+        # v1.17.3: elke sensor met device_class=power + state_class=measurement
+        # die niet is uitgesloten, wordt als meetapparaat opgenomen.
+        if best_type is None:
+            dc = attrs.get("device_class", "")
+            sc = attrs.get("state_class", "")
+            if dc == "power" and sc == "measurement":
+                # Naam-hint geeft iets hogere conf
+                if re.search(r'(^|[_\s\.])(vermogen|power|watt|energie|verbruik|meting|usage)([_\s\.]|$)',
+                              search, re.IGNORECASE):
+                    best_type = "socket"
+                    best_conf = 0.50
+                else:
+                    # Geen naam-hint maar wél juiste device_class/state_class
+                    best_type = "socket"
+                    best_conf = 0.40
+
         if best_type is None:
             return None
 
-        # Detecteer platform uit entity_id (bijv. "sensor.shelly_wasmachine_power")
-        platform = ""
-        for plat in SMART_PLUG_PLATFORMS:
-            if plat in eid_low:
-                platform = plat
-                break
-
-        # Ruimte / area
         area = str(attrs.get("area", "") or "")
 
         return DiscoveredPlug(
@@ -356,8 +447,68 @@ class SmartSensorDiscovery:
             device_type  = best_type,
             confidence   = best_conf,
             area         = area,
-            platform     = platform,
+            platform     = platform or "",
         )
+
+    def _check_device_registry(self, entity_id: str) -> tuple:
+        """
+        Controleer het HA-device via de device registry.
+
+        Geeft terug: (platform_str, has_switch_sibling)
+          - platform_str: integratie-domein als het in SMART_PLUG_PLATFORMS zit, anders ''
+          - has_switch_sibling: True als het device ook een switch.* entiteit heeft
+            (sterke indicator voor smart plug: schakelaar + vermogensmeting)
+        """
+        platform   = ""
+        has_switch = False
+        try:
+            from homeassistant.helpers import device_registry as dr
+            entity_reg = er.async_get(self._hass)
+            entry = entity_reg.async_get(entity_id)
+            if not entry or not entry.device_id:
+                return platform, has_switch
+
+            dev_reg = dr.async_get(self._hass)
+            device  = dev_reg.async_get(entry.device_id)
+            if not device:
+                return platform, has_switch
+
+            # Platform via config_entries
+            for config_entry_id in device.config_entries:
+                ce = self._hass.config_entries.async_get_entry(config_entry_id)
+                if ce and ce.domain.lower() in SMART_PLUG_PLATFORMS:
+                    platform = ce.domain.lower()
+                    break
+
+            # Fabrikant/model fallback als config_entry geen hit gaf
+            if not platform:
+                mfr   = (device.manufacturer or "").lower()
+                model = (device.model or "").lower()
+                known = {
+                    "shelly": "shelly", "sonoff": "sonoff", "tuya": "tuya",
+                    "ikea": "zha", "xiaomi": "zha", "philips": "zha",
+                    "tp-link": "tplink_smartlife", "kasa": "tplink_smartlife",
+                    "aqara": "zha", "zemismart": "zha", "nous": "tasmota",
+                    "blitzwolf": "tasmota", "athom": "tasmota",
+                    "frient": "zha", "innr": "zha", "osram": "zha",
+                    "legrand": "zha", "schneider": "zha", "niko": "zha",
+                }
+                for brand, plat in known.items():
+                    if brand in mfr or brand in model:
+                        platform = plat
+                        break
+
+            # Switch-sibling: zoek switch.* entiteiten op hetzelfde device
+            siblings = entity_reg.entities.get_entries_for_device_id(device.id)
+            has_switch = any(
+                s.entity_id.startswith("switch.") for s in siblings
+                if s.entity_id != entity_id
+            )
+
+        except Exception as exc:
+            _LOGGER.debug("Device registry check fout voor %s: %s", entity_id, exc)
+
+        return platform, has_switch
 
     def _classify_weather(self, entity_id: str, attrs: dict) -> Optional[DiscoveredWeather]:
         """Herken weersensoren."""

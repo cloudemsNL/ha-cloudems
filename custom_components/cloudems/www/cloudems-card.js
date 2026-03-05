@@ -1,7 +1,8 @@
 /**
- * CloudEMS Dashboard Card — v1.17.1
+ * CloudEMS Dashboard Card — v1.17.2
  * Visual energy overview: flow diagram · NILM device cards · battery health ·
  * PV forecast · phase bars · EPEX price chart · EV charging · congestion alerts.
+ * v1.17.2: socket device type · fase-bevestiging indicator · 3-kolom tabel
  * Copyright © 2025 CloudEMS — https://cloudems.eu
  */
 
@@ -30,6 +31,8 @@ const DEVICE_ICONS = {
   power_tool:      { emoji: "🔨", color: "#9ca3af", label: "Gereedschap" },
   garden:          { emoji: "🌿", color: "#86efac", label: "Tuin" },
   medical:         { emoji: "❤️", color: "#f87171", label: "Medisch" },
+  // v1.17.2: generiek stopcontact (smart plug zonder specifiek apparaattype)
+  socket:          { emoji: "🔌", color: "#94a3b8", label: "Stopcontact" },
   unknown:         { emoji: "🔌", color: "#9ca3af", label: "Onbekend" },
 };
 
@@ -202,82 +205,8 @@ class CloudEMSCard extends LitElement {
     const solar   = Math.max(0, solarW || 0);
     const houseW  = Math.max(0, solar + importW - exportW);
 
-    const gc = exportW > 0 ? "#10b981" : importW > 200 ? "#f97316" : "#6366f1";
-    const sc = solar > 100 ? "#fbbf24" : "#475569";
-
-    // SVG arrow sizes proportional to power (1–4px)
-    const gf = Math.min(4, Math.max(1, importW / 800));
-    const sf = Math.min(4, Math.max(1, solar / 800));
-
     return html`
-      <!-- Energy flow SVG ────────────────── -->
-      <svg class="flow-svg" viewBox="0 0 310 170" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <filter id="glow-s"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-          <filter id="glow-g"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        </defs>
-
-        <!-- Grid node (left) -->
-        <circle cx="38" cy="85" r="28" fill="${gc}18" stroke="${gc}" stroke-width="1.8"/>
-        <text x="38" y="78" text-anchor="middle" font-size="17">🏭</text>
-        <text x="38" y="93" text-anchor="middle" font-size="7" fill="${gc}" font-weight="700">Net</text>
-        <text x="38" y="103" text-anchor="middle" font-size="6.5" fill="#94a3b8">
-          ${importW > 50 ? "▼" + this._fmt(importW) : exportW > 50 ? "▲" + this._fmt(exportW) : "—"}
-        </text>
-
-        <!-- Solar node (top-center) -->
-        <circle cx="155" cy="28" r="24" fill="${sc}18" stroke="${sc}" stroke-width="1.8"
-          filter="${solar > 200 ? "url(#glow-s)" : "none"}"/>
-        <text x="155" y="22" text-anchor="middle" font-size="15">☀️</text>
-        <text x="155" y="35" text-anchor="middle" font-size="6.5" fill="${sc}" font-weight="700">Zonnestroom</text>
-        <text x="155" y="44" text-anchor="middle" font-size="6.5" fill="#94a3b8">${this._fmt(solar)}</text>
-
-        <!-- House node (center) -->
-        <circle cx="155" cy="105" r="28" fill="#6366f118" stroke="#6366f1" stroke-width="1.8"/>
-        <text x="155" y="98" text-anchor="middle" font-size="17">🏠</text>
-        <text x="155" y="113" text-anchor="middle" font-size="7" fill="#818cf8" font-weight="700">Verbruik</text>
-        <text x="155" y="123" text-anchor="middle" font-size="6.5" fill="#94a3b8">${this._fmt(houseW)}</text>
-
-        <!-- Battery node (right, optional) -->
-        ${soh !== null ? html`
-          <circle cx="272" cy="85" r="24" fill="${soh < 80 ? "#f8717118" : "#22c55e18"}" stroke="${soh < 80 ? "#f87171" : "#22c55e"}" stroke-width="1.8"/>
-          <text x="272" y="79" text-anchor="middle" font-size="15">🔋</text>
-          <text x="272" y="92" text-anchor="middle" font-size="6.5" fill="${soh < 80 ? "#f87171" : "#4ade80"}" font-weight="700">Batterij</text>
-          <text x="272" y="102" text-anchor="middle" font-size="6.5" fill="#94a3b8">${soh?.toFixed(0)}% SoH</text>
-          <!-- Battery connector -->
-          <line x1="248" y1="85" x2="183" y2="98" stroke="${soh < 80 ? "#f87171" : "#22c55e"}" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.5"/>
-        ` : ""}
-
-        <!-- Grid → House (import) -->
-        ${importW > 50 ? html`
-          <path d="M66,87 Q110,95 127,103" fill="none" stroke="${gc}" stroke-width="${gf}" opacity="0.85"
-            marker-end="url(#arr-in)"/>
-        ` : ""}
-
-        <!-- House → Grid (export) -->
-        ${exportW > 50 ? html`
-          <path d="M127,107 Q100,100 66,90" fill="none" stroke="#10b981" stroke-width="${gf}" opacity="0.85"
-            marker-end="url(#arr-exp)"/>
-        ` : ""}
-
-        <!-- Solar → House -->
-        ${solar > 50 ? html`
-          <line x1="155" y1="52" x2="155" y2="77" stroke="${sc}" stroke-width="${sf}" opacity="0.85"
-            marker-end="url(#arr-sol)"/>
-        ` : ""}
-
-        <!-- Arrow markers -->
-        <defs>
-          <marker id="arr-in"  markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="${gc}" opacity="0.8"/></marker>
-          <marker id="arr-exp" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="#10b981" opacity="0.8"/></marker>
-          <marker id="arr-sol" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="${sc}" opacity="0.8"/></marker>
-        </defs>
-      </svg>
-
-      <!-- Context bar ────────────────────── -->
-      ${this._renderContextBar()}
-
-      <!-- Stats grid ─────────────────────── -->
+      ${this._renderFlowDiagram(importW, exportW, solar, houseW, soh, congActive)}      ${this._renderContextBar()}
       <div class="stat-grid">
         <div class="stat-tile">
           <div class="st-icon">💶</div>
@@ -302,7 +231,6 @@ class CloudEMSCard extends LitElement {
           <div class="st-lbl">${importW > 0 ? "Afname net" : "Teruglevering"}</div>
         </div>
       </div>
-
       ${congActive ? html`
         <div class="alert-bar cong">
           <span>⚠️</span>
@@ -310,6 +238,200 @@ class CloudEMSCard extends LitElement {
         </div>` : ""}
       ${this._renderHints()}
     `;
+  }
+
+  // ── Geanimeerd energie-stroomdiagram ──────────────────────────────────────
+  // Gebruikt CSS stroke-dashoffset animatie — werkt correct in shadow DOM.
+  // animateMotion + mpath href="#id" werkt NIET in LitElement shadow DOM.
+
+  _renderFlowDiagram(importW, exportW, solarW, houseW, soh, congActive) {
+    const CG = exportW > 0 ? "#10b981" : importW > 200 ? "#f97316" : "#6366f1";
+    const CS = solarW > 100 ? "#fbbf24" : "#475569";
+    const CB = soh !== null ? (soh < 80 ? "#f87171" : "#22c55e") : null;
+
+    const hasImport  = importW  > 30;
+    const hasExport  = exportW  > 30;
+    const hasSolar   = solarW   > 30;
+    const hasBattery = soh !== null;
+
+    // Animatieduur: hoog vermogen = korte periode = snelle beweging
+    const dur = (w, fast=0.6, slow=3.0) =>
+      w < 50 ? slow : (slow - Math.min(1, w / 5000) * (slow - fast)).toFixed(2);
+
+    // dasharray: segment + gap; animatie schuift offset op met -(segment+gap)
+    // zodat de "bollen" over het pad bewegen
+    const DA = "10 18";   // 10px dot, 18px gap
+    const DS = "28";      // offset stap = segment + gap
+
+    return html`
+      <style>
+        @keyframes flow-fwd { to { stroke-dashoffset: -28; } }
+        @keyframes flow-rev { to { stroke-dashoffset:  28; } }
+        .fl-imp { animation: flow-fwd var(--fl-imp-dur,1.8s) linear infinite; }
+        .fl-exp { animation: flow-rev var(--fl-exp-dur,1.8s) linear infinite; }
+        .fl-sol { animation: flow-fwd var(--fl-sol-dur,1.8s) linear infinite; }
+        .fl-bat { animation: flow-fwd var(--fl-bat-dur,2.0s) linear infinite; }
+      </style>
+      <svg class="flow-svg" viewBox="0 0 310 175"
+           xmlns="http://www.w3.org/2000/svg"
+           style="--fl-imp-dur:${dur(importW)}s;--fl-exp-dur:${dur(exportW)}s;
+                  --fl-sol-dur:${dur(solarW)}s;--fl-bat-dur:1.8s">
+        <defs>
+          <filter id="glow-node">
+            <feGaussianBlur stdDeviation="3.5" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- ── Achtergrondpaden (gestippeld, altijd zichtbaar) ── -->
+        <path d="M 66,85 Q 110,97 127,104"
+          fill="none" stroke="${CG}" stroke-width="2" stroke-dasharray="4 5" opacity="0.2"/>
+        <path d="M 127,106 Q 100,100 66,87"
+          fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="4 5" opacity="0.2"/>
+        <path d="M 155,52 L 155,77"
+          fill="none" stroke="${CS}" stroke-width="2" stroke-dasharray="4 5" opacity="0.2"/>
+        ${hasBattery ? `
+          <path d="M 183,100 Q 228,92 248,87"
+            fill="none" stroke="${CB}" stroke-width="1.5" stroke-dasharray="4 5" opacity="0.15"/>` : ""}
+
+        <!-- ── Geanimeerde stroompaden ── -->
+        ${hasImport ? `
+          <path class="fl-imp"
+            d="M 66,85 Q 110,97 127,104"
+            fill="none" stroke="${CG}" stroke-width="3"
+            stroke-dasharray="${DA}" stroke-dashoffset="0" stroke-linecap="round"
+            opacity="0.9"/>` : ""}
+
+        ${hasExport ? `
+          <path class="fl-exp"
+            d="M 66,87 Q 100,100 127,106"
+            fill="none" stroke="#10b981" stroke-width="3"
+            stroke-dasharray="${DA}" stroke-dashoffset="0" stroke-linecap="round"
+            opacity="0.9"/>` : ""}
+
+        ${hasSolar ? `
+          <path class="fl-sol"
+            d="M 155,52 L 155,77"
+            fill="none" stroke="${CS}" stroke-width="3"
+            stroke-dasharray="${DA}" stroke-dashoffset="0" stroke-linecap="round"
+            opacity="0.9"/>` : ""}
+
+        ${hasBattery ? `
+          <path class="fl-bat"
+            d="M 183,100 Q 228,92 248,87"
+            fill="none" stroke="${CB}" stroke-width="2"
+            stroke-dasharray="7 14" stroke-dashoffset="0" stroke-linecap="round"
+            opacity="0.7"/>` : ""}
+
+        <!-- ── Net-node (links) ── -->
+        <circle cx="38" cy="85" r="28"
+          fill="${CG}18" stroke="${CG}" stroke-width="2"
+          ${congActive ? `filter="url(#glow-node)"` : ""}/>
+        <text x="38" y="78" text-anchor="middle" font-size="17">🏭</text>
+        <text x="38" y="93" text-anchor="middle" font-size="7"
+          fill="${CG}" font-weight="700" font-family="sans-serif">Net</text>
+        <text x="38" y="104" text-anchor="middle" font-size="6.5"
+          fill="#94a3b8" font-family="sans-serif">
+          ${importW > 50 ? "▼ " + this._fmt(importW) : exportW > 50 ? "▲ " + this._fmt(exportW) : "—"}
+        </text>
+
+        <!-- ── Zon-node (boven-midden) ── -->
+        <circle cx="155" cy="28" r="24"
+          fill="${CS}22" stroke="${CS}" stroke-width="2"
+          ${solarW > 200 ? `filter="url(#glow-node)"` : ""}/>
+        <text x="155" y="22" text-anchor="middle" font-size="15">☀️</text>
+        <text x="155" y="36" text-anchor="middle" font-size="6.5"
+          fill="${CS}" font-weight="700" font-family="sans-serif">Zon</text>
+        <text x="155" y="45" text-anchor="middle" font-size="6.5"
+          fill="#94a3b8" font-family="sans-serif">${this._fmt(solarW)}</text>
+
+        <!-- ── Huis-node (midden) ── -->
+        <circle cx="155" cy="108" r="30"
+          fill="#6366f120" stroke="#6366f1" stroke-width="2"
+          filter="url(#glow-node)"/>
+        <text x="155" y="101" text-anchor="middle" font-size="18">🏠</text>
+        <text x="155" y="116" text-anchor="middle" font-size="7"
+          fill="#818cf8" font-weight="700" font-family="sans-serif">Verbruik</text>
+        <text x="155" y="126" text-anchor="middle" font-size="6.5"
+          fill="#94a3b8" font-family="sans-serif">${this._fmt(houseW)}</text>
+
+        <!-- ── Batterij-node (rechts) ── -->
+        ${hasBattery ? `
+          <circle cx="272" cy="85" r="24"
+            fill="${CB}18" stroke="${CB}" stroke-width="2"/>
+          <text x="272" y="79" text-anchor="middle" font-size="15">🔋</text>
+          <text x="272" y="92" text-anchor="middle" font-size="6.5"
+            fill="${CB}" font-weight="700" font-family="sans-serif">Batterij</text>
+          <text x="272" y="102" text-anchor="middle" font-size="6.5"
+            fill="#94a3b8" font-family="sans-serif">${soh?.toFixed(0)}% SoH</text>` : ""}
+
+        <!-- ── Vermogenslabels op de paden ── -->
+        ${hasImport ? `
+          <rect x="82" y="88" width="44" height="13" rx="4" fill="#1e293bcc"/>
+          <text x="104" y="98" text-anchor="middle" font-size="7"
+            fill="${CG}" font-weight="700" font-family="sans-serif">${this._fmt(importW)}</text>` : ""}
+        ${hasSolar ? `
+          <rect x="130" y="58" width="50" height="13" rx="4" fill="#1e293bcc"/>
+          <text x="155" y="68" text-anchor="middle" font-size="7"
+            fill="${CS}" font-weight="700" font-family="sans-serif">${this._fmt(solarW)}</text>` : ""}
+      </svg>
+
+      ${this._renderPhasePowerBar()}
+    `;
+  }
+
+  // ── Fase-vermogensbalk: toont L1/L2/L3 belasting vanuit NILM ─────────────
+  _renderPhasePowerBar() {
+    const nilmEid = this.config.nilm_sensor;
+    if (!nilmEid) return "";
+    const devs = (this._attr(nilmEid, "device_list", null)
+               || this._attr(nilmEid, "devices", null)
+               || []).filter(d => d.state === "on" || d.running);
+    if (!devs.length) return "";
+
+    // Som per fase
+    const byPhase = { L1: { w: 0, plugW: 0, nilmW: 0 },
+                      L2: { w: 0, plugW: 0, nilmW: 0 },
+                      L3: { w: 0, plugW: 0, nilmW: 0 } };
+    devs.forEach(d => {
+      const ph  = d.phase || "L1";
+      const pw  = d.power_w || 0;
+      const src = d.source_type || "nilm";
+      if (!(ph in byPhase)) return;
+      byPhase[ph].w    += pw;
+      if (src === "smart_plug") byPhase[ph].plugW += pw;
+      else                      byPhase[ph].nilmW += pw;
+    });
+
+    const maxW = Math.max(...Object.values(byPhase).map(v => v.w), 1);
+    const phColors = { L1: "#3b82f6", L2: "#eab308", L3: "#22c55e" };
+
+    return html`
+      <div class="phase-power-bar">
+        ${Object.entries(byPhase).map(([ph, v]) => {
+          if (v.w < 5) return "";
+          const pct     = Math.min(100, (v.w / maxW) * 100);
+          const plugPct = v.w > 0 ? Math.min(100, (v.plugW / v.w) * 100) : 0;
+          const col     = phColors[ph];
+          return html`
+            <div class="ppb-row">
+              <span class="ppb-lbl" style="color:${col}">${ph}</span>
+              <div class="ppb-track">
+                <div class="ppb-fill" style="width:${pct}%;background:${col}22;border-color:${col}44">
+                  ${plugPct > 0 ? html`
+                    <div class="ppb-plug" style="width:${plugPct}%;background:${col}66"
+                         title="🔌 Stopcontact: ${Math.round(v.plugW)}W"></div>
+                  ` : ""}
+                </div>
+              </div>
+              <span class="ppb-val">
+                <span style="color:${col};font-weight:700">${Math.round(v.w)}W</span>
+                ${v.plugW > 5 ? html`<span class="ppb-sub">🔌${Math.round(v.plugW)}W</span>` : ""}
+                ${v.nilmW > 5 ? html`<span class="ppb-sub">🔍${Math.round(v.nilmW)}W</span>` : ""}
+              </span>
+            </div>`;
+        })}
+      </div>`;
   }
 
   // ── Sensor hints ─────────────────────────────────────────────────────────
@@ -374,9 +496,12 @@ class CloudEMSCard extends LitElement {
     const allDevicesRaw = this._attr(statsSensor, "devices", null);
     let detected = [];
     if (allDevicesRaw) {
-      // Filter: niet actief, niet gedismissed, wel al eens gezien (on_events > 0)
+      // v1.17.3: Slimme stekkers (source_type=smart_plug) altijd tonen, ook als on_events=0.
+      // Ze zijn ontdekt = gezien, dus ze horen in het overzicht.
+      // Andere NILM-apparaten: alleen tonen als al eens aan geweest (on_events > 0).
       detected = allDevicesRaw.filter(d =>
-        !d.is_on && !d.dismissed && (d.on_events || 0) > 0
+        !d.is_on && !d.dismissed &&
+        ((d.on_events || 0) > 0 || d.source_type === "smart_plug")
       ).map(d => ({
         name:        d.name || d.device_type,
         type:        d.device_type,
@@ -405,6 +530,19 @@ class CloudEMSCard extends LitElement {
     running.forEach(d => { const ph = d.phase||"L1"; if (ph in phaseCnt) phaseCnt[ph]++; });
     const hasPhases = Object.values(phaseCnt).some(v => v > 0);
 
+    // v1.17.2: socket vs NILM opsplitsing
+    const socketDevs = running.filter(d => d.source_type === "smart_plug");
+    const nilmDevs   = running.filter(d => d.source_type !== "smart_plug");
+    const socketW    = socketDevs.reduce((s,d) => s + (d.power_w||0), 0);
+    const nilmW      = nilmDevs.reduce((s,d)   => s + (d.power_w||0), 0);
+
+    // Per-fase vermogen gesommeerd vanuit stopcontacten
+    const socketByPhase = {L1:0, L2:0, L3:0};
+    socketDevs.forEach(d => {
+      const ph = d.phase||"L1";
+      if (ph in socketByPhase) socketByPhase[ph] += (d.power_w||0);
+    });
+
     return html`
       <div class="devices-hdr">
         <span class="devices-title">NILM Apparaatherkenning</span>
@@ -416,11 +554,20 @@ class CloudEMSCard extends LitElement {
           ${["L1","L2","L3"].map(ph => {
             const s = this._phaseStyle(ph);
             const cnt = phaseCnt[ph];
+            const sw  = socketByPhase[ph];
             return cnt > 0 ? html`
               <span class="ph-pill" style="background:${s.bg};border-color:${s.border};color:${s.text}">
-                ${s.label} · ${cnt}
+                ${s.label} · ${cnt}${sw > 5 ? html` · <span style="color:#94a3b8;font-size:.6rem">🔌 ${Math.round(sw)}W</span>` : ""}
               </span>` : ``;
           })}
+        </div>
+        <div class="src-summary">
+          ${socketDevs.length > 0 ? html`
+            <span class="src-pill src-plug">🔌 ${socketDevs.length} stopcontact${socketDevs.length > 1 ? "en" : ""} · ${this._fmt(socketW)}</span>
+          ` : ""}
+          ${nilmDevs.length > 0 ? html`
+            <span class="src-pill src-nilm">🔍 ${nilmDevs.length} NILM · ${this._fmt(nilmW)}</span>
+          ` : ""}
         </div>
       ` : ``}
 
@@ -430,7 +577,7 @@ class CloudEMSCard extends LitElement {
       ` : html`<p class="no-running">Geen actieve apparaten op dit moment</p>`}
 
       ${detected.length > 0 ? html`
-        <div class="section-lbl" style="margin-top:14px">🔍 Recent gedetecteerd</div>
+        <div class="section-lbl" style="margin-top:14px">🔍 Bekend · nu uit</div>
         <div class="device-grid">${detected.map(d => this._renderDeviceCard(d, false))}</div>
       ` : ``}
 
@@ -452,6 +599,8 @@ class CloudEMSCard extends LitElement {
     // Fase-badge
     const phase   = (device.phase || "L1").replace("3\u2205","ALL");
     const phStyle = this._phaseStyle(phase);
+    // v1.17.2: fase bevestigd via DSMR5?
+    const phConfirmed = device.phase_confirmed === true;
 
     // Bron-badge
     const srcType = device.source_type ||
@@ -479,8 +628,9 @@ class CloudEMSCard extends LitElement {
           </div>
 
           <div class="dev-badges">
-            <span class="dev-badge" style="background:${phStyle.bg};border-color:${phStyle.border};color:${phStyle.text}">
-              \u26A1 ${phStyle.label}
+            <span class="dev-badge" style="background:${phStyle.bg};border-color:${phStyle.border};color:${phStyle.text}"
+                  title="${phConfirmed ? "Fase bevestigd via DSMR5 meting" : "Fase geschat"}">
+              \u26A1 ${phStyle.label}${phConfirmed ? " ✓" : ""}
             </span>
             <span class="dev-badge" style="background:${srcStyle.bg}22;border-color:${srcStyle.bg}88;color:${srcStyle.bg}" title="${srcStyle.desc}">
               ${srcStyle.ico} ${srcStyle.label}
@@ -975,8 +1125,26 @@ class CloudEMSCard extends LitElement {
       .content { padding:14px 15px 18px; }
       .empty { text-align:center; color:var(--c-sub); padding:28px 0; font-size:0.82rem; line-height:1.7; }
 
-      /* Flow SVG */
-      .flow-svg { width:100%; height:auto; margin-bottom:12px; }
+      /* Flow SVG — geanimeerd via CSS stroke-dashoffset (shadow DOM compatible) */
+      .flow-svg  { width:100%; height:auto; display:block; margin-bottom:8px; }
+
+      /* Fase-vermogensbalk onder flow diagram */
+      .phase-power-bar { display:flex; flex-direction:column; gap:5px;
+                         padding:8px 10px; background:var(--c-surf);
+                         border-radius:10px; border:1px solid var(--c-border);
+                         margin-bottom:10px; }
+      .ppb-row  { display:grid; grid-template-columns:24px 1fr auto;
+                  align-items:center; gap:8px; }
+      .ppb-lbl  { font-size:.72rem; font-weight:700; }
+      .ppb-track{ background:rgba(255,255,255,.06); border-radius:4px;
+                  height:12px; overflow:visible; position:relative; }
+      .ppb-fill { height:100%; border-radius:4px; border:1px solid;
+                  position:relative; overflow:hidden; transition:width .6s ease; }
+      .ppb-plug { height:100%; border-radius:4px 0 0 4px;
+                  position:absolute; left:0; top:0; transition:width .6s ease; }
+      .ppb-val  { font-size:.65rem; display:flex; flex-direction:column;
+                  align-items:flex-end; gap:1px; min-width:80px; }
+      .ppb-sub  { font-size:.58rem; color:var(--c-sub); }
 
       /* Stat grid */
       .stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
@@ -1010,8 +1178,13 @@ class CloudEMSCard extends LitElement {
       /* v1.17: fase + bron badges */
       .dev-badges { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
       .dev-badge { font-size:.62rem; font-weight:700; padding:2px 6px; border-radius:99px; border:1px solid; white-space:nowrap; line-height:1.4; }
-      .phase-summary { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:10px; margin-top:2px; }
-      .ph-pill { font-size:.68rem; font-weight:600; padding:2px 9px; border-radius:99px; border:1px solid; white-space:nowrap; }
+      .phase-summary { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:6px; margin-top:2px; }
+      .ph-pill { font-size:.68rem; font-weight:600; padding:2px 9px; border-radius:99px; border:1px solid; white-space:nowrap; display:flex; align-items:center; gap:3px; }
+      /* v1.17.2: socket vs NILM overzichtsbalk */
+      .src-summary { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+      .src-pill { font-size:.65rem; font-weight:600; padding:2px 9px; border-radius:99px; white-space:nowrap; }
+      .src-plug { background:#94a3b822; border:1px solid #94a3b855; color:#94a3b8; }
+      .src-nilm { background:#6366f122; border:1px solid #6366f155; color:#818cf8; }
 
       /* Forecast */
       .forecast-row { display:flex; gap:10px; margin-bottom:14px; }
@@ -1120,6 +1293,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "cloudems-card",
   name:        "CloudEMS Dashboard",
-  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.17.1)",
+  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.17.2)",
   preview:     true,
 });

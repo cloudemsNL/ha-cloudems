@@ -1,5 +1,5 @@
 """
-CloudEMS Hybride NILM — v1.0.0
+CloudEMS Hybride NILM — v1.1.0
 
 Verbetert de NILM-nauwkeurigheid via drie aanvullende lagen bovenop de bestaande
 NILMDetector, zonder bestaande functionaliteit te breken:
@@ -11,6 +11,9 @@ LAAG 1 — Smart Plug Ankering (automatisch)
     • Hun vermogen wordt afgetrokken van het restsignaal → schoner NILM-signaal
     → Nauwkeurigheid stijgt van ~65% naar ~85%+ voor geankerde apparaten
 
+  v1.1.0: Ook generieke stopcontacten (device_type="socket") worden ontdekt,
+    zodat ALLE smart plugs — ook zonder herkenbare apparaatnaam — zichtbaar zijn.
+
 LAAG 2 — Context-bewuste Bayesiaanse priors
   Classificatiescores worden bijgesteld op basis van:
     • Buitentemperatuur  → warmtepomp/boiler boost bij kou, AC boost bij hitte
@@ -19,11 +22,20 @@ LAAG 2 — Context-bewuste Bayesiaanse priors
     • Vermogensbereik    → kleine delta → grote apparaten minder waarschijnlijk
   Priors veranderen de eindconfidentie maar vervangen de detector NIET.
 
-LAAG 3 — 3-fase Balansanalyse
+LAAG 3 — 3-fase Balansanalyse + DSMR5 Fase-correlatie
   Bij 3-fase installaties detecteert de balans-analyzer of een event
   afkomstig is van een 1-fase of 3-fase apparaat:
     • Gelijktijdige ~gelijke delta op alle 3 fasen → 3-fase (WP, EV)
     • Delta slechts op 1 fase → 1-fase (wasmachine, droger)
+
+  v1.1.0 Fase-correlatie stopcontacten via DSMR5:
+    • Elke keer dat het vermogen van een stopcontact significant wijzigt
+      (>SOCKET_PHASE_MIN_DELTA_W), wordt de delta vergeleken met de actuele
+      per-fase deltas van de DSMR5-meter (L1, L2, L3).
+    • De fase waarvan de delta het best overeenkomt (laagste relatieve afwijking)
+      krijgt toegewezen aan het stopcontact.
+    • Zodra een fase bevestigd is (SOCKET_PHASE_CONFIRM_COUNT keer correct),
+      wordt hij als definitief gemarkeerd en niet meer opnieuw bepaald.
 
 Integratie:
   HybridNILM.async_tick() elke updatecyclus via coordinator
@@ -44,16 +56,30 @@ from .smart_sensor_discovery import SmartSensorDiscovery, DiscoveryResult
 _LOGGER = logging.getLogger(__name__)
 
 # ── Constanten ────────────────────────────────────────────────────────────────
-SMART_PLUG_STALE_S   = 120
-PRIOR_MAX_BOOST      = 1.40
-PRIOR_MAX_PENALTY    = 0.50
-TEMP_COLD            =  8.0
-TEMP_HOT             = 24.0
-PHASE_WIN_S          =  3.0
-PHASE_MIN_DELTA_W    = 200.0
-PHASE_RATIO_MIN      = 0.26
-PHASE_RATIO_MAX      = 0.40
-THREE_PHASE_TYPES    = {"ev_charger", "heat_pump", "boiler", "dryer"}
+SMART_PLUG_STALE_S        = 120
+PRIOR_MAX_BOOST           = 1.40
+PRIOR_MAX_PENALTY         = 0.50
+TEMP_COLD                 =  8.0
+TEMP_HOT                  = 24.0
+PHASE_WIN_S               =  3.0
+PHASE_MIN_DELTA_W         = 200.0
+PHASE_RATIO_MIN           = 0.26
+PHASE_RATIO_MAX           = 0.40
+THREE_PHASE_TYPES         = {"ev_charger", "heat_pump", "boiler", "dryer"}
+
+# ── v1.1.0: Stopcontact fase-correlatie via DSMR5 ─────────────────────────────
+# Minimale vermogenswijziging (W) voordat fase-correlatie wordt uitgevoerd
+SOCKET_PHASE_MIN_DELTA_W  = 30.0
+# Tijdvenster (s) waarbinnen DSMR5 fase-snapshot geldig is voor correlatie
+SOCKET_PHASE_WIN_S        = 6.0
+# Maximale relatieve afwijking (0.0–1.0) voor een goede fase-match
+SOCKET_PHASE_MAX_REL_ERR  = 0.35
+# Aantal opeenvolgende correcte matches vóór fase als definitief geldt
+SOCKET_PHASE_CONFIRM_COUNT = 3
+# Hervalidatie-interval: na hoeveel seconden wordt een bevestigde fase opnieuw
+# gecontroleerd? Standaard 24 uur. Zo worden verplaatste stopcontacten automatisch
+# opgepikt zonder dat de initiële bevestiging telkens opnieuw moet.
+SOCKET_PHASE_RECHECK_S    = 86_400  # 24 uur
 
 
 # ── Dataklassen ───────────────────────────────────────────────────────────────
@@ -68,6 +94,18 @@ class AnchoredDevice:
     power_w:     float = 0.0
     is_on:       bool  = False
     last_update: float = field(default_factory=time.time)
+
+    # v1.1.0: DSMR5 fase-correlatie tracking
+    prev_power_w:         float = 0.0          # vermogen bij vorige tick
+    phase_confirmed:      bool  = False         # fase bevestigd via DSMR5
+    phase_confirmed_at:   float = 0.0          # timestamp van laatste bevestiging
+    phase_confirm_count:  int   = 0             # opeenvolgende correcte matches
+    phase_last_candidate: str   = ""            # kandidaat-fase bij laatste event
+
+    # v1.17.3: on_events counter zodat het apparaat ook in de NILM-kaart
+    # verschijnt als het momenteel in stand-by is (on_events > 0 filter).
+    on_events:   int   = 0                     # aantal keer dat het apparaat AAN was
+    power_max_w: float = 0.0                   # hoogste gemeten vermogen (voor display)
 
     @property
     def is_stale(self) -> bool:
@@ -128,7 +166,8 @@ class HybridNILM:
         self._phase_snapshots: Dict[str, PhaseSnapshot] = {}
         self._stats = dict(enrich_calls=0, anchor_hits=0,
                            prior_boosts=0, prior_penalties=0,
-                           phase_balance_hints=0, discoveries=0)
+                           phase_balance_hints=0, discoveries=0,
+                           phase_correlations=0)
         self._last_diag_log: float = 0.0
 
     # ── Setup & tick ──────────────────────────────────────────────────────────
@@ -167,11 +206,21 @@ class HybridNILM:
             for eid, anchor in self._anchors.items():
                 pw = self._discovery.get_plug_power(eid)
                 if pw is not None:
+                    was_on = anchor.is_on
+                    anchor.prev_power_w = anchor.power_w
                     anchor.power_w    = pw
-                    anchor.is_on      = pw > 5.0
+                    anchor.is_on      = pw > 1.0   # v1.17.3: verlaagd van 5W → 1W
                     anchor.last_update = time.time()
+                    # v1.17.3: bijhouden hoe vaak apparaat aan is geweest + max vermogen
+                    if anchor.is_on and not was_on:
+                        anchor.on_events += 1
+                    if pw > anchor.power_max_w:
+                        anchor.power_max_w = pw
 
-            # Fase verfijnen via correlatie met NILM-snapshots
+            # v1.1.0: Fase bepalen via DSMR5 correlatie (voor alle stopcontacten)
+            self._correlate_socket_phases()
+
+            # Fase verfijnen via correlatie met NILM-snapshots (legacy fallback)
             self._refine_anchor_phases()
 
             # Weerdata
@@ -204,6 +253,113 @@ class HybridNILM:
             if best_ph and best_ph != anchor.phase:
                 _LOGGER.debug("HybridNILM: %s fase verfijnd L1→%s", anchor.name, best_ph)
                 anchor.phase = best_ph
+
+    def _correlate_socket_phases(self) -> None:
+        """
+        v1.1.0 — Bepaal de fase van elk stopcontact via DSMR5 correlatie.
+
+        Algoritme per stopcontact:
+          1. Hervalidatie: als de fase al > SOCKET_PHASE_RECHECK_S geleden bevestigd
+             is, wordt phase_confirmed gereset (de huidig toegewezen fase blijft
+             behouden als startwaarde — bij gelijkblijvende situatie herbevestigt
+             het systeem direct; bij een verplaatst stopcontact corrigeert het binnen
+             3 schakelgebeurtenissen).
+          2. Bereken de delta t.o.v. de vorige tick: delta = power_w − prev_power_w
+          3. Als |delta| < SOCKET_PHASE_MIN_DELTA_W → geen informatie, skip
+          4. Zoek in _phase_snapshots de fase waarvan de delta het best overeenkomt:
+               relatieve_fout = |delta_snapshot − delta_socket| / max(|delta_socket|, 1)
+          5. Als relatieve_fout ≤ SOCKET_PHASE_MAX_REL_ERR:
+               - Kandidaat-fase gevonden
+               - Als dit dezelfde fase is als de vorige kandidaat:
+                   phase_confirm_count++
+               - Anders:
+                   phase_confirm_count = 1
+                   phase_last_candidate = kandidaat
+               - Als phase_confirm_count ≥ SOCKET_PHASE_CONFIRM_COUNT:
+                   fase definitief vastgesteld (phase_confirmed = True,
+                   phase_confirmed_at = now)
+        """
+        now = time.time()
+        for anchor in self._anchors.values():
+
+            # ── Stap 1: Dagelijkse hervalidatie ───────────────────────────────
+            # Een bevestigde fase is nooit voor altijd zeker: het stopcontact kan
+            # verplaatst zijn naar een andere groep. Elke SOCKET_PHASE_RECHECK_S
+            # seconden zetten we de bevestiging terug naar "onbekend" zodat het
+            # systeem opnieuw verifieert. De huidige fase-waarde blijft als
+            # startwaarde staan; bij een onveranderde situatie herbevestigt het
+            # binnen 3 deltagebeurtenissen. Bij een verplaatst stopcontact
+            # corrigeert het automatisch.
+            if anchor.phase_confirmed:
+                age = now - anchor.phase_confirmed_at
+                if age > SOCKET_PHASE_RECHECK_S:
+                    _LOGGER.debug(
+                        "HybridNILM: %s fase-hervalidatie na %.1fh (was: %s)",
+                        anchor.name, age / 3600, anchor.phase,
+                    )
+                    anchor.phase_confirmed      = False
+                    anchor.phase_confirm_count  = 0
+                    anchor.phase_last_candidate = anchor.phase  # houd huidige fase als hint
+                continue  # deze tick nog niet opnieuw correleren, wacht op delta
+
+            # ── Stap 2: Delta berekenen ───────────────────────────────────────
+            delta = anchor.power_w - anchor.prev_power_w
+            if abs(delta) < SOCKET_PHASE_MIN_DELTA_W:
+                continue
+
+            # ── Stap 3: Beste fase-match zoeken ──────────────────────────────
+            best_ph:     Optional[str] = None
+            best_rel_err: float        = float("inf")
+
+            for ph, snap in self._phase_snapshots.items():
+                age = now - snap.timestamp
+                if age > SOCKET_PHASE_WIN_S:
+                    continue  # te oud
+                rel_err = abs(snap.delta_w - delta) / max(abs(delta), 1.0)
+                if rel_err < best_rel_err:
+                    best_rel_err = rel_err
+                    best_ph      = ph
+
+            if best_ph is None or best_rel_err > SOCKET_PHASE_MAX_REL_ERR:
+                # Geen goede match — reset kandidaat-streak
+                anchor.phase_confirm_count  = 0
+                anchor.phase_last_candidate = ""
+                continue
+
+            # ── Stap 4: Streaklogica ──────────────────────────────────────────
+            if best_ph == anchor.phase_last_candidate:
+                anchor.phase_confirm_count += 1
+            else:
+                anchor.phase_confirm_count  = 1
+                anchor.phase_last_candidate = best_ph
+
+            if anchor.phase_confirm_count >= SOCKET_PHASE_CONFIRM_COUNT:
+                if anchor.phase != best_ph:
+                    _LOGGER.info(
+                        "HybridNILM: %s fase gewijzigd %s→%s via DSMR5 "
+                        "(delta=%.0fW, fase-delta=%.0fW, err=%.0f%%)",
+                        anchor.name, anchor.phase, best_ph, delta,
+                        self._phase_snapshots[best_ph].delta_w,
+                        best_rel_err * 100,
+                    )
+                else:
+                    _LOGGER.info(
+                        "HybridNILM: %s fase bevestigd als %s via DSMR5 "
+                        "(delta=%.0fW, err=%.0f%%)",
+                        anchor.name, best_ph, delta, best_rel_err * 100,
+                    )
+                anchor.phase              = best_ph
+                anchor.phase_confirmed    = True
+                anchor.phase_confirmed_at = now
+                self._stats["phase_correlations"] += 1
+            else:
+                _LOGGER.debug(
+                    "HybridNILM: %s fase-kandidaat %s (%d/%d) "
+                    "(delta=%.0fW, rel_err=%.0f%%)",
+                    anchor.name, best_ph,
+                    anchor.phase_confirm_count, SOCKET_PHASE_CONFIRM_COUNT,
+                    delta, best_rel_err * 100,
+                )
 
     def _refresh_weather(self) -> None:
         temp = self._discovery.get_weather_value("temperature")
@@ -261,8 +417,13 @@ class HybridNILM:
                 "is_on":         a.is_on,
                 "source":        "smart_plug",
                 "phase":         a.phase,
+                "phase_confirmed": a.phase_confirmed,
                 "confirmed":     True,
                 "user_feedback": "correct",
+                # v1.17.3: zodat apparaten ook zichtbaar zijn in stand-by in de NILM-kaart
+                "on_events":     max(a.on_events, 1),  # minstens 1: ontdekt = gezien
+                "power_min":     round(a.power_max_w, 1),
+                "entity_id":     a.entity_id,
             }
             for a in self._anchors.values()
             if not a.is_stale
@@ -283,8 +444,19 @@ class HybridNILM:
 
     def get_diagnostics(self) -> dict:
         active_anchors = [
-            {"entity_id": a.entity_id, "name": a.name, "device_type": a.device_type,
-             "phase": a.phase, "power_w": round(a.power_w, 1), "is_on": a.is_on}
+            {
+                "entity_id":       a.entity_id,
+                "name":            a.name,
+                "device_type":     a.device_type,
+                "phase":           a.phase,
+                "phase_confirmed": a.phase_confirmed,
+                "phase_confirmed_age_h": round((time.time() - a.phase_confirmed_at) / 3600, 1)
+                                         if a.phase_confirmed_at > 0 else None,
+                "phase_candidate": a.phase_last_candidate,
+                "phase_streak":    a.phase_confirm_count,
+                "power_w":         round(a.power_w, 1),
+                "is_on":           a.is_on,
+            }
             for a in self._anchors.values() if not a.is_stale
         ]
         weather_sensors = [
@@ -296,6 +468,8 @@ class HybridNILM:
             "anchors_total":         len(self._anchors),
             "anchors_active":        sum(1 for a in self._anchors.values()
                                          if a.is_on and not a.is_stale),
+            "anchors_phase_confirmed": sum(1 for a in self._anchors.values()
+                                           if a.phase_confirmed),
             "weather_temperature_c": self._weather.temperature_c,
             "weather_season":        self._weather.season,
             "weather_irradiance_w":  self._weather.irradiance_wm2,
@@ -383,7 +557,8 @@ class HybridNILM:
             # ── Vermogensbereik ───────────────────────────────────────────
             big_types   = {"washing_machine", "dryer", "dishwasher", "boiler",
                            "heat_pump", "ev_charger", "oven"}
-            small_types = {"refrigerator", "microwave", "kettle", "light", "entertainment"}
+            small_types = {"refrigerator", "microwave", "kettle", "light",
+                           "entertainment", "socket"}
             if abs_delta < 100 and dt in big_types:
                 f *= 0.40
             if abs_delta > 5000 and dt in small_types:
