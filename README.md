@@ -1,9 +1,3 @@
-Ik begrijp je: je wilt de volledige inhoud behouden voor een `README.md`, maar de rommelige lijst met losse versienummers en bugfixes omzetten naar een strak, samenhangend verhaal over de **huidige staat** van de software.
-
-Hier is de herschreven versie voor GitHub, waarbij alle technische details en functies zijn behouden, maar de "changelog-vibe" is vervangen door een krachtige feature-set.
-
----
-
 # ⚡ CloudEMS — Slimme Energiebeheer voor Home Assistant
 
 > **"Stroom is geld. CloudEMS zorgt dat jij het beheert — niet het energiebedrijf."**
