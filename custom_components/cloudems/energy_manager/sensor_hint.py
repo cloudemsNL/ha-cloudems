@@ -99,6 +99,7 @@ class SensorHintEngine:
         self._recent_powers: deque = deque(maxlen=30)   # (timestamp, grid_w)
         self._batt_events_today: int = 0
         self._last_batt_check_day: Optional[str] = None
+        self._dirty: bool = False
 
     async def async_setup(self) -> None:
         data = await self._store.async_load()
@@ -108,6 +109,8 @@ class SensorHintEngine:
         _LOGGER.debug("SensorHintEngine ready (%d stored hints)", len(self._hints))
 
     async def async_save(self) -> None:
+        if not self._dirty:
+            return
         await self._store.async_save({
             "hints": [
                 {
@@ -123,6 +126,7 @@ class SensorHintEngine:
                 for h in self._hints.values()
             ]
         })
+        self._dirty = False
 
     # ── Main update ───────────────────────────────────────────────────────────
 
@@ -300,6 +304,7 @@ class SensorHintEngine:
                 action     = action,
                 confidence = confidence,
             )
+            self._dirty = True
             _LOGGER.info("SensorHintEngine: new hint '%s' (confidence %.0f%%)", hint_id, confidence * 100)
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -307,6 +312,7 @@ class SensorHintEngine:
     def dismiss_hint(self, hint_id: str) -> None:
         if hint_id in self._hints:
             self._hints[hint_id].dismissed = True
+            self._dirty = True
 
     def get_all_hints(self) -> list[dict]:
         return [

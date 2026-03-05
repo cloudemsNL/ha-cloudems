@@ -849,8 +849,26 @@ class NILMDetector:
         v1.15.1: deduplicates variable-speed heat pump entries — merges
         all heat_pump/heat type entries on the same phase into one entry
         showing the power range instead of separate per-step entries.
+
+        v1.17.5: filters out low-confidence and barely-seen devices.
+        A device must have been detected at least MIN_ON_EVENTS times
+        AND have confidence ≥ NILM_MIN_CONFIDENCE to appear.
+        Smart plug anchors (source="smart_plug") are always shown.
         """
+        MIN_ON_EVENTS_REQUIRED = 2   # seen at least twice before showing
+
         raw = [d.to_dict() for d in self._devices.values()]
+
+        # Filter: skip devices that have too low confidence or too few on-events,
+        # unless they come from a smart plug anchor (those are always reliable).
+        raw = [
+            d for d in raw
+            if d.get("source") == "smart_plug"
+            or (
+                d.get("confidence", 0) >= NILM_MIN_CONFIDENCE
+                and d.get("on_events", 0) >= MIN_ON_EVENTS_REQUIRED
+            )
+        ]
 
         # Deduplicate heat pump entries per phase
         hp_by_phase: dict = {}

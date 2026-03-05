@@ -1,5 +1,5 @@
 """
-CloudEMS Micro-Mobiliteit Tracker — v1.0.0
+CloudEMS Micro-Mobiliteit Tracker — v1.1.0
 
 Ondersteunt e-bikes, elektrische scooters en andere kleine accu's van het
 gezin. Verschil met auto-EV:
@@ -49,6 +49,25 @@ SCOOTER_POWER_MAX  = 700
 # Minimale laadduur voor een volledige sessie
 MIN_SESSION_MINUTES = 20
 SAVE_INTERVAL_S     = 300
+
+# Maximale laadduur voor een micro-EV sessie.
+# Een luchtreiniger / verwarming / koelkast draait uren of dagen aan één stuk;
+# een echte e-bike of scooter lader stopt na het volladen (max ~10 uur).
+MAX_SESSION_HOURS   = 10.0
+
+# Minimaal geladen energie voor een echte accu-sessie.
+# Voorkomt dat kleine continue verbruikers (luchtreiniger, TV standby) als
+# e-bike worden geregistreerd.
+MIN_SESSION_KWH     = 0.05   # 50 Wh — een e-bike laadt altijd meer dan dit
+
+# Device-types die door NILM al herkend zijn als iets anders dan een lader.
+# Deze worden nooit als micro-EV behandeld, ook al valt hun vermogen in het bereik.
+EXCLUDED_DEVICE_TYPES = {
+    "socket", "light", "entertainment", "refrigerator",
+    "heat_pump", "boiler", "cv_boiler", "electric_heater",
+    "washing_machine", "dryer", "dishwasher", "oven", "microwave",
+    "ev_charger", "kettle", "air_purifier",
+}
 
 # Meest gangbare e-bike batterijcapaciteit (Wh)
 TYPICAL_EBIKE_CAPACITY_WH    = 500
@@ -194,9 +213,29 @@ class MicroMobilityTracker:
             is_micro = (
                 dtype == "micro_ev_charger"
                 or (dev.get("is_on") and EBIKE_POWER_MIN <= power_w <= SCOOTER_POWER_MAX
-                    and dtype in ("unknown", "micro_ev_charger", "resistive", ""))
+                    and dtype in ("unknown", "micro_ev_charger", "resistive", "")
+                    and dtype not in EXCLUDED_DEVICE_TYPES)
             )
-            if not is_micro or not dev.get("is_on"):
+            # Sluit expliciet bekende niet-lader types uit (veiligheidsnet naast dtype-check)
+            if dtype in EXCLUDED_DEVICE_TYPES:
+                is_micro = False
+            # ── Naam-gebaseerde uitsluiting ────────────────────────────────────
+        # Als NILM of de gebruiker al een naam heeft gegeven die duidelijk
+        # geen lader is, nooit als micro-EV behandelen.
+        _NON_CHARGER_NAME_KEYWORDS = (
+            "purifier", "luchtreiniger", "heater", "verwarming", "lamp",
+            "light", "koelkast", "fridge", "freezer", "vriezer",
+            "tv", "television", "audio", "speaker", "printer",
+            "router", "modem", "nas", "server", "computer",
+            "wasmachine", "washing", "droger", "dryer", "vaatwasser", "dishwasher",
+            "oven", "magnetron", "microwave", "kettle", "waterkoker",
+            "boiler", "warmtepomp",
+        )
+        label_low = label.lower()
+        if any(kw in label_low for kw in _NON_CHARGER_NAME_KEYWORDS):
+            is_micro = False
+
+        if not is_micro or not dev.get("is_on"):
                 # Apparaat uit → sluit actieve sessie
                 did = dev.get("device_id", "")
                 if did in self._active:
@@ -239,8 +278,24 @@ class MicroMobilityTracker:
         if sess is None:
             return
         sess.end_ts = now
-        if sess.duration_min < MIN_SESSION_MINUTES:
-            _LOGGER.debug("MicroMobility: sessie te kort (%d min), genegeerd", sess.duration_min)
+        duration_min = sess.duration_min
+        duration_h   = duration_min / 60.0
+
+        if duration_min < MIN_SESSION_MINUTES:
+            _LOGGER.debug("MicroMobility: sessie te kort (%d min), genegeerd", duration_min)
+            return
+        if duration_h > MAX_SESSION_HOURS:
+            _LOGGER.info(
+                "MicroMobility: sessie '%s' te lang (%.1fh > %.0fh max) — "
+                "waarschijnlijk continu verbruiker, genegeerd",
+                sess.label, duration_h, MAX_SESSION_HOURS,
+            )
+            return
+        if sess.kwh < MIN_SESSION_KWH:
+            _LOGGER.debug(
+                "MicroMobility: sessie '%s' te weinig energie (%.3f kWh < %.3f kWh min), genegeerd",
+                sess.label, sess.kwh, MIN_SESSION_KWH,
+            )
             return
         self._sessions.append(sess)
         self._today_sessions.append(sess)

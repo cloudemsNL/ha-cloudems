@@ -22,6 +22,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 1),
         CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 2),
         CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 3),
+        CloudEMSCheapHourRankedBinarySensor(coordinator, entry, 4),
     ]
     for phase in range(1, (phase_count + 1) if phase_count == 3 else 2):
         entities.append(PhaseLimitedBinarySensor(coordinator, entry, phase))

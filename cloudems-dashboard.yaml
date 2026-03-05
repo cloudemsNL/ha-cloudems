@@ -662,51 +662,36 @@ views:
               attribute: gas_kwh
               name: Equivalent (kWh)
 
-      - type: entities
+      - type: markdown
         title: "⚡🔥 Goedkoopste Warmtebron"
-        entities:
-          - entity: sensor.cloudems_goedkoopste_warmtebron
-            name: Goedkoopste bron nu
-          - type: attribute
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            attribute: elec_price_kwh
-            name: Stroom (€/kWh)
-          - type: attribute
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            attribute: gas_per_kwh_heat
-            name: Gas via CV (€/kWh warmte)
-          - type: attribute
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            attribute: elec_boiler_per_kwh_heat
-            name: Stroom via boiler (€/kWh warmte)
-          - type: attribute
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            attribute: elec_hp_per_kwh_heat
-            name: Stroom via warmtepomp (€/kWh warmte)
-          - type: attribute
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            attribute: recommendation
-            name: Advies
+        content: |
+          {% set s = states('sensor.cloudems_goedkoopste_warmtebron') %}
+          {% set elec   = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'elec_price_kwh') %}
+          {% set gas    = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'gas_per_kwh_heat') %}
+          {% set boiler = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'elec_boiler_per_kwh_heat') %}
+          {% set hp     = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'elec_hp_per_kwh_heat') %}
+          {% set has_hp = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'has_heat_pump') %}
+          {% set bron   = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'cheapest_electric_source') %}
+          {% set advies = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'recommendation') %}
 
-      - type: conditional
-        conditions:
-          - condition: state
-            entity: sensor.cloudems_goedkoopste_warmtebron
-            state: "elektriciteit"
-        card:
-          type: markdown
-          title: "⚡ Verwarm nu via stroom"
-          content: |
-            {% set s = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'savings_electric_boiler_vs_gas') %}
-            {% set hp = state_attr('sensor.cloudems_goedkoopste_warmtebron', 'savings_heat_pump_vs_gas') %}
-            🟢 **Elektriciteit is goedkoper dan gas op dit moment.**
+          {% if s == 'elektriciteit' %}
+          🟢 **Elektriciteit is goedkoper dan gas**
+          {% elif s == 'gas' %}
+          🔵 **Gas is goedkoper dan elektriciteit**
+          {% else %}
+          🟡 **Elektriciteit en gas zijn nagenoeg even duur**
+          {% endif %}
 
-            | Optie | Besparing vs. gas |
-            |-------|-------------------|
-            | Elektrische boiler | {{ (s * 100) | round(2) }} ct/kWh |
-            | Warmtepomp | {{ (hp * 100) | round(2) }} ct/kWh |
+          | Verwarmingsbron | €/kWh warmte | Goedkoopst? |
+          |---|---|:---:|
+          | ⛽ Gas via CV (90% eff.) | {{ gas | round(4) }} | {{ '✅' if s == 'gas' else '' }} |
+          | ⚡ Elektrische boiler (resistief) | {{ boiler | round(4) }} | {{ '✅' if s == 'elektriciteit' and bron == 'elektrische_boiler' else '' }} |
+          {% if has_hp %}| 🌡️ Warmtepomp (COP {{ state_attr('sensor.cloudems_goedkoopste_warmtebron', 'heat_pump_cop') }}) | {{ hp | round(4) }} | {{ '✅' if s == 'elektriciteit' and bron == 'warmtepomp' else '' }} |
+          {% endif %}
 
-            ➡️ *Zet de boiler op stroomverwarming via een automatisering op `sensor.cloudems_goedkoopste_warmtebron = elektriciteit`.*
+          > {{ advies }}
+
+          **Huidige stroomprijs:** {{ elec | round(4) }} €/kWh
 
       - type: entities
         title: "💶 Energiekosten"

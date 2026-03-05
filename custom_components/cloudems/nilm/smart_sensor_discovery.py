@@ -1,5 +1,5 @@
 """
-CloudEMS Smart Sensor Discovery — v1.1.0
+CloudEMS Smart Sensor Discovery — v1.2.0
 
 Scant automatisch alle Home Assistant entiteiten en herkent:
   1. Smart plug vermogenssensoren  → NILM-ankers (bekend apparaat, bekende fase)
@@ -222,6 +222,11 @@ class SmartSensorDiscovery:
         self._hass = hass
         self._last_result: Optional[DiscoveryResult] = None
         self._last_run: float = 0.0
+        self._excluded_entity_ids: set = set()  # explicit exclusions from CloudEMS config
+
+    def set_excluded_entity_ids(self, entity_ids: set) -> None:
+        """Stel expliciete uitsluitingslijst in vanuit CloudEMS config (grid, solar, battery, P1, enz.)."""
+        self._excluded_entity_ids = {eid for eid in entity_ids if eid}
 
     # ── Publieke API ──────────────────────────────────────────────────────────
 
@@ -357,11 +362,31 @@ class SmartSensorDiscovery:
 
     # Patronen die bij een bekende vermogenssensor horen die GEEN stopcontact is.
     # Gebruikt scheidingstekens i.p.v. \b zodat 'solar_power' ook gematcht wordt.
+    #
+    # Categorieën:
+    #   • Grid / P1 / DSMR   — net, grid, import, export, p1, dsmr, slimme_meter, gas
+    #   • PV / omvormer       — solar, pv, zon, omvorm, inverter, string, opbrengst, yield
+    #   • Thuisbatterij       — battery, batterij, accu, opslag, soc, bms, laad, ontlaad
+    #   • Aggregaat/totaal    — totaal, total, mains, house_total, verbruik_totaal
+    #   • CloudEMS intern     — cloudems, fase, phase, l1/l2/l3, afname, teruglevering
     _EXCLUDE_PATTERNS = re.compile(
         r'(^|[_\s\.])('
-        r'grid|solar|pv|fase|phase|net(?=_)|l[123](?=_)|totaal|total|'
-        r'cloudems|import|export|teruglevering|afname|mains|house_total|'
-        r'verbruik_totaal|zon(?=_)|omvorm'
+        # Grid / P1 / DSMR
+        r'grid|net(?=_)|import|export|teruglevering|afname|mains|'
+        r'p1(?=_|$)|dsmr|slimme_meter|gas_meter|stroom_meter|'
+        # PV / omvormer
+        r'solar|pv(?=_|\d|$)|zon(?=_)|omvorm|inverter|omvormer|'
+        r'string(?=_|\d)|opbrengst|pv_power|solar_power|'
+        # Thuisbatterij / accu
+        r'battery(?=_|$)|batterij|accu(?=_|$)|opslag(?=_|$)|'
+        r'thuisbatterij|bms(?=_|$)|soc(?=_|$)|'
+        r'laadvermogen|ontlaadvermogen|'
+        r'charge_power|discharge_power|'
+        # Aggregaat / totaal
+        r'totaal|total|house_total|verbruik_totaal|home_power|'
+        r'house_consumption|woningverbruik|'
+        # CloudEMS intern / metingen
+        r'cloudems|fase|phase|l[123](?=_)'
         r')([_\s\.]|$)',
         re.IGNORECASE,
     )
@@ -386,6 +411,8 @@ class SmartSensorDiscovery:
         search   = f"{eid_low} {friendly}"
 
         # ── Stap 1: uitsluitfilter ─────────────────────────────────────────
+        if entity_id in self._excluded_entity_ids:
+            return None
         if self._EXCLUDE_PATTERNS.search(search):
             return None
 

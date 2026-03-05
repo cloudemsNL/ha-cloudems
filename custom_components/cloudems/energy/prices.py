@@ -110,6 +110,7 @@ class EnergyPriceFetcher:
         cheapest_hours  = [h["hour"] for h in sorted_by_price]
         cheapest_2h     = _find_cheapest_window(next_hours, 2)
         cheapest_3h     = _find_cheapest_window(next_hours, 3)
+        cheapest_4h     = _find_cheapest_window(next_hours, 4)
         now_hour        = datetime.now(timezone.utc).hour
 
         today_all = []
@@ -145,12 +146,15 @@ class EnergyPriceFetcher:
             "cheapest_hour_3":    cheapest_hours[2] if len(cheapest_hours) > 2 else None,
             "cheapest_2h_start":  cheapest_2h,
             "cheapest_3h_start":  cheapest_3h,
+            "cheapest_4h_start":  cheapest_4h,
             "in_cheapest_1h":     now_hour in cheapest_hours[:1],
             "in_cheapest_2h":     now_hour in cheapest_hours[:2],
             "in_cheapest_3h":     now_hour in cheapest_hours[:3],
+            "in_cheapest_4h":     now_hour in cheapest_hours[:4],
             "cheapest_1h_hours":  cheapest_hours[:1],
             "cheapest_2h_hours":  cheapest_hours[:2],
             "cheapest_3h_hours":  cheapest_hours[:3],
+            "cheapest_4h_hours":  cheapest_hours[:4],
             "source":             self._source,
             "country":            self._country,
             "slot_count":         len(self._prices),

@@ -1,5 +1,5 @@
 """
-CloudEMS Power Calculator — v1.10.2
+CloudEMS Power Calculator — v1.10.3
 
 Handles:
   - Auto-scaling: sensors that report in W or kW.
@@ -215,10 +215,13 @@ class PowerCalculator:
         """
         # Normalise power through kW auto-detection
         power_w: Optional[float] = None
+        power_was_measured = False   # True only when power came from a real sensor
         if raw_power is not None and power_entity:
             power_w = self.to_watts(power_entity, raw_power)
+            power_was_measured = True
         elif raw_power is not None:
             power_w = raw_power
+            power_was_measured = True
 
         voltage_v = raw_voltage if (raw_voltage and raw_voltage > 50) else self._default_v
         current_a = raw_current
@@ -233,12 +236,16 @@ class PowerCalculator:
         elif current_a is not None and power_w is None:
             power_w = self.derive_power(current_a, voltage_v, self._default_v)
             derived_from.append("P=U*I")
+            # power_was_measured stays False — derived from fallback voltage
 
-        # Case 3: have both P and I but no real voltage sensor → derive U = P/I
-        if power_w is not None and current_a is not None and raw_voltage is None:
+        # Case 3: derive U = P/I only when BOTH came from real sensors.
+        # Guard: if power was derived from the 230V default (Case 2), then
+        # P/I = (I×230)/I = 230 — circular, adds no information.
+        if (power_was_measured and current_a is not None
+                and raw_voltage is None and raw_current is not None):
             derived_v = self.derive_voltage(power_w, current_a)
             if derived_v and abs(derived_v - self._default_v) < 50:
-                # Only accept derived voltage if it's plausible (within 50V of nominal)
+                # Only accept if plausible (within 50V of nominal)
                 voltage_v = derived_v
                 derived_from.append("U=P/I")
 

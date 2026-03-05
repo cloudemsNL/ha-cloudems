@@ -1,5 +1,5 @@
 """
-CloudEMS Battery EPEX Scheduler — v1.9.0
+CloudEMS Battery EPEX Scheduler — v1.9.1
 
 Automatically plans the optimal battery charge/discharge schedule based on
 EPEX day-ahead electricity prices.
@@ -104,7 +104,16 @@ class BatteryEPEXScheduler:
 
     async def async_setup(self) -> None:
         saved = await self._store.async_load() or {}
+        self._plan_hits  = int(saved.get("plan_hits", 0))
+        self._plan_total = int(saved.get("plan_total", 0))
         _LOGGER.info("CloudEMS BatteryScheduler: setup (capacity=%.1f kWh)", self._capacity_kwh)
+
+    async def async_maybe_save(self) -> None:
+        """Persist learning counters — called from coordinator on shutdown."""
+        await self._store.async_save({
+            "plan_hits":  self._plan_hits,
+            "plan_total": self._plan_total,
+        })
 
     # ── Main evaluate loop ─────────────────────────────────────────────────────
 

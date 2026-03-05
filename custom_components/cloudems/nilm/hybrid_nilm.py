@@ -1,5 +1,5 @@
 """
-CloudEMS Hybride NILM — v1.1.0
+CloudEMS Hybride NILM — v1.2.0
 
 Verbetert de NILM-nauwkeurigheid via drie aanvullende lagen bovenop de bestaande
 NILMDetector, zonder bestaande functionaliteit te breken:
@@ -158,8 +158,9 @@ class HybridNILM:
                 matches, event.delta_power, event.phase, event.timestamp)
     """
 
-    def __init__(self, hass) -> None:
+    def __init__(self, hass, config: dict | None = None) -> None:
         self._hass      = hass
+        self._config    = config or {}
         self._discovery = SmartSensorDiscovery(hass)
         self._anchors:  Dict[str, AnchoredDevice] = {}
         self._weather:  WeatherContext = WeatherContext()
@@ -173,6 +174,44 @@ class HybridNILM:
     # ── Setup & tick ──────────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
+        # Bouw exclusie-set vanuit CloudEMS config: grid, solar, battery,
+        # P1, fase-sensoren — deze mogen NOOIT als NILM-anker worden geleerd.
+        cfg = self._config
+        excluded: set = set()
+
+        # Directe sensoren
+        for key in (
+            "grid_sensor", "solar_sensor", "battery_sensor",
+            "battery_soc_entity",
+            "import_power_sensor", "export_power_sensor",
+            "power_sensor_l1", "power_sensor_l2", "power_sensor_l3",
+            "voltage_sensor_l1", "voltage_sensor_l2", "voltage_sensor_l3",
+            "phase_sensors_L1", "phase_sensors_L2", "phase_sensors_L3",
+        ):
+            val = cfg.get(key, "")
+            if val:
+                excluded.add(val)
+
+        # Omvormer entity_ids (lijst van dicts)
+        for inv in cfg.get("inverter_configs", []):
+            eid = inv.get("entity_id", "")
+            if eid:
+                excluded.add(eid)
+
+        # Batterij power sensors (lijst van dicts)
+        for bc in cfg.get("battery_configs", []):
+            for bkey in ("power_sensor", "soc_sensor", "charge_sensor", "discharge_sensor"):
+                beid = bc.get(bkey, "")
+                if beid:
+                    excluded.add(beid)
+
+        if excluded:
+            _LOGGER.info(
+                "HybridNILM: %d CloudEMS-sensoren uitgesloten van NILM-leren: %s",
+                len(excluded), ", ".join(sorted(excluded)),
+            )
+
+        self._discovery.set_excluded_entity_ids(excluded)
         await self._async_refresh()
         _LOGGER.info("CloudEMS HybridNILM klaar — %d ankers ontdekt", len(self._anchors))
 

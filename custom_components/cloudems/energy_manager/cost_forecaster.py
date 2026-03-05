@@ -1,5 +1,5 @@
 """
-CloudEMS Energy Cost Forecaster — v1.9.0
+CloudEMS Energy Cost Forecaster — v1.9.1
 
 Predicts the remaining energy cost for today and the total cost for tomorrow.
 
@@ -42,6 +42,8 @@ STORAGE_VERSION = 1
 MIN_TRAINING_DAYS = 5
 # Days of history to keep for the learning model
 HISTORY_DAYS = 30
+# Periodic save interval — persist learned data even without a clean HA shutdown
+SAVE_INTERVAL_S = 300  # 5 minutes
 
 
 @dataclass
@@ -98,6 +100,8 @@ class EnergyCostForecaster:
 
         # Forecast accuracy tracking (last 14 days)
         self._accuracy_log: list = []   # [{date, forecast_eur, actual_eur}]
+        self._dirty:     bool  = False
+        self._last_save: float = 0.0
         self._mape_pct: Optional[float] = None
 
         # Last tick timestamp
@@ -132,6 +136,8 @@ class EnergyCostForecaster:
             "today_cost_actual":  round(self._today_cost_actual, 4),
             "today_date":         self._today_date,
         })
+        self._dirty     = False
+        self._last_save = time.time()
 
     # ── Tick (called every 10s from coordinator) ───────────────────────────────
 
@@ -155,6 +161,7 @@ class EnergyCostForecaster:
 
         self._today_kwh_actual  += kwh
         self._today_cost_actual += cost
+        self._dirty = True
 
         # Hourly accumulator
         if self._hour_key != hour_key:
@@ -167,8 +174,8 @@ class EnergyCostForecaster:
         else:
             self._hour_kwh += kwh
 
-        # Save every 60 ticks (~10 min)
-        if int(time.time()) % 600 < 10:
+        # Periodic save — persist learned data even without a clean HA shutdown
+        if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
             await self.async_save()
 
     async def _finalize_day(self) -> None:
@@ -176,6 +183,7 @@ class EnergyCostForecaster:
         # Nothing to log yet (first run)
         self._today_kwh_actual  = 0.0
         self._today_cost_actual = 0.0
+        self._dirty = True
         _LOGGER.info("CloudEMS CostForecaster: nieuwe dag, accumulatoren gereset")
 
     # ── Forecast ───────────────────────────────────────────────────────────────

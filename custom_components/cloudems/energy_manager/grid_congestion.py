@@ -1,5 +1,5 @@
 """
-CloudEMS Grid Congestion Detector — v1.10.0
+CloudEMS Grid Congestion Detector — v1.10.1
 
 Detects grid overload / congestion situations and recommends load shedding.
 
@@ -29,6 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STORAGE_KEY     = "cloudems_congestion_v1"
 STORAGE_VERSION = 1
+SAVE_INTERVAL_S = 300  # 5 minutes — persist even without a clean HA shutdown
 
 DEFAULT_CONGESTION_THRESHOLD_W   = 5000   # W — alert when import > this
 DEFAULT_PRICE_THRESHOLD_EUR_KWH  = 0.25   # EUR/kWh — only flag when price is also high
@@ -75,6 +76,8 @@ class GridCongestionDetector:
         self._active        = False
         self._event_start:  Optional[float] = None
         self._peak_today_w: float = 0.0
+        self._dirty:        bool  = False
+        self._last_save:    float = 0.0
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -83,6 +86,15 @@ class GridCongestionDetector:
         if data:
             self._history = data
         _LOGGER.debug("GridCongestionDetector ready (threshold=%.0f W)", self._threshold)
+
+    async def async_save(self) -> None:
+        await self._store.async_save(self._history)
+        self._dirty     = False
+        self._last_save = time.time()
+
+    async def async_maybe_save(self) -> None:
+        if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
+            await self.async_save()
 
     # ── Evaluation ────────────────────────────────────────────────────────────
 
@@ -108,6 +120,8 @@ class GridCongestionDetector:
             # Reset peak on new day
             self._peak_today_w = grid_import_w
         daily[day_key]["peak_w"] = max(daily[day_key]["peak_w"], grid_import_w)
+        if daily[day_key]["peak_w"] > (daily[day_key].get("peak_w", 0) - 1):
+            self._dirty = True
         if month_key not in monthly:
             monthly[month_key] = {"events": 0}
 
@@ -125,6 +139,7 @@ class GridCongestionDetector:
             self._event_start  = time.time()
             daily[day_key]["events"]   += 1
             monthly[month_key]["events"] += 1
+            self._dirty = True
             _LOGGER.warning(
                 "Grid congestion detected: %.0f W > %.0f W threshold (price %.3f €/kWh)",
                 grid_import_w, self._threshold, price_eur_kwh,
@@ -156,9 +171,9 @@ class GridCongestionDetector:
                 "reason":   f"Severe congestion ({utilisation:.0f}%) — shed loads immediately",
             })
 
-        # Persist every ~5 minutes (not every cycle to save I/O)
-        if int(time.time()) % 300 < 30:
-            await self._store.async_save(self._history)
+        # Periodic save — persist even without a clean HA shutdown
+        if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
+            await self.async_save()
 
         return CongestionResult(
             congestion_active = self._active,

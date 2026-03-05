@@ -665,7 +665,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         await self._hp_cop.async_setup()
 
         # v1.17: Hybride NILM — auto-discovery + contextpriors + 3-fase balans
-        self._hybrid = HybridNILM(self.hass)
+        self._hybrid = HybridNILM(self.hass, self._config)
         await self._hybrid.async_setup()
         # Koppel hybride laag aan de NILM-detector
         self._nilm._hybrid = self._hybrid
@@ -798,6 +798,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     for ph, amp in (("L1", t.current_l1),("L2", t.current_l2),("L3", t.current_l3)):
                         if amp is not None:
                             self._nilm.update_power(ph, amp * mains_v, source="p1_i*u")
+
+            # Store latest P1 data so _process_power_data can use it as fallback
+            # for phase voltage derivation (U = P/I) when no dedicated sensors configured.
+            self._last_p1_data = p1_data
 
             # v1.15.1: inject battery directly into NILM (prevents false edge detection)
             batt_configs = self._config.get("battery_configs", [])
@@ -1980,14 +1984,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Bidirectionele meters meten teruglevering per fase apart.
         # Netto fase vermogen = import_W − export_W
         from .const import CONF_POWER_L1_EXPORT, CONF_POWER_L2_EXPORT, CONF_POWER_L3_EXPORT
-        phase_export_keys = {"L1": CONF_POWER_L1_EXPORT, "L2": CONF_POWER_L2_EXPORT, "L3": CONF_POWER_L3_EXPORT}
+        # P1 per-phase data — used as fallback when no dedicated phase sensors configured.
+        # p1_data is populated earlier in _gather_power_data if P1 reader is active.
+        p1_data = getattr(self, "_last_p1_data", {})
+        p1_phase_power  = {"L1": "power_l1_import_w", "L2": "power_l2_import_w", "L3": "power_l3_import_w"}
+        p1_phase_export = {"L1": "power_l1_export_w",  "L2": "power_l2_export_w",  "L3": "power_l3_export_w"}
+        p1_phase_current= {"L1": "current_l1",          "L2": "current_l2",          "L3": "current_l3"}
+
+        phase_export_keys = {\"L1\": CONF_POWER_L1_EXPORT, \"L2\": CONF_POWER_L2_EXPORT, \"L3\": CONF_POWER_L3_EXPORT}
 
         for ph in phases:
             amp_key, volt_key, pwr_key = phase_conf[ph]
             raw_a = self._read_state(cfg.get(amp_key,""))
             raw_v = self._read_state(cfg.get(volt_key,""))
             raw_p = self._read_state(cfg.get(pwr_key,""))
-            # DSMR5 netto: subtract export if configured
+
+            # Fallback 1: use P1 per-phase current when no dedicated current sensor
+            if raw_a is None and p1_data:
+                p1_a = p1_data.get(p1_phase_current[ph])
+                if p1_a and p1_a > 0:
+                    raw_a = float(p1_a)
+
+            # Fallback 2: use P1 per-phase net power when no dedicated power sensor.
+            # This enables U = P/I derivation when both P1 power and current are available.
+            if raw_p is None and p1_data:
+                p1_imp = p1_data.get(p1_phase_power[ph])
+                p1_exp = p1_data.get(p1_phase_export[ph], 0.0) or 0.0
+                if p1_imp is not None:
+                    raw_p = float(p1_imp) - float(p1_exp)   # netto
+
+            # DSMR5 netto: subtract export if dedicated export sensor configured
             exp_eid = cfg.get(phase_export_keys.get(ph,""), "")
             if exp_eid and raw_p is not None:
                 raw_exp = self._read_state(exp_eid)

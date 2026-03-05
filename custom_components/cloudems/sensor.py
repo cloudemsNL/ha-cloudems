@@ -24,6 +24,7 @@ from .const import (
     GAS_KWH_PER_M3, GAS_BOILER_EFFICIENCY,
     DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP, DEFAULT_GAS_PRICE_EUR_M3,
     CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED, CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP,
+    CONF_HEAT_PUMP_ENTITY,
 )
 from .coordinator import CloudEMSCoordinator
 
@@ -279,6 +280,7 @@ class CloudEMSPriceSensor(CoordinatorEntity, SensorEntity):
             "cheapest_hour_3":   ep.get("cheapest_hour_3"),
             "cheapest_2h_start": ep.get("cheapest_2h_start"),
             "cheapest_3h_start": ep.get("cheapest_3h_start"),
+            "cheapest_4h_start": ep.get("cheapest_4h_start"),
         }
 
 
@@ -1424,6 +1426,7 @@ class CloudEMSPriceNextHourSensor(CoordinatorEntity, SensorEntity):
             "next_2h":                [{"hour": h.get("hour"), "price": h.get("price")} for h in next_hours[:2]],
             "cheapest_2h_start":      ep.get("cheapest_2h_start"),
             "cheapest_3h_start":      ep.get("cheapest_3h_start"),
+            "cheapest_4h_start":      ep.get("cheapest_4h_start"),
         }
 
 
@@ -1718,6 +1721,7 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "cheapest_hour_3":    ep.get("cheapest_hour_3"),
             "cheapest_2h_start":  ep.get("cheapest_2h_start"),
             "cheapest_3h_start":  ep.get("cheapest_3h_start"),
+            "cheapest_4h_start":  ep.get("cheapest_4h_start"),
             "data_source":        ep.get("source", "unknown"),
             "country":            ep.get("country", ""),
             "slot_count":         ep.get("slot_count", 0),
@@ -2877,20 +2881,31 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
         cfg           = self.coordinator._config
         boiler_eff    = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
         hp_cop        = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
+        has_hp        = bool(cfg.get(CONF_HEAT_PUMP_ENTITY, ""))
 
-        # Gas: €/kWh warmte via CV-ketel (90% rendement)
+        # Gas CV-ketel: €/kWh warmte
         gas_kwh_heat  = (gas_m3 / GAS_KWH_PER_M3) / GAS_BOILER_EFFICIENCY
 
-        # Electricity options — use the cheapest electric option for comparison
-        elec_boiler   = elec / boiler_eff    # direct elektrische verwarming
-        elec_hp       = elec / hp_cop        # warmtepomp
+        # Elektrische boiler (resistief, COP ≈ 1): altijd beschikbaar
+        elec_boiler   = elec / boiler_eff
 
-        # Primary comparison: gas CV vs. best electric option
-        best_electric = min(elec_boiler, elec_hp)
+        # Warmtepomp: alleen meenemen als er een WP geconfigureerd is.
+        # Zonder WP-entiteit berekenen we de kosten WEL voor de attributen (informatief),
+        # maar baseren we de state NIET op de WP — dat zou misleidend zijn.
+        elec_hp       = elec / hp_cop
 
-        if best_electric < gas_kwh_heat * 0.98:
+        # Vergelijking: staat = goedkoopste BESCHIKBARE elektrische optie vs. gas
+        if has_hp:
+            best_elec_kwh    = min(elec_boiler, elec_hp)
+            best_elec_source = "warmtepomp" if elec_hp <= elec_boiler else "elektrische_boiler"
+        else:
+            # Alleen resistief beschikbaar — vergelijk enkel boiler vs. gas
+            best_elec_kwh    = elec_boiler
+            best_elec_source = "elektrische_boiler"
+
+        if best_elec_kwh < gas_kwh_heat * 0.98:
             return "elektriciteit"
-        elif gas_kwh_heat < best_electric * 0.98:
+        elif gas_kwh_heat < best_elec_kwh * 0.98:
             return "gas"
         else:
             return "gelijk"
@@ -2902,41 +2917,76 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
         cfg = self.coordinator._config
         boiler_eff = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
         hp_cop     = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
+        has_hp     = bool(cfg.get(CONF_HEAT_PUMP_ENTITY, ""))
 
-        gas_kwh_raw   = round(gas_m3 / GAS_KWH_PER_M3, 5)
-        gas_kwh_heat  = round(gas_kwh_raw / GAS_BOILER_EFFICIENCY, 5)
-        elec_boiler   = round(elec / boiler_eff, 5) if elec else None
-        elec_hp       = round(elec / hp_cop, 5) if elec else None
+        gas_kwh_raw    = round(gas_m3 / GAS_KWH_PER_M3, 5)
+        gas_kwh_heat   = round(gas_kwh_raw / GAS_BOILER_EFFICIENCY, 5)
+        elec_boiler    = round(elec / boiler_eff, 5) if elec else None
+        elec_hp        = round(elec / hp_cop, 5) if elec else None
+
+        # Savings: positief = elektrisch goedkoper, negatief = gas goedkoper
         savings_boiler = round(gas_kwh_heat - elec_boiler, 5) if elec_boiler else None
         savings_hp     = round(gas_kwh_heat - elec_hp, 5) if elec_hp else None
+
+        # Cheapest available electric source
+        if has_hp and elec_hp and elec_boiler:
+            cheapest_elec_source = "warmtepomp" if elec_hp <= elec_boiler else "elektrische_boiler"
+            cheapest_elec_kwh    = min(elec_boiler, elec_hp)
+        else:
+            cheapest_elec_source = "elektrische_boiler"
+            cheapest_elec_kwh    = elec_boiler
+
+        # Recommendation: specific about WHICH option and WHY
+        state = self.native_value
+        if state == "elektriciteit":
+            if cheapest_elec_source == "warmtepomp":
+                recommendation = (
+                    f"Warmtepomp is goedkoopst: €{elec_hp:.4f}/kWh warmte "
+                    f"vs. gas €{gas_kwh_heat:.4f}/kWh — besparing {savings_hp*100:.1f} ct/kWh."
+                )
+            else:
+                recommendation = (
+                    f"Elektrische boiler is goedkoper dan gas: €{elec_boiler:.4f}/kWh warmte "
+                    f"vs. gas €{gas_kwh_heat:.4f}/kWh — besparing {savings_boiler*100:.1f} ct/kWh."
+                )
+        elif state == "gas":
+            if has_hp:
+                cheapest_electric_str = f"warmtepomp €{elec_hp:.4f}" if elec_hp < elec_boiler else f"boiler €{elec_boiler:.4f}"
+                recommendation = (
+                    f"Gas is goedkoper: CV €{gas_kwh_heat:.4f}/kWh warmte "
+                    f"vs. {cheapest_electric_str}/kWh — gebruik gas."
+                )
+            else:
+                recommendation = (
+                    f"Gas is goedkoper: CV €{gas_kwh_heat:.4f}/kWh warmte "
+                    f"vs. elektrische boiler €{elec_boiler:.4f}/kWh — gebruik gas."
+                )
+        else:
+            recommendation = "Elektriciteit en gas zijn nagenoeg even duur per kWh warmte."
 
         source_eid = cfg.get(CONF_GAS_PRICE_SENSOR, "")
         source = "sensor" if source_eid else ("config" if cfg.get(CONF_GAS_PRICE_FIXED) else "default")
 
         return {
             # Elektriciteit
-            "elec_price_kwh":           elec,
-            "elec_boiler_per_kwh_heat": elec_boiler,
-            "elec_hp_per_kwh_heat":     elec_hp,
+            "elec_price_kwh":                 elec,
+            "elec_boiler_per_kwh_heat":       elec_boiler,
+            "elec_hp_per_kwh_heat":           elec_hp if has_hp else None,
             "electric_boiler_efficiency_pct": round(boiler_eff * 100),
-            "heat_pump_cop":            hp_cop,
+            "heat_pump_cop":                  hp_cop if has_hp else None,
+            "has_heat_pump":                  has_hp,
+            "cheapest_electric_source":       cheapest_elec_source,
             # Gas
-            "gas_price_m3":             round(gas_m3, 4),
-            "gas_kwh_per_m3":           GAS_KWH_PER_M3,
-            "gas_price_per_kwh_raw":    gas_kwh_raw,
-            "gas_cv_efficiency_pct":    round(GAS_BOILER_EFFICIENCY * 100),
-            "gas_per_kwh_heat":         gas_kwh_heat,
-            "gas_price_source":         source,
+            "gas_price_m3":                   round(gas_m3, 4),
+            "gas_kwh_per_m3":                 GAS_KWH_PER_M3,
+            "gas_price_per_kwh_raw":          gas_kwh_raw,
+            "gas_cv_efficiency_pct":          round(GAS_BOILER_EFFICIENCY * 100),
+            "gas_per_kwh_heat":               gas_kwh_heat,
+            "gas_price_source":               source,
             # Vergelijking
             "savings_electric_boiler_vs_gas": savings_boiler,
-            "savings_heat_pump_vs_gas":       savings_hp,
-            "recommendation":          (
-                "Verwarm boiler via stroom — goedkoper dan gas op dit moment."
-                if self.native_value == "elektriciteit" else
-                "Gebruik gas — goedkoper dan stroom op dit moment."
-                if self.native_value == "gas" else
-                "Elektriciteit en gas zijn nagenoeg even duur per kWh warmte."
-            ),
+            "savings_heat_pump_vs_gas":       savings_hp if has_hp else None,
+            "recommendation":                 recommendation,
         }
 
 
