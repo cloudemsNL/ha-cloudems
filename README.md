@@ -1,3 +1,5 @@
+In ontwikkeling, nog niet productie klaar.
+
 # ⚡ CloudEMS — Slimme Energiebeheer voor Home Assistant
 
 > **"Stroom is geld. CloudEMS zorgt dat jij het beheert — niet het energiebedrijf."**
