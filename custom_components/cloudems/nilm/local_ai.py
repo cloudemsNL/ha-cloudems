@@ -102,10 +102,15 @@ class LocalAIClassifier:
         time_angle = (event.timestamp % 86400) / 86400 * 2 * math.pi
         day_of_week = (int(event.timestamp / 86400)) % 7
 
+        # FIX v1.21.2: index 2 was event.duration (duplicate of index 5).
+        # FEATURE_NAMES declares 'fall_time' at index 2.
+        # PowerEvent has no fall_time field (not measured at event-time), so use 0.0
+        # as a neutral placeholder. This keeps the feature vector aligned with FEATURE_NAMES
+        # and prevents the model from training on a duplicate duration feature.
         return [
             event.delta_power,
             event.rise_time,
-            event.duration,
+            0.0,                  # fall_time — not available at detection time
             event.peak_power,
             event.rms_power,
             event.duration,

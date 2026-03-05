@@ -430,6 +430,15 @@ class NILMDetector:
         recent   = list(buf)[-3:]
         avg      = sum(p for _, p in recent) / len(recent)
         baseline = self._baseline_power[phase]
+
+        # FIX v1.21.2: seed baseline on first real reading to avoid 100+ min false event flood.
+        # With alpha=0.002 the EMA takes ~500 samples (83 min) to converge from 0 to actual power.
+        # Every reading during warmup triggers a false "device on" event.
+        # Seeding directly prevents this without affecting ongoing tracking.
+        if baseline == 0.0 and avg > 0:
+            self._baseline_power[phase] = avg
+            baseline = avg
+
         delta    = avg - baseline
 
         if abs(delta) >= threshold:
@@ -439,7 +448,11 @@ class NILMDetector:
                 event = PowerEvent(
                     timestamp   = timestamp,
                     delta_power = delta,
-                    rise_time   = recent[-1][0] - recent[0][0],
+                    # FIX v1.21.1: rise_time op basis van 3 samples × 10s polling-interval
+                    # geeft altijd ~20s, wat niet overeenkomt met de elektrische rise times
+                    # in de database (0.5–30s). Stel rise_time in op 0.0 zodat de database-
+                    # matcher de rise_time-component overslaat en alleen op vermogen matcht.
+                    rise_time   = 0.0,
                     duration    = 0.0,
                     peak_power  = max(p for _, p in recent),
                     rms_power   = avg,
@@ -479,7 +492,6 @@ class NILMDetector:
         lang = getattr(getattr(self._hass, "config", None), "language", "en")
         lang = lang[:2].lower() if lang else "en"
         matches: List[Dict] = self._db.classify(event.delta_power, event.rise_time, language=lang)
-        self._diag_log_event(event, matches)
         if self._local_ai.is_available:
             matches = self._merge_matches(matches, self._local_ai.classify(event))
 
@@ -500,6 +512,9 @@ class NILMDetector:
                 )
             except Exception as _he:
                 _LOGGER.debug("HybridNILM enrich fout: %s", _he)
+
+        # FIX v1.21.2: log diagnostics AFTER all enrichment so shown confidence is final
+        self._diag_log_event(event, matches)
 
         best_conf = matches[0]["confidence"] if matches else 0.0
 
@@ -549,8 +564,16 @@ class NILMDetector:
             "fallback": True,
         }
         try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post(url, json={"model": model, "prompt": prompt, "stream": False},
+            # FIX v1.21.2: reuse the coordinator's shared aiohttp session instead of
+            # creating a new ClientSession per call (saves DNS + TCP connect overhead).
+            import aiohttp as _aiohttp
+            _own_session = False
+            _sess = getattr(self, "_shared_session", None)
+            if _sess is None or _sess.closed:
+                _sess = _aiohttp.ClientSession()
+                _own_session = True
+            try:
+              async with _sess.post(url, json={"model": model, "prompt": prompt, "stream": False},
                                   timeout=aiohttp.ClientTimeout(total=8)) as r:
                     elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
                     log_entry["ms"] = elapsed_ms
@@ -591,6 +614,9 @@ class NILMDetector:
                     self._ollama_calls_failed += 1
                     self._ollama_last_error = f"HTTP {r.status}"
                     log_entry["result"] = f"❌ HTTP {r.status}"
+            finally:
+                if _own_session:
+                    await _sess.close()
         except asyncio.TimeoutError:
             elapsed_ms = round((_t.monotonic() - t_start) * 1000, 1)
             self._ollama_calls_failed += 1

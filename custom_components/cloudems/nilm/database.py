@@ -52,8 +52,14 @@ class ApplianceSignature:
             return False, 0.0
 
         if self.rise_time > 0:
-            rise_diff   = abs(rise_time - self.rise_time) / max(self.rise_time, 1.0)
-            confidence += max(0.0, 1.0 - rise_diff) * 0.3
+            if rise_time > 0:
+                # Gemeten rise_time beschikbaar: gebruik voor matching
+                rise_diff   = abs(rise_time - self.rise_time) / max(self.rise_time, 1.0)
+                confidence += max(0.0, 1.0 - rise_diff) * 0.3
+            else:
+                # rise_time onbekend (polling interval te grof) — geef halve credit
+                # zodat totale max 0.70 + 0.15 = 0.85 is i.p.v. altijd 0.70
+                confidence += 0.15
 
         return confidence >= 0.5, min(confidence, 1.0)
 

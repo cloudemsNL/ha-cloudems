@@ -578,7 +578,7 @@ class _NilmEnhancer:
                 log_upd  = (0.4*math.log(p_w+eps) + 0.3*math.log(p_t+eps) + 0.2*math.log(p_a+eps) + 0.1*math.log(p_c+eps))
                 posterior = 1.0 / (1.0 + math.exp(-(log_odds + 0.5*log_upd)))
                 posterior = min(_EV_MAX, posterior * p_u)
-            new_conf = min(_EV_MAX, posterior) if dev.get("confirmed") else (min(orig, posterior) if posterior < orig else min(_EV_MAX, posterior*0.8))
+            new_conf = min(_EV_MAX, posterior) if dev.get("confirmed") else min(_EV_MAX, posterior)
             if abs(new_conf - orig) > 0.01: self._stats["conf_adjustments"] += 1
             dev["confidence"] = round(new_conf, 4)
             result.append(dev)
@@ -660,14 +660,29 @@ class _NilmEnhancer:
                 mu = window.mean(); sigma = window.std() + 1e-6
                 x  = ((window - mu) / sigma).reshape(1, -1).astype(_np.float32)
                 out = sess.run(None, {sess.get_inputs()[0].name: x})
-                pred = float(out[0][0][0]) * sigma + mu
-                if pred > 5.0:
+                pred = float(out[0].flatten()[0]) * sigma + mu
+
+                # FIX v1.21.1: ONNX-modellen produceren negatieve waarden wanneer
+                # het model verkeerd is getraind of verkeerde schaling heeft.
+                # Accepteer alleen plausibele positieve vermogenswaarden (5W–20kW).
+                if 5.0 < pred < 20000.0:
                     dev["engine_seq2point_w"] = round(pred, 1)
                     self._stats["seq2point_inferences"] += 1
                     cur_w = dev.get("current_power", 0.0) or 0.0
                     if cur_w > 0 and abs(pred - cur_w) / (cur_w + 1e-6) > 0.3:
                         dev["current_power"] = round(0.7*cur_w + 0.3*pred, 1)
                         self._stats["seq2point_corrections"] += 1
+                else:
+                    # Model geeft ongeldige voorspelling — markeer voor diagnostiek
+                    dev["engine_seq2point_invalid"] = round(pred, 1)
+                    self._stats["seq2point_invalid"] = self._stats.get("seq2point_invalid", 0) + 1
+                    if self._stats.get("seq2point_invalid", 0) == 1:
+                        _NILM_LOGGER.warning(
+                            "Seq2Point model '%s' geeft ongeldige output (%.1fW). "
+                            "Controleer of de ONNX-modellen correct zijn getraind. "
+                            "Seq2Point-correctie uitgeschakeld voor dit apparaattype.",
+                            dtype, pred,
+                        )
             except Exception as exc:
                 _NILM_LOGGER.debug("Seq2Point fout (%s): %s", dtype, exc)
             result.append(dev)
@@ -1206,6 +1221,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     async def async_setup(self):
         self._session = aiohttp.ClientSession()
         self._nilm._cloud_ai._session = self._session
+        self._nilm._shared_session    = self._session  # FIX v1.21.2: reuse for Ollama calls
         await self._nilm.async_load()
 
         # ── LearningBackup: tweede schrijfpad voor alle leerdata ──────────────
