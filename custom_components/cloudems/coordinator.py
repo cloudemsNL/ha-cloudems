@@ -112,6 +112,7 @@ from .const import (
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
     DOMAIN, UPDATE_INTERVAL_FAST, DEFAULT_MAX_CURRENT, DEFAULT_MAINS_VOLTAGE_V,
     STORAGE_KEY_NILM_DEVICES, STORAGE_KEY_NILM_ENERGY,
+    STORAGE_KEY_NILM_ENHANCER, STORAGE_KEY_NILM_ANOMALY,  # v1.22.0
     CONF_GRID_SENSOR, CONF_PHASE_SENSORS, CONF_SOLAR_SENSOR,
     CONF_BATTERY_SENSOR, CONF_EV_CHARGER_ENTITY,
     CONF_ENERGY_PRICES_COUNTRY, CONF_CLOUD_API_KEY,
@@ -136,6 +137,7 @@ from .const import (
 )
 from .nilm.detector import NILMDetector, DetectedDevice
 from .nilm.hybrid_nilm import HybridNILM
+from .nilm.anomaly_detector import NILMAnomalyDetector  # v1.22.0
 from .energy_manager.home_baseline import HomeBaselineLearner
 from .energy_manager.ev_session_learner import EVSessionLearner
 from .energy_manager.nilm_schedule import NILMScheduleLearner
@@ -735,6 +737,45 @@ class _NilmEnhancer:
         }
 
 
+    # ── Persistentie (v1.22.0) ────────────────────────────────────────────────
+
+    def to_persist(self) -> dict:
+        """Serialiseer FSM-states en evidence-scores voor herstart-persistentie."""
+        fsm_data = {}
+        for did, fsm in self._fsm.items():
+            fsm_data[did] = {
+                "device_id":    fsm.device_id,
+                "device_type":  fsm.device_type,
+                "states":       list(fsm.states),
+                "current_idx":  fsm.current_state_idx,
+                "active":       fsm.active,
+            }
+        ev_data = {}
+        for did, ev in self._evidence.items():
+            ev_data[did] = {
+                "device_id": ev.device_id,
+                "score":     round(ev.score, 4),
+            }
+        return {"fsm": fsm_data, "evidence": ev_data}
+
+    def from_persist(self, data: dict) -> None:
+        """Herstel FSM-states en evidence-scores na herstart."""
+        for did, d in data.get("fsm", {}).items():
+            fsm = _FsmDevice(device_id=d["device_id"], device_type=d.get("device_type", ""))
+            fsm.states = list(d.get("states", []))
+            fsm.current_state_idx = d.get("current_idx", 0)
+            fsm.active = d.get("active", False)
+            self._fsm[did] = fsm
+        for did, d in data.get("evidence", {}).items():
+            ev = _EvidenceAcc(device_id=d["device_id"])
+            ev.score = float(d.get("score", 0.0))
+            self._evidence[did] = ev
+        _LOGGER.debug(
+            "NilmEnhancer hersteld: %d FSM-states, %d evidence-scores",
+            len(self._fsm), len(self._evidence),
+        )
+
+
 class CloudEMSCoordinator(DataUpdateCoordinator):
     """Main coordinator for CloudEMS v1.4.1."""
 
@@ -901,6 +942,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v1.21.0: CPU-adaptive NILM enhancer
         self._nilm_enhancer = _NilmEnhancer()
+
+        # v1.22.0: Anomaly detector + enhancer/anomaly stores
+        self._nilm_anomaly = NILMAnomalyDetector()
+        self._store_enhancer = Store(hass, 1, STORAGE_KEY_NILM_ENHANCER)
+        self._store_anomaly  = Store(hass, 1, STORAGE_KEY_NILM_ANOMALY)
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -1223,6 +1269,20 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._nilm._cloud_ai._session = self._session
         self._nilm._shared_session    = self._session  # FIX v1.21.2: reuse for Ollama calls
         await self._nilm.async_load()
+
+        # v1.22.0: Herstel NilmEnhancer FSM/evidence en AnomalyDetector state na herstart
+        try:
+            enhancer_data = await self._store_enhancer.async_load()
+            if enhancer_data:
+                self._nilm_enhancer.from_persist(enhancer_data)
+        except Exception as _enh_load_err:
+            _LOGGER.debug("NilmEnhancer state load fout (niet-kritisch): %s", _enh_load_err)
+        try:
+            anomaly_data = await self._store_anomaly.async_load()
+            if anomaly_data:
+                self._nilm_anomaly.from_persist(anomaly_data)
+        except Exception as _ano_load_err:
+            _LOGGER.debug("AnomalyDetector state load fout (niet-kritisch): %s", _ano_load_err)
 
         # ── LearningBackup: tweede schrijfpad voor alle leerdata ──────────────
         from .energy_manager.learning_backup import LearningBackup
@@ -2760,6 +2820,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Save NILM
             await self._nilm.async_save()
 
+            # v1.22.0: Periodiek opslaan van NilmEnhancer FSM/evidence en AnomalyDetector
+            try:
+                await self._store_enhancer.async_save(self._nilm_enhancer.to_persist())
+            except Exception:
+                pass
+            try:
+                await self._store_anomaly.async_save(self._nilm_anomaly.to_persist())
+            except Exception:
+                pass
+
             # ── Periodiek opslaan: alle zelflerende modules ───────────────────
             # Modules die hun eigen dirty/interval-logica hebben maar geen
             # expliciete save-aanroep in de update-loop — max elke 2-10 min.
@@ -2926,6 +2996,28 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     self._data["nilm_engine_stats"] = enhanced["stats"]
                 except Exception as _enh_err:
                     _LOGGER.warning("NilmEnhancer fout (niet-kritisch): %s", _enh_err)
+
+            # v1.22.0: Anomalie-detectie op bevestigde apparaten
+            if self._data.get("nilm_devices"):
+                try:
+                    new_alerts = self._nilm_anomaly.update(self._data["nilm_devices"])
+                    self._data["nilm_anomalies"] = self._nilm_anomaly.get_active_alerts()
+                    # Stuur notificatie voor nieuwe anomalieën
+                    if new_alerts and hasattr(self, "_notification_engine") and self._notification_engine:
+                        for alert in new_alerts:
+                            try:
+                                lang = getattr(getattr(self.hass, "config", None), "language", "nl")[:2].lower()
+                                msg = alert.message_nl if lang == "nl" else alert.message_en
+                                self._notification_engine.ingest({
+                                    "type":     "nilm_anomaly",
+                                    "severity": alert.severity,
+                                    "message":  msg,
+                                    "device_id": alert.device_id,
+                                })
+                            except Exception:
+                                pass
+                except Exception as _ano_err:
+                    _LOGGER.debug("AnomalyDetector fout (niet-kritisch): %s", _ano_err)
 
             return self._data
 

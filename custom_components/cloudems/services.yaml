@@ -219,3 +219,22 @@ assign_device_to_room:
       required: false
       selector:
         text:
+
+export_nilm_csv:
+  name: Exporteer NILM data als CSV
+  description: >
+    Exporteert NILM-apparaatdata (vermogenshistorie, energie, duty cycle, anomalieën)
+    naar een CSV-bestand in de Home Assistant config-map (/config/cloudems_nilm_export.csv).
+  fields:
+    filename:
+      name: Bestandsnaam
+      description: Naam van het exportbestand (standaard: cloudems_nilm_export.csv)
+      required: false
+      selector:
+        text:
+    include_anomalies:
+      name: Anomalieën meenemen
+      description: Voeg kolom toe met laatste anomalie per apparaat
+      required: false
+      selector:
+        boolean:

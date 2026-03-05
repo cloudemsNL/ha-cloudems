@@ -170,6 +170,80 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "generate_report",        generate_report)
     hass.services.async_register(DOMAIN, "boiler_override",        boiler_override)
 
+    # v1.22.0: Export NILM data as CSV
+    async def export_nilm_csv(call: ServiceCall):
+        """Exporteer alle NILM-apparaatdata naar CSV in /config/."""
+        import csv, os, io
+        from datetime import datetime
+
+        filename = call.data.get("filename", "cloudems_nilm_export.csv")
+        include_anomalies = call.data.get("include_anomalies", True)
+
+        # Haal data op
+        devices = coordinator.data.get("nilm_devices", []) if coordinator.data else []
+        anomalies = coordinator.data.get("nilm_anomalies", []) if coordinator.data else []
+
+        # Bouw anomalie-lookup per device_id
+        anomaly_by_id = {a["device_id"]: a for a in anomalies}
+
+        # CSV-velden
+        fieldnames = [
+            "device_id", "name", "device_type", "phase",
+            "confirmed", "confidence", "on_events",
+            "current_power_w", "is_on",
+            "today_kwh", "week_kwh", "month_kwh", "total_kwh",
+            "duty_cycle_pct",
+            "source", "last_seen",
+        ]
+        if include_anomalies:
+            fieldnames += ["anomaly_severity", "anomaly_deviation_pct", "anomaly_message"]
+
+        rows = []
+        for dev in devices:
+            energy = dev.get("energy", {})
+            row = {
+                "device_id":       dev.get("device_id", ""),
+                "name":            dev.get("display_name") or dev.get("name", ""),
+                "device_type":     dev.get("device_type", ""),
+                "phase":           dev.get("phase", "L1"),
+                "confirmed":       dev.get("confirmed", False),
+                "confidence":      round(float(dev.get("confidence", 0)), 3),
+                "on_events":       dev.get("on_events", 0),
+                "current_power_w": dev.get("current_power", 0),
+                "is_on":           dev.get("is_on", False),
+                "today_kwh":       round(float(energy.get("today_kwh", 0)), 4),
+                "week_kwh":        round(float(energy.get("week_kwh", 0)), 4),
+                "month_kwh":       round(float(energy.get("month_kwh", 0)), 4),
+                "total_kwh":       round(float(energy.get("total_kwh", 0)), 4),
+                "duty_cycle_pct":  round(float(dev.get("duty_cycle", 0)) * 100, 1),
+                "source":          dev.get("source", ""),
+                "last_seen":       datetime.fromtimestamp(
+                    float(dev.get("last_seen", 0))
+                ).strftime("%Y-%m-%d %H:%M:%S") if dev.get("last_seen") else "",
+            }
+            if include_anomalies:
+                ano = anomaly_by_id.get(dev.get("device_id", ""))
+                row["anomaly_severity"]      = ano["severity"] if ano else ""
+                row["anomaly_deviation_pct"] = ano["deviation_pct"] if ano else ""
+                row["anomaly_message"]       = ano.get("message_nl", "") if ano else ""
+            rows.append(row)
+
+        # Schrijf CSV naar /config/
+        config_dir = hass.config.config_dir
+        filepath   = os.path.join(config_dir, filename)
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            _LOGGER.info(
+                "CloudEMS NILM export: %d apparaten naar %s", len(rows), filepath
+            )
+        except OSError as exc:
+            _LOGGER.error("NILM export mislukt: %s", exc)
+
+    hass.services.async_register(DOMAIN, "export_nilm_csv", export_nilm_csv)
+
     async def reset_drift_baseline(call: ServiceCall):
         """Reset the drift baseline for a device (e.g. after replacement).
         

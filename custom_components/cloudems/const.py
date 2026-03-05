@@ -209,6 +209,27 @@ NILM_MODE_CLOUD_AI   = "cloud_ai"
 NILM_MODE_OLLAMA     = "ollama"
 NILM_MIN_CONFIDENCE  = 0.65   # drempel voor registratie — database haalt max ~0.70 door polling-artefact rise_time
 NILM_HIGH_CONFIDENCE = 0.85   # drempel voor auto-bevestiging zonder gebruikersactie
+
+# v1.22.0: Per-apparaat minimum detecties vóór weergave in HA.
+# Een droger of EV-lader wordt wekelijks gebruikt — 3× vereisen duurt te lang.
+# Een koelkast moet 20× gezien zijn om cycli goed te herkennen.
+NILM_MIN_ON_EVENTS: dict = {
+    "default":          3,
+    "refrigerator":    20,   # hoge cyclusfrequentie nodig voor betrouwbaar beeld
+    "heat_pump":       10,
+    "dryer":            2,   # wekelijks gebruik — laagste drempel
+    "ev_charger":       2,
+    "washing_machine":  3,
+    "dishwasher":       3,
+    "boiler":           5,
+    "kettle":           5,
+    "microwave":        5,
+    "oven":             3,
+    "television":       3,
+    "light":            5,
+    "computer":         3,
+    "socket":           3,
+}
 NILM_LEARNING_WINDOW = 30
 NILM_FEEDBACK_CORRECT   = "correct"
 NILM_FEEDBACK_INCORRECT = "incorrect"
@@ -315,6 +336,9 @@ DEFAULT_PRICE_THRESHOLD_CHEAP = 0.10    # EUR/kWh
 # Storage key for PID state persistence
 STORAGE_KEY_PID_STATE         = f"{DOMAIN}_pid_state_v1"
 STORAGE_KEY_NILM_THRESHOLD    = f"{DOMAIN}_nilm_threshold_v1"
+STORAGE_KEY_NILM_ENHANCER     = f"{DOMAIN}_nilm_enhancer_v1"   # v1.22.0: FSM+evidence persistence
+STORAGE_KEY_NILM_ANOMALY      = f"{DOMAIN}_nilm_anomaly_v1"    # v1.22.0: anomaly detector state
+STORAGE_KEY_NILM_DUTY_CYCLE   = f"{DOMAIN}_nilm_duty_cycle_v1" # v1.22.0: per-device duty cycle
 
 # ── Compat aliases from v1.3 / v1.4 ──────────────────────────────────────────
 CONF_EV_PRICE_THRESHOLD       = CONF_EV_CHEAP_THRESHOLD

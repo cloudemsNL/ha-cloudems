@@ -186,6 +186,29 @@ class DetectedDevice:
     # v1.20 — room meter: originating HA entity for area registry lookup
     source_entity_id: str = ""      # entity_id of smart plug / power sensor that anchored this device
 
+    # v1.22.0 — duty cycle tracking: % van de tijd dat het apparaat aan is
+    # Cyclische apparaten (koelkast ~35%, warmtepomp ~50%) hebben andere patronen
+    # dan apparaten die altijd volledig aan zijn (droger, oven).
+    duty_cycle_on_s:  float = 0.0   # totaal aantal seconden aan
+    duty_cycle_tot_s: float = 0.0   # totaal aantal seconden getrackt
+    _duty_last_ts:    float = field(default=0.0, repr=False, compare=False)
+
+    @property
+    def duty_cycle(self) -> float:
+        """Actuele duty cycle 0.0–1.0. 0.0 als nog geen data."""
+        if self.duty_cycle_tot_s < 60:
+            return 0.0
+        return round(self.duty_cycle_on_s / self.duty_cycle_tot_s, 3)
+
+    def tick_duty_cycle(self, ts: float) -> None:
+        """Update duty cycle teller elke 10s tick."""
+        if self._duty_last_ts > 0:
+            elapsed = min(ts - self._duty_last_ts, 30.0)  # max 30s per stap
+            self.duty_cycle_tot_s += elapsed
+            if self.is_on:
+                self.duty_cycle_on_s += elapsed
+        self._duty_last_ts = ts
+
     # v1.4 — energy tracking (runtime; persisted separately)
     energy: DeviceEnergy = field(default_factory=lambda: DeviceEnergy(device_id=""))
     _on_start_ts: float  = field(default=0.0, repr=False, compare=False)
@@ -234,6 +257,9 @@ class DetectedDevice:
             "user_suppressed": self.user_suppressed,
             "source_entity_id": self.source_entity_id,
             "energy":         self.energy.to_dict(),
+            "duty_cycle":     self.duty_cycle,
+            "duty_cycle_on_s":  round(self.duty_cycle_on_s, 0),
+            "duty_cycle_tot_s": round(self.duty_cycle_tot_s, 0),
         }
 
 
@@ -368,6 +394,8 @@ class NILMDetector:
                     user_hidden    = dev_data.get("user_hidden", False),
                     user_suppressed = dev_data.get("user_suppressed", False),
                     source_entity_id = dev_data.get("source_entity_id", ""),
+                    duty_cycle_on_s  = dev_data.get("duty_cycle_on_s", 0.0),
+                    duty_cycle_tot_s = dev_data.get("duty_cycle_tot_s", 0.0),
                 )
                 dev.energy.device_id = dev.device_id
                 self._devices[dev.device_id] = dev
@@ -474,6 +502,7 @@ class NILMDetector:
         for dev in self._devices.values():
             if dev.phase == phase:
                 dev.tick_energy(ts)
+                dev.tick_duty_cycle(ts)  # v1.22.0: duty cycle tracking
 
     # ── Classification ────────────────────────────────────────────────────────
 
@@ -921,14 +950,14 @@ class NILMDetector:
         AND have confidence ≥ NILM_MIN_CONFIDENCE to appear.
         Smart plug anchors (source="smart_plug") are always shown.
         """
-        MIN_ON_EVENTS_REQUIRED = 3   # seen at least 3× before showing — reduces false positives
+        # v1.22.0: Per-apparaattype minimum on_events drempel (was hardcoded 3).
+        # Bijv. een droger of EV-lader wordt zelden gebruikt — 3× vereisen duurt weken.
+        # Een koelkast heeft meer cycli nodig voor betrouwbare herkenning.
+        from ..const import NILM_MIN_ON_EVENTS as _MIN_EV_MAP
 
         raw = [d.to_dict() for d in self._devices.values()]
 
         # Filter: verwijder altijd device-types die nooit huishoudapparaten zijn.
-        # solar_inverter → PV-omvormer (coordinator geeft dit zelf al door)
-        # battery        → thuisbatterij (al apart gemeten)
-        # solar_inverter kan ook door AI worden geclassificeerd op grote negatieve delta
         ALWAYS_EXCLUDE_TYPES = {"solar_inverter", "battery", "opslag"}
         raw = [d for d in raw if d.get("device_type", "") not in ALWAYS_EXCLUDE_TYPES]
 
@@ -940,14 +969,15 @@ class NILMDetector:
                 if d.get("source_entity_id", "") not in self._config_sensor_eids
             ]
 
-        # Filter: skip devices that have too low confidence or too few on-events,
-        # unless they come from a smart plug anchor (those are always reliable).
+        # Per-type minimum on_events drempel
         raw = [
             d for d in raw
             if d.get("source") == "smart_plug"
             or (
                 d.get("confidence", 0) >= NILM_MIN_CONFIDENCE
-                and d.get("on_events", 0) >= MIN_ON_EVENTS_REQUIRED
+                and d.get("on_events", 0) >= _MIN_EV_MAP.get(
+                    d.get("device_type", ""), _MIN_EV_MAP["default"]
+                )
             )
         ]
 
