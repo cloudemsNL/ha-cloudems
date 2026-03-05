@@ -108,5 +108,3 @@ MIT © 2026 CloudEMS · [cloudems.eu](https://cloudems.eu)
 *Trefwoorden: Home Assistant energiebeheer, NILM, EPEX prijzen, dynamisch laden, piekafschaving, fase-balancering, zonnebegrenzing, Ollama AI*
 
 ---
-
-**Is dit de structuur die je zocht voor je GitHub pagina?**
