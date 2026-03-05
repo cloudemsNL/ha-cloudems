@@ -1,5 +1,5 @@
 """
-CloudEMS PV Forecasting — v1.4.1
+CloudEMS PV Forecasting — v1.4.2
 
 Two-layer forecast engine:
   Layer 1: Statistical model using historically learned hourly yield curves
@@ -11,8 +11,14 @@ Self-learning orientation / azimuth / tilt:
   - CloudEMS measures actual peak irradiance times throughout the day.
   - The hour with the highest yield → solar noon → azimuth is derived.
   - Morning-heavy vs afternoon-heavy yield → east vs west bias.
-  - After ~30 clear days the orientation estimate becomes "confident".
+  - After ~30 clear days (1800 minutes) the orientation estimate becomes "confident".
   - Users can fill in values manually; tooltip says "leave blank to self-learn".
+
+Changelog (v1.4.2):
+  - CHG: MIN_ORIENTATION_SAMPLES 600 → 1800 (30 sunny hours instead of 10)
+         for a much more reliable azimuth/tilt estimate before "confident" is set.
+  - CHG: Log progress bar capped at 30 chars (was unbounded, causing 1800-char lines).
+  - CHG: Log frequency changed from every 10 to every 30 samples.
 
 Changelog (v1.4.1):
   - FIX: avg_az_om / _azom UnboundLocalError (was only assigned inside if-block)
@@ -56,9 +62,9 @@ OPEN_METEO_URL = OPEN_METEO_URL_BASE  # legacy, unused — URL built dynamically
 
 # Minimum samples before orientation is "confident".
 # Each sample = one clear-sky *minute* (sampled once per minute).
-# 10 hours × 60 min = 600 samples → confirmed after ~2 sunny days.
-# 30 hours × 60 min = 1800 samples → very conservative (use if preferred).
-MIN_ORIENTATION_SAMPLES = 600
+# 30 hours × 60 min = 1800 samples → confirmed after ~5 sunny days (conservative).
+# This ensures the learned azimuth/tilt is based on enough diverse sun positions.
+MIN_ORIENTATION_SAMPLES = 1800
 
 # Minimum yield fraction (power/peak) to count as a learning sample.
 # 0.10 = 10% of peak — filters night/standby but includes overcast mornings.
@@ -226,7 +232,7 @@ class PVForecast:
             # Orientation learning — at most ONCE per minute, only when sun is up.
             # CLEAR_SKY_MIN_FRAC filters out night/standby readings.
             # Per-minute sampling means 1 sunny hour = 60 samples, visible progress
-            # every minute in the dashboard (600 samples = 10 hours = confident).
+            # every minute in the dashboard (1800 samples = 30 hours = confident).
             cur_min = now.hour * 60 + now.minute
             last_learn_min = getattr(p, "_last_learn_min", -1)
             if frac > CLEAR_SKY_MIN_FRAC and cur_min != last_learn_min:
@@ -275,23 +281,26 @@ class PVForecast:
                 p.orientation_confident = True
                 just_confident = True
 
-            # Log on first sample, every 10 after that, and at confirmation
+            # Log on first sample, every 30 after that, and at confirmation
+            # Progress bar is capped at 30 chars for readability
+            BAR_LEN = 30
+            filled = min(round(p.clear_sky_samples / MIN_ORIENTATION_SAMPLES * BAR_LEN), BAR_LEN)
+            bar = '#' * filled + '.' * (BAR_LEN - filled)
             n_hours = len(hf)
-            bar = '#' * min(p.clear_sky_samples, MIN_ORIENTATION_SAMPLES) + '.' * max(0, MIN_ORIENTATION_SAMPLES - p.clear_sky_samples)
             if just_confident:
                 _LOGGER.info(
                     "CloudEMS PVForecast [%s]: ✅ oriëntatie BEVESTIGD — "
                     "azimuth=%.0f° tilt=%.0f° (na %d minuten zon)",
                     p.label, learned_az, learned_tilt, p.clear_sky_samples,
                 )
-            elif p.clear_sky_samples == 1 or p.clear_sky_samples % 10 == 0:
+            elif p.clear_sky_samples == 1 or p.clear_sky_samples % 30 == 0:
                 provisional = " (voorlopig)" if n_hours < 4 else ""
                 _LOGGER.info(
-                    "CloudEMS PVForecast [%s]: leren %d/%d (%.0f%%) — "
+                    "CloudEMS PVForecast [%s]: leren %d/%d (%.0f%%) [%s] — "
                     "azimuth=%.0f°%s tilt=%.0f° (%d uur data)",
                     p.label, p.clear_sky_samples, MIN_ORIENTATION_SAMPLES,
                     p.clear_sky_samples / MIN_ORIENTATION_SAMPLES * 100,
-                    learned_az, provisional, learned_tilt, n_hours,
+                    bar, learned_az, provisional, learned_tilt, n_hours,
                 )
 
         except Exception as exc:  # noqa: BLE001

@@ -1,8 +1,9 @@
 /**
- * CloudEMS Dashboard Card — v1.17.2
+ * CloudEMS Dashboard Card — v1.18.0
  * Visual energy overview: flow diagram · NILM device cards · battery health ·
  * PV forecast · phase bars · EPEX price chart · EV charging · congestion alerts.
- * v1.17.2: socket device type · fase-bevestiging indicator · 3-kolom tabel
+ * v1.18.0: confidence percentages ipv iconen · visuele leervoortgang per module ·
+ *          PV helling & hoek kaart in Inzichten · 1800-sample oriëntatie drempel
  * Copyright © 2025 CloudEMS — https://cloudems.eu
  */
 
@@ -797,13 +798,27 @@ class CloudEMSCard extends LitElement {
     const clipping    = s?.attributes?.clipping ?? false;
     const samples     = s?.attributes?.samples ?? 0;
 
-    const samplesNeeded = s?.attributes?.orientation_samples_needed ?? 10;
-    const learnBar = `${"#".repeat(Math.min(Math.round(learnPct/100*samplesNeeded), samplesNeeded))}${".".repeat(Math.max(0, samplesNeeded - Math.round(learnPct/100*samplesNeeded)))}`;
+    const samplesNeeded = s?.attributes?.orientation_samples_needed ?? 1800;
+    const learnPctNum = learnPct ?? 0;
+    const learnColor = learnPctNum >= 80 ? "#4ade80" : learnPctNum >= 40 ? "#f59e0b" : "#94a3b8";
+    // Estimated hours remaining (1800 samples = 30 sunny hours; each sunny hour = 60 samples)
+    const samplesLeft = Math.max(0, samplesNeeded - Math.round(learnPctNum / 100 * samplesNeeded));
+    const hoursLeft   = Math.round(samplesLeft / 60);
     const learnBadge = !confident
-      ? html`<span style="font-size:0.65rem;color:#94a3b8;margin-left:4px;font-family:monospace" title="Oriëntatie leren: ${learnPct}%">🎓 ${learnPct}% [${learnBar}]</span>`
+      ? html`<span style="display:inline-flex;align-items:center;gap:5px;background:#1e293b;border:1px solid #334155;border-radius:99px;padding:2px 8px;margin-left:6px" title="Helling &amp; hoek leren: ${learnPctNum}% (${samplesLeft} samples resterend ≈ ${hoursLeft} zonne-uren)">
+          <span style="font-size:0.6rem;color:#94a3b8;white-space:nowrap">Oriëntatie</span>
+          <span style="font-size:0.72rem;font-weight:700;color:${learnColor};min-width:30px;text-align:right">${learnPctNum}%</span>
+          <span style="width:36px;height:4px;background:#334155;border-radius:2px;overflow:hidden;flex-shrink:0">
+            <span style="width:${learnPctNum}%;height:100%;background:${learnColor};display:block;border-radius:2px;transition:width 0.4s"></span>
+          </span>
+        </span>`
       : orientOk
-        ? html`<span style="font-size:0.68rem;color:#4ade80;margin-left:4px">✅ Volledig geleerd</span>`
-        : html`<span style="font-size:0.68rem;color:#4ade80;margin-left:4px">✅ Vermogen geleerd</span>`;
+        ? html`<span style="display:inline-flex;align-items:center;gap:4px;background:#14532d40;border:1px solid #4ade8040;border-radius:99px;padding:2px 8px;margin-left:6px">
+            <span style="font-size:0.65rem;color:#4ade80;font-weight:600">✓ 100% geleerd</span>
+          </span>`
+        : html`<span style="display:inline-flex;align-items:center;gap:4px;background:#14532d40;border:1px solid #4ade8040;border-radius:99px;padding:2px 8px;margin-left:6px">
+            <span style="font-size:0.65rem;color:#4ade80;font-weight:600">✓ Vermogen geleerd</span>
+          </span>`;
 
     return html`
       <div style="margin-bottom:14px">
@@ -819,7 +834,10 @@ class CloudEMSCard extends LitElement {
         ${outP < 100 ? html`<div style="font-size:0.72rem;color:#f97316;margin-top:4px;padding-left:8px;border-left:2px solid #f97316">⚡ Gedimmd naar ${outP.toFixed(0)}%</div>` : ""}
         <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--c-sub);margin-top:3px">
           <span>Piek: ${peak > 0 ? peak.toFixed(0) + " W" : "Aan het leren…"}</span>
-          ${s?.attributes?.estimated_wp ? html`<span>~${s.attributes.estimated_wp} Wp</span>` : ""}
+          <span style="display:flex;gap:8px">
+            ${!confident && learnPct !== null ? html`<span style="color:${learnColor}" title="Helling &amp; hoek: ${samples} van ${samplesNeeded} zonneminuten">${samples}/${samplesNeeded} min</span>` : ""}
+            ${s?.attributes?.estimated_wp ? html`<span>~${s.attributes.estimated_wp} Wp</span>` : ""}
+          </span>
         </div>
       </div>`;
   }
@@ -903,14 +921,18 @@ class CloudEMSCard extends LitElement {
               <div class="ctx-sub">${pvAcc.toFixed(1)}% MAPE</div>
             </div>
           </div>` : ""}
-        ${learningItems.map(item => html`
+        ${learningItems.map(item => {
+          const lc = item.pct >= 80 ? "#4ade80" : item.pct >= 40 ? "#f59e0b" : "#94a3b8";
+          return html`
           <div class="ctx-item">
-            <span class="ctx-ico">🎓</span>
+            <div style="width:32px;height:32px;border-radius:50%;background:#1e293b;border:2px solid ${lc};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <span style="font-size:0.6rem;font-weight:700;color:${lc}">${item.pct}%</span>
+            </div>
             <div>
               <div class="ctx-lbl">${item.lbl}</div>
-              <div class="ctx-sub">oriëntatie ${item.pct}% geleerd</div>
+              <div class="ctx-sub">helling &amp; hoek leren</div>
             </div>
-          </div>`)}
+          </div>`;})}
       </div>\`;
   }
 
@@ -919,22 +941,52 @@ class CloudEMSCard extends LitElement {
   _renderLearningStatus() {
     // Global learning status bar — shown when any module is still learning
     const invEids  = (this.config.inverter_sensors || []).map(i => typeof i === "string" ? i : i.entity);
-    const anyLearning = invEids.some(eid => !(this.hass?.states[eid]?.attributes?.confident));
     const shadowEid  = this.config.shadow_sensor;
     const thermalEid2 = this.config.thermal_sensor;
     const shPct   = shadowEid   ? (this._attr(shadowEid,  "progress_pct", 0)) : null;
     const thPct2  = thermalEid2 ? (this._attr(thermalEid2,"progress_pct", 0)) : null;
     const shTrained = shadowEid ? this._attr(shadowEid, "trained_hours", 0) : 0;
     const shTotal   = shadowEid ? this._attr(shadowEid, "total_hours", 0)   : 0;
+
+    // Collect all per-inverter orientation learning items
+    const invItems = invEids
+      .map(eid => {
+        const attrs = this.hass?.states[eid]?.attributes;
+        if (!attrs || attrs.confident) return null;
+        const pct = attrs.orientation_learning_pct ?? attrs.learn_confidence_pct ?? 0;
+        const lbl = attrs.label || eid.split(".").pop();
+        const need = attrs.orientation_samples_needed ?? 1800;
+        const have = attrs.clear_sky_samples ?? Math.round(pct / 100 * need);
+        return { lbl, pct, have, need };
+      })
+      .filter(Boolean);
+
     const items = [];
-    if (anyLearning)        items.push("☀️ Omvormer oriëntatie");
-    if (thPct2 !== null && thPct2 < 100) items.push(`🏠 Thermisch model ${thPct2}%`);
-    if (shPct  !== null && shPct  < 100) items.push(`🌑 Schaduw ${shTrained}/${shTotal} uur`);
+    invItems.forEach(item => items.push({ label: `☀️ ${item.lbl} helling & hoek`, pct: item.pct, detail: `${item.have}/${item.need} zonneminuten` }));
+    if (thPct2 !== null && thPct2 < 100) items.push({ label: "🏠 Thermisch huismodel",   pct: thPct2, detail: `${thPct2}% van verwarmingsdata` });
+    if (shPct  !== null && shPct  < 100) items.push({ label: "🌑 Schaduwdetectie",         pct: shPct,  detail: `${shTrained}/${shTotal} uur` });
+
     if (!items.length) return "";
+
     return html`
-      <div style="background:#1e293b;border:1px solid #f59e0b40;border-radius:8px;padding:8px 12px;margin-bottom:10px;display:flex;align-items:center;gap:8px">
-        <span style="font-size:0.9rem">🎓</span>
-        <span style="font-size:0.75rem;color:#f59e0b">Aan het leren: ${items.join(" · ")}</span>
+      <div style="background:#1e293b;border:1px solid #f59e0b40;border-radius:10px;padding:10px 14px;margin-bottom:10px">
+        <div style="font-size:0.72rem;color:#f59e0b;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          <span>⚙️</span>
+          <span>CloudEMS is aan het leren — prognoses worden nauwkeuriger naarmate meer data beschikbaar is</span>
+        </div>
+        ${items.map(item => {
+          const col = item.pct >= 80 ? "#4ade80" : item.pct >= 40 ? "#f59e0b" : "#94a3b8";
+          return html`
+          <div style="margin-top:6px">
+            <div style="display:flex;justify-content:space-between;font-size:0.7rem;margin-bottom:3px">
+              <span style="color:#cbd5e1">${item.label}</span>
+              <span style="font-weight:700;color:${col}">${item.pct}% · <span style="font-weight:400;color:#64748b">${item.detail}</span></span>
+            </div>
+            <div style="height:5px;background:#334155;border-radius:3px;overflow:hidden">
+              <div style="width:${item.pct}%;height:100%;background:${col};border-radius:3px;transition:width 0.4s"></div>
+            </div>
+          </div>`;
+        })}
       </div>`;
   }
 
@@ -1039,8 +1091,18 @@ class CloudEMSCard extends LitElement {
                 const copTotal  = this._attr(copEid,"total_samples",0);
                 const copRelBkt = this._attr(copEid,"reliable_buckets",0);
                 if (reliable) return html`<div class="ins-note">✅ COP-curve betrouwbaar (${copRelBkt} buckets, ${copTotal} metingen)</div>`;
-                const bar = "#".repeat(Math.min(copRelBkt,8)) + ".".repeat(Math.max(0,8-copRelBkt));
-                return html`<div class="ins-note" style="font-family:monospace">🎓 Leren ${copPct}% [${bar}] — ${copRelBkt}/8 buckets, ${copTotal} metingen</div>`;
+                const col = copPct >= 80 ? "#4ade80" : copPct >= 40 ? "#f59e0b" : "#94a3b8";
+                return html`
+                  <div class="ins-note" style="margin-top:4px">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                      <span style="color:#94a3b8">COP-curve leren</span>
+                      <span style="font-weight:700;color:${col}">${copPct}% · ${copRelBkt}/8 buckets</span>
+                    </div>
+                    <div style="height:5px;background:#334155;border-radius:3px;overflow:hidden">
+                      <div style="width:${copPct}%;height:100%;background:${col};border-radius:3px"></div>
+                    </div>
+                    <div style="font-size:0.65rem;color:#64748b;margin-top:3px">${copTotal} metingen verzameld</div>
+                  </div>`;
               })()}
             `;
           })() : html`<div class="ins-note">Voeg <code>cop_sensor</code> toe.</div>`}
@@ -1064,7 +1126,16 @@ class CloudEMSCard extends LitElement {
                 const bar = "#".repeat(Math.min(thSamples,thNeeded)) + ".".repeat(Math.max(0,thNeeded-thSamples));
                 return thRel
                   ? html`<span class="ins-val">✅ Betrouwbaar (${thSamples} metingen)</span>`
-                  : html`<span class="ins-val" style="font-family:monospace;font-size:0.75rem" title="${thSamples}/${thNeeded} verwarmingsmetingen">🎓 ${thPct}% [${bar.substring(0,thNeeded)}]</span>`;
+                  : html`<span class="ins-val" style="display:block;width:100%">
+                      <span style="display:flex;justify-content:space-between;margin-bottom:3px">
+                        <span style="font-size:0.7rem;color:#94a3b8">Aan het leren</span>
+                        <span style="font-size:0.7rem;font-weight:700;color:${thPct >= 80 ? '#4ade80' : thPct >= 40 ? '#f59e0b' : '#94a3b8'}">${thPct}%</span>
+                      </span>
+                      <span style="display:block;height:4px;background:#334155;border-radius:2px;overflow:hidden">
+                        <span style="display:block;width:${thPct}%;height:100%;background:${thPct >= 80 ? '#4ade80' : thPct >= 40 ? '#f59e0b' : '#94a3b8'};border-radius:2px"></span>
+                      </span>
+                      <span style="display:block;font-size:0.65rem;color:#64748b;margin-top:2px">${thSamples}/${thNeeded} verwarmingsmetingen</span>
+                    </span>`;
               })()}
             </div>
             <div class="ins-row">
@@ -1073,6 +1144,45 @@ class CloudEMSCard extends LitElement {
             </div>
             <div class="ins-note">${this._attr(thermalEid,"advice","")}</div>
           ` : html`<div class="ins-note">Voeg <code>thermal_sensor</code> toe.</div>`}
+        </div>
+
+        <!-- PV Oriëntatie leren -->
+        <div class="ins-card">
+          <div class="ins-title">☀️ PV Helling &amp; Hoek leren</div>
+          ${(() => {
+            const invEidsIns = (this.config.inverter_sensors || []).map(i => typeof i === "string" ? i : i.entity);
+            if (!invEidsIns.length) return html`<div class="ins-note">Voeg <code>inverter_sensors</code> toe.</div>`;
+            return invEidsIns.map(eid => {
+              const attrs = this.hass?.states[eid]?.attributes;
+              if (!attrs) return "";
+              const lbl   = attrs.label || eid.split(".").pop();
+              const pct   = attrs.orientation_learning_pct ?? attrs.learn_confidence_pct ?? 0;
+              const need  = attrs.orientation_samples_needed ?? 1800;
+              const have  = attrs.clear_sky_samples ?? Math.round(pct / 100 * need);
+              const conf  = attrs.orientation_confident ?? attrs.confident ?? false;
+              const az    = attrs.learned_azimuth ?? attrs.azimuth_deg ?? null;
+              const tilt  = attrs.learned_tilt    ?? attrs.tilt_deg    ?? null;
+              const col   = conf ? "#4ade80" : pct >= 80 ? "#4ade80" : pct >= 40 ? "#f59e0b" : "#94a3b8";
+              const hoursLeft = Math.round(Math.max(0, need - have) / 60);
+              return html`
+                <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #1e293b">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span style="font-size:0.8rem;font-weight:600;color:#e2e8f0">${lbl}</span>
+                    <span style="font-size:0.8rem;font-weight:700;color:${col}">${conf ? "100%" : pct + "%"}</span>
+                  </div>
+                  <div style="height:6px;background:#334155;border-radius:3px;overflow:hidden;margin-bottom:6px">
+                    <div style="width:${conf ? 100 : pct}%;height:100%;background:${col};border-radius:3px;transition:width 0.4s"></div>
+                  </div>
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:0.68rem">
+                    <div><span style="color:#64748b">Zonneminuten: </span><span style="color:#cbd5e1">${have} / ${need}</span></div>
+                    <div><span style="color:#64748b">Status: </span><span style="color:${col}">${conf ? "✓ Bevestigd" : `nog ~${hoursLeft} zonne-uren`}</span></div>
+                    ${az !== null ? html`<div><span style="color:#64748b">Azimut: </span><span style="color:#cbd5e1">${Number(az).toFixed(0)}°</span></div>` : ""}
+                    ${tilt !== null ? html`<div><span style="color:#64748b">Helling: </span><span style="color:#cbd5e1">${Number(tilt).toFixed(0)}°</span></div>` : ""}
+                  </div>
+                  ${!conf ? html`<div style="font-size:0.65rem;color:#475569;margin-top:4px">CloudEMS meet elke zonneminute de paneelhoek en -richting. Na ${need} metingen (~30 zonne-uren) is de oriëntatie bevestigd.</div>` : ""}
+                </div>`;
+            });
+          })()}
         </div>
       </div>`;
   }
@@ -1356,6 +1466,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type:        "cloudems-card",
   name:        "CloudEMS Dashboard",
-  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.17.2)",
+  description: "Energiestroomdiagram · NILM · PV prognose · Batterijgezondheid · EPEX · EV · Fasen · Inzichten · Diagnose (v1.18.0)",
   preview:     true,
 });

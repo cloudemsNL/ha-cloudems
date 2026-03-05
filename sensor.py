@@ -2170,6 +2170,7 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
                     "phase_provisional":        i.get("phase_provisional", True),
                     "clipping":                 i.get("clipping"),
                     "orientation_confident":    i.get("orientation_confident"),
+                    "orientation_learning_pct": i.get("orientation_learning_pct", 0),
                     "clear_sky_samples":        i.get("clear_sky_samples"),
                     "orientation_samples_needed": i.get("orientation_samples_needed"),
                 }
