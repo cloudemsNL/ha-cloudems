@@ -10,7 +10,7 @@
 
 **Fully local · Privacy-first · No subscription · No extra hardware**
 
-[🌐 cloudems.eu](https://cloudems.eu) &nbsp;·&nbsp; [📖 Wiki](https://github.com/cloudemsNL/ha-cloudems/wiki) &nbsp;·&nbsp; [🐛 Report an issue](https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.yml) &nbsp;·&nbsp; [☕ Buy Me a Coffee](https://buymeacoffee.com/cloudems)
+[🌐 cloudems.eu](https://cloudems.eu) &nbsp;·&nbsp; [📖 Wiki](https://github.com/cloudemsNL/ha-cloudems/wiki) &nbsp;·&nbsp; [🐛 Report an issue](https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.yml) &nbsp;·&nbsp; [☕ Buy Me a Coffee](https://buymeacoffee.com/smarthost9m)
 
 </div>
 
@@ -262,7 +262,7 @@ CloudEMS is **completely free and open source**. If it saves you money on your e
 
 <div align="center">
 
-### 👉 [buymeacoffee.com/cloudems](https://buymeacoffee.com/cloudems) ☕
+### 👉 [buymeacoffee.com/cloudems](https://buymeacoffee.com/smarthost9m) ☕
 
 </div>
 
