@@ -1,6 +1,16 @@
+# CloudEMS — Recorder exclusions
+# Voeg dit toe aan je configuration.yaml:
+#
+#   recorder:
+#     exclude:
+#       entities: !include cloudems_recorder_exclude.yaml
+#
+# Of kopieer de lijst onder je eigen recorder: exclude: entities: blok.
+
 recorder:
   exclude:
     entities:
+    # --- Grote JSON-attributen (overschrijden 16 KB recorder limiet) ---
     - sensor.cloudems_actieve_meldingen
     - sensor.cloudems_apparaat_efficientiedrift
     - sensor.cloudems_batterij_epex_schema
@@ -14,6 +24,9 @@ recorder:
     - sensor.cloudems_nilm_apparaat_schemas
     - sensor.cloudems_nilm_devices
     - sensor.cloudems_nilm_diagnostics
+    - sensor.cloudems_nilm_running_devices
+    - sensor.cloudems_nilm_running_devices_power
+    - sensor.cloudems_nilm_sensor_input
     - sensor.cloudems_ollama_diagnostics
     - sensor.cloudems_pv_forecast_accuracy
     - sensor.cloudems_pv_paneelgezondheid
@@ -22,3 +35,8 @@ recorder:
     - sensor.cloudems_system_decision_log
     - sensor.cloudems_thermisch_huismodel
     - sensor.cloudems_verbruik_categorien
+    - sensor.cloudems_warmtepomp_cop
+    - sensor.cloudems_nilm_hybride_status
+    - sensor.cloudems_home_baseline_anomalie
+    - sensor.cloudems_ema_diagnostics
+    - sensor.cloudems_sensor_sanity

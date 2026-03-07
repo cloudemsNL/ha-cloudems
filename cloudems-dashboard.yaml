@@ -523,7 +523,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -839,8 +839,8 @@ views:
 
       | Kamer | Nu (W) | Vandaag (kWh) | % van totaal |
       |---|---|---|---|
-      {% for r in ov | sort(attribute='current_power_w', reverse=True) %}
-      | {{ r.room | title }} | {{ r.current_power_w | round(0) | int }} | {{ r.kwh_today | round(2) }} | {{ r.pct_of_total | round(0) | int }}% |
+      {% for r in ov | sort(attribute='power_w', reverse=True) %}
+      | {{ r.room | title }} | {{ r.power_w | round(0) | int }} | {{ r.kwh_today | round(2) }} | {{ r.pct | round(0) | int }}% |
       {% endfor %}
 
       _Kamers worden automatisch herkend via HA-zones en apparaattypen_
@@ -1178,7 +1178,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -2051,7 +2051,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -3443,7 +3443,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -4014,7 +4014,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -4049,6 +4049,78 @@ views:
     style: |
       hui-view { padding: 12px 12px 24px !important; }
   cards:
+  - type: custom:mushroom-template-card
+    primary: >-
+      {% set name = state_attr('sensor.cloudems_nilm_review_current', 'name') %}
+      {% if name %}{{ name }}{% else %}✅ Alle apparaten beoordeeld{% endif %}
+    secondary: >-
+      {% set s = states('sensor.cloudems_nilm_review_current') %}
+      {% set count = state_attr('sensor.cloudems_nilm_review_current', 'pending_count') | int(0) %}
+      {% if s == 'none' %}Geen onbesliste apparaten.
+      {% else %}{% set dtype = state_attr('sensor.cloudems_nilm_review_current', 'device_type') or '?' %}{% set pw = state_attr('sensor.cloudems_nilm_review_current', 'power_w') | int(0) %}{% set conf = state_attr('sensor.cloudems_nilm_review_current', 'confidence') | int(0) %}{% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or 'L1' %}{% set ev = state_attr('sensor.cloudems_nilm_review_current', 'on_events') | int(0) %}{{ dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen{% endif %}
+    icon: >-
+      {% if states('sensor.cloudems_nilm_review_current') == 'none' %}mdi:check-all{% else %}mdi:help-circle-outline{% endif %}
+    icon_color: >-
+      {% if states('sensor.cloudems_nilm_review_current') == 'none' %}green{% else %}orange{% endif %}
+    card_mod:
+      style: |-
+        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,165,0,0.3) !important; border-radius: 16px !important; --primary-text-color: rgb(255,255,255); --secondary-text-color: rgb(163,163,163); --card-background-color: transparent; --ha-card-border-color: transparent; }
+
+  - type: horizontal-stack
+    cards:
+    - type: button
+      name: Bevestigen
+      icon: mdi:check-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_confirm
+      card_mod:
+        style: |
+          ha-card { background: rgba(0,177,64,0.15) !important; border: 1px solid rgba(0,177,64,0.4) !important; border-radius: 14px !important; --primary-text-color: rgb(0,212,78); --paper-item-icon-color: rgb(0,212,78); --card-background-color: transparent; }
+    - type: button
+      name: Afwijzen
+      icon: mdi:close-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_dismiss
+      card_mod:
+        style: |
+          ha-card { background: rgba(220,50,50,0.12) !important; border: 1px solid rgba(220,50,50,0.35) !important; border-radius: 14px !important; --primary-text-color: rgb(240,100,100); --paper-item-icon-color: rgb(240,100,100); --card-background-color: transparent; }
+    - type: button
+      name: Vorige
+      icon: mdi:skip-previous-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_previous
+      card_mod:
+        style: |
+          ha-card { background: rgba(100,100,100,0.12) !important; border: 1px solid rgba(100,100,100,0.3) !important; border-radius: 14px !important; --primary-text-color: rgb(163,163,163); --paper-item-icon-color: rgb(163,163,163); --card-background-color: transparent; }
+    - type: button
+      name: Volgende
+      icon: mdi:skip-next-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_skip
+      card_mod:
+        style: |
+          ha-card { background: rgba(100,100,100,0.12) !important; border: 1px solid rgba(100,100,100,0.3) !important; border-radius: 14px !important; --primary-text-color: rgb(163,163,163); --paper-item-icon-color: rgb(163,163,163); --card-background-color: transparent; }
+
   - type: markdown
     title: 🔍 NILM Filter Status
     content: |
@@ -4058,7 +4130,7 @@ views:
       {% set inputs = state_attr('sensor.cloudems_nilm_diagnostics', 'sensor_inputs') %}
       | Parameter | Waarde |
       |---|---|
-      | Detectiedrempel (adaptief) | {{ state_attr('sensor.cloudems_nilm_diagnostics', 'power_threshold_w') | round(1) }} W |
+      | Detectiedrempel (adaptief) | {{ state_attr('sensor.cloudems_nilm_diagnostics', 'power_threshold_w') | float(0) | round(1) }} W |
       | Batterij-ramp masker | {% if ramp %}🔴 actief ({{ ramp_s | round(0) }}s){% else %}🟢 inactief{% endif %} |
       | Sensor input L1 | {{ inputs.L1 if inputs and inputs.L1 else '—' }} |
       | Sensor input L2 | {{ inputs.L2 if inputs and inputs.L2 else '—' }} |
@@ -4392,8 +4464,13 @@ views:
       {% else %}
       | Apparaat | Piek dag | Piek uur |
       |----------|----------|----------|
+      {% set seen = namespace(names=[]) %}
       {% for s in ready -%}
-      | {{ s.label or s.device_type }} | {{ s.peak_weekday or '?' }} | {{ (s.peak_hour | string ~ ':00') if s.peak_hour is not none else '?' }} |
+      {% set lbl = s.get('label') or s.get('device_type', '?') %}
+      {% if lbl not in seen.names %}
+      {% set seen.names = seen.names + [lbl] %}
+      | {{ lbl }} | {{ s.get('peak_weekday') or '?' }} | {{ (s.get('peak_hour') | string ~ ':00') if s.get('peak_hour') != none else '?' }} |
+      {% endif %}
       {% endfor %}
       {% endif %}
     card_mod:
@@ -4473,7 +4550,7 @@ views:
       | Apparaat | Referentie | Huidig | Drift |
       |----------|-----------|--------|-------|
       {% for d in alerts | sort(attribute='drift_pct', reverse=true) -%}
-      | {{ '🔴' if d.level == 'alert' else '🟡' }} {{ d.label }} | {{ d.baseline_w }} W | {{ d.current_w }} W | {{ '⬆' if d.drift_pct > 0 else '⬇' }} {{ d.drift_pct | round(0) | abs }}% |
+      | {{ '🔴' if d.level == 'alert' else '🟡' }} {{ d.label }} | {{ d.baseline_w }} W | {{ d.current_w }} W | {{ '⬆' if d.drift_pct > 0 else '⬇' }} {{ d.drift_pct | float(0) | round(0) | abs }}% |
       {% endfor %}
       {% endif %}
     card_mod:
@@ -4670,8 +4747,12 @@ views:
 
       | Apparaat | Huidig (kWh/j) | A+++ (kWh/j) | Besparing/j | Terugverdientijd |
       |---|---|---|---|---|
+      {% set seen_roi = namespace(names=[]) %}
       {% for d in devices %}
+      {% if d.label not in seen_roi.names %}
+      {% set seen_roi.names = seen_roi.names + [d.label] %}
       | {{ '✅' if d.recommend else '⏳' }} {{ d.label }} | {{ d.current_kwh_year }} | {{ d.benchmark_kwh_year }} | €{{ d.saving_eur_year }} | {% if d.payback_years %}{{ d.payback_years }} jr{% else %}—{% endif %} |
+      {% endif %}
       {% endfor %}
 
       _Totale jaarlijkse besparing bij vervanging: **€{{ total | round(0) | int }}**_
@@ -4711,7 +4792,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -4925,7 +5006,7 @@ views:
   - type: markdown
     title: "📋 Alle bekende NILM apparaten"
     content: |
-      {% set devs = state_attr('sensor.cloudems_nilm_running_devices','device_list') or state_attr('sensor.cloudems_nilm_running_devices','devices') or [] %}
+      {% set devs = state_attr('sensor.cloudems_nilm_devices','device_list') or [] %}
       {% if devs | length == 0 %}
       *CloudEMS leert apparaten kennen — na een paar uur verschijnen ze hier.*
       {% else %}
@@ -4934,21 +5015,20 @@ views:
       {% set total = devs | length %}
       **{{ total }}** apparaten &nbsp;·&nbsp; ✅ **{{ confirmed }}** goedgekeurd &nbsp;·&nbsp; 🚫 **{{ suppressed }}** onderdrukt &nbsp;·&nbsp; ⏳ **{{ total - confirmed - suppressed }}** onbeslist
 
-      | Apparaat | Nu | Status | W | Fase | Bron | % |
-      |----------|----|--------|---|------|------|---|
+      | % | Bron | Fase | W | Apparaat | Nu | Status |
+      |---|------|------|---|----------|----|--------|
       {% for d in devs | sort(attribute='power_w', reverse=true) %}
-      {%- set is_on   = d.get('state','') == 'on' or d.get('power_w', 0) > 0 -%}
+      {%- set is_on   = d.get('is_on', false) or d.get('state','') == 'on' -%}
       {%- set confirmed_d = d.get('confirmed', false) -%}
       {%- set suppressed_d = d.get('user_suppressed', false) -%}
       {%- set status  = '✅' if confirmed_d else ('🚫' if suppressed_d else '⏳') -%}
       {%- set active  = '🟢' if is_on else '⚫' -%}
       {%- set ph = d.get('phase','L1') -%}
       {%- set ph_ico  = '🔵' if ph == 'L1' else ('🟡' if ph == 'L2' else ('🟢' if ph == 'L3' else '⚪')) -%}
-      {%- set src = d.get('source_type','nilm') -%}
+      {%- set src = d.get('source_type', d.get('source','nilm')) -%}
       {%- set src_ico = '🔌' if src == 'smart_plug' else ('🧠' if src == 'local_ai' else ('☁️' if src == 'cloud_ai' else '🔍')) -%}
       {%- set conf = d.get('confidence', 0) | int -%}
-      {%- set conf_ico = '🟢' if conf >= 70 else ('🟡' if conf >= 50 else '🔴') -%}
-      | {{ d.get('name', d.get('device_type','?')) }} | {{ active }} | {{ status }} | {{ d.get('power_w', 0) | int }} | {{ ph_ico }} {{ ph }} | {{ src_ico }} | {% if src == 'smart_plug' %}✅{% else %}{{ conf_ico }} {{ conf }}%{% endif %} |
+      | {% if src == 'smart_plug' %}—{% else %}{{ conf }}%{% endif %} | {{ src_ico }} | {{ ph_ico }} {{ ph }} | {{ d.get('power_w', 0) | int }} | {{ d.get('name', d.get('device_type','?')) }} | {{ active }} | {{ status }} |
       {% endfor %}
 
       🟢 actief &nbsp;·&nbsp; ✅ goedgekeurd &nbsp;·&nbsp; ⏳ onbeslist &nbsp;·&nbsp; 🚫 onderdrukt &nbsp;·&nbsp; 🔌 stekker &nbsp;·&nbsp; 🔍 NILM &nbsp;·&nbsp; 🧠 AI
@@ -4991,85 +5071,122 @@ views:
         ha-markdown-element strong { color: rgb(255,255,255) !important; }
         ha-markdown-element em { color: rgb(102,102,102) !important; }
 
-  - type: markdown
-    title: "⏳ Onbesliste apparaten"
-    content: |
-      {% set devs = state_attr('sensor.cloudems_nilm_running_devices','device_list') or state_attr('sensor.cloudems_nilm_running_devices','devices') or [] %}
-      {% set unconf = [] %}
-      {% for d in devs %}
-        {% if not d.get('confirmed', false) and not d.get('user_suppressed', false) %}
-          {% set unconf = unconf + [d] %}
-        {% endif %}
-      {% endfor %}
-      {% if unconf | length == 0 %}
-      ✅ **Alle apparaten zijn beoordeeld.** Geen onbesliste apparaten.
+  - type: custom:mushroom-template-card
+    primary: >-
+      {% set name = state_attr('sensor.cloudems_nilm_review_current', 'name') %}
+      {% if name %}{{ name }}{% else %}✅ Alle apparaten beoordeeld{% endif %}
+    secondary: >-
+      {% set s = states('sensor.cloudems_nilm_review_current') %}
+      {% set count = state_attr('sensor.cloudems_nilm_review_current', 'pending_count') | int(0) %}
+      {% if s == 'none' %}
+      Geen onbesliste apparaten.
       {% else %}
-      **{{ unconf | length }} apparaten wachten op beoordeling.**
-      Gebruik de **Apparaten tab** in de CloudEMS kaart om ze goed te keuren of te onderdrukken.
-      Of kopieer het Device ID en gebruik Developer Tools → Services.
-
-      | Apparaat | W | Fase | Bron | % | Device ID |
-      |----------|---|------|------|---|-----------|
-      {% for d in unconf | sort(attribute='power_w', reverse=true) %}
-      {%- set ph = d.get('phase','L1') -%}
-      {%- set ph_ico = '🔵' if ph == 'L1' else ('🟡' if ph == 'L2' else ('🟢' if ph == 'L3' else '⚪')) -%}
-      {%- set src = d.get('source_type','nilm') -%}
-      {%- set src_ico = '🔌' if src == 'smart_plug' else '🔍' -%}
-      {%- set conf = d.get('confidence', 0) | int -%}
-      | **{{ d.get('name', d.get('device_type','?')) }}** | {{ d.get('power_w', 0) | int }} W | {{ ph_ico }} {{ ph }} | {{ src_ico }} | {{ conf }}% | `{{ d.get('device_id', d.get('name','?')) }}` |
-      {% endfor %}
-
-      > 💡 Services: `cloudems.confirm_device` of `cloudems.suppress_nilm_device` met parameter `device_id`
+      {% set dtype = state_attr('sensor.cloudems_nilm_review_current', 'device_type') or '?' %}
+      {% set pw = state_attr('sensor.cloudems_nilm_review_current', 'power_w') | int(0) %}
+      {% set conf = state_attr('sensor.cloudems_nilm_review_current', 'confidence') | int(0) %}
+      {% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or 'L1' %}
+      {% set ev = state_attr('sensor.cloudems_nilm_review_current', 'on_events') | int(0) %}
+      {{ dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen
       {% endif %}
+    icon: >-
+      {% if states('sensor.cloudems_nilm_review_current') == 'none' %}mdi:check-all{% else %}mdi:help-circle-outline{% endif %}
+    icon_color: >-
+      {% if states('sensor.cloudems_nilm_review_current') == 'none' %}green{% else %}orange{% endif %}
     card_mod:
-      style: |
+      style: |-
         ha-card {
           background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.06) !important;
+          border: 1px solid rgba(255,165,0,0.3) !important;
           border-radius: 16px !important;
           box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(163,163,163);
-          --primary-color: rgb(0,177,64);
+          --primary-text-color: rgb(255,255,255);
+          --secondary-text-color: rgb(163,163,163);
           --card-background-color: transparent;
           --ha-card-border-color: transparent;
         }
-        .card-header {
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          padding: 14px 16px 12px !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-        }
-        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-        ha-markdown-element th {
-          background: rgba(0,177,64,0.1) !important;
-          color: rgb(0,212,78) !important;
-          font-size: 10px !important;
-          font-weight: 700 !important;
-          text-transform: uppercase !important;
-          padding: 8px 10px !important;
-          border-bottom: 1px solid rgba(0,177,64,0.2) !important;
-        }
-        ha-markdown-element td {
-          color: rgb(163,163,163) !important;
-          border-bottom: 1px solid rgba(255,255,255,0.05) !important;
-          padding: 7px 10px !important;
-        }
-        ha-markdown-element tr:hover td { background: rgba(0,177,64,0.06) !important; color: rgb(255,255,255) !important; }
-        ha-markdown-element strong { color: rgb(255,255,255) !important; }
-        ha-markdown-element em { color: rgb(102,102,102) !important; }
-        ha-markdown-element code {
-          background: rgba(0,177,64,0.12) !important;
-          color: rgb(0,212,78) !important;
-          padding: 1px 6px !important;
-          border-radius: 4px !important;
-        }
-        ha-markdown-element blockquote {
-          border-left: 3px solid rgb(0,177,64) !important;
-          background: rgba(0,177,64,0.07) !important;
-          padding: 8px 14px !important;
-          border-radius: 0 8px 8px 0 !important;
-        }
+
+  - type: horizontal-stack
+    cards:
+    - type: button
+      name: Bevestigen
+      icon: mdi:check-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_confirm
+      card_mod:
+        style: |
+          ha-card {
+            background: rgba(0,177,64,0.15) !important;
+            border: 1px solid rgba(0,177,64,0.4) !important;
+            border-radius: 14px !important;
+            --primary-text-color: rgb(0,212,78);
+            --paper-item-icon-color: rgb(0,212,78);
+            --card-background-color: transparent;
+          }
+    - type: button
+      name: Afwijzen
+      icon: mdi:close-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_dismiss
+      card_mod:
+        style: |
+          ha-card {
+            background: rgba(220,50,50,0.12) !important;
+            border: 1px solid rgba(220,50,50,0.35) !important;
+            border-radius: 14px !important;
+            --primary-text-color: rgb(240,100,100);
+            --paper-item-icon-color: rgb(240,100,100);
+            --card-background-color: transparent;
+          }
+    - type: button
+      name: Vorige
+      icon: mdi:skip-previous-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_previous
+      card_mod:
+        style: |
+          ha-card {
+            background: rgba(100,100,100,0.12) !important;
+            border: 1px solid rgba(100,100,100,0.3) !important;
+            border-radius: 14px !important;
+            --primary-text-color: rgb(163,163,163);
+            --paper-item-icon-color: rgb(163,163,163);
+            --card-background-color: transparent;
+          }
+    - type: button
+      name: Volgende
+      icon: mdi:skip-next-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: call-service
+        service: button.press
+        service_data:
+          entity_id: button.cloudems_nilm_review_skip
+      card_mod:
+        style: |
+          ha-card {
+            background: rgba(100,100,100,0.12) !important;
+            border: 1px solid rgba(100,100,100,0.3) !important;
+            border-radius: 14px !important;
+            --primary-text-color: rgb(163,163,163);
+            --paper-item-icon-color: rgb(163,163,163);
+            --card-background-color: transparent;
+          }
 
   - type: markdown
     title: 🗄️ NILM Database Status
@@ -5211,7 +5328,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -5677,7 +5794,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -6008,7 +6125,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -6184,7 +6301,7 @@ views:
 
       | Buitentemp | Geleerde COP |
       |---|---|
-      {% for temp, val in (cop.curve or {}).items() %}
+      {% for temp, val in (cop.get('curve') or {}).items() %}
       | {{ temp }}°C | {{ val }} |
       {% endfor %}
 
@@ -6395,7 +6512,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -6577,7 +6694,7 @@ views:
       | Voertuig | Type | Sessies | Gem. kWh | Gem. duur | Per week |
       |----------|------|---------|----------|-----------|----------|
       {% for p in profiles -%}
-      | {{ p.label }} | {{ p.vehicle_type }} | {{ p.sessions }} | {{ p.avg_kwh }} kWh | {{ p.avg_duration_min | int }} min | {{ p.sessions_per_week }}×/week |
+      | {{ p.label or 'Onbekend' }} | {{ p.vehicle_type or 'ebike' }} | {{ p.sessions | int(0) }} | {{ '%.2f' % (p.avg_kwh | float(0)) }} kWh | {{ p.avg_duration_min | int(0) }} min | {{ '%.1f' % (p.sessions_per_week | float(0)) }}×/week |
       {% endfor %}
       {% endif %}
     card_mod:
@@ -6701,7 +6818,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -6927,7 +7044,7 @@ views:
         | Voertuig | Type | Sessies | Gem. kWh | Gem. duur | Per week |
         |----------|------|---------|----------|-----------|----------|
         {%- for p in profiles %}
-        | {{ p.label or 'Onbekend' }} | {{ p.vehicle_type or 'ebike' }} | {{ p.total_sessions | int }} | {{ '%.2f' % (p.avg_kwh | float(0)) }} kWh | {{ p.avg_duration_min | int }} min | {{ '%.1f' % (p.sessions_per_week | float(0)) }}x/week |
+        | {{ p.label or 'Onbekend' }} | {{ p.vehicle_type or 'ebike' }} | {{ p.sessions | int(0) }} | {{ '%.2f' % (p.avg_kwh | float(0)) }} kWh | {{ p.avg_duration_min | int(0) }} min | {{ '%.1f' % (p.sessions_per_week | float(0)) }}x/week |
         {%- endfor %}
         {%- else %}
         *Nog geen profielen geleerd. Sluit een e-bike of scooter aan om te starten.*
@@ -7076,7 +7193,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -7636,7 +7753,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -7939,7 +8056,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -8213,8 +8330,8 @@ views:
       {% set d = state_attr('sensor.cloudems_nilm_diagnostics', 'adaptive_threshold') or {} %}
       {% set diag = state_attr('sensor.cloudems_nilm_diagnostics', 'pv_mask_active') %}
       {% set batt = state_attr('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_active') %}
-      {% set pv_rem = state_attr('sensor.cloudems_nilm_diagnostics', 'pv_mask_remaining_s') | default(0) %}
-      {% set batt_rem = state_attr('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_remaining_s') | default(0) %}
+      {% set pv_rem = state_attr('sensor.cloudems_nilm_diagnostics', 'pv_mask_remaining_s') | float(0) %}
+      {% set batt_rem = state_attr('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_remaining_s') | float(0) %}
       | Filter | Status | Resterend |
       |---|---|---|
       | ☀️ PV-delta maskering | {{ '🔴 ACTIEF' if diag else '🟢 inactief' }} | {{ pv_rem | round(0) | int }}s |
@@ -8249,7 +8366,7 @@ views:
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>
@@ -9192,6 +9309,26 @@ views:
           letter-spacing: 0.04em !important;
           padding: 14px 16px 12px !important;
         }
+  - type: custom:mushroom-template-card
+    primary: "📧 E-mail rapporten"
+    secondary: >-
+      {% set enabled = state_attr('sensor.cloudems_mail_status', 'enabled') %}
+      {% if enabled %}✅ Geconfigureerd — klik om testmail te sturen{% else %}⚠️ Niet geconfigureerd — ga naar Configureren → E-mail rapporten{% endif %}
+    icon: mdi:email-fast-outline
+    icon_color: "{{ 'green' if state_attr('sensor.cloudems_mail_status', 'enabled') else 'orange' }}"
+    tap_action:
+      action: perform-action
+      perform_action: cloudems.send_test_mail
+      data: {}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgb(34,34,34) !important;
+          border: 1px solid rgba(255,255,255,0.06) !important;
+          border-radius: 16px !important;
+          cursor: pointer;
+        }
+
   - type: entities
     title: 🔘 Actieknoppen
     entities:
@@ -9201,6 +9338,13 @@ views:
     - entity: button.cloudems_diagnoserapport
       name: Diagnoserapport genereren
       icon: mdi:file-document-outline
+    - type: button
+      name: 📥 Energierapport downloaden
+      icon: mdi:chart-bar
+      action_name: Genereren
+      tap_action:
+        action: call-service
+        service: cloudems.download_energy_report
     - entity: button.cloudems_buy_me_a_coffee
       name: ☕ Steun de ontwikkelaar
       icon: mdi:coffee
@@ -9239,12 +9383,42 @@ views:
         }
 
   - type: markdown
+    title: "📥 Rapport downloaden"
+    content: |
+      {% set url = states('sensor.cloudems_last_report_url') %}
+      {% set label = state_attr('sensor.cloudems_last_report_url', 'label') %}
+      {% if url and url != 'geen' %}
+      ✅ Rapport klaar — **{{ label }}**
+
+      <a href="{{ url }}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:rgb(0,177,64);color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;margin-top:6px;">📥 Rapport openen / downloaden</a>
+
+      *Klik Opslaan als PDF in je browser om een PDF te maken.*
+      {% else %}
+      Klik op **📥 Energierapport downloaden** hierboven om een rapport te genereren.
+
+      *Het rapport bevat verbruik, kosten, zonne-energie, top-apparaten en CO₂ van de afgelopen maand.*
+      {% endif %}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgb(34,34,34) !important;
+          border: 1px solid rgba(0,177,64,0.25) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
+          --primary-text-color: rgb(163,163,163);
+          --card-background-color: transparent;
+          --ha-card-border-color: transparent;
+        }
+        .card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07) !important; }
+        ha-markdown-element { padding: 12px 16px 14px !important; }
+
+  - type: markdown
     content: |
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;">
         <div style="display:flex;align-items:center;gap:10px;">
           <span style="font-size:20px;">⚡</span>
           <div>
-            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.0.0</div>
+            <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v2.4.8</div>
             <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
           </div>
         </div>

@@ -6,7 +6,27 @@ Het formaat is gebaseerd op [Keep a Changelog](https://keepachangelog.com/nl/1.0
 
 ---
 
-## [2.2.1] — 2026-03-06
+## [2.4.0] — 2026-03-06
+
+### Bugfix — Dashboard "Entiteit niet gevonden" reparaties
+
+- **`sensor.cloudems_energy_cost`**: sensor heette `CloudEMS Kosten Vandaag` (→ `kosten_vandaag`), dashboard verwachtte `energy_cost`. Naam gecorrigeerd naar `CloudEMS Energy Cost` + expliciete `entity_id` override.
+- **`sensor.cloudems_flexibel_vermogen`**: sensor heette `CloudEMS Flex Score` (→ `flex_score`), dashboard verwachtte `flexibel_vermogen`. Naam gecorrigeerd + entity_id override.
+- **`sensor.cloudems_warmtepomp_cop`**: sensor ontbrak volledig in de entity-registratie. Nieuwe `CloudEMSWarmtepompCOPSensor` klasse toegevoegd met COP-waarden, degradatiedetectie en alle dashboard-attributen (`cop_report`, `degradation_detected`, `degradation_pct`, `degradation_advice`, `cop_at_7c`).
+- **`coordinator.py`**: `hp_cop_data` aangevuld met `degradation_detected`, `degradation_pct` en `degradation_advice` uit `COPReport`.
+
+---
+
+## [2.4.1] — 2026-03-06
+
+### Bugfix
+- `sensor.cloudems_battery_soc`: entity_id mismatch opgelost — sensor heette "Battery · State of Charge" → genereerde `sensor.cloudems_battery_state_of_charge`, dashboard verwachtte `sensor.cloudems_battery_soc`. Hernoemd naar "Battery · SoC".
+- `sensor.cloudems_p1_power`: entity_id mismatch opgelost — sensor heette "Grid · P1 Net Power" → genereerde `sensor.cloudems_grid_p1_net_power`, dashboard verwachtte `sensor.cloudems_p1_power`. Hernoemd naar "CloudEMS P1 Power".
+- `sensor.cloudems_nilm_diagnostics`, `sensor.cloudems_nilm_sensor_input`, `sensor.cloudems_nilm_devices`, `sensor.cloudems_nilm_running_devices`, `sensor.cloudems_nilm_running_devices_power`, `sensor.cloudems_ai_status`, `sensor.cloudems_nilm_hybride_status`: expliciete `entity_id` override toegevoegd om te garanderen dat de entiteit-ID overeenkomt met het dashboard, ongeacht eerder in het HA entity registry opgeslagen waarden.
+
+---
+
+
 
 ### Bugfix
 - `MicroMobilityTracker`: attribuut `_last_seen` ontbrak in `__init__` → `AttributeError` opgelost
