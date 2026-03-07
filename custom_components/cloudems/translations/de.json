@@ -242,6 +242,9 @@
     },
     "abort": {
       "reconfigure_successful": "Neukonfiguration erfolgreich gespeichert."
+    },
+    "error": {
+      "sensor_is_energy_not_power": "Dieser Sensor misst Energie (kWh), nicht Leistung (W). Bitte wählen Sie einen Sensor mit der Einheit W oder kW."
     }
   },
   "options": {

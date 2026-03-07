@@ -213,8 +213,27 @@ class HybridNILM:
             )
 
         self._discovery.set_excluded_entity_ids(excluded)
+        # v2.2.3: registreer change-callback voor directe herscanning bij plug-wijziging
+        self._discovery.set_on_change_callback(self._on_discovery_change)
         await self._async_refresh()
         _LOGGER.info("CloudEMS HybridNILM klaar — %d ankers ontdekt", len(self._anchors))
+
+    def _on_discovery_change(self, added: set, removed: set) -> None:
+        """Wordt aangeroepen door SmartSensorDiscovery als de plug-set wijzigt."""
+        if added:
+            _LOGGER.info(
+                "HybridNILM: %d nieuwe plug(s) ontdekt — verrijking bijgewerkt: %s",
+                len(added), ", ".join(sorted(added)[:3]),
+            )
+        if removed:
+            # Verwijder ankers waarvan de bron-entiteit verdwenen is
+            to_remove = [
+                plug_id for plug_id, anchor in self._anchors.items()
+                if anchor.entity_id in removed
+            ]
+            for plug_id in to_remove:
+                _LOGGER.info("HybridNILM: anker '%s' verwijderd (sensor verdwenen)", plug_id)
+                del self._anchors[plug_id]
 
     async def async_tick(self) -> None:
         await self._async_refresh()

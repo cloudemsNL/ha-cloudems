@@ -36,11 +36,14 @@ class SolarDimmer:
     per dag/maand/jaar terwijl dimmen actief is.
     """
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, coordinator) -> None:
+    def __init__(self, hass: HomeAssistant, config_or_entry, coordinator) -> None:
         self.hass = hass
-        self.entry = entry
         self.coordinator = coordinator
-        self.config = {**entry.data, **entry.options}
+        # Accept either a ConfigEntry or a plain config dict (v2.2.5+)
+        if hasattr(config_or_entry, "data"):
+            self.config = {**config_or_entry.data, **config_or_entry.options}
+        else:
+            self.config = dict(config_or_entry) if config_or_entry else {}
         self.is_active = False
         self._threshold = float(
             self.config.get(CONF_NEGATIVE_PRICE_THRESHOLD, DEFAULT_NEGATIVE_PRICE_THRESHOLD)

@@ -67,7 +67,9 @@ class CloudEMSWatchdog:
         self._last_failure_msg:     str   = ""
         self._last_restart_ts:      Optional[float] = None
         self._last_success_ts:      Optional[float] = None
-        self._next_restart_allowed: float = 0.0
+        # Grace period: geen reload in de eerste 2 minuten na (her)start van HA.
+        # Tijdens het opstarten zijn sensors tijdelijk unavailable — dat zijn geen echte crashes.
+        self._next_restart_allowed: float = time.time() + 120
         self._backoff_s:            float = BACKOFF_BASE_S
         self._restarting:           bool  = False
 
@@ -83,8 +85,24 @@ class CloudEMSWatchdog:
             if stored:
                 self._total_failures  = stored.get("total_failures", 0)
                 self._total_restarts  = stored.get("total_restarts", 0)
-                self._backoff_s       = stored.get("backoff_s", BACKOFF_BASE_S)
+                raw_backoff           = stored.get("backoff_s", BACKOFF_BASE_S)
                 self._last_restart_ts = stored.get("last_restart_ts")
+
+                # v2.4.17: als de laatste herstart > 30 minuten geleden was,
+                # beschouw dit als een schone start en reset de backoff.
+                # Dit voorkomt dat een oude hoge backoff (bijv. 3600s) altijd
+                # wordt meegenomen na een stabiele nacht.
+                if self._last_restart_ts:
+                    time_since_restart = time.time() - self._last_restart_ts
+                    if time_since_restart > 1800:  # 30 minuten
+                        raw_backoff = BACKOFF_BASE_S
+                        _LOGGER.info(
+                            "CloudEMS Watchdog: backoff gereset naar %ds "
+                            "(laatste herstart was %.0f min geleden)",
+                            BACKOFF_BASE_S, time_since_restart / 60,
+                        )
+                self._backoff_s = raw_backoff
+
                 history = stored.get("history", [])
                 self._history = deque(history[-HISTORY_MAX:], maxlen=HISTORY_MAX)
                 _LOGGER.info(

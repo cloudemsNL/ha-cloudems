@@ -264,10 +264,32 @@
           "selected_supplier": "Supplier (for default markup)",
           "supplier_markup": "Manual markup (€/kWh)"
         }
+      },
+      "mail": {
+        "title": "📧 E-mail reports (optional)",
+        "description": "Configure e-mail to automatically receive monthly or weekly energy reports as PDF.\n\nLeave empty to skip.",
+        "data": {
+          "mail_enabled": "Enable e-mail reports",
+          "mail_host": "SMTP server (e.g. smtp.gmail.com)",
+          "mail_port": "Port (usually 587)",
+          "mail_use_tls": "Use STARTTLS",
+          "mail_username": "Username / e-mail address",
+          "mail_password": "Password or app password",
+          "mail_from": "Sender (leave empty = username)",
+          "mail_to": "Recipient(s) — comma-separated",
+          "mail_monthly_report": "Send monthly PDF report",
+          "mail_weekly_report": "Send weekly summary"
+        }
       }
     },
     "abort": {
       "reconfigure_successful": "Reconfiguration saved successfully."
+    },
+    "error": {
+      "sensor_is_energy_not_power": "This sensor measures energy (kWh), not power (W). Please select a sensor with unit W or kW. Energy counters cannot be used as a power sensor.",
+      "mail_host_required": "Please enter an SMTP server",
+      "mail_to_required": "Please enter at least one recipient",
+      "mail_connection_failed": "Connection to mail server failed. Check host, port and credentials."
     }
   },
   "options": {
@@ -515,6 +537,22 @@
         "description": "Select which tabs you want to **hide** from the navigation bar. Hidden tabs are still accessible via direct URL but disappear from the tab row. CloudEMS applies this automatically in the Lovelace dashboard. The Overview tab is always visible.",
         "data": {
           "hidden_tabs": "Hidden tabs"
+        }
+      },
+      "mail_opts": {
+        "title": "📧 E-mail reports",
+        "description": "{info}",
+        "data": {
+          "mail_enabled": "Enable e-mail reports",
+          "mail_host": "SMTP server",
+          "mail_port": "Port",
+          "mail_use_tls": "Use STARTTLS",
+          "mail_username": "Username",
+          "mail_password": "Password / app password",
+          "mail_from": "Sender (empty = username)",
+          "mail_to": "Recipient(s), comma-separated",
+          "mail_monthly_report": "Send monthly PDF report",
+          "mail_weekly_report": "Send weekly summary"
         }
       }
     },

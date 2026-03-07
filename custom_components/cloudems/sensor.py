@@ -3,6 +3,11 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 from __future__ import annotations
 import logging
+import time as _time_mod
+
+# Shortcut for use in property expressions
+def import_time() -> float:
+    return _time_mod.time()
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorDeviceClass
@@ -26,11 +31,53 @@ from .const import (
     DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP, DEFAULT_GAS_PRICE_EUR_M3,
     CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED, CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP,
     CONF_HEAT_PUMP_ENTITY,
+    CONF_NILM_PRUNE_THRESHOLD, DEFAULT_NILM_PRUNE_THRESHOLD,
+    CONF_NILM_PRUNE_MIN_DAYS, DEFAULT_NILM_PRUNE_MIN_DAYS,
 )
 from .coordinator import CloudEMSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Helper — keep HA recorder happy (16 KB attribute limit)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_ATTR_LIMIT = 14_000  # bytes — stay safely below the 16 384 hard limit
+
+def _trim_attrs(attrs: dict) -> dict:
+    """Truncate sensor attributes to always stay under the HA recorder limit.
+
+    Strategy (in order):
+      1. Measure serialised JSON size.
+      2. If within limit → return as-is.
+      3. Find all list values, sorted by size (largest first).
+      4. Shorten each list by 25 % per iteration until payload fits.
+      5. If still too large → clear remaining lists, then drop non-scalar values.
+    """
+    import json as _json
+    raw = _json.dumps(attrs, default=str)
+    if len(raw) <= _ATTR_LIMIT:
+        return attrs
+    result = dict(attrs)
+    list_keys = sorted(
+        [k for k, v in result.items() if isinstance(v, list)],
+        key=lambda k: len(_json.dumps(result[k], default=str)),
+        reverse=True,
+    )
+    for key in list_keys:
+        while result[key] and len(_json.dumps(result, default=str)) > _ATTR_LIMIT:
+            result[key] = result[key][:max(0, int(len(result[key]) * 0.75))]
+        if not result[key]:
+            result[key] = []
+    if len(_json.dumps(result, default=str)) > _ATTR_LIMIT:
+        for key in sorted(result, key=lambda k: len(_json.dumps(result[k], default=str)), reverse=True):
+            if not isinstance(result[key], (int, float, bool, type(None))):
+                result[key] = None
+            if len(_json.dumps(result, default=str)) <= _ATTR_LIMIT:
+                break
+    return result
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -87,6 +134,7 @@ async def async_setup_entry(
         # v1.5: NILM running-devices list sensors (plain + with power)
         CloudEMSNILMRunningDevicesSensor(coordinator, entry),
         CloudEMSNILMRunningDevicesPowerSensor(coordinator, entry),
+        CloudEMSNILMReviewCurrentSensor(coordinator, entry),
         CloudEMSCostSensor(coordinator, entry),
         CloudEMSP1Sensor(coordinator, entry),
         CloudEMSForecastSensor(coordinator, entry),
@@ -140,6 +188,25 @@ async def async_setup_entry(
         CloudEMSHybridNILMSensor(coordinator, entry),
         # v2.1.9: Watchdog — crashgeschiedenis en herstartteller
         CloudEMSWatchdogSensor(coordinator, entry),
+        # v2.2.2: Installatie-kwaliteitsscore
+        CloudEMSInstallationScoreSensor(coordinator, entry),
+        # v2.2.3: nieuwe module-sensoren
+        CloudEMSBehaviourCoachSensor(coordinator, entry),
+        CloudEMSLoadPlanSensor(coordinator, entry),
+        CloudEMSEnergyLabelSensor(coordinator, entry),
+        CloudEMSSalderingSensor(coordinator, entry),
+        CloudEMSSystemHealthSensor(coordinator, entry),
+        # v2.2.5: nieuwe module-sensoren
+        CloudEMSGasAnalysisSensor(coordinator, entry),
+        CloudEMSEnergyBudgetSensor(coordinator, entry),
+        CloudEMSApplianceROISensor(coordinator, entry),
+        # v2.4.0: warmtepomp COP sensor (was missing from registration)
+        CloudEMSWarmtepompCOPSensor(coordinator, entry),
+        # v2.4.1: ontbrekende sensoren voor dashboard
+        CloudEMSBillSimulatorSensor(coordinator, entry),
+        CloudEMSNILMOverzichtSensor(coordinator, entry),
+        # v2.4.19: mail-status sensor (vervangt config_entry_attr in dashboard)
+        CloudEMSMailStatusSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -160,6 +227,9 @@ async def async_setup_entry(
     # EPEX cheap-hour binary sensors (registered in binary_sensor.py for correct binary_sensor.* entity_ids)
     # for rank in [1, 2, 3]: entities.append(CloudEMSCheapHourBinarySensor(...))
 
+    # v2.4.22: Rapport download URL sensor
+    entities.append(CloudEMSReportURLSensor(coordinator, entry))
+
     async_add_entities(entities)
 
     # Pre-populate registered sets from the HA entity registry so that on HA
@@ -172,19 +242,152 @@ async def async_setup_entry(
         for e in er.async_entries_for_config_entry(_er, entry.entry_id)
     }
 
-    # Dynamically add NILM device sensors when detected
+    # Dynamically add NILM device sensors when detected + prune orphaned ones
     registered_nilm_ids: set = set(_existing_uids)
+
+    # Pruning safety: only remove entiteiten die CloudEMS zelf heeft aangemaakt
+    # (unique_id begint met "{entry_id}_nilm_") en nooit power sockets of andere
+    # HA-entiteiten aanraken. Extra bescherming: wacht minimaal 2 coordinator-cycli
+    # voordat een absent device als definitief verdwenen wordt beschouwd.
+    _nilm_absent_counter: dict = {}   # uid → aantal cycli afwezig
+    # v2.2.2: drempel instelbaar via config (default 2 cycli)
+    _cfg_all = {**entry.data, **entry.options}
+    _PRUNE_THRESHOLD = int(_cfg_all.get(CONF_NILM_PRUNE_THRESHOLD, DEFAULT_NILM_PRUNE_THRESHOLD))
+    _PRUNE_MIN_DAYS  = int(_cfg_all.get(CONF_NILM_PRUNE_MIN_DAYS,  DEFAULT_NILM_PRUNE_MIN_DAYS))
 
     @callback
     def _nilm_updated():
+        _er = er.async_get(hass)
+
+        # ── Stap 1: toevoegen van nieuwe NILM-sensoren ────────────────────
         new_ents = []
+        active_uids: set = set()
         for dev in coordinator.nilm.get_devices():
             uid = f"{entry.entry_id}_nilm_{dev.device_id}"
+            active_uids.add(uid)
             if uid not in registered_nilm_ids:
                 new_ents.append(CloudEMSNILMDeviceSensor(coordinator, entry, dev))
                 registered_nilm_ids.add(uid)
         if new_ents:
             async_add_entities(new_ents)
+
+        # ── Stap 2: intelligente pruning van verdwenen NILM-sensoren ──────
+        # Vind alle HA-entiteiten die door CloudEMS NILM zijn aangemaakt
+        # (unique_id patroon: "<entry_id>_nilm_<device_id>")
+        # maar waarvan het device_id niet meer voorkomt in de actieve NILM-lijst.
+        #
+        # Veiligheidsregels:
+        #  • Alleen entiteiten met exact ons unique_id-patroon worden aangeraakt
+        #  • Power sockets, grid, solar, battery sensoren worden NOOIT verwijderd
+        #
+        # v2.4.11: skip pruning zolang de NILM-storage nog niet volledig is geladen.
+        # Bij herstart geeft get_devices() tijdelijk [] terug → sensoren zouden
+        # onterecht worden weggegooid voordat de Store zijn data heeft ingelezen.
+        if not getattr(coordinator.nilm, "_storage_loaded", False):
+            return
+        #  • Hybrid-ankers (__hybrid_*) worden NOOIT verwijderd (zijn smart plugs)
+        #  • Een entity pas verwijderen na _PRUNE_THRESHOLD opeenvolgende afwezige cycli
+        #    (beschermt tegen tijdelijke NILM-reset of herstart)
+        #  • __battery_injected__ wordt nooit verwijderd
+        nilm_uid_prefix = f"{entry.entry_id}_nilm_"
+
+        # Bepaal welke uid's in de registry staan maar niet meer actief zijn.
+        # v2.4.19: alleen sensor-platform entiteiten — switches, buttons en andere
+        # platforms vallen buiten de verantwoordelijkheid van de sensor-pruner.
+        registry_nilm_uids = {
+            e.unique_id
+            for e in er.async_entries_for_config_entry(_er, entry.entry_id)
+            if e.unique_id
+            and e.unique_id.startswith(nilm_uid_prefix)
+            and e.domain == "sensor"
+        }
+
+        absent_uids = registry_nilm_uids - active_uids
+
+        # Statische sensoren waarvan het unique_id toevallig ook met _nilm_ begint
+        # maar die GEEN dynamische apparaat-sensoren zijn — nooit verwijderen.
+        _STATIC_NILM_SUFFIXES = frozenset({
+            "db", "stats", "running", "running_power",
+            "diag", "input", "schedule", "overzicht",
+            "review_current",
+        })
+
+        for uid in absent_uids:
+            # Beschermde device_id's die nooit mogen worden verwijderd
+            device_id_part = uid[len(nilm_uid_prefix):]
+            if (
+                device_id_part.startswith("__hybrid_")      # smart plug ankers
+                or device_id_part == "__battery_injected__"  # batterij-injectie
+                or device_id_part.startswith("__")           # toekomstige interne ids
+                or device_id_part in _STATIC_NILM_SUFFIXES  # vaste module-sensoren
+                or device_id_part.startswith("top_")        # nilm_top_1 … top_15
+                or device_id_part.startswith("confirm_")    # bevestig-knoppen (button.py)
+                or device_id_part.startswith("reject_")     # afwijs-knoppen (button.py)
+            ):
+                _nilm_absent_counter.pop(uid, None)
+                continue
+
+            # Tel opeenvolgende afwezige cycli
+            _nilm_absent_counter[uid] = _nilm_absent_counter.get(uid, 0) + 1
+
+            if _nilm_absent_counter[uid] >= _PRUNE_THRESHOLD:
+                # v2.2.2: optionele minimum-inactiviteit in dagen
+                if _PRUNE_MIN_DAYS > 0:
+                    # Haal last_seen op uit het device (via registry entity_id → coordinator)
+                    _dev_obj = coordinator.nilm.get_device(device_id_part)
+                    if _dev_obj:
+                        _age_days = (_time_mod.time() - _dev_obj.last_seen) / 86400.0
+                        if _age_days < _PRUNE_MIN_DAYS:
+                            continue  # Nog niet lang genoeg inactief
+                # Verwijder uit HA entity registry
+                entity_entry = _er.async_get_entity_id("sensor", "cloudems", uid)
+                if entity_entry is None:
+                    # Zoek op unique_id via de registry entries
+                    for reg_entry in er.async_entries_for_config_entry(_er, entry.entry_id):
+                        if reg_entry.unique_id == uid:
+                            entity_entry = reg_entry.entity_id
+                            break
+
+                if entity_entry:
+                    _LOGGER.info(
+                        "CloudEMS NILM pruning: verwijder orphaned sensor '%s' (device_id=%s, "
+                        "%d cycli afwezig)",
+                        entity_entry, device_id_part, _nilm_absent_counter[uid],
+                    )
+                    _er.async_remove(entity_entry)
+                    registered_nilm_ids.discard(uid)
+                    _nilm_absent_counter.pop(uid, None)
+                    # v2.4.14: verwijder ook de bijbehorende bevestig/afwijs-knoppen
+                    for btn_uid in (
+                        f"{entry.entry_id}_nilm_confirm_{device_id_part}",
+                        f"{entry.entry_id}_nilm_reject_{device_id_part}",
+                    ):
+                        btn_eid = _er.async_get_entity_id("button", "cloudems", btn_uid)
+                        if btn_eid:
+                            _er.async_remove(btn_eid)
+                    # v2.2.3: fix 10 — stuur pruning-notificatie via NotificationEngine
+                    try:
+                        _ne = getattr(coordinator, "_notification_engine", None)
+                        if _ne:
+                            _ne.ingest({
+                                f"nilm_pruned:{device_id_part}": {
+                                    "priority": "info",
+                                    "category": "system",
+                                    "title":    "NILM sensor opgeruimd",
+                                    "message":  (
+                                        f"Sensor '{entity_entry}' is verwijderd omdat het "
+                                        f"bijbehorende NILM-apparaat niet meer actief is."
+                                    ),
+                                    "active": True,
+                                }
+                            })
+                    except Exception:
+                        pass
+
+        # Reset teller voor uid's die weer actief zijn (los van de for-loop)
+        for uid in list(_nilm_absent_counter.keys()):
+            if uid in active_uids:
+                _nilm_absent_counter.pop(uid, None)
 
     coordinator.async_add_listener(_nilm_updated)
 
@@ -707,10 +910,13 @@ class CloudEMSForecastSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         d = self.coordinator.data or {}
-        return {
+        return _trim_attrs({
             "hourly":   d.get("pv_forecast_hourly", []),
-            "profiles": d.get("inverter_profiles", []),
-        }
+            "profiles": [
+                {k: v for k, v in p.items() if k in {"entity_id", "label", "peak_w", "today_kwh"}}
+                for p in d.get("inverter_profiles", [])
+            ],
+        })
 
 
 class CloudEMSForecastTomorrowSensor(CoordinatorEntity, SensorEntity):
@@ -735,10 +941,13 @@ class CloudEMSForecastTomorrowSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         d = self.coordinator.data or {}
-        return {
+        return _trim_attrs({
             "hourly_tomorrow": d.get("pv_forecast_hourly_tomorrow", []),
-            "profiles":        d.get("inverter_profiles", []),
-        }
+            "profiles": [
+                {k: v for k, v in p.items() if k in {"entity_id", "label", "peak_w", "tomorrow_kwh"}}
+                for p in d.get("inverter_profiles", [])
+            ],
+        })
 
 
 class CloudEMSForecastPeakSensor(CoordinatorEntity, SensorEntity):
@@ -850,7 +1059,7 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
     Leest primair uit multi-battery data (batteries[0].soc_pct).
     Valt terug op battery_schedule.soc_pct voor legacy single-battery configuraties.
     """
-    _attr_name  = "CloudEMS Battery · State of Charge"
+    _attr_name  = "CloudEMS Battery · SoC"
     _attr_icon  = "mdi:battery"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "%"
@@ -980,7 +1189,7 @@ class CloudEMSScaleInfoSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSNILMDatabaseSensor(CoordinatorEntity, SensorEntity):
     """NILM database status — total signatures, community count, remote feed health."""
-    _attr_name  = "CloudEMS NILM · Database"
+    _attr_name  = "CloudEMS NILM · DB"
     _attr_icon  = "mdi:database-check"
 
     def __init__(self, coord, entry):
@@ -1028,7 +1237,7 @@ class CloudEMSPeakShavingSensor(CoordinatorEntity, SensorEntity):
             "headroom_w":   ps.get("headroom_w"),
             "peak_today_w": ps.get("peak_today_w"),
             "peak_month_w": ps.get("peak_month_w"),
-            "history":      ps.get("peak_history", []),
+            "history":      ps.get("peak_history", [])[:30],
             "last_action":  ps.get("action","none"),
         }
 
@@ -1078,6 +1287,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_stats"
+        self.entity_id = "sensor.cloudems_nilm_devices"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1105,6 +1315,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 "power_min":     round(dv.get("power_min", dv.get("current_power", 0)), 1),
                 "confidence":    round(dv.get("confidence", 0) * 100, 0),
                 "confirmed":     dv.get("confirmed", False),
+                "user_suppressed": dv.get("user_suppressed", False),
                 "on_events":     dv.get("on_events", 0),
                 "dismissed":     dv.get("dismissed", False),
                 # v1.17: fase + bron
@@ -1113,17 +1324,21 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 "phase_confirmed": dv.get("phase_confirmed", False),
                 "source":        dv.get("source", "database"),
                 "source_type":   _src_map.get(dv.get("source",""), "nilm"),
+                # v2.4.19: tijdprofiel
+                "primary_slot":  dv.get("primary_slot", ""),
+                "time_mismatch": dv.get("time_mismatch", False),
             }
             for dv in devices
         ]
-        return {
-            "devices":         slim_devices,
+        return _trim_attrs({
+            "devices":         slim_devices[:50],
+            "device_list":     slim_devices[:50],   # alias — dashboard leest dit
             "active_mode":     d.get("nilm_mode", "database"),
             "confirmed_count": sum(1 for dv in devices if dv.get("confirmed")),
             "pending_count":   sum(1 for dv in devices if dv.get("pending")),
             "active_count":    sum(1 for dv in devices if dv.get("is_on")),
             "total_power_w":   sum(dv.get("current_power", 0) for dv in devices if dv.get("is_on")),
-        }
+        })
 
 
 class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
@@ -1190,7 +1405,46 @@ class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
             "energy_month_kwh": dev.energy.month_kwh,
             "energy_year_kwh":  dev.energy.year_kwh,
             "energy_total_kwh": dev.energy.total_kwh,
+            # v2.2.2: sessie-statistieken
+            "session_count":         dev.energy.session_count,
+            "avg_duration_min":      dev.energy.avg_duration_min,
+            "last_12_months_kwh":    dev.energy.last_12_months_kwh,
+            # v2.2.2: confidence decay info
+            "confidence_raw":        round(dev.confidence, 3),
+            "confidence_decay_days": max(0, round((import_time() - dev.last_seen) / 86400.0 - 7, 1))
+                                     if not dev.confirmed else 0,
+            # v2.2.3: fix 5 — schedule attributen uit nilm_devices_enriched
+            **self._get_schedule_attrs(dev.device_id),
+            # v2.2.3: fix 9 — energie trend tov gemiddelde laatste 3 maanden
+            "energy_trend_pct":      self._calc_energy_trend(dev),
+            # v2.2.5: LLM naam-suggestie
+            "suggested_name":        dev.suggested_name,
         }
+
+    def _get_schedule_attrs(self, device_id: str) -> dict:
+        """Haal schedule-verrijkingsdata op uit coordinator nilm_devices."""
+        nilm_list = (self.coordinator.data or {}).get("nilm_devices", [])
+        for d in nilm_list:
+            if d.get("device_id") == device_id:
+                return {
+                    "schedule_peak_weekday":  d.get("schedule_peak_weekday"),
+                    "schedule_peak_hour":     d.get("schedule_peak_hour"),
+                    "schedule_unusual":       d.get("schedule_unusual", False),
+                    "schedule_observations":  d.get("schedule_observations", 0),
+                    "schedule_ready":         d.get("schedule_ready", False),
+                }
+        return {}
+
+    @staticmethod
+    def _calc_energy_trend(dev) -> float | None:
+        """Bereken trend: huidige maand vs gemiddelde van laatste 3 maanden. None als onvoldoende data."""
+        history = dev.energy.last_12_months_kwh
+        if len(history) < 3 or dev.energy.month_kwh <= 0:
+            return None
+        avg_3m = sum(history[-3:]) / 3
+        if avg_3m <= 0:
+            return None
+        return round((dev.energy.month_kwh - avg_3m) / avg_3m * 100, 1)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1198,7 +1452,7 @@ class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
-    _attr_name = "CloudEMS Energy · Cost"
+    _attr_name = "CloudEMS Energy Cost"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "EUR/h"
     _attr_icon  = ICON_PRICE
@@ -1207,6 +1461,7 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_energy_cost"
+        self.entity_id = "sensor.cloudems_energy_cost"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1221,11 +1476,12 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
         return {
             "cost_today_eur": d.get("cost_today_eur", 0.0),
             "cost_month_eur": d.get("cost_month_eur", 0.0),
+            "bill_simulator": d.get("bill_simulator", {}),
         }
 
 
 class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
-    _attr_name = "CloudEMS Grid · P1 Net Power"
+    _attr_name = "CloudEMS P1 Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -1622,6 +1878,52 @@ class CloudEMSPriceNextHourSensor(CoordinatorEntity, SensorEntity):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# v2.4.14 — NILM review queue sensor (voor dashboard goedkeur-UI)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSNILMReviewCurrentSensor(CoordinatorEntity, SensorEntity):
+    """
+    State = device_id van het eerste onbevestigde NILM-apparaat, of 'none'.
+    Attributen bevatten naam, type, vermogen, confidence en queue-grootte
+    zodat het dashboard dit zonder templates kan tonen.
+    """
+    _attr_name       = "CloudEMS NILM · Te beoordelen"
+    _attr_icon       = "mdi:help-circle-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_nilm_review_current"
+        self.entity_id       = "sensor.cloudems_nilm_review_current"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        dev = self.coordinator.get_review_current()
+        return dev.device_id if dev else "none"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        dev   = self.coordinator.get_review_current()
+        count = self.coordinator.get_review_pending_count()
+        if not dev:
+            return {"pending_count": count, "name": None, "device_type": None,
+                    "power_w": None, "confidence": None, "phase": None, "on_events": None}
+        return {
+            "pending_count": count,
+            "name":          dev.name or dev.device_type,
+            "device_type":   dev.device_type,
+            "power_w":       round(dev.current_power, 1),
+            "confidence":    round(dev.confidence * 100, 0),
+            "phase":         dev.phase or "L1",
+            "on_events":     dev.on_events,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # v1.5.0 — NILM: Running devices list sensors (for dashboard)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1639,6 +1941,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_running"
+        self.entity_id = "sensor.cloudems_nilm_running_devices"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1654,7 +1957,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         running = self._running
-        return {
+        return _trim_attrs({
             "device_names": [d.get("user_name") or d.get("name", d.get("device_type", "Unknown")) for d in running],
             "device_list": [
                 {
@@ -1700,7 +2003,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
                 }
                 for d in running
             ],
-        }
+        })
 
 
 class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
@@ -1719,6 +2022,7 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_running_power"
+        self.entity_id = "sensor.cloudems_nilm_running_devices_power"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1734,7 +2038,7 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         running = self._running
-        return {
+        return _trim_attrs({
             "devices": [
                 {
                     "name":        d.get("user_name") or d.get("name", "Unknown"),
@@ -1756,7 +2060,7 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
                 }
                 for d in sorted(running, key=lambda x: x.get("current_power", 0), reverse=True)
             ],
-        }
+        })
 
 
 class CloudEMSNILMTopDeviceSensor(CoordinatorEntity, SensorEntity):
@@ -1832,6 +2136,7 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_ai_status"
+        self.entity_id = "sensor.cloudems_ai_status"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1933,7 +2238,7 @@ class CloudEMSCheapest4hBlockSensor(CoordinatorEntity, SensorEntity):
     Ideaal voor Lovelace: toon als entity-card of in een markdown card.
     Gebruik binary_sensor.cloudems_energy_cheapest_4h voor automations.
     """
-    _attr_name  = "CloudEMS Energy · Goedkoopste 4u Blok"
+    _attr_name  = "CloudEMS Cheapest 4h Block"
     _attr_icon  = "mdi:clock-star-four-points"
     _attr_device_class = None
 
@@ -2015,6 +2320,7 @@ class CloudEMSNILMDiagSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_diag"
+        self.entity_id = "sensor.cloudems_nilm_diagnostics"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -2153,6 +2459,7 @@ class CloudEMSNILMInputSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_input"
+        self.entity_id = "sensor.cloudems_nilm_sensor_input"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -2718,7 +3025,7 @@ class CloudEMSEVSessionSensor(CoordinatorEntity, SensorEntity):
     Attributes include typical schedule, cost history, and current session info.
     """
     _attr_name = "CloudEMS EV · Sessie Leermodel"
-    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_device_class = None
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "kWh"
     _attr_icon = "mdi:ev-plug-type2"
@@ -2795,12 +3102,15 @@ class CloudEMSNILMScheduleSensor(CoordinatorEntity, SensorEntity):
             d for d in (self.coordinator.data or {}).get("nilm_devices", [])
             if d.get("schedule_unusual")
         ]
+        # Trim to essential summary fields — stay under HA 16 KB recorder limit
+        _KEEP = {"device_id", "label", "device_type", "ready",
+                 "peak_weekday", "peak_hour", "observations"}
+        schedules_trimmed = [
+            {k: v for k, v in s.items() if k in _KEEP}
+            for s in schedules[:40]
+        ]
         return {
-            "schedules":         [
-                # v1.16.1: only summary fields — hourly_pattern excluded (too large for recorder)
-                {k: v for k, v in s.items() if k != "hourly_pattern"}
-                for s in schedules
-            ],
+            "schedules":         schedules_trimmed,
             "total_devices":     len(schedules),
             "schedules_ready":   sum(1 for s in schedules if s.get("ready")),
             "unusual_now":       [d.get("user_name") or d.get("name", d.get("device_type")) for d in unusual],
@@ -2967,7 +3277,7 @@ class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
     """Beschikbaar flexibel vermogen in kW."""
-    _attr_name = "CloudEMS · Flexibel Vermogen"
+    _attr_name = "CloudEMS Flexibel Vermogen"
     _attr_native_unit_of_measurement = "kW"
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_device_class = SensorDeviceClass.POWER
@@ -2977,6 +3287,7 @@ class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_flex_score"
+        self.entity_id = "sensor.cloudems_flexibel_vermogen"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -3328,13 +3639,21 @@ class CloudEMSDeviceDriftSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         d = (self.coordinator.data or {}).get("device_drift", {})
+        # Trim to essential fields only — stay under HA 16 KB recorder limit
+        _KEEP = {"device_id", "label", "baseline_w", "current_w",
+                 "drift_pct", "level", "message", "baseline_frozen",
+                 "samples_total", "samples_needed"}
+        devices_trimmed = [
+            {k: v for k, v in dev.items() if k in _KEEP}
+            for dev in (d.get("devices") or [])[:30]
+        ]
         return {
             "any_alert":    d.get("any_alert", False),
             "any_warning":  d.get("any_warning", False),
             "summary":      d.get("summary", ""),
             "trained_count":d.get("trained_count", 0),
             "total_count":  d.get("total_count", 0),
-            "devices":     d.get("devices", []),
+            "devices":      devices_trimmed,
         }
 
 
@@ -3532,7 +3851,7 @@ class CloudEMSAbsenceDetectorSensor(CoordinatorEntity, SensorEntity):
     Meldt: home / away / sleeping / vacation.
     Attributes: confidence, standby_w, vacation_hours, advice.
     """
-    _attr_name  = "CloudEMS Occupancy"
+    _attr_name  = "CloudEMS Absence Detector"
     _attr_icon  = "mdi:home-account"
     _attr_has_entity_name = False
 
@@ -3755,7 +4074,7 @@ class CloudEMSShadowDetectionSensor(CoordinatorEntity, SensorEntity):
     """
     _attr_name       = "CloudEMS Schaduwdetectie"
     _attr_native_unit_of_measurement = "kWh"
-    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_device_class = None
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_icon       = "mdi:weather-partly-cloudy"
     _attr_has_entity_name = False
@@ -3798,7 +4117,7 @@ class CloudEMSClippingForecastSensor(CoordinatorEntity, SensorEntity):
     """
     _attr_name       = "CloudEMS Clipping Voorspelling Morgen"
     _attr_native_unit_of_measurement = "kWh"
-    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_device_class = None
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_icon       = "mdi:solar-power-variant-outline"
     _attr_has_entity_name = False
@@ -3946,6 +4265,7 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_hybrid_nilm"
+        self.entity_id = "sensor.cloudems_nilm_hybride_status"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -4128,3 +4448,474 @@ class CloudEMSWatchdogSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return (self.coordinator.data or {}).get("watchdog", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.2: Installatie-kwaliteitsscore sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSInstallationScoreSensor(CoordinatorEntity, SensorEntity):
+    """Toont de installatie-kwaliteitsscore (0–100) met grade en advies."""
+    _attr_name  = "CloudEMS · Installatie Score"
+    _attr_icon  = "mdi:clipboard-check-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_installation_score"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> int | None:
+        score_data = (self.coordinator.data or {}).get("installation_score", {})
+        return score_data.get("score")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        score_data = (self.coordinator.data or {}).get("installation_score", {})
+        if not score_data:
+            return {}
+        return {
+            "grade":   score_data.get("grade", "?"),
+            "emoji":   score_data.get("emoji", ""),
+            "summary": score_data.get("summary", ""),
+            "items":   score_data.get("items", []),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.3: BehaviourCoach sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSBehaviourCoachSensor(CoordinatorEntity, SensorEntity):
+    """Toont potentiële besparing door apparaten te verschuiven naar goedkopere uren."""
+    _attr_name  = "CloudEMS · Gedragscoach"
+    _attr_icon  = "mdi:lightbulb-on-outline"
+    _attr_native_unit_of_measurement = "EUR/maand"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_behaviour_coach"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> float | None:
+        d = (self.coordinator.data or {}).get("behaviour_coach", {})
+        v = d.get("total_saving_eur_month")
+        return round(float(v), 2) if v is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("behaviour_coach", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.3: LoadPlan sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSLoadPlanSensor(CoordinatorEntity, SensorEntity):
+    """Toont het geoptimaliseerde uurschema voor morgen."""
+    _attr_name  = "CloudEMS · Dagplan Morgen"
+    _attr_icon  = "mdi:calendar-clock"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_load_plan"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> float | None:
+        d = (self.coordinator.data or {}).get("load_plan", {})
+        return round(float(d["total_saving_eur"]), 2) if d.get("total_saving_eur") is not None else None
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "EUR"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("load_plan", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.3: EnergyLabel sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSEnergyLabelSensor(CoordinatorEntity, SensorEntity):
+    """Toont het geschatte energielabel van de woning (A++++ t/m G)."""
+    _attr_name  = "CloudEMS · Energielabel"
+    _attr_icon  = "mdi:home-energy-outline"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_energy_label"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str | None:
+        d = (self.coordinator.data or {}).get("energy_label", {})
+        return d.get("label")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("energy_label", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.4.1: BillSimulator sensor — sensor.cloudems_bill_simulator
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSBillSimulatorSensor(CoordinatorEntity, SensorEntity):
+    """Vergelijkt kosten op vast, dag/nacht en dynamisch tarief."""
+    _attr_name  = "CloudEMS Bill Simulator"
+    _attr_icon  = "mdi:cash-multiple"
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_bill_simulator"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("bill_simulator", {})
+        return round(d.get("dynamic_cost_eur", 0.0), 2)
+
+    @property
+    def extra_state_attributes(self):
+        raw = (self.coordinator.data or {}).get("bill_simulator", {})
+        return _trim_attrs(raw) if isinstance(raw, dict) else {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.4.1: NILM Overzicht sensor — sensor.cloudems_nilm_overzicht
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSNILMOverzichtSensor(CoordinatorEntity, SensorEntity):
+    """NILM overzicht met ROI-data voor apparaatvervanging."""
+    _attr_name  = "CloudEMS NILM Overzicht"
+    _attr_icon  = ICON_NILM
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_nilm_overzicht"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("nilm_devices", []))
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data or {}
+        roi_raw = d.get("appliance_roi", {})
+        devices = d.get("nilm_devices", [])
+        return _trim_attrs({
+            "roi": roi_raw,
+            "device_count": len(devices),
+            "devices": [
+                {
+                    "name": dev.get("display_name", dev.get("device_id", "")),
+                    "device_type": dev.get("device_type", ""),
+                    "confirmed": dev.get("confirmed", False),
+                    "power_w": dev.get("power_w", 0),
+                }
+                for dev in devices[:20]
+            ],
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.4.1: Warmtepomp COP sensor — sensor.cloudems_warmtepomp_cop
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSWarmtepompCOPSensor(CoordinatorEntity, SensorEntity):
+    """Leert de COP-curve van de warmtepomp en detecteert degradatie."""
+    _attr_name  = "CloudEMS Warmtepomp COP"
+    _attr_icon  = "mdi:heat-pump"
+    _attr_native_unit_of_measurement = None
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_warmtepomp_cop"
+        self.entity_id = "sensor.cloudems_warmtepomp_cop"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        cop = (self.coordinator.data or {}).get("heat_pump_cop", {})
+        val = cop.get("cop_current")
+        return round(val, 2) if val is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        cop = (self.coordinator.data or {}).get("heat_pump_cop", {})
+        return {
+            "cop_current":          cop.get("cop_current"),
+            "cop_at_7c":            cop.get("cop_at_7c"),
+            "cop_at_2c":            cop.get("cop_at_2c"),
+            "cop_at_minus5c":       cop.get("cop_at_minus5c"),
+            "reliable":             cop.get("reliable", False),
+            "method":               cop.get("method"),
+            "outdoor_temp_c":       cop.get("outdoor_temp_c"),
+            "defrost_today":        cop.get("defrost_today", False),
+            "defrost_threshold_c":  cop.get("defrost_threshold_c"),
+            "total_samples":        cop.get("total_samples", 0),
+            "progress_pct":         cop.get("progress_pct", 0),
+            "curve":                {k: round(float(v), 3) for k, v in list((cop.get("curve") or {}).items())[:10]},
+            "degradation_detected": cop.get("degradation_detected", False),
+            "degradation_pct":      cop.get("degradation_pct", 0.0),
+            "degradation_advice":   cop.get("degradation_advice", ""),
+            "cop_report":           {k: v for k, v in cop.items() if k not in ("curve",)},
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.3: Saldering sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSSalderingSensor(CoordinatorEntity, SensorEntity):
+    """Toont impact van de salderingsafbouw op de jaarrekening."""
+    _attr_name  = "CloudEMS · Salderingsafbouw"
+    _attr_icon  = "mdi:solar-power-variant"
+    _attr_native_unit_of_measurement = "EUR/jaar"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_saldering"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> float | None:
+        d = (self.coordinator.data or {}).get("saldering", {})
+        # extra_cost_at_zero_eur = meerkosten bij 0% saldering (2027)
+        v = d.get("extra_cost_at_zero_eur")
+        return round(float(v), 2) if v is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("saldering", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.3: SystemHealth sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSSystemHealthSensor(CoordinatorEntity, SensorEntity):
+    """Toont de algehele systeemgezondheid van CloudEMS."""
+    _attr_name  = "CloudEMS · Systeemgezondheid"
+    _attr_icon  = "mdi:heart-pulse"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_system_health"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str | None:
+        d = (self.coordinator.data or {}).get("system_health", {})
+        return d.get("status", "unknown")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("system_health", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.5: GasAnalysis sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSGasAnalysisSensor(CoordinatorEntity, SensorEntity):
+    """Toont CV-efficiëntie en seizoensprognose op basis van graaddagen-analyse."""
+    _attr_name  = "CloudEMS · Gasanalyse"
+    _attr_icon  = "mdi:gas-burner"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_gas_analysis"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str | None:
+        d = (self.coordinator.data or {}).get("gas_analysis", {})
+        return d.get("efficiency_rating")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("gas_analysis", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.5: EnergyBudget sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSEnergyBudgetSensor(CoordinatorEntity, SensorEntity):
+    """Toont de voortgang tov het ingestelde energiebudget voor deze maand."""
+    _attr_name  = "CloudEMS · Energiebudget"
+    _attr_icon  = "mdi:cash-check"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_energy_budget"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str | None:
+        d = (self.coordinator.data or {}).get("energy_budget", {})
+        return d.get("overall_status")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("energy_budget", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v2.2.5: ApplianceROI sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSApplianceROISensor(CoordinatorEntity, SensorEntity):
+    """Toont welke apparaten financieel interessant zijn om te vervangen."""
+    _attr_name  = "CloudEMS · Apparaatvervangings-ROI"
+    _attr_icon  = "mdi:washing-machine"
+    _attr_native_unit_of_measurement = "EUR/jaar"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_appliance_roi"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> float | None:
+        d = (self.coordinator.data or {}).get("appliance_roi", {})
+        v = d.get("total_saving_eur_year")
+        return round(float(v), 2) if v is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("appliance_roi", {})
+
+
+class CloudEMSMailStatusSensor(CoordinatorEntity, SensorEntity):
+    """v2.4.19: Mail-status sensor — geeft aan of e-mailrapporten zijn geconfigureerd.
+
+    State: 'configured' | 'disabled'
+    Attrs: enabled, host, to, monthly, weekly
+    Gebruikt door dashboard om config_entry_attr() (ongeldig) te vervangen.
+    """
+    _attr_icon = "mdi:email-fast-outline"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_mail_status"
+        self._attr_name = "CloudEMS Mail Status"
+        self.entity_id = "sensor.cloudems_mail_status"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        return "configured" if self._entry.data.get("mail_enabled") else "disabled"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d = self._entry.data
+        return {
+            "enabled":  bool(d.get("mail_enabled", False)),
+            "host":     d.get("mail_host", ""),
+            "to":       d.get("mail_to", ""),
+            "monthly":  bool(d.get("mail_monthly_report", False)),
+            "weekly":   bool(d.get("mail_weekly_report", False)),
+        }
+
+
+class CloudEMSReportURLSensor(CoordinatorEntity, SensorEntity):
+    """Houdt de URL bij van het laatste gegenereerde energierapport (v2.4.22).
+
+    State  = URL van het rapport (of 'geen' als er nog geen is gegenereerd)
+    Attrs  = label, gegenereerd_op
+    """
+    _attr_icon  = "mdi:file-chart"
+    _attr_name  = "CloudEMS Laatste Rapport"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_last_report_url"
+        self.entity_id = "sensor.cloudems_last_report_url"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _report_data(self) -> dict:
+        return (
+            self.hass.data
+            .get(DOMAIN, {})
+            .get(self._entry.entry_id, {})
+        )
+
+    @property
+    def native_value(self) -> str:
+        return self._report_data().get("last_report_url", "geen")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        d = self._report_data()
+        return {
+            "label": d.get("last_report_label", ""),
+            "url":   d.get("last_report_url", ""),
+        }

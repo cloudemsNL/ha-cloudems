@@ -615,6 +615,61 @@ class NotificationEngine:
         elif "power_outage" in alerts:
             alerts["power_outage"]["active"] = False
 
+        # v2.2.2: NILM tijdpatroon anomalie — apparaat draait op ongebruikelijk tijdstip
+        nilm_devices = data.get("nilm_devices", [])
+        for dev in nilm_devices:
+            if not dev.get("schedule_unusual"):
+                continue
+            if not dev.get("schedule_ready"):
+                continue  # niet genoeg observaties — nog geen betrouwbaar patroon
+            dev_name = dev.get("user_name") or dev.get("name", "Onbekend apparaat")
+            peak_wd  = dev.get("schedule_peak_weekday", "")
+            peak_h   = dev.get("schedule_peak_hour")
+            key      = f"nilm_unusual_time:{dev.get('device_id', 'unknown')}"
+            usual_str = (
+                f" (normaal meest actief op {peak_wd} ~{peak_h}:00)"
+                if peak_wd and peak_h is not None else ""
+            )
+            alerts[key] = {
+                "priority": "info",
+                "category": "appliance",
+                "title":    f"Ongebruikelijk tijdstip: {dev_name}",
+                "message":  (
+                    f"{dev_name} is nu actief op een tijdstip waarop dit normaal niet gebeurt"
+                    f"{usual_str}. Mogelijk vergeten uit te zetten of onverwacht gebruik."
+                ),
+                "active": dev.get("is_on", False),
+            }
+
+        # v2.2.3: "vergeten apparaat" detectie
+        import time as _t_mod
+        _now_ts = _t_mod.time()
+        for dev in nilm_devices:
+            sess = dev.get("session_count") or dev.get("on_events") or 0
+            if sess < 10:
+                continue
+            last_seen = dev.get("last_seen") or 0
+            if not last_seen:
+                continue
+            inactive_days = (_now_ts - float(last_seen)) / 86400.0
+            if inactive_days < 10:
+                continue
+            if not dev.get("schedule_ready"):
+                continue
+            dev_name = dev.get("user_name") or dev.get("name", "Onbekend")
+            key = f"nilm_forgotten:{dev.get('device_id', 'unknown')}"
+            alerts[key] = {
+                "priority": "info",
+                "category": "appliance",
+                "title":    f"Apparaat {inactive_days:.0f} dagen inactief: {dev_name}",
+                "message":  (
+                    f"{dev_name} is al {inactive_days:.0f} dagen niet actief, "
+                    f"terwijl het normaal regelmatig draait ({sess} sessies geregistreerd). "
+                    "Mogelijk defect, weggehaald of vergeten in te schakelen."
+                ),
+                "active": True,
+            }
+
         # Warmtepomp COP degradatie
         hp_cop = data.get("heat_pump_cop", {})
         if hp_cop.get("degradation_detected"):
@@ -639,6 +694,63 @@ class NotificationEngine:
                 "message":  iso_advice,
                 "active":   True,
             }
+
+        # v2.2.5: fix 9 — tarief-anomalie detectie
+        tariff_check = data.get("tariff_check", {})
+        if tariff_check.get("status") == "tariff_mismatch":
+            alerts["tariff_mismatch"] = {
+                "priority": "warning",
+                "category": "cost",
+                "title":    f"Tarief-instelling mogelijk onjuist ({tariff_check.get('tariff_deviation_pct', 0):.0f}% afwijking)",
+                "message":  tariff_check.get("advice", "Controleer het geconfigureerde importtarief."),
+                "active":   True,
+            }
+        elif "tariff_mismatch" in alerts:
+            alerts["tariff_mismatch"]["active"] = False
+
+        # v2.2.5: fix 10 — batterijdegradatie waarschuwing
+        batt_deg = data.get("battery_degradation", {})
+        if batt_deg.get("degradation_detected"):
+            cap_loss = batt_deg.get("capacity_loss_pct") or batt_deg.get("capacity_loss", 0)
+            alerts["battery_degradation"] = {
+                "priority": "warning",
+                "category": "battery",
+                "title":    f"Batterij degradatie gedetecteerd ({cap_loss:.0f}% capaciteitsverlies)",
+                "message":  (
+                    f"De thuisbatterij heeft {cap_loss:.0f}% van zijn oorspronkelijke capaciteit verloren. "
+                    "Dit verkort de dagelijkse zelfconsumptie en terugverdientijd. "
+                    "Overweeg contact met de fabrikant voor garantie of vervanging."
+                ),
+                "active": True,
+            }
+        elif "battery_degradation" in alerts:
+            alerts["battery_degradation"]["active"] = False
+
+        # v2.2.5: fix 9 — gas verbruiksanomalie
+        if gas.get("anomaly"):
+            alerts["gas_anomaly"] = {
+                "priority": "warning",
+                "category": "gas",
+                "title":    "Ongewoon hoog gasverbruik",
+                "message":  gas.get("anomaly_message", "Gasverbruik significant hoger dan normaal."),
+                "active":   True,
+            }
+        elif "gas_anomaly" in alerts:
+            alerts["gas_anomaly"]["active"] = False
+
+        # v2.2.5: fix 9 — budget overschrijding alert
+        budget = data.get("energy_budget", {})
+        budget_status = budget.get("overall_status", "")
+        if budget_status == "overschrijding":
+            alerts["budget_overschrijding"] = {
+                "priority": "warning",
+                "category": "cost",
+                "title":    "Energiebudget bijna overschreden",
+                "message":  budget.get("summary", "Je energieverbruik ligt hoger dan je maandbudget."),
+                "active":   True,
+            }
+        elif "budget_overschrijding" in alerts:
+            alerts["budget_overschrijding"]["active"] = False
 
         return alerts
 

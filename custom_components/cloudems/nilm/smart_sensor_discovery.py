@@ -227,6 +227,15 @@ class SmartSensorDiscovery:
         self._last_result: Optional[DiscoveryResult] = None
         self._last_run: float = 0.0
         self._excluded_entity_ids: set = set()  # explicit exclusions from CloudEMS config
+        # v2.2.2: change-detection — set van entity_id's uit vorige scan
+        self._prev_plug_eids: set = set()
+        self._on_change_callback = None  # callback(added: set, removed: set) bij wijziging
+
+    def set_on_change_callback(self, callback) -> None:
+        """Registreer een callback die aangeroepen wordt als de plug-set wijzigt.
+        callback(added: set[str], removed: set[str])
+        """
+        self._on_change_callback = callback
 
     def set_excluded_entity_ids(self, entity_ids: set) -> None:
         """Stel expliciete uitsluitingslijst in vanuit CloudEMS config (grid, solar, battery, P1, enz.)."""
@@ -278,6 +287,28 @@ class SmartSensorDiscovery:
         result = DiscoveryResult(plugs=plugs, weather=weather)
         self._last_result = result
         self._last_run    = time.time()
+
+        # v2.2.2: change-detection — vergelijk met vorige scan
+        current_plug_eids = {p.entity_id for p in plugs}
+        added   = current_plug_eids - self._prev_plug_eids
+        removed = self._prev_plug_eids - current_plug_eids
+        if (added or removed) and self._prev_plug_eids:  # geen callback op eerste scan
+            if added:
+                _LOGGER.info(
+                    "CloudEMS discovery: %d nieuwe vermogenssensor(en): %s",
+                    len(added), ", ".join(sorted(added)[:5]),
+                )
+            if removed:
+                _LOGGER.info(
+                    "CloudEMS discovery: %d verdwenen vermogenssensor(en): %s",
+                    len(removed), ", ".join(sorted(removed)[:5]),
+                )
+            if self._on_change_callback:
+                try:
+                    self._on_change_callback(added, removed)
+                except Exception as exc:
+                    _LOGGER.debug("Discovery change callback fout: %s", exc)
+        self._prev_plug_eids = current_plug_eids
 
         _LOGGER.info(
             "CloudEMS HybridNILM discovery: %d vermogenssensoren, %d weersensoren gevonden",

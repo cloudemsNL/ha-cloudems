@@ -51,6 +51,10 @@ from .const import (
     CONF_PRICE_INCLUDE_TAX, CONF_PRICE_INCLUDE_BTW, CONF_SUPPLIER_MARKUP, CONF_SELECTED_SUPPLIER,
     SUPPLIER_MARKUPS, CONF_ENERGY_PRICES_COUNTRY,
     CONF_HIDDEN_TABS, CLOUDEMS_TABS, CLOUDEMS_TABS_HIDDEN_DEFAULT,
+    CONF_MAIL_ENABLED, CONF_MAIL_HOST, CONF_MAIL_PORT, CONF_MAIL_USERNAME,
+    CONF_MAIL_PASSWORD, CONF_MAIL_FROM, CONF_MAIL_TO, CONF_MAIL_USE_TLS,
+    CONF_MAIL_MONTHLY, CONF_MAIL_WEEKLY,
+    DEFAULT_MAIL_PORT, DEFAULT_MAIL_USE_TLS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,6 +114,36 @@ def _exclude(pool: list, exclude_kws: list) -> list:
     """Remove entities whose id contains any exclusion keyword."""
     ex = [kw.lower() for kw in exclude_kws]
     return [e for e in pool if not any(kw in e.lower() for kw in ex)]
+
+
+def _validate_power_sensor(hass, entity_id: str) -> str | None:
+    """Controleer of een entity_id een vermogenssensor is (W/kW), niet een energieteller (kWh).
+
+    Geeft None terug als de sensor geldig is, anders een foutsleutel.
+    Sensoren met device_class='energy' of unit='kWh'/'Wh' zijn kWh-tellers
+    en worden niet geaccepteerd als vermogenssensor voor CloudEMS.
+    """
+    if not entity_id:
+        return None
+    state = hass.states.get(entity_id)
+    if state is None:
+        return None  # niet geladen, laat door — runtime zal het merken
+    attrs = state.attributes
+    dc    = attrs.get("device_class", "")
+    unit  = (attrs.get("unit_of_measurement") or "").lower().strip()
+    sc    = attrs.get("state_class", "")
+
+    # device_class energy is altijd een kWh-teller
+    if dc == "energy":
+        return "sensor_is_energy_not_power"
+    # kWh / Wh / MWh units zijn tellers, geen vermogen
+    if unit in ("kwh", "wh", "mwh"):
+        return "sensor_is_energy_not_power"
+    # state_class total_increasing is typisch voor energie-integralen
+    if sc in ("total_increasing", "total"):
+        return "sensor_is_energy_not_power"
+    return None
+
 
 def _detect_sensors(hass, phase_count: int) -> dict:
     """Auto-detect HA sensors by unit + keyword scoring.
@@ -190,7 +224,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
       After ai_config    → advanced (P1 toggle → p1_config)
     """
 
-    VERSION = 4
+    VERSION = 5
 
     def __init__(self):
         self._config: Dict[str, Any] = {}
@@ -272,9 +306,17 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 3. Grid sensors ───────────────────────────────────────────────────────
     async def async_step_grid_sensors(self, user_input=None):
         phase_count = self._config.get(CONF_PHASE_COUNT, 3)
+        errors: dict = {}
         if user_input is not None:
-            self._config.update(user_input)
-            return await self.async_step_phase_sensors() if self._advanced() else await self.async_step_solar_ev()
+            # v2.4.18: valideer dat de ingevulde sensoren vermogenssensoren zijn (W), geen kWh-tellers
+            for _sensor_key in (CONF_GRID_SENSOR, CONF_IMPORT_SENSOR, CONF_EXPORT_SENSOR):
+                _eid = user_input.get(_sensor_key)
+                _err = _validate_power_sensor(self.hass, _eid) if _eid else None
+                if _err:
+                    errors[_sensor_key] = _err
+            if not errors:
+                self._config.update(user_input)
+                return await self.async_step_phase_sensors() if self._advanced() else await self.async_step_solar_ev()
 
         if not self._suggestions:
             self._suggestions = _detect_sensors(self.hass, phase_count)
@@ -296,6 +338,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="grid_sensors",
             data_schema=vol.Schema(schema),
+            errors=errors,
             description_placeholders={
                     "diagram_url": "data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNDIwIDEzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0ic2Fucy1zZXJpZiI+PHJlY3Qgd2lkdGg9IjQyMCIgaGVpZ2h0PSIxMzAiIHJ4PSIxMiIgZmlsbD0iIzFjMWMyZSIvPjx0ZXh0IHg9IjIxMCIgeT0iMjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM5NGEzYjgiIGZvbnQtd2VpZ2h0PSI2MDAiPktvcHBlbCBqZSBzbGltbWUgbWV0ZXIgb2YgUDEtbGV6ZXI8L3RleHQ+PHJlY3QgeD0iMTQwIiB5PSIzNSIgd2lkdGg9IjE0MCIgaGVpZ2h0PSI4MCIgcng9IjEwIiBmaWxsPSIjNjM2NmYxMTgiIHN0cm9rZT0iIzYzNjZmMTU1IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHg9IjIxMCIgeT0iNTciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iOSIgZmlsbD0iIzk0YTNiOCI+U2xpbW1lIG1ldGVyPC90ZXh0PjxyZWN0IHg9IjE2MyIgeT0iNjMiIHdpZHRoPSI5NCIgaGVpZ2h0PSIzMiIgcng9IjYiIGZpbGw9IiMwZjE3MmEiLz48dGV4dCB4PSIyMTAiIHk9Ijc0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjciIGZpbGw9IiM0YWRlODAiPiYjOTY2MDsgMTI0MyBXICBhZm5hbWU8L3RleHQ+PHRleHQgeD0iMjEwIiB5PSI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI3IiBmaWxsPSIjZjk3MzE2Ij4mIzk2NTA7IDAgVyAgdGVydWdsZXZlcmluZzwvdGV4dD48dGV4dCB4PSIyMTAiIHk9IjEwNyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSI5IiBmaWxsPSIjODE4Y2Y4IiBmb250LXdlaWdodD0iNjAwIj5QMS1wb29ydCAoUkoxMSk8L3RleHQ+PGNpcmNsZSBjeD0iNjAiIGN5PSI3NSIgcj0iMjYiIGZpbGw9IiNmOTczMTYxOCIgc3Ryb2tlPSIjZjk3MzE2IiBzdHJva2Utd2lkdGg9IjEuNSIvPjx0ZXh0IHg9IjYwIiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxOCI+8J+PrTwvdGV4dD48dGV4dCB4PSI2MCIgeT0iODUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iOCIgZmlsbD0iI2Y5NzMxNiI+RWxla3RyaWNpdGVpdHNuZXQ8L3RleHQ+PGxpbmUgeDE9Ijg2IiB5MT0iNzUiIHgyPSIxNDAiIHkyPSI3NSIgc3Ryb2tlPSIjZjk3MzE2IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjUsMyIvPjxjaXJjbGUgY3g9IjM2MCIgY3k9Ijc1IiByPSIyNiIgZmlsbD0iIzYzNjZmMTE4IiBzdHJva2U9IiM2MzY2ZjEiIHN0cm9rZS13aWR0aD0iMS41Ii8+PHRleHQgeD0iMzYwIiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxOCI+8J+PoDwvdGV4dD48dGV4dCB4PSIzNjAiIHk9Ijg1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjgiIGZpbGw9IiM4MThjZjgiPkhvbWUgQXNzaXN0YW50PC90ZXh0PjxsaW5lIHgxPSIyODAiIHkxPSI3NSIgeDI9IjMzNCIgeTI9Ijc1IiBzdHJva2U9IiM2MzY2ZjEiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWRhc2hhcnJheT0iNSwzIi8+PC9zdmc+",
                     
@@ -576,7 +619,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_OLLAMA_ENABLED] = (provider == AI_PROVIDER_OLLAMA)
             if provider == AI_PROVIDER_OLLAMA:
                 return await self.async_step_ollama_config()
-            return await self.async_step_advanced() if self._advanced() else self._create()
+            return await self.async_step_advanced() if self._advanced() else await self.async_step_mail()
 
         return self.async_show_form(
             step_id="ai_config",
@@ -593,7 +636,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_ollama_config(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_advanced() if self._advanced() else self._create()
+            return await self.async_step_advanced() if self._advanced() else await self.async_step_mail()
         return self.async_show_form(
             step_id="ollama_config",
             data_schema=vol.Schema({
@@ -607,7 +650,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_advanced(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_p1_config() if user_input.get(CONF_P1_ENABLED) else self._create()
+            return await self.async_step_p1_config() if user_input.get(CONF_P1_ENABLED) else await self.async_step_mail()
         return self.async_show_form(
             step_id="advanced",
             data_schema=vol.Schema({vol.Optional(CONF_P1_ENABLED, default=False): bool}),
@@ -616,12 +659,65 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_p1_config(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return self._create()
+            return await self.async_step_mail()
         return self.async_show_form(
             step_id="p1_config",
             data_schema=vol.Schema({
                 vol.Optional(CONF_P1_HOST): str,
                 vol.Optional(CONF_P1_PORT, default=DEFAULT_P1_PORT): vol.All(int, vol.Range(min=1, max=65535)),
+            }),
+        )
+
+    # ── 8. E-mail / SMTP ──────────────────────────────────────────────────────
+    async def async_step_mail(self, user_input=None):
+        """Optionele e-mailconfiguratie voor PDF-rapporten."""
+        errors: dict = {}
+        if user_input is not None:
+            enabled = user_input.get(CONF_MAIL_ENABLED, False)
+            if enabled:
+                # Valideer minimale verplichte velden
+                if not user_input.get(CONF_MAIL_HOST, "").strip():
+                    errors[CONF_MAIL_HOST] = "mail_host_required"
+                if not user_input.get(CONF_MAIL_TO, "").strip():
+                    errors[CONF_MAIL_TO] = "mail_to_required"
+                if not errors:
+                    # Doe een snelle verbindingstest
+                    try:
+                        import smtplib, ssl as _ssl
+                        host = user_input[CONF_MAIL_HOST].strip()
+                        port = user_input.get(CONF_MAIL_PORT, DEFAULT_MAIL_PORT)
+                        use_tls = user_input.get(CONF_MAIL_USE_TLS, True)
+                        ctx = _ssl.create_default_context() if use_tls else None
+                        with smtplib.SMTP(host, port, timeout=5) as smtp:
+                            if use_tls:
+                                smtp.starttls(context=ctx)
+                            user = user_input.get(CONF_MAIL_USERNAME, "").strip()
+                            pwd  = user_input.get(CONF_MAIL_PASSWORD, "").strip()
+                            if user and pwd:
+                                smtp.login(user, pwd)
+                    except Exception as _smtp_err:
+                        errors["base"] = "mail_connection_failed"
+                        _LOGGER.warning("CloudEMS mail test mislukt: %s", _smtp_err)
+            if not errors:
+                self._config.update(user_input)
+                return self._create()
+
+        existing = self._config
+        return self.async_show_form(
+            step_id="mail",
+            errors=errors,
+            data_schema=vol.Schema({
+                vol.Optional(CONF_MAIL_ENABLED,  default=existing.get(CONF_MAIL_ENABLED, False)): bool,
+                vol.Optional(CONF_MAIL_HOST,     description={"suggested_value": existing.get(CONF_MAIL_HOST, "")}): str,
+                vol.Optional(CONF_MAIL_PORT,     default=existing.get(CONF_MAIL_PORT, DEFAULT_MAIL_PORT)):
+                    vol.All(int, vol.Range(min=1, max=65535)),
+                vol.Optional(CONF_MAIL_USE_TLS,  default=existing.get(CONF_MAIL_USE_TLS, DEFAULT_MAIL_USE_TLS)): bool,
+                vol.Optional(CONF_MAIL_USERNAME, description={"suggested_value": existing.get(CONF_MAIL_USERNAME, "")}): str,
+                vol.Optional(CONF_MAIL_PASSWORD, description={"suggested_value": existing.get(CONF_MAIL_PASSWORD, "")}): str,
+                vol.Optional(CONF_MAIL_FROM,     description={"suggested_value": existing.get(CONF_MAIL_FROM, "")}): str,
+                vol.Optional(CONF_MAIL_TO,       description={"suggested_value": existing.get(CONF_MAIL_TO, "")}): str,
+                vol.Optional(CONF_MAIL_MONTHLY,  default=existing.get(CONF_MAIL_MONTHLY, True)): bool,
+                vol.Optional(CONF_MAIL_WEEKLY,   default=existing.get(CONF_MAIL_WEEKLY, False)): bool,
             }),
         )
 
@@ -732,6 +828,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="pool_opts",      label="🏊 Zwembad Controller"),
                         selector.SelectOptionDict(value="lamp_circ_opts", label="💡 Lampcirculatie & Beveiliging"),
                         selector.SelectOptionDict(value="tab_visibility_opts", label="👁️ Tabbladen zichtbaarheid"),
+                        selector.SelectOptionDict(value="mail_opts",          label="📧 E-mail rapporten"),
                     ], mode="list"))
             }),
         )
@@ -1282,7 +1379,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             new_lc = {
                 "light_entities":  [],  # auto-discovery: alle light.* entiteiten
                 "excluded_ids":    user_input.get("lc_excluded_ids", []),
-                "enabled":         bool(user_input.get("lc_enabled", True)),
+                "enabled":         bool(user_input.get("lc_enabled", False)),
                 "min_confidence":  float(user_input.get("lc_min_confidence", 0.55)),
                 "night_start_h":   int(user_input.get("lc_night_start_h", 22)),
                 "night_end_h":     int(user_input.get("lc_night_end_h", 7)),
@@ -1297,7 +1394,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     selector.EntitySelector(selector.EntitySelectorConfig(
                         domain=["light", "switch", "input_boolean"], multiple=True)),
                 vol.Optional("lc_enabled",
-                             default=bool(lc_cfg.get("enabled", True))): bool,
+                             default=bool(lc_cfg.get("enabled", False))): bool,
                 vol.Optional("lc_use_sun_entity",
                              default=bool(lc_cfg.get("use_sun_entity", True))): bool,
                 vol.Optional("lc_min_confidence",
@@ -1360,5 +1457,62 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         mode="list",
                     )
                 ),
+            }),
+        )
+
+    async def async_step_mail_opts(self, user_input=None):
+        """E-mail / SMTP opties — ook bereikbaar vanuit het Configureren-menu."""
+        errors: dict = {}
+        data = self._data()
+
+        if user_input is not None:
+            enabled = user_input.get(CONF_MAIL_ENABLED, False)
+            if enabled:
+                if not user_input.get(CONF_MAIL_HOST, "").strip():
+                    errors[CONF_MAIL_HOST] = "mail_host_required"
+                if not user_input.get(CONF_MAIL_TO, "").strip():
+                    errors[CONF_MAIL_TO] = "mail_to_required"
+                if not errors:
+                    try:
+                        import smtplib, ssl as _ssl
+                        host     = user_input[CONF_MAIL_HOST].strip()
+                        port     = user_input.get(CONF_MAIL_PORT, DEFAULT_MAIL_PORT)
+                        use_tls  = user_input.get(CONF_MAIL_USE_TLS, True)
+                        ctx      = _ssl.create_default_context() if use_tls else None
+                        with smtplib.SMTP(host, port, timeout=5) as smtp:
+                            if use_tls:
+                                smtp.starttls(context=ctx)
+                            u = user_input.get(CONF_MAIL_USERNAME, "").strip()
+                            p = user_input.get(CONF_MAIL_PASSWORD, "").strip()
+                            if u and p:
+                                smtp.login(u, p)
+                    except Exception as _err:
+                        errors["base"] = "mail_connection_failed"
+                        _LOGGER.warning("CloudEMS mail test mislukt: %s", _err)
+            if not errors:
+                return self._save(user_input)
+
+        return self.async_show_form(
+            step_id="mail_opts",
+            errors=errors,
+            description_placeholders={
+                "info": (
+                    "💡 Gebruik voor Gmail een App-wachtwoord "
+                    "(myaccount.google.com → Beveiliging → App-wachtwoorden). "
+                    "Office 365: smtp.office365.com, poort 587."
+                )
+            },
+            data_schema=vol.Schema({
+                vol.Optional(CONF_MAIL_ENABLED,  default=data.get(CONF_MAIL_ENABLED, False)): bool,
+                vol.Optional(CONF_MAIL_HOST,     description={"suggested_value": data.get(CONF_MAIL_HOST, "")}): str,
+                vol.Optional(CONF_MAIL_PORT,     default=data.get(CONF_MAIL_PORT, DEFAULT_MAIL_PORT)):
+                    vol.All(int, vol.Range(min=1, max=65535)),
+                vol.Optional(CONF_MAIL_USE_TLS,  default=data.get(CONF_MAIL_USE_TLS, DEFAULT_MAIL_USE_TLS)): bool,
+                vol.Optional(CONF_MAIL_USERNAME, description={"suggested_value": data.get(CONF_MAIL_USERNAME, "")}): str,
+                vol.Optional(CONF_MAIL_PASSWORD, description={"suggested_value": data.get(CONF_MAIL_PASSWORD, "")}): str,
+                vol.Optional(CONF_MAIL_FROM,     description={"suggested_value": data.get(CONF_MAIL_FROM, "")}): str,
+                vol.Optional(CONF_MAIL_TO,       description={"suggested_value": data.get(CONF_MAIL_TO, "")}): str,
+                vol.Optional(CONF_MAIL_MONTHLY,  default=data.get(CONF_MAIL_MONTHLY, True)): bool,
+                vol.Optional(CONF_MAIL_WEEKLY,   default=data.get(CONF_MAIL_WEEKLY, False)): bool,
             }),
         )

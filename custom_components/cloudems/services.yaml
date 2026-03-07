@@ -55,7 +55,13 @@ set_phase_max_current:
       required: true
       selector:
         select:
-          options: [L1, L2, L3]
+          options:
+            - value: "L1"
+              label: "L1"
+            - value: "L2"
+              label: "L2"
+            - value: "L3"
+              label: "L3"
     max_current:
       name: Max stroom (A)
       required: true
@@ -149,7 +155,13 @@ nilm_feedback:
       required: true
       selector:
         select:
-          options: [correct, incorrect, maybe]
+          options:
+            - value: "correct"
+              label: "Correct"
+            - value: "incorrect"
+              label: "Incorrect"
+            - value: "maybe"
+              label: "Misschien"
     name:
       name: Naam
       required: false
@@ -176,7 +188,11 @@ boiler_override:
       required: false
       selector:
         select:
-          options: [on, off]
+          options:
+            - value: "on"
+              label: "Aan"
+            - value: "off"
+              label: "Uit"
 
 reset_drift_baseline:
   name: Reset drift basislijn

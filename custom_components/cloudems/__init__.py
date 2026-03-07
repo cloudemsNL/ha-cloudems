@@ -4,6 +4,7 @@
 # BUG FIX: Platform.BINARY_SENSOR was missing from PLATFORMS list
 from __future__ import annotations
 import logging
+import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -36,8 +37,9 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
             _LOGGER.debug("CloudEMS: lovelace not available yet, skipping resource registration")
             return
 
-        resources = lovelace.get("resources")
+        resources = getattr(lovelace, "resources", None)
         if resources is None:
+            resources = lovelace.get("resources") if hasattr(lovelace, "get") else None
             _LOGGER.debug("CloudEMS: lovelace resources not available, skipping")
             return
 
@@ -87,7 +89,8 @@ async def _async_apply_tab_visibility(hass: HomeAssistant, hidden_tabs: list[str
             return
 
         # Find the CloudEMS dashboard — it has views with paths starting 'cloudems-'
-        dashboards = lovelace.get("dashboards", {})
+        _dashboards_obj = getattr(lovelace, "dashboards", None)
+        dashboards = _dashboards_obj if _dashboards_obj is not None else (lovelace.get("dashboards", {}) if hasattr(lovelace, "get") else {})
 
         target_dashboard = None
         for _url_slug, dash in dashboards.items():
@@ -104,13 +107,16 @@ async def _async_apply_tab_visibility(hass: HomeAssistant, hidden_tabs: list[str
         # Also check default dashboard
         if target_dashboard is None:
             try:
-                default = lovelace.get("dashboards", {}).get("lovelace", None)
+                default = dashboards.get("lovelace", None) if hasattr(dashboards, "get") else getattr(dashboards, "lovelace", None)
                 if default is None:
                     # Try the lovelace object itself as default dashboard handler
-                    cfg = await lovelace["dashboards"]["lovelace"].async_load(force=False)
+                    _dash_obj = (dashboards.get("lovelace") if hasattr(dashboards, "get") else None) or getattr(dashboards, "lovelace", None)
+                    if _dash_obj is None:
+                        raise KeyError("lovelace dashboard not found")
+                    cfg = await _dash_obj.async_load(force=False)
                     views = cfg.get("views", [])
                     if any(v.get("path", "").startswith("cloudems-") for v in views):
-                        target_dashboard = lovelace["dashboards"]["lovelace"]
+                        target_dashboard = _dash_obj
                         target_cfg = cfg
             except Exception:
                 pass
@@ -183,6 +189,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _register_services(hass, entry, coordinator)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    # v2.4.18: registreer CloudEMS als energy platform voor HA energiedashboard
+    try:
+        from homeassistant.components import energy as _energy_component
+        if hasattr(_energy_component, "async_register_info"):
+            from .energy import async_get_energy_info
+            _energy_component.async_register_info(hass, DOMAIN, async_get_energy_info)
+            _LOGGER.info("CloudEMS: geregistreerd als HA energy platform")
+    except Exception as _ep_err:
+        _LOGGER.debug("CloudEMS: energy platform registratie niet beschikbaar: %s", _ep_err)
+
     # Auto-register the Lovelace card resource so users don't have to do it manually
     hass.async_create_task(_async_register_lovelace_resource(hass))
 
@@ -251,9 +267,58 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         if coordinator._prices:
             await coordinator._prices.update()
 
+
     async def generate_report(call: ServiceCall):
         from .diagnostics import async_generate_report
         await async_generate_report(hass, entry)
+
+    async def download_energy_report(call: ServiceCall):
+        """Genereer een HTML-energierapport en sla op in /config/www/cloudems/.
+
+        Het bestand is downloadbaar via /local/cloudems/rapport-YYYY-MM.html.
+        Na generatie wordt sensor.cloudems_last_report_url bijgewerkt.
+        """
+        import os, pathlib
+        from datetime import datetime as _dt, timezone as _tz
+        from .energy_manager.monthly_report import MonthlyReportGenerator, _prev_month_label
+
+        now   = _dt.now(_tz.utc)
+        label = call.data.get("month", "") or _prev_month_label(now)
+        data  = coordinator.data or {}
+
+        # Bouw Markdown rapport
+        gen    = MonthlyReportGenerator(hass, "")
+        md_text = gen._build(data, label)  # noqa: SLF001
+
+        # Converteer naar nette HTML
+        html = _md_to_html(md_text, label)
+
+        # Schrijf naar /config/www/cloudems/
+        www_dir = pathlib.Path(hass.config.config_dir) / "www" / "cloudems"
+        www_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"rapport-{label.lower().replace(' ', '-')}.html"
+        filepath = www_dir / filename
+        await hass.async_add_executor_job(filepath.write_text, html, "utf-8")
+
+        url = f"/local/cloudems/{filename}"
+        _LOGGER.info("CloudEMS rapport gegenereerd: %s", url)
+
+        # Sla URL op zodat de dashboard sensor hem kan tonen
+        hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
+        hass.data[DOMAIN][entry.entry_id]["last_report_url"]   = url
+        hass.data[DOMAIN][entry.entry_id]["last_report_label"] = label
+
+        # Stuur een persistent notification met directe link
+        from homeassistant.components.persistent_notification import async_create as _pn
+        _pn(
+            hass,
+            message=f"[📥 Download rapport — {label}]({url})",
+            title=f"☀️ CloudEMS Rapport gereed — {label}",
+            notification_id="cloudems_report_ready",
+        )
+
+        # Ververs de sensor zodat de URL zichtbaar is in het dashboard
+        coordinator.async_update_listeners()
 
     async def boiler_override(call: ServiceCall):
         """Manually force a boiler on or off."""
@@ -275,6 +340,8 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "set_phase_max_current",  set_phase_max_current)
     hass.services.async_register(DOMAIN, "force_price_update",     force_price_update)
     hass.services.async_register(DOMAIN, "generate_report",        generate_report)
+    hass.services.async_register(DOMAIN, "download_energy_report", download_energy_report,
+        schema=vol.Schema({vol.Optional("month", default=""): str}))
     hass.services.async_register(DOMAIN, "boiler_override",        boiler_override)
 
     async def reset_drift_baseline(call: ServiceCall):
@@ -353,6 +420,91 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         )
 
     hass.services.async_register(DOMAIN, "cleanup_nilm", cleanup_nilm)
+
+    # ── v2.4.21: E-mail test service ─────────────────────────────────────────
+
+    async def send_test_mail(call: ServiceCall) -> None:
+        """Stuur een testmail om SMTP-configuratie te verifieren.
+
+        Parameters:
+          recipient (optional): overschrijf het geconfigureerde ontvangstadres.
+        """
+        from .mail import CloudEMSMailer
+        import datetime
+
+        cfg = {**coordinator.config_entry.data, **coordinator.config_entry.options}
+        recipient_override = call.data.get("recipient", "").strip()
+        if recipient_override:
+            cfg["mail_to"] = recipient_override
+
+        mailer = CloudEMSMailer(hass, cfg)
+        if not mailer.enabled and not recipient_override:
+            _LOGGER.warning(
+                "CloudEMS send_test_mail: e-mail niet ingeschakeld. "
+                "Schakel in via Configureren → E-mail rapporten."
+            )
+            hass.components.persistent_notification.async_create(
+                "📧 **CloudEMS testmail mislukt**\n\n"
+                "E-mail is niet ingeschakeld. Ga naar **Configureren → E-mail rapporten** "
+                "en schakel e-mail in.",
+                title="CloudEMS",
+                notification_id="cloudems_mail_test",
+            )
+            return
+
+        now_str = datetime.datetime.now().strftime("%d-%m-%Y %H:%M")
+        subject = f"✅ CloudEMS testmail — {now_str}"
+        body = (
+            f"Dit is een testmail van CloudEMS.\n\n"
+            f"Als je dit bericht ontvangt, is je SMTP-configuratie correct ingesteld.\n\n"
+            f"Instellingen gebruikt:\n"
+            f"  Server : {cfg.get('mail_host', '?')}\n"
+            f"  Poort  : {cfg.get('mail_port', 587)}\n"
+            f"  TLS    : {'ja' if cfg.get('mail_use_tls', True) else 'nee'}\n"
+            f"  Van    : {cfg.get('mail_from') or cfg.get('mail_username', '?')}\n"
+            f"  Naar   : {cfg.get('mail_to', '?')}\n\n"
+            f"— CloudEMS {now_str}"
+        )
+        ok, err_msg = await mailer.async_test_connection()
+        if not ok:
+            _LOGGER.error("CloudEMS send_test_mail: verbindingstest mislukt: %s", err_msg)
+            hass.components.persistent_notification.async_create(
+                f"📧 **CloudEMS testmail mislukt**\n\n"
+                f"Kan geen verbinding maken met de mailserver.\n\n"
+                f"**Fout:** `{err_msg}`\n\n"
+                f"Controleer server, poort en inloggegevens via "
+                f"**Configureren → E-mail rapporten**.",
+                title="CloudEMS",
+                notification_id="cloudems_mail_test",
+            )
+            return
+
+        success = await mailer._async_send(subject, body, None, None)
+        if success:
+            _LOGGER.info("CloudEMS send_test_mail: testmail verstuurd naar %s", cfg.get("mail_to"))
+            hass.components.persistent_notification.async_create(
+                f"📧 **CloudEMS testmail verstuurd**\n\n"
+                f"Testmail succesvol verstuurd naar **{cfg.get('mail_to', '?')}**.\n\n"
+                f"Controleer je inbox (en spam-map).",
+                title="CloudEMS",
+                notification_id="cloudems_mail_test",
+            )
+        else:
+            hass.components.persistent_notification.async_create(
+                f"📧 **CloudEMS testmail mislukt**\n\n"
+                f"Verbinding geslaagd maar versturen mislukt. Controleer de logs voor details.",
+                title="CloudEMS",
+                notification_id="cloudems_mail_test",
+            )
+
+    hass.services.async_register(
+        DOMAIN,
+        "send_test_mail",
+        send_test_mail,
+        schema=vol.Schema({
+            vol.Optional("recipient"): str,
+        }),
+    )
 
     # ── v1.25: Fase-detectie via dim-puls ────────────────────────────────────
 
@@ -517,6 +669,21 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             enabled = bool(call.data.get("enabled", True))
             lc.set_enabled(enabled)
             _LOGGER.info("CloudEMS lamp_circulation_set_enabled: %s", enabled)
+
+            # Persisteer naar coordinator._config zodat lazy-discovery + configure()
+            # de instelling NIET terugzetten naar True bij de volgende coordinator-tick.
+            lamp_cfg = coordinator._config.setdefault("lamp_circulation", {})
+            lamp_cfg["enabled"] = enabled
+
+            # Persisteer naar HA config entry zodat de instelling overleeft bij herstart.
+            try:
+                new_options = dict(entry.options)
+                lc_opts = dict(new_options.get("lamp_circulation", {}))
+                lc_opts["enabled"] = enabled
+                new_options["lamp_circulation"] = lc_opts
+                hass.config_entries.async_update_entry(entry, options=new_options)
+            except Exception as _pe:
+                _LOGGER.warning("CloudEMS: lamp_circulation enabled persisteren mislukt: %s", _pe)
         else:
             _LOGGER.warning("CloudEMS lamp_circulation_set_enabled: geen lampen geconfigureerd")
 
@@ -637,4 +804,102 @@ async def async_migrate_entry(hass, config_entry) -> bool:
         hass.config_entries.async_update_entry(config_entry, version=4)
         _LOGGER.info("CloudEMS: migrated to version 4")
 
+    if version == 4:
+        # v4→v5: lampcirculatie standaard UIT zetten.
+        # De module werd automatisch ingeschakeld bij nieuwe installaties (default True).
+        # Veiligheidsmaatregel: forceer enabled=False zodat gebruikers bewust moeten
+        # kiezen om de inbraakbeveiliging aan te zetten via de wizard of het dashboard.
+        new_data    = dict(config_entry.data)
+        new_options = dict(config_entry.options)
+
+        # Forceer in data-dict
+        lc_data = dict(new_data.get("lamp_circulation", {}))
+        lc_data["enabled"] = False
+        new_data["lamp_circulation"] = lc_data
+
+        # Forceer in options-dict (wordt bij OptionsFlow gebruikt)
+        lc_opts = dict(new_options.get("lamp_circulation", {}))
+        lc_opts["enabled"] = False
+        new_options["lamp_circulation"] = lc_opts
+
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, options=new_options, version=5
+        )
+        _LOGGER.info("CloudEMS: migrated to version 5 — lamp_circulation.enabled → False")
+
     return True
+
+
+# ── Rapport HTML helper ────────────────────────────────────────────────────────
+
+def _md_to_html(md: str, title: str) -> str:
+    """Converteer Markdown rapport naar standalone HTML met CloudEMS styling."""
+    import re, html as _html
+
+    lines = md.split("\n")
+    body_parts: list[str] = []
+
+    for line in lines:
+        raw = line.rstrip()
+        if raw.startswith("## "):
+            body_parts.append(f"<h2>{_html.escape(raw[3:])}</h2>")
+        elif raw.startswith("### "):
+            body_parts.append(f"<h3>{_html.escape(raw[4:])}</h3>")
+        elif raw.startswith("---"):
+            body_parts.append("<hr>")
+        elif raw.startswith("- "):
+            content = raw[2:]
+            # Bold: **tekst**
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+            body_parts.append(f"<li>{content}</li>")
+        elif raw.startswith("*") and raw.endswith("*"):
+            body_parts.append(f"<p class='footer'>{raw.strip('*')}</p>")
+        elif re.match(r"^\d+\.", raw):
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", raw)
+            body_parts.append(f"<li class='numbered'>{content}</li>")
+        elif raw == "":
+            body_parts.append("<br>")
+        else:
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", _html.escape(raw))
+            body_parts.append(f"<p>{content}</p>")
+
+    body = "\n".join(body_parts)
+
+    return f"""<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudEMS Rapport — {_html.escape(title)}</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #111827; color: #e5e7eb;
+      max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem;
+      line-height: 1.6;
+    }}
+    h1 {{ color: #00b140; font-size: 1.6rem; margin-bottom: 1.5rem; border-bottom: 2px solid #00b140; padding-bottom: .5rem; }}
+    h2 {{ color: #00d44e; font-size: 1.25rem; margin: 1.5rem 0 .5rem; }}
+    h3 {{ color: #6ee7b7; font-size: 1rem; margin: 1.2rem 0 .4rem; }}
+    li {{ margin-left: 1.2rem; margin-bottom: .2rem; }}
+    li.numbered {{ list-style: decimal; margin-left: 1.5rem; }}
+    strong {{ color: #f9fafb; }}
+    hr {{ border: none; border-top: 1px solid #374151; margin: 1.5rem 0; }}
+    p.footer {{ color: #6b7280; font-size: .85rem; font-style: italic; margin-top: 1rem; }}
+    br {{ display: block; content: ''; margin: .3rem 0; }}
+    .print-btn {{
+      display: inline-block; margin-bottom: 1.5rem;
+      padding: .5rem 1.2rem; background: #00b140; color: #fff;
+      border: none; border-radius: 6px; cursor: pointer;
+      font-size: .9rem; text-decoration: none;
+    }}
+    @media print {{ .print-btn {{ display: none; }} body {{ background: #fff; color: #000; }} }}
+  </style>
+</head>
+<body>
+  <h1>☀️ CloudEMS Energierapport</h1>
+  <button class="print-btn" onclick="window.print()">🖨️ Afdrukken / Opslaan als PDF</button>
+  {body}
+</body>
+</html>"""

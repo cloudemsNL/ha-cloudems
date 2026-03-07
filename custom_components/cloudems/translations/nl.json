@@ -244,10 +244,32 @@
           "heat_pump_power_entity": "Warmtepomp elektrisch vermogen sensor (W)",
           "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor (W, optioneel)"
         }
+      },
+      "mail": {
+        "title": "📧 E-mail rapporten (optioneel)",
+        "description": "Stel e-mail in om automatisch maandelijkse of wekelijkse energierapporten als PDF te ontvangen.\n\nLaat leeg om over te slaan.",
+        "data": {
+          "mail_enabled": "E-mailrapporten inschakelen",
+          "mail_host": "SMTP server (bijv. smtp.gmail.com)",
+          "mail_port": "Poort (meestal 587)",
+          "mail_use_tls": "STARTTLS gebruiken",
+          "mail_username": "Gebruikersnaam / e-mailadres",
+          "mail_password": "Wachtwoord of app-wachtwoord",
+          "mail_from": "Afzender (laat leeg = gebruikersnaam)",
+          "mail_to": "Ontvanger(s) — komma-gescheiden",
+          "mail_monthly_report": "Maandelijks PDF-rapport versturen",
+          "mail_weekly_report": "Wekelijkse samenvatting versturen"
+        }
       }
     },
     "abort": {
       "reconfigure_successful": "Herconfiguratie succesvol opgeslagen."
+    },
+    "error": {
+      "sensor_is_energy_not_power": "Deze sensor meet energie (kWh), geen vermogen (W). Kies een sensor met eenheid W of kW. Energietellers zijn niet bruikbaar als vermogenssensor.",
+      "mail_host_required": "Vul een SMTP-server in",
+      "mail_to_required": "Vul minimaal één ontvanger in",
+      "mail_connection_failed": "Verbinding met mailserver mislukt. Controleer host, poort en inloggegevens."
     }
   },
   "options": {
@@ -495,6 +517,22 @@
         "description": "Selecteer welke tabbladen je wil **verbergen** uit de navigatiebalk. Verborgen tabbladen zijn nog steeds bereikbaar via directe URL maar verdwijnen uit de tabbladenrij. CloudEMS past dit automatisch toe in het Lovelace dashboard. Het tabblad Overzicht is altijd zichtbaar.",
         "data": {
           "hidden_tabs": "Verborgen tabbladen"
+        }
+      },
+      "mail_opts": {
+        "title": "📧 E-mail rapporten",
+        "description": "{info}",
+        "data": {
+          "mail_enabled": "E-mailrapporten inschakelen",
+          "mail_host": "SMTP server",
+          "mail_port": "Poort",
+          "mail_use_tls": "STARTTLS gebruiken",
+          "mail_username": "Gebruikersnaam",
+          "mail_password": "Wachtwoord / app-wachtwoord",
+          "mail_from": "Afzender (leeg = gebruikersnaam)",
+          "mail_to": "Ontvanger(s), komma-gescheiden",
+          "mail_monthly_report": "Maandelijks PDF-rapport versturen",
+          "mail_weekly_report": "Wekelijkse samenvatting versturen"
         }
       }
     },

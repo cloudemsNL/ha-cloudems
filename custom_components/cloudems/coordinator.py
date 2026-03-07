@@ -93,7 +93,7 @@ from .const import (
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
     DOMAIN, UPDATE_INTERVAL_FAST, DEFAULT_MAX_CURRENT, DEFAULT_MAINS_VOLTAGE_V,
     STORAGE_KEY_NILM_DEVICES, STORAGE_KEY_NILM_ENERGY,
-    STORAGE_KEY_NILM_TOGGLES,
+    STORAGE_KEY_NILM_TOGGLES, STORAGE_KEY_NILM_REVIEW, STORAGE_KEY_NILM_ADAPTIVE,
     DEFAULT_NILM_ACTIVE, DEFAULT_HYBRID_NILM_ACTIVE, DEFAULT_NILM_HMM_ACTIVE,
     DEFAULT_NILM_BAYES_ACTIVE,
     CONF_GRID_SENSOR, CONF_PHASE_SENSORS, CONF_SOLAR_SENSOR,
@@ -129,6 +129,12 @@ from .energy.prices import EnergyPriceFetcher
 from .energy.limiter import CurrentLimiter
 from .energy_manager.power_calculator import PowerCalculator
 from .energy_manager.notification_engine import NotificationEngine
+from .energy_manager.monthly_report import MonthlyReportGenerator
+from .energy_manager.installation_score import InstallationScoreCalculator
+from .energy_manager.behaviour_coach import BehaviourCoach
+from .energy_manager.load_planner import plan_tomorrow, plan_to_dict
+from .energy_manager.energy_label import EnergyLabelSimulator
+from .energy_manager.saldering_simulator import SalderingSimulator
 from .energy_manager.sensor_ema import SensorEMALayer
 from .energy_manager.sensor_sanity import SensorSanityGuard
 from .energy_manager.absence_detector import AbsenceDetector
@@ -183,6 +189,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._store_energy  = Store(hass, 1, STORAGE_KEY_NILM_ENERGY)
         # v1.22: persistente NILM-schakelaar staat
         self._store_toggles = Store(hass, 1, STORAGE_KEY_NILM_TOGGLES)
+        # v2.4.17: persistente review-history en adaptieve drempels
+        self._store_review   = Store(hass, 1, STORAGE_KEY_NILM_REVIEW)
+        self._store_adaptive = Store(hass, 1, STORAGE_KEY_NILM_ADAPTIVE)
+        # adaptive thresholds per device_type: {type: {min_events, confidence, fp_count, tp_count}}
+        self._adaptive_thresholds: dict = {}
         self._nilm_active:        bool = DEFAULT_NILM_ACTIVE
         self._hybrid_nilm_active: bool = DEFAULT_HYBRID_NILM_ACTIVE
         self._nilm_hmm_active:    bool = DEFAULT_NILM_HMM_ACTIVE
@@ -254,7 +265,96 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             for _bk in ("power_sensor", "soc_sensor", "charge_sensor", "discharge_sensor"):
                 if _bc.get(_bk):
                     _config_eids.add(_bc[_bk])
+
+        # v2.4.15: Robuuste uitbreiding van _config_sensor_eids — drie lagen:
+        #
+        # Laag 1 — HA-device siblings: alle entiteiten van hetzelfde HA-device als
+        #   een geconfigureerde sensor worden automatisch uitgesloten. Dit pakt alle
+        #   afgeleide sensoren van bijv. Zonneplan/DSMR taalongafhankelijk.
+        #
+        # Laag 2 — Energie-integraties: entiteiten waarvan de config_entry domain
+        #   een bekende energiemeter- of energieleverancier-integratie is worden
+        #   nooit gescand als apparaat (ongeacht naam of eenheid).
+        #
+        # Laag 3 — kWh-sensoren: state_class=total_increasing of device_class=energy
+        #   zijn nooit bruikbaar als NILM-vermogenssignaal.
+        #
+        # Bekende energiemeter/leverancier-integraties (taalongafhankelijk):
+        _ENERGY_METER_DOMAINS = frozenset({
+            # DSMR / P1
+            "dsmr", "dsmr_reader", "p1_monitor", "dsmr_parser",
+            # Slimme meters / energiemeters
+            "homewizard", "homewizard_energy",
+            "enelogic", "youless", "volksthuis", "easyenergy",
+            "zonneplan", "tibber", "eneco", "vattenfall", "oxxio",
+            "n2g_ems", "itho_daalderop",
+            # Groene stroom / leveranciers met eigen integratie
+            "essent", "greenchoice", "budget_energie",
+            # Omvormers / PV (mochten ze toch in de NILM belanden)
+            "growatt_local", "goodwe", "solaredge", "fronius",
+            "enphase_envoy", "sma", "huawei_solar",
+            # Generieke energie-aggregatoren
+            "energy_dashboard", "powerwall",
+        })
+
+        try:
+            from homeassistant.helpers import entity_registry as _er_mod
+            _er = _er_mod.async_get(self.hass)
+
+            # Laag 1: siblings van geconfigureerde HA-devices
+            _device_ids: set = set()
+            for _eid in set(_config_eids):
+                _entry = _er.async_get(_eid)
+                if _entry and _entry.device_id:
+                    _device_ids.add(_entry.device_id)
+            for _e in _er.entities.values():
+                if _e.device_id and _e.device_id in _device_ids:
+                    _config_eids.add(_e.entity_id)
+
+            # Laag 2 + 3: energie-integraties en kWh-sensoren
+            for _e in _er.entities.values():
+                if _e.domain != "sensor":
+                    continue
+                # Laag 2: bekende energie-integratie domain
+                if _e.platform in _ENERGY_METER_DOMAINS:
+                    _config_eids.add(_e.entity_id)
+                    continue
+                # Laag 3: kWh / energietellers
+                _state = self.hass.states.get(_e.entity_id)
+                if _state is None:
+                    continue
+                _sc = _state.attributes.get("state_class", "")
+                _dc = _state.attributes.get("device_class", "")
+                _unit = (_state.attributes.get("unit_of_measurement") or "").lower()
+                if (
+                    _sc in ("total_increasing", "total")
+                    or _dc == "energy"
+                    or _unit in ("kwh", "wh", "mwh", "gj", "m³", "m3")
+                ):
+                    _config_eids.add(_e.entity_id)
+
+            _LOGGER.debug(
+                "CloudEMS NILM: %d entiteiten uitgesloten als infra/energie-sensor",
+                len(_config_eids),
+            )
+        except Exception as _ex:
+            _LOGGER.warning("CloudEMS: uitbreiding config_sensor_eids mislukt: %s", _ex)
+
         self._nilm.set_config_sensor_eids(_config_eids)
+
+        # v2.4.19: geef ook de friendly names door zodat naam-gebaseerde filter werkt
+        try:
+            _blocked_names: set = set()
+            for _eid in _config_eids:
+                _st = self.hass.states.get(_eid)
+                if _st:
+                    _fname = _st.attributes.get("friendly_name") or ""
+                    if _fname:
+                        _blocked_names.add(_fname)
+            if _blocked_names:
+                self._nilm.set_blocked_friendly_names(_blocked_names)
+        except Exception as _bn_err:
+            _LOGGER.debug("CloudEMS: blocked_friendly_names ophalen mislukt: %s", _bn_err)
 
         self._prices: Optional[EnergyPriceFetcher] = None
         self._limiter = CurrentLimiter(
@@ -292,6 +392,23 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._battery_degradation:  Optional[object] = None
         self._sensor_hints:         Optional[object] = None
         self._cost_forecaster:   Optional[object] = None
+        # v2.2.2: maandrapportage + installatie-score
+        self._monthly_report:    Optional[object] = None
+        self._daily_summary:     Optional[object] = None
+        self._install_score:     Optional[InstallationScoreCalculator] = None
+        # v2.2.3: gedragscoach + load planner + energy label + saldering
+        self._behaviour_coach:   Optional[object] = None
+        self._load_planner_data: dict = {}   # resultaat van laatste plan_tomorrow()
+        self._energy_label:      Optional[object] = None
+        self._saldering_sim:     Optional[object] = None
+        # v2.2.3: lichte EPEX-prijshistorie voor BehaviourCoach (max 30 dagen × 24 = 720 uur)
+        self._price_hour_history: list = []   # [{"ts": int, "price": float, "kwh_net": float}]
+        self._price_history_last_hour: int = 0
+        # v2.4.0: gas analyse, budget, appliance ROI, solar dimmer
+        self._gas_analysis:      Optional[object] = None
+        self._energy_budget:     Optional[object] = None
+        self._appliance_roi:     Optional[object] = None
+        self._solar_dimmer:      Optional[object] = None
         # v1.10.3: self-learning intelligence modules
         self._home_baseline:     Optional[object] = None
         self._ev_session:        Optional[object] = None
@@ -341,6 +458,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v1.17: Hybride NILM
         self._hybrid: Optional[HybridNILM] = None
+
+        # v2.4.14: NILM review queue — houdt bij welk apparaat de gebruiker nu beoordeelt
+        # _review_skip_set: device_ids die de gebruiker tijdelijk heeft overgeslagen
+        self._review_skip_set: set = set()
+        self._review_skip_history: list = []  # geordend — voor "Vorige" knop
 
     # ── Public helpers ────────────────────────────────────────────────────────
 
@@ -534,6 +656,154 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         }
 
 
+    async def _async_suggest_device_names(self) -> None:
+        """v2.4.0: Vraag LLM om naam-suggesties voor pending generic NILM-apparaten."""
+        if not self._ollama_cfg.get("enabled"):
+            return
+        if self._ollama_health.get("status") != "online":
+            return
+
+        cfg   = self._ollama_cfg
+        host  = cfg.get("host", "localhost")
+        port  = cfg.get("port", 11434)
+        model = cfg.get("model", "llama3")
+        url   = f"http://{host}:{port}/api/generate"
+
+        for dev in self._nilm.get_devices():
+            if not dev.pending_confirmation:
+                continue
+            if dev.suggested_name:
+                continue  # al een suggestie
+            if dev.user_name:
+                continue  # gebruiker heeft al een naam gegeven
+            # Alleen voor generic types
+            if dev.device_type not in ("unknown", "generic_appliance", "generic", ""):
+                continue
+
+            prompt = (
+                f"A home energy monitor detected a new electrical device. "
+                f"Based on the following profile, suggest a short Dutch household appliance name (max 3 words). "
+                f"Device type hint: {dev.device_type or 'unknown'}. "
+                f"Power: {dev.current_power:.0f}W. "
+                f"Phase: {dev.phase}. "
+                f"Detected at hour: {datetime.fromtimestamp(dev.last_seen, tz=timezone.utc).hour}. "
+                f"Respond ONLY with the device name, nothing else. Example: 'Magnetron' or 'Elektrische boiler'."
+            )
+
+            try:
+                async with self._session.post(
+                    url,
+                    json={"model": model, "prompt": prompt, "stream": False},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        name = (result.get("response") or "").strip().strip('"\'')
+                        if name and len(name) < 50:
+                            dev.suggested_name = name
+                            _LOGGER.info(
+                                "NILM LLM naam-suggestie voor '%s': '%s'",
+                                dev.device_id, name,
+                            )
+            except Exception as _llm_err:
+                _LOGGER.debug("LLM naam-suggestie fout voor %s: %s", dev.device_id, _llm_err)
+
+    def _calc_tariff_check(self, p1_data: dict | None, price_info: dict | None) -> dict:
+        """v2.4.0: Vergelijk berekende kosten met geconfigureerd tarief × gemeten import."""
+        try:
+            import_kwh = float((p1_data or {}).get("electricity_import_today_kwh") or 0)
+            if import_kwh < 1.0:
+                return {"status": "insufficient_data"}
+
+            configured_tariff = float(self._config.get("energy_tariff_import_eur_kwh") or 0)
+            avg_epex = float((price_info or {}).get("avg_today") or 0)
+
+            if configured_tariff <= 0 and avg_epex <= 0:
+                return {"status": "no_tariff_configured"}
+
+            # Geschatte kosten op basis van geconfigureerd vaste tarief
+            expected_eur = import_kwh * configured_tariff if configured_tariff > 0 else None
+            # Kosten op basis van EPEX gemiddelde
+            epex_eur = import_kwh * avg_epex if avg_epex > 0 else None
+
+            actual_eur = self._cost_today_eur
+
+            result = {
+                "status":              "ok",
+                "import_kwh":          round(import_kwh, 2),
+                "calculated_cost_eur": round(actual_eur, 3),
+                "configured_tariff":   configured_tariff,
+                "avg_epex_price":      round(avg_epex, 4),
+            }
+
+            if expected_eur and expected_eur > 0.5:
+                deviation_pct = abs(actual_eur - expected_eur) / expected_eur * 100
+                result["tariff_deviation_pct"] = round(deviation_pct, 1)
+                if deviation_pct > 20:
+                    result["status"] = "tariff_mismatch"
+                    result["advice"] = (
+                        f"Berekende kosten (€{actual_eur:.2f}) wijken {deviation_pct:.0f}% af van "
+                        f"tarief × import (€{expected_eur:.2f}). "
+                        "Controleer het geconfigureerde importtarief in de CloudEMS instellingen."
+                    )
+            return result
+        except Exception as _tc_err:
+            _LOGGER.debug("TariffCheck fout: %s", _tc_err)
+            return {"status": "error"}
+
+    def _build_system_health(self, price_info: dict | None) -> dict:
+        """v2.2.3: Bouw een systeemgezondheid-overzicht voor de health sensor."""
+        import time as _t
+        now = _t.time()
+
+        # Tel actieve sub-modules
+        modules = {
+            "nilm":           self._nilm_active,
+            "hybrid_nilm":    self._hybrid_nilm_active and self._hybrid is not None,
+            "p1":             self._p1_reader is not None,
+            "solar_learner":  self._solar_learner is not None,
+            "pv_forecast":    self._pv_forecast is not None,
+            "battery_sched":  self._battery_scheduler is not None,
+            "ev_charger":     self._dynamic_loader is not None or bool(self._config.get("ev_charger_entity")),
+            "prices":         self._prices is not None,
+            "notification":   self._notification_engine is not None,
+            "behaviour_coach": self._behaviour_coach is not None,
+        }
+        active_count = sum(1 for v in modules.values() if v)
+
+        # EPEX prijs-versheid
+        price_age_min = None
+        if self._prices_last_update > 0:
+            price_age_min = round((now - self._prices_last_update) / 60, 1)
+        prices_fresh = price_age_min is not None and price_age_min < 90
+
+        # NILM devices — gebruik get_devices_for_ha() zodat infra/geblokkeerde
+        # sensoren niet meegeteld worden (fix v2.4.17)
+        nilm_devices_ha  = self._nilm.get_devices_for_ha()
+        nilm_devices_raw = self._nilm.get_devices()
+        confirmed_dev = sum(1 for d in nilm_devices_ha if d.get("confirmed", False))
+        detected_dev  = len(nilm_devices_ha)
+
+        # Algehele status
+        if active_count >= 7 and prices_fresh:
+            status = "ok"
+        elif active_count >= 4:
+            status = "degraded"
+        else:
+            status = "limited"
+
+        return {
+            "status":          status,
+            "active_modules":  active_count,
+            "total_modules":   len(modules),
+            "modules":         modules,
+            "prices_fresh":    prices_fresh,
+            "price_age_min":   price_age_min,
+            "nilm_devices":    detected_dev,
+            "confirmed_devices": confirmed_dev,
+            "uptime_cycles":   getattr(self, "_health_cycle_count", 0),
+        }
+
     def _build_ai_status(self) -> dict:
         """Build AI/NILM status dict for the AI Status sensor."""
         devices   = self._nilm.get_devices()
@@ -608,9 +878,96 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .const import NILM_FEEDBACK_CORRECT
         self._nilm.set_feedback(device_id, NILM_FEEDBACK_CORRECT,
                                 corrected_name=name, corrected_type=device_type)
+        # Sync: haal ook uit skip-set en history zodat de review-queue consistent is
+        self._review_skip_set.discard(device_id)
+        if device_id in self._review_skip_history:
+            self._review_skip_history.remove(device_id)
+        # v2.4.17: registreer als true positive voor adaptieve drempels
+        dev = self._nilm._devices.get(device_id)
+        if dev:
+            dtype = getattr(dev, "device_type", "unknown") or "unknown"
+            rec = self._adaptive_thresholds.setdefault(dtype, {"tp": 0, "fp": 0})
+            rec["tp"] = rec.get("tp", 0) + 1
 
     def dismiss_nilm_device(self, device_id: str) -> None:
         self._nilm.dismiss_device(device_id)
+        self._review_skip_set.discard(device_id)
+        if device_id in self._review_skip_history:
+            self._review_skip_history.remove(device_id)
+        # v2.4.17: registreer als false positive voor adaptieve drempels
+        dev = self._nilm._devices.get(device_id)
+        if dev:
+            dtype = getattr(dev, "device_type", "unknown") or "unknown"
+            rec = self._adaptive_thresholds.setdefault(dtype, {"tp": 0, "fp": 0})
+            rec["fp"] = rec.get("fp", 0) + 1
+            # Pas on_events drempel aan: als fp > tp, verhoog minimale on_events voor dit type
+            if rec["fp"] > rec.get("tp", 0):
+                rec["min_events"] = min(rec.get("min_events", 3) + 1, 20)
+            # Direct doorgeven aan detector
+            self._nilm.set_adaptive_overrides(self._adaptive_thresholds)
+
+    # ── v2.4.14: NILM review queue ────────────────────────────────────────────
+
+    def get_review_current(self) -> Optional[object]:
+        """Geeft het eerste onbevestigde, niet-overgeslagen NILM-apparaat terug.
+
+        Volgorde: langst aanwezig (meeste on_events) eerst, zodat de meest
+        stabiele detecties als eerste worden beoordeeld.
+        """
+        pending = [
+            dev for dev in self._nilm.get_devices()
+            if not dev.confirmed
+            and not getattr(dev, "user_suppressed", False)
+            and dev.device_id not in self._review_skip_set
+        ]
+        if not pending:
+            return None
+        return max(pending, key=lambda d: d.on_events)
+
+    def get_review_pending_count(self) -> int:
+        """Aantal onbevestigde apparaten (inclusief overgeslagen)."""
+        return sum(
+            1 for dev in self._nilm.get_devices()
+            if not dev.confirmed and not getattr(dev, "user_suppressed", False)
+        )
+
+    def review_confirm_current(self) -> Optional[str]:
+        """Bevestig het huidige review-apparaat. Geeft device_id terug of None."""
+        dev = self.get_review_current()
+        if not dev:
+            return None
+        self.confirm_nilm_device(dev.device_id)
+        self._review_skip_set.discard(dev.device_id)
+        return dev.device_id
+
+    def review_dismiss_current(self) -> Optional[str]:
+        """Wijs het huidige review-apparaat af. Geeft device_id terug of None."""
+        dev = self.get_review_current()
+        if not dev:
+            return None
+        self.dismiss_nilm_device(dev.device_id)
+        return dev.device_id
+
+    def review_skip_current(self) -> Optional[str]:
+        """Sla het huidige review-apparaat over (tijdelijk, reset bij herstart).
+        Geeft device_id terug of None.
+        """
+        dev = self.get_review_current()
+        if not dev:
+            return None
+        self._review_skip_set.add(dev.device_id)
+        self._review_skip_history.append(dev.device_id)
+        return dev.device_id
+
+    def review_previous(self) -> Optional[str]:
+        """Ga terug naar het vorige overgeslagen apparaat.
+        Haalt de laatste entry uit de skip-history en zet hem terug in de queue.
+        """
+        if not self._review_skip_history:
+            return None
+        prev_id = self._review_skip_history.pop()
+        self._review_skip_set.discard(prev_id)
+        return prev_id
 
     def set_nilm_feedback(self, device_id: str, feedback: str,
                           corrected_name: str = "", corrected_type: str = "") -> None:
@@ -691,6 +1048,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             getattr(self, "_ev_session", None),
             getattr(self, "_nilm_schedule", None),
             getattr(self, "_gas_analysis", None),
+            getattr(self, "_energy_budget", None),
             getattr(self, "_battery_degradation", None),
             getattr(self, "_sensor_hints", None),
             getattr(self, "_room_meter", None),          # v1.20
@@ -746,6 +1104,62 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._session = aiohttp.ClientSession()
         self._nilm._cloud_ai._session = self._session
         await self._nilm.async_load()
+
+        # v2.4.17 Fix 8: Verwijder opgeslagen NILM-devices waarvan source_entity_id
+        # nu in de geblokkeerde infra-set zit. Dit treedt op wanneer de gebruiker
+        # een P1/DSMR-integratie wijzigt — de oude geleerde devices blijven anders
+        # voor altijd in storage staan.
+        try:
+            _blocked_eids = getattr(self._nilm, "_config_sensor_eids", set())
+            if _blocked_eids:
+                # Bouw een set van friendly names van geblokkeerde entiteiten
+                # zodat we ook kunnen matchen op apparaatnaam (voor devices zonder source_entity_id)
+                _blocked_names: set = set()
+                for _eid in _blocked_eids:
+                    _st = self.hass.states.get(_eid)
+                    if _st:
+                        _fname = _st.attributes.get("friendly_name") or _st.name or ""
+                        if _fname:
+                            _blocked_names.add(_fname.lower().strip())
+
+                _stale_ids = []
+                for did, dev in self._nilm._devices.items():
+                    if getattr(dev, "source", "") == "smart_plug":
+                        continue
+                    # Check 1: source_entity_id is geblokkeerd
+                    if getattr(dev, "source_entity_id", "") in _blocked_eids:
+                        _stale_ids.append(did)
+                        continue
+                    # Check 2: device naam komt overeen met friendly name van geblokkeerde entity
+                    _dev_name = (getattr(dev, "name", "") or "").lower().strip()
+                    if _dev_name and _dev_name in _blocked_names:
+                        _stale_ids.append(did)
+
+                for did in _stale_ids:
+                    _LOGGER.info(
+                        "CloudEMS NILM: verwijder stale infra-device '%s' (geblokkeerde naam/entity)",
+                        self._nilm._devices[did].name,
+                    )
+                    del self._nilm._devices[did]
+                if _stale_ids:
+                    await self._nilm.async_save()
+        except Exception as _cl_err:
+            _LOGGER.warning("CloudEMS: post-load cleanup mislukt: %s", _cl_err)
+
+        # v2.4.17: laad persistente review-history en adaptieve drempels
+        try:
+            _review_data = await self._store_review.async_load() or {}
+            self._review_skip_set  = set(_review_data.get("skip_set", []))
+            self._review_skip_history = list(_review_data.get("skip_history", []))
+        except Exception as _re:
+            _LOGGER.warning("CloudEMS: review-history laden mislukt: %s", _re)
+        try:
+            self._adaptive_thresholds = await self._store_adaptive.async_load() or {}
+            # Stuur direct door naar detector zodat get_devices_for_ha ze direct gebruikt
+            if self._adaptive_thresholds:
+                self._nilm.set_adaptive_overrides(self._adaptive_thresholds)
+        except Exception as _ae:
+            _LOGGER.warning("CloudEMS: adaptieve drempels laden mislukt: %s", _ae)
 
         # ── Watchdog ──────────────────────────────────────────────────────────
         # Haal entry_id op via de config entries — coordinator is gekoppeld aan één entry
@@ -838,6 +1252,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # v1.12.0: Notification engine
         self._notification_engine = NotificationEngine(self.hass, cfg)
         await self._notification_engine.async_setup()
+
+        # v2.2.2: maandrapportage
+        notify_svc = cfg.get("notification_service", "")
+        self._monthly_report = MonthlyReportGenerator(self.hass, notify_service=notify_svc)
+        # v2.4.0: dagelijkse samenvatting
+        from .energy_manager.daily_summary import DailySummaryGenerator
+        self._daily_summary = DailySummaryGenerator(self.hass, notify_service=notify_svc)
+        # v2.2.2: installatie-score (stateless, berekening on-demand)
+        self._install_score = InstallationScoreCalculator(self._config)
+        # v2.2.3: gedragscoach (stateless), energy label, saldering simulator
+        self._behaviour_coach = BehaviourCoach()
+        self._energy_label    = EnergyLabelSimulator()
+        self._saldering_sim   = SalderingSimulator()
+        # v2.4.0: nieuwe modules
+        from .energy_manager.gas_analysis import GasAnalyzer
+        from .energy_manager.energy_budget import EnergyBudgetTracker
+        from .energy_manager.appliance_roi import ApplianceROICalculator
+        from .energy_manager.solar_dimmer import SolarDimmer
+        self._gas_analysis = GasAnalyzer(self.hass)
+        await self._gas_analysis.async_setup()
+        self._energy_budget = EnergyBudgetTracker(self.hass, self._config)
+        await self._energy_budget.async_setup()
+        self._appliance_roi = ApplianceROICalculator()
+        self._solar_dimmer  = SolarDimmer(self.hass, self._config, self)
 
         # v1.12.0: Clipping verlies calculator
         from .energy_manager.clipping_loss import ClippingLossCalculator
@@ -1656,14 +2094,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if not self._lamp_circulation._lamps:
                     _discovered = [s.entity_id for s in self.hass.states.async_all("light")]
                     if _discovered:
-                        _lamp_cfg = self._config.get("lamp_circulation", {}) or {}
+                        # Lees altijd de actuele coordinator config — niet de stale lokale lamp_cfg.
+                        # Zo blijft een via de UI uitgeschakelde module uitgeschakeld na lazy-discovery.
+                        _lamp_cfg_live = self._config.get("lamp_circulation", {}) or {}
                         self._lamp_circulation.configure(
                             light_entities = _discovered,
-                            excluded_ids   = _lamp_cfg.get("excluded_ids", []),
-                            enabled        = _lamp_cfg.get("enabled", True),
-                            min_confidence = float(_lamp_cfg.get("min_confidence", 0.55)),
-                            night_start_h  = int(_lamp_cfg.get("night_start_h", 22)),
-                            night_end_h    = int(_lamp_cfg.get("night_end_h", 7)),
+                            excluded_ids   = _lamp_cfg_live.get("excluded_ids", []),
+                            enabled        = _lamp_cfg_live.get("enabled", True),
+                            min_confidence = float(_lamp_cfg_live.get("min_confidence", 0.55)),
+                            night_start_h  = int(_lamp_cfg_live.get("night_start_h", 22)),
+                            night_end_h    = int(_lamp_cfg_live.get("night_end_h", 7)),
                         )
                         _LOGGER.info(
                             "LampCirculation lazy-discovery: %d lampen gevonden",
@@ -1877,6 +2317,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "total_samples":     _cop_total,
                     "reliable_buckets":  _cop_rel_bkt,
                     "progress_pct":      round(min(100, _cop_rel_bkt / max(1, len(_cop_buckets)) * 100)) if _cop_buckets else 0,
+                    "degradation_detected": cop_result.degradation_detected,
+                    "degradation_pct":   cop_result.degradation_pct,
+                    "degradation_advice": cop_result.degradation_advice,
                 }
                 await self._hp_cop.async_maybe_save()
 
@@ -2535,6 +2978,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             # v1.18.1: Dagelijks leerrapport om 20:00
             _now_h = datetime.now(timezone.utc).hour
+            _now_day = datetime.now(timezone.utc).day
             if _now_h == 20 and self._notification_engine:
                 try:
                     _report = {"orientation_progress": [], "phase_progress": [], "samples_today": 0}
@@ -2559,6 +3003,62 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _rep_err:
                     _LOGGER.debug("Leerrapport fout: %s", _rep_err)
 
+            # v2.2.2: Maandrapportage — 1e van de maand om 07:00
+            if _now_day == 1 and _now_h == 7 and self._monthly_report:
+                try:
+                    await self._monthly_report.maybe_send(self._data)
+                except Exception as _mr_err:
+                    _LOGGER.debug("Maandrapport fout: %s", _mr_err)
+
+            # v2.4.19: Mail maandrapport als PDF
+            if _now_day == 1 and _now_h == 7 and self._config.get("mail_enabled"):
+                try:
+                    from .mail import CloudEMSMailer
+                    from datetime import datetime as _dt, timezone as _tz
+                    import calendar as _cal
+                    _mailer = CloudEMSMailer(self.hass, self._config)
+                    if _mailer.enabled and self._config.get("mail_monthly_report", True):
+                        # Genereer eenvoudige tekst-samenvatting als fallback (PDF later)
+                        _prev = _dt.now(_tz.utc).replace(day=1)
+                        _month_label = f"{_cal.month_name[_prev.month]} {_prev.year}"
+                        _report_data = self._data or {}
+                        _summary = (
+                            f"CloudEMS Maandrapport — {_month_label}\n\n"
+                            f"Totaal verbruik: {_report_data.get('total_kwh_month', 0):.1f} kWh\n"
+                            f"Zonne-energie:   {_report_data.get('solar_kwh_month', 0):.1f} kWh\n"
+                            f"Kosten:          €{_report_data.get('total_cost_month', 0):.2f}\n"
+                            f"Besparing:       €{_report_data.get('solar_saving_month', 0):.2f}\n"
+                        )
+                        await _mailer.async_send_monthly_report(
+                            _summary.encode("utf-8"), _month_label
+                        )
+                except Exception as _mail_err:
+                    _LOGGER.warning("CloudEMS mail maandrapport mislukt: %s", _mail_err)
+
+            # v2.4.0: Dagelijkse samenvatting — elke ochtend om 07:30
+            if self._daily_summary:
+                try:
+                    await self._daily_summary.maybe_send(self._data)
+                except Exception as _ds_err:
+                    _LOGGER.debug("Dagelijkse samenvatting fout: %s", _ds_err)
+
+            # v2.4.0: LLM naam-suggestie — elke 5 minuten checken (lichtgewicht)
+            if _now_h != getattr(self, "_llm_name_last_h", -1) or \
+               getattr(self, "_health_cycle_count", 0) % 30 == 0:
+                try:
+                    await self._async_suggest_device_names()
+                    self._llm_name_last_h = _now_h
+                except Exception as _llm_err:
+                    _LOGGER.debug("LLM naam-suggestie fout: %s", _llm_err)
+
+            # v2.2.2: Installatie-score berekenen (elke 30 min, lichtgewicht)
+            if self._install_score:
+                try:
+                    _score_result = self._install_score.calculate()
+                    self._data["installation_score"] = _score_result.to_dict()
+                except Exception as _is_err:
+                    _LOGGER.debug("Installatie-score fout: %s", _is_err)
+
             # Generate insights
             self._insights = self._generate_insights(
                 data, price_info, inverter_data, peak_data, balance_data,
@@ -2566,7 +3066,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             )
 
             # Save NILM
-            await self._nilm.async_save()
+            try:
+                await self._nilm.async_save()
+            except Exception as _nilm_save_err:
+                _LOGGER.warning("CloudEMS: NILM opslaan mislukt: %s", _nilm_save_err)
+
+            # v2.4.17: sla review-history en adaptieve drempels op
+            try:
+                await self._store_review.async_save({
+                    "skip_set":     list(self._review_skip_set),
+                    "skip_history": self._review_skip_history,
+                })
+                if self._adaptive_thresholds:
+                    await self._store_adaptive.async_save(self._adaptive_thresholds)
+            except Exception as _rv_err:
+                _LOGGER.warning("CloudEMS: review-state opslaan mislukt: %s", _rv_err)
 
             # ── Periodiek opslaan: alle zelflerende modules ───────────────────
             # Modules die hun eigen dirty/interval-logica hebben maar geen
@@ -2594,6 +3108,250 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         await _fn()
                     except Exception:  # noqa: BLE001
                         pass
+
+            # v2.2.3: Prijshistorie bijhouden voor BehaviourCoach (max 720 uur = 30 dagen)
+            _cur_hour_ts = int(time.time()) - (int(time.time()) % 3600)
+            if price_info and _cur_hour_ts != self._price_history_last_hour:
+                _cur_price = price_info.get("current")
+                if _cur_price is not None:
+                    _kwh_net = data.get("import_power", 0.0) / 1000.0 * (UPDATE_INTERVAL_FAST / 3600.0)
+                    self._price_hour_history.append({
+                        "ts":      _cur_hour_ts,
+                        "price":   float(_cur_price),
+                        "kwh_net": round(_kwh_net, 4),
+                    })
+                    if len(self._price_hour_history) > 720:
+                        self._price_hour_history = self._price_hour_history[-720:]
+                    self._price_history_last_hour = _cur_hour_ts
+
+            # v2.4.0: GasAnalyzer tick
+            gas_analysis_data: dict = {}
+            if self._gas_analysis:
+                try:
+                    _gas_m3_val = (
+                        self._p1_reader.latest.gas_m3
+                        if self._p1_reader and self._p1_reader.latest
+                        else self._read_gas_sensor()
+                    ) or 0.0
+                    _outside_t = outside_temp_c_val if outside_temp_c_val is not None else 10.0
+                    if _gas_m3_val > 0:
+                        self._gas_analysis.tick(
+                            gas_m3_cumulative = float(_gas_m3_val),
+                            outside_temp_c    = float(_outside_t),
+                        )
+                    _gas_price = float(self._config.get("gas_price_eur_m3") or 1.25)
+                    _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price)
+                    gas_analysis_data = {
+                        "gas_m3_today":           _gas_result.gas_m3_today,
+                        "gas_m3_month":           _gas_result.gas_m3_month,
+                        "gas_cost_month_eur":     _gas_result.gas_cost_month_eur,
+                        "efficiency_m3_hdd":      _gas_result.efficiency_m3_hdd,
+                        "efficiency_rating":      _gas_result.efficiency_rating,
+                        "hdd_today":              _gas_result.hdd_today,
+                        "hdd_month":              _gas_result.hdd_month,
+                        "seasonal_forecast_m3":   _gas_result.seasonal_forecast_m3,
+                        "seasonal_forecast_eur":  _gas_result.seasonal_forecast_eur,
+                        "anomaly":                _gas_result.anomaly,
+                        "anomaly_message":        _gas_result.anomaly_message,
+                        "advice":                 _gas_result.advice,
+                        "records_count":          _gas_result.records_count,
+                        "isolation_advice":       _gas_result.isolation_advice,
+                        "isolation_saving_pct":   _gas_result.isolation_saving_pct,
+                    }
+                except Exception as _ga_err:
+                    _LOGGER.debug("GasAnalyzer fout: %s", _ga_err)
+
+            # v2.4.0: EnergyBudget tick
+            energy_budget_data: dict = {}
+            if self._energy_budget:
+                try:
+                    _kwh_delta  = max(0.0, grid_power_w / 1000.0 * (UPDATE_INTERVAL_FAST / 3600.0))
+                    _cost_delta = _kwh_delta * (current_price + float(self._config.get("energy_tax_eur_kwh", 0.0)))
+                    _gas_delta  = 0.0
+                    if self._p1_reader and self._p1_reader.latest:
+                        _prev_gas = getattr(self, "_prev_gas_m3", 0.0)
+                        _cur_gas  = float(self._p1_reader.latest.gas_m3 or 0)
+                        _gas_delta = max(0.0, _cur_gas - _prev_gas)
+                        self._prev_gas_m3 = _cur_gas
+                    self._energy_budget.tick(
+                        cost_eur_delta = _cost_delta,
+                        kwh_delta      = _kwh_delta,
+                        gas_m3_delta   = _gas_delta,
+                    )
+                    _budget_result = self._energy_budget.get_data()
+                    energy_budget_data = {
+                        "overall_status":       _budget_result.overall_status,
+                        "days_remaining":       _budget_result.days_remaining,
+                        "days_elapsed":         _budget_result.days_elapsed,
+                        "month_label":          _budget_result.month_label,
+                        "summary":              _budget_result.summary,
+                        "electricity_eur": {
+                            "status":              _budget_result.electricity_eur.status,
+                            "budget_value":        _budget_result.electricity_eur.budget_value,
+                            "actual_so_far":       _budget_result.electricity_eur.actual_so_far,
+                            "forecast_end_month":  _budget_result.electricity_eur.forecast_end_month,
+                            "pct_used":            _budget_result.electricity_eur.pct_used,
+                            "remaining":           _budget_result.electricity_eur.remaining,
+                            "advice":              _budget_result.electricity_eur.advice,
+                        },
+                        "electricity_kwh": {
+                            "status":              _budget_result.electricity_kwh.status,
+                            "budget_value":        _budget_result.electricity_kwh.budget_value,
+                            "actual_so_far":       _budget_result.electricity_kwh.actual_so_far,
+                            "pct_used":            _budget_result.electricity_kwh.pct_used,
+                        } if _budget_result.electricity_kwh else None,
+                        "gas_m3": {
+                            "status":              _budget_result.gas_m3.status,
+                            "budget_value":        _budget_result.gas_m3.budget_value,
+                            "actual_so_far":       _budget_result.gas_m3.actual_so_far,
+                            "pct_used":            _budget_result.gas_m3.pct_used,
+                        } if _budget_result.gas_m3 else None,
+                    }
+                except Exception as _eb_err:
+                    _LOGGER.debug("EnergyBudget fout: %s", _eb_err)
+
+            # v2.4.0: ApplianceROI — vervanging-advies per apparaat
+            appliance_roi_data: dict = {}
+            if self._appliance_roi and nilm_devices_enriched:
+                try:
+                    _avg_price = float((price_info or {}).get("avg_today") or 0.28)
+                    _roi_result = self._appliance_roi.calculate(
+                        nilm_devices  = nilm_devices_enriched,
+                        price_eur_kwh = _avg_price,
+                    )
+                    appliance_roi_data = self._appliance_roi.to_sensor_dict(_roi_result)
+                except Exception as _roi_err:
+                    _LOGGER.debug("ApplianceROI fout: %s", _roi_err)
+
+            # v2.4.0: SolarDimmer — bescherming bij negatieve EPEX-prijzen
+            if self._solar_dimmer:
+                try:
+                    self._solar_dimmer.update_solar_power(data.get("solar_power", 0.0))
+                    self._solar_dimmer.tick_curtailment(interval_s=UPDATE_INTERVAL_FAST)
+                    await self._solar_dimmer.async_evaluate(current_price)
+                except Exception as _sd_err:
+                    _LOGGER.debug("SolarDimmer fout: %s", _sd_err)
+            behaviour_coach_data: dict = {}
+            if self._behaviour_coach and self._nilm_schedule:
+                try:
+                    from .energy_manager.bill_simulator import HourRecord
+                    _hr_list = [
+                        HourRecord(ts=h["ts"], kwh_net=h["kwh_net"], price=h["price"])
+                        for h in self._price_hour_history
+                    ]
+                    _coach_summary = self._behaviour_coach.analyse(
+                        schedule_summary = self._nilm_schedule.get_schedule_summary(),
+                        hour_records     = _hr_list,
+                        device_energy    = nilm_devices_enriched,
+                    )
+                    behaviour_coach_data = self._behaviour_coach.to_sensor_dict(_coach_summary)
+                except Exception as _bc_err:
+                    _LOGGER.debug("BehaviourCoach fout: %s", _bc_err)
+
+            # v2.2.3: LoadPlanner — optimaal uurschema voor morgen
+            load_plan_data: dict = {}
+            try:
+                _tomorrow_prices = (price_info or {}).get("tomorrow_all", [])
+                if _tomorrow_prices:
+                    _ev_conn = bool(self._config.get("ev_charger_entity"))
+                    _batt_soc = data.get("battery_soc_pct") or 0.0
+                    _batt_cap = float(self._config.get("battery_capacity_kwh") or 0)
+                    _batt_chg_kw = float(self._config.get("battery_max_charge_kw") or 0)
+                    _day_type_str = (day_type_data or {}).get("day_type", "unknown")
+                    _avg_p = (price_info or {}).get("avg_today") or 0.15
+                    _plan = plan_tomorrow(
+                        tomorrow_prices       = _tomorrow_prices,
+                        pv_forecast_hourly_w  = {int(k): float(v) for k, v in (pv_forecast_hourly_tomorrow or {}).items()},
+                        ev_expected           = _ev_conn,
+                        ev_max_kw             = float(self._config.get("ev_max_charge_kw") or 7.4),
+                        ev_departure_hour     = int(self._config.get("ev_departure_hour") or 8),
+                        boiler_power_w        = float((self._boiler_ctrl.get_status()[0].get("power_w") if self._boiler_ctrl and self._boiler_ctrl.get_status() else 0) or 0),
+                        battery_soc_pct       = float(_batt_soc),
+                        battery_capacity_kwh  = _batt_cap,
+                        battery_max_charge_kw = _batt_chg_kw,
+                        day_type              = _day_type_str,
+                        avg_price_eur_kwh     = float(_avg_p),
+                    )
+                    load_plan_data = plan_to_dict(_plan)
+                    self._load_planner_data = load_plan_data
+            except Exception as _lp_err:
+                _LOGGER.debug("LoadPlanner fout: %s", _lp_err)
+                load_plan_data = self._load_planner_data  # gebruik laatste geldig plan
+
+            # v2.2.3: EnergyLabelSimulator
+            energy_label_data: dict = {}
+            if self._energy_label:
+                try:
+                    _wk = float((thermal_data or {}).get("heat_loss_w_per_k") or 0)
+                    _gas_m3_yr = float((p1_data or {}).get("gas_m3_year") or 0)
+                    _elec_yr = float((cost_forecast or {}).get("year_kwh_est") or 0)
+                    _pv_yr = float(
+                        (pv_forecast_kwh * 365.0) if (pv_forecast_kwh and pv_forecast_kwh > 0)
+                        else 0
+                    )
+                    _floor = float(self._config.get("floor_area_m2") or 0)
+                    _label_result = self._energy_label.calculate(
+                        w_per_k           = _wk,
+                        gas_m3_year       = _gas_m3_yr,
+                        electric_kwh_year = _elec_yr,
+                        pv_kwh_year       = _pv_yr,
+                        floor_area_m2     = _floor if _floor > 0 else None,
+                    )
+                    energy_label_data = self._energy_label.to_sensor_dict(_label_result)
+                except Exception as _el_err:
+                    _LOGGER.debug("EnergyLabel fout: %s", _el_err)
+
+            # v2.4.1: BillSimulator — vergelijkt kosten op vast, dag/nacht en dynamisch tarief
+            bill_simulator_data: dict = {}
+            if len(self._price_hour_history) >= 24:
+                try:
+                    from .energy_manager.bill_simulator import BillSimulator, HourRecord
+                    _fixed_tariff = float(self._config.get("energy_tariff_import_eur_kwh") or 0.28)
+                    _bill_sim = BillSimulator(
+                        self.hass,
+                        fixed_tariff=_fixed_tariff,
+                        day_tariff=round(_fixed_tariff * 1.1, 4),
+                        night_tariff=round(_fixed_tariff * 0.9, 4),
+                    )
+                    _bill_sim._hours = [  # type: ignore[attr-defined]
+                        HourRecord(ts=h["ts"], kwh_net=h["kwh_net"], price=h["price"])
+                        for h in self._price_hour_history
+                    ]
+                    _bill_result = _bill_sim.get_result()
+                    bill_simulator_data = {
+                        "dynamic_cost_eur":     round(_bill_result.dynamic_cost_eur, 2),
+                        "fixed_cost_eur":       round(_bill_result.fixed_cost_eur, 2),
+                        "day_night_cost_eur":   round(_bill_result.day_night_cost_eur, 2),
+                        "saving_vs_fixed_eur":  round(_bill_result.saving_vs_fixed_eur, 2),
+                        "saving_vs_fixed_pct":  round(_bill_result.saving_vs_fixed_pct, 1),
+                        "months_data":          _bill_result.months_data,
+                        "hours_recorded":       _bill_result.hours_recorded,
+                        "advice":               _bill_result.advice,
+                        "months_dynamic_won":   _bill_result.months_dynamic_won,
+                    }
+                except Exception as _bs_err:
+                    _LOGGER.debug("BillSimulator fout: %s", _bs_err)
+
+            # v2.2.3: SalderingSimulator — gebruikt dezelfde price history als BehaviourCoach
+            saldering_data: dict = {}
+            if self._saldering_sim and len(self._price_hour_history) >= 168:
+                try:
+                    from .energy_manager.bill_simulator import HourRecord
+                    _sal_hr_list = [
+                        HourRecord(ts=h["ts"], kwh_net=h["kwh_net"], price=h["price"])
+                        for h in self._price_hour_history
+                    ]
+                    _fixed_tariff = float(self._config.get("energy_tariff_import_eur_kwh") or 0.28)
+                    _sal_result = self._saldering_sim.calculate(
+                        hour_records        = _sal_hr_list,
+                        fixed_tariff        = _fixed_tariff,
+                        current_return_pct  = 1.0,
+                    )
+                    saldering_data = self._saldering_sim.to_sensor_dict(_sal_result)
+                except Exception as _ss_err:
+                    _LOGGER.debug("SalderingSimulator fout: %s", _ss_err)
+                except Exception as _ss_err:
+                    _LOGGER.debug("SalderingSimulator fout: %s", _ss_err)
 
             self._data = {
                 "grid_power_w":         grid_power_w,
@@ -2701,6 +3459,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     for p in (self._solar_learner.get_all_profiles() if self._solar_learner else [])
                     if p.new_panel_resets > 0
                 ],
+                # v2.2.3: nieuwe modules
+                "behaviour_coach":      behaviour_coach_data,
+                "load_plan":            load_plan_data,
+                "energy_label":         energy_label_data,
+                "saldering":            saldering_data,
+                # v2.4.1: bill simulator
+                "bill_simulator":       bill_simulator_data,
+                # v2.2.3: systeemgezondheid
+                "system_health":        self._build_system_health(price_info),
+                # v2.4.0: nieuwe modules
+                "gas_analysis":         gas_analysis_data,
+                "energy_budget":        energy_budget_data,
+                "appliance_roi":        appliance_roi_data,
+                "solar_dimmer":         self._solar_dimmer.get_curtailment_stats() if self._solar_dimmer else {},
+                # v2.4.0: tarief-anomalie (berekende kosten vs geconfigureerd tarief × import)
+                "tariff_check":         self._calc_tariff_check(p1_data, price_info),
             }
 
             # v1.12.0: Notification engine — ingest alle alerts en verstuur
@@ -2717,10 +3491,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._watchdog:
                 self._watchdog.report_success()
             self._data["watchdog"] = self._watchdog.get_data() if self._watchdog else {}
+            # v2.2.3: health cycle counter
+            self._health_cycle_count = getattr(self, "_health_cycle_count", 0) + 1
             return self._data
 
         except Exception as exc:
-            _LOGGER.exception("CloudEMS coordinator update failed: %s", exc)
+            cycle = getattr(self, "_health_cycle_count", 0)
+            _LOGGER.exception(
+                "CloudEMS coordinator update failed at cycle %d: %s — zie HA logs voor volledige traceback",
+                cycle, exc,
+            )
             # Watchdog: update mislukt — logt, slaat op, herstart indien nodig
             if self._watchdog:
                 await self._watchdog.report_failure(exc)

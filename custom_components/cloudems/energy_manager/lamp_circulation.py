@@ -123,7 +123,8 @@ class LampCirculationController:
     def __init__(self, hass) -> None:
         self.hass               = hass
         self._lamps:            list[LampEntry]   = []
-        self._enabled:          bool              = True
+        self._enabled:          bool              = False  # standaard UIT tot configure() het expliciet aanzet
+        self._enabled_explicit: bool              = False   # True zodra set_enabled() ooit geroepen is
         self._min_confidence:   float             = 0.55
         self._night_start:      int               = 22
         self._night_end:        int               = 7
@@ -158,10 +159,14 @@ class LampCirculationController:
         night_start_h:   int             = 22,
         night_end_h:     int             = 7,
     ) -> None:
-        self._enabled        = enabled
         self._min_confidence = min_confidence
         self._night_start    = night_start_h
         self._night_end      = night_end_h
+        # _enabled alleen overschrijven als set_enabled() nog nooit expliciet geroepen is.
+        # Zo voorkomt een herhaalde configure()-aanroep (lazy-discovery) dat een
+        # bewust uitgeschakelde module stiekem weer ingeschakeld wordt.
+        if not self._enabled_explicit:
+            self._enabled = enabled
         excluded = set(excluded_ids or [])
         pir_map  = pir_map or {}
 
@@ -183,6 +188,7 @@ class LampCirculationController:
         )
 
     def set_enabled(self, enabled: bool) -> None:
+        self._enabled_explicit = True   # beschermt tegen configure()-overschrijving
         if self._enabled != enabled:
             _LOGGER.info("LampCirculation: %s", "✅ ingeschakeld" if enabled else "❌ uitgeschakeld")
         self._enabled = enabled
@@ -292,30 +298,34 @@ class LampCirculationController:
         # Zongebaseerde nacht bepalen
         self._sun_derived_night = self._is_sun_night(hour)
 
-        # Testmodus
-        if self._test_active:
-            if now > self._test_until:
-                await self.async_stop_test()
-            else:
-                return await self._run_circulation(
-                    now, hour, dow, phase_currents,
-                    mode="test",
-                    reason=f"Testmodus — nog {int(self._test_until - now)}s",
-                    occupancy_state=occupancy_state,
-                    occupancy_confidence=occupancy_confidence,
-                )
-
         # Geen lampen
         if not self._lamps:
             return self._status(False, "off", "Geen lampen geconfigureerd.",
                                occupancy_state, occupancy_confidence)
 
-        # Uitgeschakeld
+        # Uitgeschakeld — ALTIJD als eerste functionele check, ook boven testmodus
         if not self._enabled:
-            if self._current_on:
+            if self._test_active:
+                await self.async_stop_test()
+            elif self._current_on:
                 await self._turn_all_off()
             return self._status(False, "off", "Lampcirculatie uitgeschakeld.",
                                occupancy_state, occupancy_confidence)
+
+        # Testmodus
+        if self._test_active:
+            if now > self._test_until:
+                await self.async_stop_test()
+                # Terugkeren na afloop test — géén doorval naar normale circulatie
+                return self._status(False, "off", "Testmodus afgelopen.",
+                                   occupancy_state, occupancy_confidence)
+            return await self._run_circulation(
+                now, hour, dow, phase_currents,
+                mode="test",
+                reason=f"Testmodus — nog {int(self._test_until - now)}s",
+                occupancy_state=occupancy_state,
+                occupancy_confidence=occupancy_confidence,
+            )
 
         # Nachtmodus (gecombineerd: configuratie-uur + zonsondergang)
         is_night = self._sun_derived_night or (hour >= self._night_start or hour < self._night_end)

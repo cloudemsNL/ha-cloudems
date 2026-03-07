@@ -175,6 +175,25 @@ class DeviceEnergy:
     last_reset_month: str = ""
     last_reset_year:  str = ""
 
+    # v2.2.2: sessie-statistieken
+    session_count:      int   = 0      # totaal aantal voltooide sessies (aan→uit)
+    total_on_seconds:   float = 0.0    # totale brandtijd in seconden
+    last_12_months_kwh: list  = field(default_factory=list)  # [kwh_maand-11, ..., kwh_deze_maand]
+    _last_month_key:    str   = field(default="", repr=False, compare=False)
+
+    @property
+    def avg_duration_min(self) -> float:
+        """Gemiddelde sessieduur in minuten. 0.0 als geen sessies."""
+        if self.session_count <= 0:
+            return 0.0
+        return round(self.total_on_seconds / self.session_count / 60.0, 1)
+
+    def record_session(self, duration_seconds: float) -> None:
+        """Registreer een voltooide sessie (apparaat ging uit)."""
+        if duration_seconds > 5:  # negeer flicker < 5 s
+            self.session_count     += 1
+            self.total_on_seconds  += duration_seconds
+
     def add_kwh(self, kwh: float, ts: float) -> None:
         now     = datetime.fromtimestamp(ts, tz=timezone.utc)
         day_k   = now.strftime("%Y-%m-%d")
@@ -193,6 +212,15 @@ class DeviceEnergy:
         self.year_kwh   = round(self.year_kwh   + kwh, 4)
         self.total_kwh  = round(self.total_kwh  + kwh, 4)
 
+        # v2.2.2: rol maand-geschiedenis bij (last_12_months_kwh)
+        if self._last_month_key != month_k:
+            if self._last_month_key:
+                # Vorige maand afsluiten — voeg toe aan history
+                self.last_12_months_kwh.append(round(self.month_kwh, 3))
+                if len(self.last_12_months_kwh) > 12:
+                    self.last_12_months_kwh = self.last_12_months_kwh[-12:]
+            self._last_month_key = month_k
+
     def to_dict(self) -> dict:
         return {
             "today_kwh":    self.today_kwh,
@@ -204,6 +232,10 @@ class DeviceEnergy:
             "last_reset_week":  self.last_reset_week,
             "last_reset_month": self.last_reset_month,
             "last_reset_year":  self.last_reset_year,
+            # v2.2.2: sessie-statistieken
+            "session_count":      self.session_count,
+            "total_on_seconds":   self.total_on_seconds,
+            "last_12_months_kwh": self.last_12_months_kwh,
         }
 
 
@@ -236,6 +268,14 @@ class DetectedDevice:
     # v1.20 — room meter: originating HA entity for area registry lookup
     source_entity_id: str = ""      # entity_id of smart plug / power sensor that anchored this device
 
+    # v2.2.5 — LLM naam-suggestie voor generic apparaten
+    suggested_name: str = ""        # door LLM voorgestelde naam (nog niet door gebruiker bevestigd)
+
+    # v2.4.18 — dag/nacht profiel: bijhouden in welke tijdvakken het apparaat actief is
+    # Slaat on_events op per tijdvak: {"day": n, "evening": n, "night": n}
+    # dag=06-18u, avond=18-23u, nacht=23-06u
+    time_profile: dict = field(default_factory=dict)
+
     # v1.4 — energy tracking (runtime; persisted separately)
     energy: DeviceEnergy = field(default_factory=lambda: DeviceEnergy(device_id=""))
     _on_start_ts: float  = field(default=0.0, repr=False, compare=False)
@@ -260,6 +300,14 @@ class DetectedDevice:
             return 1.0
         if self.user_feedback == NILM_FEEDBACK_INCORRECT:
             return 0.0
+        # Tijdsgebaseerde confidence decay: elk apparaat dat langer dan 7 dagen
+        # niet gezien is, verliest geleidelijk vertrouwen (max -30% na 30 dagen).
+        # Beschermt bevestigde apparaten: confirmed devices decayen niet.
+        if not self.confirmed:
+            age_days = (time.time() - self.last_seen) / 86400.0
+            if age_days > 7:
+                decay = min(0.30, (age_days - 7) / 23.0 * 0.30)  # 0→30% over 7-30 dagen
+                return max(0.0, round(self.confidence - decay, 3))
         return self.confidence
 
     def to_dict(self) -> dict:
@@ -283,6 +331,8 @@ class DetectedDevice:
             "user_hidden":    self.user_hidden,
             "user_suppressed": self.user_suppressed,
             "source_entity_id": self.source_entity_id,
+            "suggested_name": self.suggested_name,
+            "time_profile":   self.time_profile,
             "energy":         self.energy.to_dict(),
         }
 
@@ -321,6 +371,15 @@ class NILMDetector:
         self._on_device_found  = on_device_found
         self._on_device_update = on_device_update
 
+        # v2.4.17: warmup periode — hogere drempel in eerste 24 uur na start
+        self._started_at: float = time.time()
+
+        # v2.4.17: adaptieve drempels per device_type vanuit coordinator feedback
+        self._adaptive_overrides: dict = {}  # {device_type: {min_events: int}}
+
+        # v2.4.19: friendly names van geblokkeerde entiteiten voor naam-gebaseerde filter
+        self._blocked_friendly_names: set = set()
+
         self._power_buffers: Dict[str, deque] = {
             "L1": deque(maxlen=WINDOW_SIZE),
             "L2": deque(maxlen=WINDOW_SIZE),
@@ -333,6 +392,7 @@ class NILMDetector:
         self._store_devices: Optional[Store] = None
         self._store_energy:  Optional[Store] = None
         self._last_energy_save = 0.0
+        self._storage_loaded: bool = False   # True after async_load() completes
 
         # v1.8: adaptive threshold
         self._adaptive = AdaptiveNILMThreshold()
@@ -435,12 +495,7 @@ class NILMDetector:
         self._pv_power_prev = pv_w
 
     def set_config_sensor_eids(self, entity_ids: set) -> None:
-        """Register entity_ids of CloudEMS-configured sensors (grid, PV, P1, gas, etc.).
-
-        v1.20: These are definitively NOT household appliances — filter them from
-        get_devices_for_ha() even if the NILM algorithm accidentally learned them.
-        Also removes any already-stored devices whose device_id matches these eids.
-        """
+        """Register entity_ids of CloudEMS-configured sensors (grid, PV, P1, gas, etc.)."""
         self._config_sensor_eids = {e for e in entity_ids if e}
         # Purge any devices already learned from these sensors
         to_remove = [
@@ -450,6 +505,31 @@ class NILMDetector:
         for did in to_remove:
             _LOGGER.info("NILM: verwijder config-sensor apparaat '%s' uit _devices", did)
             self._devices.pop(did, None)
+
+        # v2.4.18: reset baselijnen die buiten fysiek bereik liggen (bijv. door
+        # eerdere export-bug waarbij negatieve waarden de EWMA vertekenden).
+        for phase, val in self._baseline_power.items():
+            if val < 0 or val > 6000:
+                _LOGGER.warning(
+                    "NILM: basislijn %s (%.0fW) buiten bereik — gereset naar 0",
+                    phase, val,
+                )
+                self._baseline_power[phase] = 0.0
+
+    def set_adaptive_overrides(self, overrides: dict) -> None:
+        """Ontvang adaptieve drempelwaarden per device_type vanuit coordinator.
+
+        overrides: {device_type: {min_events: int, ...}}
+        """
+        self._adaptive_overrides = overrides or {}
+
+    def set_blocked_friendly_names(self, names: set) -> None:
+        """Registreer friendly names van geblokkeerde infra-entiteiten.
+
+        Apparaten waarvan de naam overeenkomt worden gefilterd uit get_devices_for_ha(),
+        ook als ze geen source_entity_id hebben.
+        """
+        self._blocked_friendly_names = {n.lower().strip() for n in names if n}
 
     def set_infra_powers(self, powers: dict) -> None:
         """Update known infrastructure sensor power values.
@@ -505,6 +585,8 @@ class NILMDetector:
                     user_hidden    = dev_data.get("user_hidden", False),
                     user_suppressed = dev_data.get("user_suppressed", False),
                     source_entity_id = dev_data.get("source_entity_id", ""),
+                    suggested_name   = dev_data.get("suggested_name", ""),
+                    time_profile     = dev_data.get("time_profile", {}),
                 )
                 dev.energy.device_id = dev.device_id
                 self._devices[dev.device_id] = dev
@@ -523,8 +605,13 @@ class NILMDetector:
                     e.last_reset_week  = edict.get("last_reset_week",  "")
                     e.last_reset_month = edict.get("last_reset_month", "")
                     e.last_reset_year  = edict.get("last_reset_year",  "")
+                    # v2.2.2: sessie-statistieken
+                    e.session_count      = edict.get("session_count",      0)
+                    e.total_on_seconds   = edict.get("total_on_seconds",   0.0)
+                    e.last_12_months_kwh = edict.get("last_12_months_kwh", [])
 
         _LOGGER.info("CloudEMS NILM: loaded %d devices", len(self._devices))
+        self._storage_loaded = True
 
     async def async_save(self) -> None:
         if self._store_devices:
@@ -578,6 +665,14 @@ class NILMDetector:
         baseline = self._baseline_power[phase]
         delta    = avg - baseline
 
+        # Bij export (gemiddeld negatief) geen edges detecteren: de vermogenssprong
+        # is dan veroorzaakt door zon, niet door een huishoudapparaat.
+        if avg < 0 or baseline < 0:
+            # Baseline wel zachtjes terugbrengen naar 0 als we lang in export zitten
+            if avg < 0:
+                self._baseline_power[phase] = max(0.0, baseline * 0.999)
+            return
+
         if abs(delta) >= threshold:
             last_ev = self._last_event_time.get(phase, 0)
             if timestamp - last_ev > DEBOUNCE_TIME:
@@ -600,8 +695,13 @@ class NILMDetector:
                 except RuntimeError:
                     asyncio.ensure_future(self._async_process_event(event))
 
-        # Update baseline slowly
-        self._baseline_power[phase] = baseline * 0.998 + avg * 0.002
+        # Update baseline slowly — alleen bij import (positief vermogen).
+        # Bij export (negatief) niet updaten: zonnepanelen drukken het fasevermogen
+        # negatief maar de altijd-aan last is ongewijzigd.
+        if avg >= 0:
+            new_baseline = baseline * 0.998 + avg * 0.002
+            # Sanity cap: basislijn per fase max 6000W (een volledig belaste 25A fase)
+            self._baseline_power[phase] = min(new_baseline, 6000.0)
 
         # ── v1.21: Auto-off timeout ───────────────────────────────────────────
         # Apparaten die te lang 'aan' zijn, worden stilgezet. Dit vangt gemiste
@@ -619,6 +719,8 @@ class NILMDetector:
                     (timestamp - dev._on_start_ts) / 60,
                     max_on / 60,
                 )
+                # v2.2.2: registreer sessieduur bij auto-off
+                dev.energy.record_session(timestamp - dev._on_start_ts)
                 dev.is_on         = False
                 dev.current_power = 0.0
                 dev._on_start_ts  = 0.0
@@ -1018,6 +1120,10 @@ class NILMDetector:
             if is_on:
                 dev.on_events    += 1
                 dev._on_start_ts  = event.timestamp
+                # v2.4.18: dag/nacht profiel bijhouden
+                _hour = int((event.timestamp % 86400) / 3600)  # UTC uur, goed genoeg voor profiel
+                _slot = "night" if _hour < 6 or _hour >= 23 else ("day" if _hour < 18 else "evening")
+                dev.time_profile[_slot] = dev.time_profile.get(_slot, 0) + 1
                 # Registreer voor steady-state validatie
                 self._pending_validations.append({
                     "device_id":      existing_id,
@@ -1026,6 +1132,11 @@ class NILMDetector:
                     "baseline_before": self._baseline_power.get(event.phase, 0.0),
                     "check_at":       event.timestamp + STEADY_STATE_DELAY_S,
                 })
+            elif prev_is_on and dev._on_start_ts > 0:
+                # v2.2.2: off-event — registreer sessieduur
+                duration = event.timestamp - dev._on_start_ts
+                dev.energy.record_session(duration)
+                dev._on_start_ts = 0.0
             if self._on_device_update:
                 self._on_device_update(dev)
             # v1.22: HMM sessietracking
@@ -1052,6 +1163,10 @@ class NILMDetector:
             if is_on:
                 dev.on_events    = 1
                 dev._on_start_ts = event.timestamp
+                # v2.4.18: dag/nacht profiel initialiseren
+                _hour = int((event.timestamp % 86400) / 3600)
+                _slot = "night" if _hour < 6 or _hour >= 23 else ("day" if _hour < 18 else "evening")
+                dev.time_profile = {_slot: 1}
                 # Registreer voor steady-state validatie
                 self._pending_validations.append({
                     "device_id":      dev_id,
@@ -1435,6 +1550,11 @@ class NILMDetector:
         }
         MIN_ON_EVENTS_DEFAULT = 2   # voor alle andere types
 
+        # v2.4.17: warmup periode — eerste 24 uur na start zijn drempels 2× hoger
+        # zodat vroege false positives niet direct op het dashboard verschijnen.
+        _uptime_h = (time.time() - self._started_at) / 3600
+        _warmup_factor = 2 if _uptime_h < 24 else 1
+
         raw = [d.to_dict() for d in self._devices.values()]
 
         # Filter: verwijder altijd device-types die nooit huishoudapparaten zijn.
@@ -1461,11 +1581,23 @@ class NILMDetector:
                 d for d in raw
                 if d.get("source_entity_id", "") not in self._config_sensor_eids
             ]
+            # v2.4.19: ook filteren op naam — voor devices zonder source_entity_id
+            # die zijn geleerd via de ruwe vermogensstroom van een infra-sensor.
+            if self._blocked_friendly_names:
+                raw = [
+                    d for d in raw
+                    if d.get("source") == "smart_plug"
+                    or (d.get("name") or "").lower().strip() not in self._blocked_friendly_names
+                ]
 
         # Filter: skip devices that have too low confidence or too few on-events,
         # unless they come from a smart plug anchor (those are always reliable).
         def _min_events(dtype: str) -> int:
-            return RARE_TYPES_MIN_EVENTS.get(dtype, MIN_ON_EVENTS_DEFAULT)
+            base = RARE_TYPES_MIN_EVENTS.get(dtype, MIN_ON_EVENTS_DEFAULT)
+            # Adaptieve override: als dit type meer fp's had, verhoog drempel
+            override = self._adaptive_overrides.get(dtype, {})
+            base = max(base, override.get("min_events", base))
+            return base * _warmup_factor
 
         raw = [
             d for d in raw
@@ -1481,6 +1613,31 @@ class NILMDetector:
 
         # Filter: skip devices suppressed/declined by the user — never show again
         raw = [d for d in raw if not d.get("user_suppressed", False)]
+
+        # v2.4.18: dag/nacht profiel — bereken primair tijdvak en pas confidence aan
+        # op basis van of het huidige tijdstip overeenkomt met het profiel.
+        # Een apparaat dat vrijwel alleen 's nachts actief is maar nu overdag als "on"
+        # wordt gemeld, krijgt een lichte confidence-penalty.
+        _now_hour = int((time.time() % 86400) / 3600)
+        _current_slot = ("night" if _now_hour < 6 or _now_hour >= 23
+                         else ("day" if _now_hour < 18 else "evening"))
+        for d in raw:
+            profile = d.get("time_profile") or {}
+            if not profile or d.get("source") == "smart_plug":
+                d["primary_slot"] = "unknown"
+                continue
+            total = sum(profile.values())
+            primary = max(profile, key=profile.get)
+            primary_pct = profile[primary] / total if total > 0 else 0
+            d["primary_slot"] = primary
+            d["primary_slot_pct"] = round(primary_pct * 100)
+            # Confidence aanpassen: als apparaat sterk gebonden is aan één tijdvak
+            # (>70%) maar nu in een ander tijdvak actief lijkt, penalty van 10%.
+            if primary_pct > 0.70 and primary != _current_slot and d.get("is_on"):
+                d["confidence"] = round(max(0.0, d.get("confidence", 0.5) - 0.10), 3)
+                d["time_mismatch"] = True
+            else:
+                d["time_mismatch"] = False
 
         # Deduplicate heat pump entries per phase
         hp_by_phase: dict = {}

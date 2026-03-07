@@ -3,7 +3,7 @@
 # Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
-VERSION = "2.1.7"
+VERSION = "2.4.23"
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -324,6 +324,8 @@ DEFAULT_PRICE_THRESHOLD_CHEAP = 0.10    # EUR/kWh
 # Storage key for PID state persistence
 STORAGE_KEY_PID_STATE         = f"{DOMAIN}_pid_state_v1"
 STORAGE_KEY_NILM_THRESHOLD    = f"{DOMAIN}_nilm_threshold_v1"
+STORAGE_KEY_NILM_REVIEW       = f"{DOMAIN}_nilm_review_v1"      # review skip history
+STORAGE_KEY_NILM_ADAPTIVE     = f"{DOMAIN}_nilm_adaptive_v1"    # adaptive thresholds per device_type
 
 # ── Compat aliases from v1.3 / v1.4 ──────────────────────────────────────────
 CONF_EV_PRICE_THRESHOLD       = CONF_EV_CHEAP_THRESHOLD
@@ -596,3 +598,25 @@ CLOUDEMS_TABS_HIDDEN_DEFAULT = [
     "cloudems-intelligence",
     "cloudems-fasen",
 ]
+
+
+# v2.2.2: NILM pruning configuratie
+CONF_NILM_PRUNE_THRESHOLD   = "nilm_prune_threshold"   # int: coordinator-cycli voor pruning
+DEFAULT_NILM_PRUNE_THRESHOLD = 60                        # 60 cycli ≈ ~10 minuten
+CONF_NILM_PRUNE_MIN_DAYS    = "nilm_prune_min_days"     # int: minimale inactiviteit in dagen (0=uit)
+DEFAULT_NILM_PRUNE_MIN_DAYS  = 1                         # 1 dag minimum — beschermt tegen herstart-pruning
+
+
+# v2.4.19: E-mail / SMTP instellingen voor PDF-rapporten
+CONF_MAIL_ENABLED    = "mail_enabled"
+CONF_MAIL_HOST       = "mail_host"
+CONF_MAIL_PORT       = "mail_port"
+CONF_MAIL_USERNAME   = "mail_username"
+CONF_MAIL_PASSWORD   = "mail_password"
+CONF_MAIL_FROM       = "mail_from"
+CONF_MAIL_TO         = "mail_to"
+CONF_MAIL_USE_TLS    = "mail_use_tls"
+CONF_MAIL_MONTHLY    = "mail_monthly_report"    # stuur maandelijks PDF-rapport
+CONF_MAIL_WEEKLY     = "mail_weekly_report"     # stuur wekelijks samenvatting
+DEFAULT_MAIL_PORT    = 587
+DEFAULT_MAIL_USE_TLS = True
