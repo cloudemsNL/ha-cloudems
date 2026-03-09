@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg?style=for-the-badge)](https://www.home-assistant.io/)
 
-**Fully local · Privacy-first · No subscription · No extra hardware**
+** No extra hardware**
 
 [🌐 cloudems.eu](https://cloudems.eu) &nbsp;·&nbsp; [📖 Wiki](https://github.com/cloudemsNL/ha-cloudems/wiki) &nbsp;·&nbsp; [🐛 Report an issue](https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.yml) &nbsp;·&nbsp; [☕ Buy Me a Coffee](https://buymeacoffee.com/smarthost9m)
 
@@ -338,8 +338,6 @@ The dashboard reads the CloudEMS version dynamically from HA — updating the in
 ---
 
 ## Support CloudEMS
-
-CloudEMS is **completely free and open source**. If it saves you money on your energy bill — please consider a small contribution.
 
 <div align="center">
 
