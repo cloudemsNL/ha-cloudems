@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.06" fill="none" stroke="#ffcc02" stroke-width="1.5">
+  <!-- bel groot rechts -->
+  <path d="M 580 120 Q 580 60 640 60 Q 700 60 700 120 L 710 280 Q 730 300 730 320 L 550 320 Q 550 300 570 280 Z"/>
+  <circle cx="640" cy="340" r="20"/>
+  <line x1="640" y1="60" x2="640" y2="40"/>
+  <!-- kleine bellen links -->
+  <path d="M 180 220 Q 180 190 200 190 Q 220 190 220 220 L 225 310 Q 233 318 233 325 L 167 325 Q 167 318 175 310 Z"/>
+  <circle cx="200" cy="333" r="10"/>
+  <path d="M 100 280 Q 100 258 115 258 Q 130 258 130 280 L 134 345 Q 140 351 140 356 L 90 356 Q 90 351 96 345 Z"/>
+  <circle cx="115" cy="362" r="7"/>
+  <!-- uitroeptekens -->
+  <line x1="360" y1="160" x2="360" y2="280" stroke-width="4"/>
+  <circle cx="360" cy="310" r="10" stroke-width="3"/>
+  <line x1="430" y1="200" x2="430" y2="300" stroke-width="3"/>
+  <circle cx="430" cy="325" r="8" stroke-width="2.5"/>
+  <!-- geluidsgolven rondom grote bel -->
+  <path d="M 750 180 Q 770 230 750 280" stroke-dasharray="4,3"/>
+  <path d="M 770 160 Q 800 230 770 300" stroke-dasharray="4,3"/>
+</g>
+</svg>

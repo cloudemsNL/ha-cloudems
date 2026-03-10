@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CloudEMS</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080c14;--surf:#0e1420;--surf2:#131b28;
+  --border:rgba(255,255,255,0.06);
+  --green:#00e676;--green2:#00c853;
+  --amber:#ffab00;--red:#ff5252;--blue:#40c4ff;
+  --purple:#ce93d8;--cyan:#26c6da;
+  --text:#e2e8f0;--muted:#4a5568;
+  --mono:'DM Mono',monospace;--ui:'Syne',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--ui);
+  display:grid;grid-template-rows:48px 1fr 32px;height:100dvh;user-select:none}
+
+/* HEADER */
+header{display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.2rem;border-bottom:1px solid var(--border);
+  background:rgba(8,12,20,.96);backdrop-filter:blur(12px);position:relative;z-index:20}
+.logo{display:flex;align-items:center;gap:.5rem;font-size:1rem;font-weight:800;color:var(--green);letter-spacing:.06em}
+.logo svg{width:18px;height:18px}
+.clock{font-family:var(--mono);font-size:.85rem;color:var(--muted);letter-spacing:.08em}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:background .5s}
+.live-dot.on{background:var(--green);animation:dot-pulse 2.5s ease-in-out infinite}
+@keyframes dot-pulse{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.5)}60%{box-shadow:0 0 0 7px transparent}}
+
+/* MAIN GRID */
+main{display:grid;grid-template-columns:2fr 3fr 2fr;grid-template-rows:1fr 1fr;
+  gap:1px;background:var(--border);overflow:hidden}
+
+/* CARDS */
+.card{background:var(--surf);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;padding:.8rem .6rem;
+  position:relative;overflow:hidden;gap:.15rem}
+.card::after{content:'';position:absolute;inset:0;pointer-events:none}
+.card-label{font-size:.58rem;font-weight:800;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--muted);position:relative;z-index:2}
+.card-value{font-family:var(--mono);font-size:clamp(1.6rem,3.5vw,2.8rem);
+  font-weight:500;line-height:1;transition:color .5s;position:relative;z-index:2}
+.card-unit{font-family:var(--mono);font-size:.7rem;color:var(--muted)}
+.card-sub{font-family:var(--mono);font-size:.62rem;color:var(--muted);
+  margin-top:.15rem;position:relative;z-index:2}
+
+.card-net   {border-top:2px solid var(--green)}
+.card-solar {border-top:2px solid var(--amber)}
+.card-bat   {border-top:2px solid var(--blue)}
+.card-flow  {border-top:2px solid var(--cyan);grid-column:2;grid-row:1/3;padding:.4rem}
+.card-price {border-top:2px solid var(--purple)}
+.card-cheap {border-top:2px solid var(--green2);grid-column:3;grid-row:1/3;padding:.6rem .5rem}
+
+.card-net::after  {background:radial-gradient(ellipse at 50% 120%,rgba(0,230,118,.06) 0%,transparent 70%)}
+.card-solar::after{background:radial-gradient(ellipse at 50% 120%,rgba(255,171,0,.06) 0%,transparent 70%)}
+.card-bat::after  {background:radial-gradient(ellipse at 50% 120%,rgba(64,196,255,.06) 0%,transparent 70%)}
+.card-price::after{background:radial-gradient(ellipse at 50% 120%,rgba(206,147,216,.06) 0%,transparent 70%)}
+
+/* GAUGE */
+.gauge-wrap{position:relative;display:flex;align-items:center;justify-content:center;margin:.2rem 0}
+.gauge-wrap svg{overflow:visible}
+.gauge-track{fill:none;stroke:rgba(255,255,255,.07);stroke-linecap:round}
+.gauge-fill{fill:none;stroke-linecap:round;transition:stroke-dashoffset .9s cubic-bezier(.4,0,.2,1),stroke .5s}
+.gauge-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  display:flex;flex-direction:column;align-items:center;pointer-events:none}
+
+/* SPARKLINE */
+.spark-wrap{width:100%;height:28px;margin-top:.2rem;position:relative;z-index:2}
+.spark-wrap svg{width:100%;height:100%;overflow:visible}
+.spark-line{fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.spark-area{opacity:.12}
+
+/* FLOW */
+.flow-svg-wrap{flex:1;width:100%;display:flex;align-items:center;justify-content:center;min-height:0}
+.flow-svg{width:100%;height:100%;max-height:100%}
+.fn-circle{fill:var(--surf2);stroke-width:2}
+.fn-label{font-size:9px;font-family:'DM Mono',monospace;fill:var(--muted);text-anchor:middle}
+.fn-value{font-size:11px;font-family:'DM Mono',monospace;text-anchor:middle;dominant-baseline:central;font-weight:500}
+.flow-path{fill:none;stroke-width:2;stroke-linecap:round}
+.flow-path.active {animation:dash-flow 1.8s linear infinite}
+.flow-path.reverse{animation:dash-flow-rev 1.8s linear infinite}
+.flow-path.idle{opacity:.15}
+@keyframes dash-flow    {to{stroke-dashoffset:-20}}
+@keyframes dash-flow-rev{to{stroke-dashoffset:20}}
+
+/* PHASE BARS */
+.phases-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;width:100%;position:relative;z-index:2}
+.ph-col{display:flex;flex-direction:column;align-items:center;gap:.25rem}
+.ph-label{font-size:.55rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.ph-val{font-family:var(--mono);font-size:clamp(.9rem,2vw,1.4rem);font-weight:500;line-height:1;transition:color .4s}
+.ph-track{width:100%;height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+.ph-fill{height:100%;border-radius:3px;transition:width .7s ease,background .4s}
+.ph-unit{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
+
+/* PRICE TIERS */
+.price-tier-row{display:flex;gap:2px;width:85%;margin:.3rem 0;position:relative;z-index:2}
+.price-tier{flex:1;height:4px;border-radius:2px;opacity:.25;transition:opacity .4s}
+.price-tier.active{opacity:1}
+
+/* CHEAP HOURS */
+.cheap-col{display:flex;flex-direction:column;align-items:center;
+  width:100%;height:100%;gap:.3rem;position:relative;z-index:2}
+.cheap-title{font-size:.58rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase;color:var(--muted)}
+.cheap-bar-list{display:flex;flex-direction:column;gap:3px;width:100%;flex:1;justify-content:center}
+.ch-row{display:flex;align-items:center;gap:.4rem;height:18px}
+.ch-time{font-family:var(--mono);font-size:.65rem;color:var(--muted);width:38px;text-align:right;flex-shrink:0}
+.ch-track{flex:1;height:6px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden}
+.ch-fill{height:100%;border-radius:3px;background:var(--green2);opacity:.6;transition:width .8s ease}
+.ch-row.now .ch-time{color:var(--green);font-weight:500}
+.ch-row.now .ch-fill{background:var(--green);opacity:1}
+.ch-row.now .ch-track{box-shadow:0 0 6px rgba(0,230,118,.3)}
+.ch-ct{font-family:var(--mono);font-size:.6rem;color:var(--muted);width:36px;flex-shrink:0;text-align:right}
+.cheap-avg{font-family:var(--mono);font-size:.62rem;color:var(--muted);margin-top:.2rem}
+
+/* FOOTER */
+footer{display:flex;align-items:center;justify-content:space-between;
+  padding:0 1.2rem;border-top:1px solid var(--border);
+  font-family:var(--mono);font-size:.6rem;color:var(--muted);letter-spacing:.04em}
+
+/* SIM BANNER */
+#sim-banner{display:none;position:fixed;top:0;left:0;right:0;z-index:999;
+  background:rgba(255,152,0,.16);border-bottom:1px solid #ff9800;
+  padding:.35rem 1rem;color:#ffb74d;font-size:.72rem;font-family:var(--mono);
+  align-items:center;gap:.6rem}
+#sim-banner .sim-dot{width:6px;height:6px;border-radius:50%;background:#ff9800;animation:blink 1s infinite}
+#sim-banner button{margin-left:auto;background:rgba(255,152,0,.25);border:1px solid #ff9800;
+  color:#ffb74d;padding:.15rem .6rem;border-radius:3px;cursor:pointer;font-size:.68rem}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+body.sim-on{padding-top:28px}
+
+#err-bar{display:none;position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);
+  background:rgba(255,82,82,.12);border:1px solid var(--red);color:var(--red);
+  padding:.35rem 1rem;border-radius:4px;font-size:.7rem;font-family:var(--mono);z-index:100}
+
+.c-green{color:var(--green)}.c-amber{color:var(--amber)}
+.c-red{color:var(--red)}.c-blue{color:var(--blue)}
+.c-purple{color:var(--purple)}.c-muted{color:var(--muted)}.c-cyan{color:var(--cyan)}
+</style>
+</head>
+<body>
+
+<div id="sim-banner">
+  <span class="sim-dot"></span>
+  <span id="sim-txt">Testmodus actief</span>
+  <span id="sim-rem"></span>
+  <button onclick="stopSim()">&#9646; Stop</button>
+</div>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>
+    CloudEMS
+  </div>
+  <span class="clock" id="clock">--:--:--</span>
+  <div class="live-dot" id="dot"></div>
+</header>
+
+<main>
+  <!-- NET -->
+  <div class="card card-net">
+    <span class="card-label">Net verbruik</span>
+    <div class="gauge-wrap" id="gw-net"></div>
+    <span class="card-sub" id="sub-net">—</span>
+    <div class="spark-wrap"><svg id="sp-net" preserveAspectRatio="none"></svg></div>
+  </div>
+
+  <!-- FLOW (centre, 2 rows) -->
+  <div class="card card-flow">
+    <div class="flow-svg-wrap">
+      <svg class="flow-svg" id="flow-svg" viewBox="0 0 300 270" preserveAspectRatio="xMidYMid meet">
+        <!-- paths first so nodes render on top -->
+        <path id="fp-sol-grid" d="M82,75 Q115,100 128,122" class="flow-path idle" stroke="var(--amber)" stroke-dasharray="6 4"/>
+        <path id="fp-bat-grid" d="M218,75 Q186,100 172,122" class="flow-path idle" stroke="var(--blue)"  stroke-dasharray="6 4"/>
+        <path id="fp-grid-home" d="M150,175 L150,210"       class="flow-path idle" stroke="var(--cyan)"  stroke-dasharray="6 4"/>
+        <path id="fp-sol-home"  d="M72,80 Q50,180 126,225"  class="flow-path idle" stroke="var(--amber)" stroke-dasharray="4 6" opacity=".5"/>
+
+        <!-- SOLAR -->
+        <circle cx="60" cy="58" r="30" class="fn-circle" stroke="var(--amber)"/>
+        <text x="60" y="52" font-size="16" text-anchor="middle" dominant-baseline="central">&#9728;</text>
+        <text x="60" y="68" class="fn-value" fill="var(--amber)" id="fv-sol">—W</text>
+        <text x="60" y="82" class="fn-label">SOLAR</text>
+
+        <!-- BATTERY -->
+        <circle cx="240" cy="58" r="30" class="fn-circle" stroke="var(--blue)"/>
+        <text x="240" y="52" font-size="15" text-anchor="middle" dominant-baseline="central">&#128267;</text>
+        <text x="240" y="68" class="fn-value" fill="var(--blue)" id="fv-bat">—%</text>
+        <text x="240" y="82" class="fn-label">BATTERIJ</text>
+
+        <!-- GRID (centre) -->
+        <circle cx="150" cy="138" r="36" class="fn-circle" stroke="var(--green)" id="fc-grid"/>
+        <text x="150" y="130" font-size="18" text-anchor="middle" dominant-baseline="central">&#9889;</text>
+        <text x="150" y="148" class="fn-value" fill="var(--green)" id="fv-grid">—W</text>
+        <text x="150" y="162" class="fn-label">NET</text>
+
+        <!-- HOME -->
+        <circle cx="150" cy="228" r="28" class="fn-circle" stroke="var(--cyan)"/>
+        <text x="150" y="222" font-size="14" text-anchor="middle" dominant-baseline="central">&#127968;</text>
+        <text x="150" y="236" class="fn-value" fill="var(--cyan)" id="fv-home">—W</text>
+        <text x="150" y="250" class="fn-label">HUIS</text>
+      </svg>
+    </div>
+    <!-- Phase bars under flow -->
+    <div class="phases-grid" style="width:88%;padding:0 .4rem .15rem">
+      <div class="ph-col">
+        <span class="ph-label">L&#8321;</span>
+        <span class="ph-val" id="vl1">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl1"></div></div>
+      </div>
+      <div class="ph-col">
+        <span class="ph-label">L&#8322;</span>
+        <span class="ph-val" id="vl2">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl2"></div></div>
+      </div>
+      <div class="ph-col">
+        <span class="ph-label">L&#8323;</span>
+        <span class="ph-val" id="vl3">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl3"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHEAP HOURS (right col, 2 rows) -->
+  <div class="card card-cheap">
+    <div class="cheap-col">
+      <span class="cheap-title">Goedkope uren</span>
+      <div class="cheap-bar-list" id="cheap-list"><span style="color:var(--muted);font-size:.7rem">Laden&hellip;</span></div>
+      <span class="cheap-avg" id="cheap-avg">—</span>
+    </div>
+  </div>
+
+  <!-- SOLAR -->
+  <div class="card card-solar">
+    <span class="card-label">Solar opwek</span>
+    <div class="gauge-wrap" id="gw-sol"></div>
+    <span class="card-sub" id="sub-solar">—</span>
+    <div class="spark-wrap"><svg id="sp-sol" preserveAspectRatio="none"></svg></div>
+  </div>
+
+  <!-- BATTERY -->
+  <div class="card card-bat">
+    <span class="card-label">Batterij</span>
+    <div class="gauge-wrap" id="gw-bat"></div>
+    <span class="card-sub" id="sub-bat-action">—</span>
+    <div id="zp-info" style="display:none;margin-top:.3rem;width:100%;text-align:center">
+      <span id="zp-badge" style="font-size:.52rem;font-weight:700;letter-spacing:.1em;padding:.15rem .45rem;border-radius:4px;background:rgba(0,177,64,.18);color:var(--green2)">ZONNEPLAN</span>
+      <div id="zp-mode" style="font-size:.6rem;color:var(--muted);margin-top:.2rem">—</div>
+      <div id="zp-sliders" style="display:none;font-size:.58rem;color:var(--muted);margin-top:.15rem;line-height:1.6"></div>
+    </div>
+    <span class="card-sub" id="sub-bat-reason" style="font-size:.52rem;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+  </div>
+
+  <!-- PRICE -->
+  <div class="card card-price">
+    <span class="card-label">EPEX prijs</span>
+    <div class="gauge-wrap" id="gw-price"></div>
+    <div class="price-tier-row">
+      <div class="price-tier" style="background:var(--green)"  id="pt0"></div>
+      <div class="price-tier" style="background:var(--purple)" id="pt1"></div>
+      <div class="price-tier" style="background:var(--amber)"  id="pt2"></div>
+      <div class="price-tier" style="background:var(--red)"    id="pt3"></div>
+    </div>
+    <span class="card-sub" id="sub-price">—</span>
+  </div>
+</main>
+
+<footer>
+  <span id="ft-update">Geen data</span>
+  <span>CloudEMS &middot; <span id="ft-ver">—</span></span>
+</footer>
+<div id="err-bar"></div>
+
+<script>
+// CONFIG
+const POLL_MS=6000, MAX_A=25, MAX_W=7000, MAX_SOL=12000;
+const E={
+  net:'sensor.cloudems_grid_net_power',
+  solar:'sensor.cloudems_solar_system',
+  selfCons:'sensor.cloudems_self_consumption',
+  bat:'sensor.cloudems_battery_so_c',
+  batSch:'sensor.cloudems_batterij_epex_schema',
+  batSoc:'sensor.cloudems_battery_so_c',
+  l1:'sensor.cloudems_current_l1',
+  l2:'sensor.cloudems_current_l2',
+  l3:'sensor.cloudems_current_l3',
+  price:'sensor.cloudems_price_current_hour',
+  cheap4:'sensor.cloudems_cheapest_4h_block',
+  cheap24:'sensor.cloudems_energy_price',
+  watchdog:'sensor.cloudems_watchdog',
+  test:'binary_sensor.cloudems_testmodus',
+};
+
+let token=null, ws=null, wsId=1, states={}, hist={};
+const HMAX=40;
+
+// Clock
+setInterval(()=>{
+  document.getElementById('clock').textContent=
+    new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+},1000);
+
+// ── GAUGE FACTORY ──────────────────────────────────────────────────
+function buildGauge(wrapId, color, size=110, r=44, stroke=8){
+  const cx=size/2, cy=size/2+6;
+  const startAng=-210, totalAng=240;
+  const circum=2*Math.PI*r;
+  const arcFrac=totalAng/360;
+  const trackDash=circum*arcFrac;
+  const w=document.getElementById(wrapId);
+  w.innerHTML=`<svg width="${size}" height="${size*.72}" viewBox="0 0 ${size} ${size*.72}" style="overflow:visible">
+    <circle cx="${cx}" cy="${cy}" r="${r}" class="gauge-track" stroke-width="${stroke}"
+      stroke-dasharray="${trackDash} ${circum-trackDash}"
+      stroke-dashoffset="${-circum*(1-arcFrac)*.5}"
+      transform="rotate(${startAng} ${cx} ${cy})"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" id="${wrapId}-fill"
+      class="gauge-fill" stroke="${color}" stroke-width="${stroke}"
+      stroke-dasharray="${trackDash} ${circum-trackDash}"
+      stroke-dashoffset="${trackDash}"
+      transform="rotate(${startAng} ${cx} ${cy})"/>
+  </svg>`;
+  // centre label
+  const d=document.createElement('div'); d.className='gauge-center';
+  w.appendChild(d);
+  return {
+    trackDash,
+    set(frac,clr){
+      const f=Math.max(0,Math.min(1,frac));
+      const el=document.getElementById(wrapId+'-fill');
+      if(el){el.style.strokeDashoffset=trackDash*(1-f); if(clr)el.style.stroke=clr;}
+    },
+    centerEl(){return w.querySelector('.gauge-center')}
+  };
+}
+
+const gNet  =buildGauge('gw-net',  'var(--green)');
+const gSol  =buildGauge('gw-sol',  'var(--amber)');
+const gBat  =buildGauge('gw-bat',  'var(--blue)');
+const gPrice=buildGauge('gw-price','var(--purple)');
+
+function setCenterHTML(g, val, unit){
+  const el=g.centerEl();
+  if(el) el.innerHTML=`<span class="card-value">${val}</span><span class="card-unit">${unit}</span>`;
+}
+
+// ── SPARKLINE ──────────────────────────────────────────────────────
+function drawSpark(svgId, data, color, maxV){
+  const svg=document.getElementById(svgId); if(!svg||data.length<2)return;
+  const W=svg.parentElement.clientWidth||140, H=28;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const mx=maxV||Math.max(...data)*1.15||1;
+  const pts=data.map((v,i)=>[(i/(data.length-1))*W, H-((v/mx)*H)]);
+  const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const area=d+` L${pts[pts.length-1][0]},${H} L0,${H} Z`;
+  svg.innerHTML=`<defs><linearGradient id="sg${svgId}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${color}" stop-opacity=".35"/>
+    <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+  </linearGradient></defs>
+  <path d="${area}" fill="url(#sg${svgId})" class="spark-area"/>
+  <path d="${d}" class="spark-line" stroke="${color}"/>`;
+}
+
+// ── HELPERS ────────────────────────────────────────────────────────
+const st =(id)=>states[id]||null;
+const val=(id)=>{const s=st(id);return(!s||['unavailable','unknown'].includes(s.state))?null:s.state;};
+const num=(id)=>{const v=parseFloat(val(id));return isNaN(v)?null:v;};
+const att=(id,k,d=null)=>st(id)?.attributes?.[k]??d;
+const fmt=(n,d=0)=>n===null?'—':n.toFixed(d);
+const fmtk=(n)=>n===null?'—':Math.abs(n)<1000?fmt(Math.abs(n),0):(Math.abs(n)/1000).toFixed(1)+'k';
+const setEl=(id,t)=>{const e=document.getElementById(id);if(e)e.textContent=t;};
+const setC =(id,c)=>{const e=document.getElementById(id);if(e)e.style.color=c;};
+function pushH(k,v){if(v===null)return;if(!hist[k])hist[k]=[];hist[k].push(v);if(hist[k].length>HMAX)hist[k].shift();}
+
+// ── FLOW ───────────────────────────────────────────────────────────
+function setPath(id,active,reverse,color){
+  const el=document.getElementById(id); if(!el)return;
+  el.className='flow-path'+(active?(reverse?' reverse':' active'):' idle');
+  if(active&&color)el.style.stroke=color;
+}
+function renderFlow(netW,solW,batPct){
+  const imp=netW!==null&&netW>50, exp=netW!==null&&netW<-50;
+  const clr=imp?'var(--red)':exp?'var(--green)':'var(--muted)';
+  const gc=document.getElementById('fc-grid'); if(gc)gc.setAttribute('stroke',clr);
+  setEl('fv-grid', netW!==null?fmtk(Math.abs(netW))+'W':'—W');
+  setC('fv-grid', clr);
+  setEl('fv-sol',  solW!==null?fmtk(solW)+'W':'—W');
+  setEl('fv-bat',  batPct!==null?fmt(batPct,0)+'%':'—%');
+  const homeW=netW!==null?Math.max(0,(solW||0)+netW):null;
+  setEl('fv-home', homeW!==null?fmtk(homeW)+'W':'—W');
+
+  const solOn=solW!==null&&solW>50;
+  const batAct=(att(E.batSch,'action')||'').toLowerCase();
+  const charging=batAct.includes('lad')||batAct==='charge';
+  const discharging=batAct.includes('ontlad')||batAct==='discharge';
+
+  setPath('fp-sol-grid', solOn, false, 'var(--amber)');
+  setPath('fp-sol-home',  solOn&&homeW>100, false, 'var(--amber)');
+  setPath('fp-bat-grid',  discharging, false, 'var(--blue)');
+  setPath('fp-bat-grid',  charging, true, 'var(--blue)');
+  setPath('fp-grid-home', homeW!==null&&homeW>50, false, imp?'var(--red)':'var(--cyan)');
+}
+
+// ── RENDER ALL ─────────────────────────────────────────────────────
+function renderAll(){
+  const netW  = num(E.net);
+  const solW  = att(E.solar,'pv_power_w')??att(E.solar,'solar_power_w')??num(E.solar);
+  const batPct= num(E.bat);
+  const priceE= num(E.price); // €/kWh
+
+  pushH('net',  netW!==null?Math.abs(netW):null);
+  pushH('sol',  solW);
+
+  // Net gauge
+  const imp=netW!==null&&netW>50, exp=netW!==null&&netW<-50;
+  const netClr=imp?'var(--red)':exp?'var(--green)':'var(--muted)';
+  gNet.set(netW!==null?Math.min(1,Math.abs(netW)/MAX_W):0, netClr);
+  setCenterHTML(gNet, netW!==null?fmtk(Math.abs(netW)):'—', 'W');
+  gNet.centerEl()&&(gNet.centerEl().querySelector('.card-value').style.color=netClr);
+  setEl('sub-net', imp?'&#8593; import':exp?'&#8595; export':'&#8776; balans');
+
+  // Solar gauge
+  gSol.set(solW!==null?Math.min(1,solW/MAX_SOL):0);
+  setCenterHTML(gSol, solW!==null?fmtk(solW):'—', 'W');
+  const kwh=att(E.selfCons,'pv_today_kwh');
+  setEl('sub-solar', kwh!==null?fmt(kwh,1)+' kWh vandaag':'—');
+
+  // Battery gauge + Zonneplan info
+  const batAct=(att(E.batSch,'action')||'idle').toLowerCase();
+  const batReason=att(E.batSch,'reason')||'';
+  const batClr=batPct===null?'var(--muted)':batPct<15?'var(--red)':batPct<30?'var(--amber)':'var(--blue)';
+  gBat.set(batPct!==null?batPct/100:0, batClr);
+  const batPctStr=batPct!==null?fmt(batPct,0)+'%':'—';
+  const batPwrW=att(E.batSch,'power_w')??att(E.batSoc,'power_w');
+  const batPwrStr=batPwrW!==null&&Math.abs(batPwrW)>10?(batPwrW>0?'+':'')+fmtk(batPwrW)+'W':'';
+  setCenterHTML(gBat, batPctStr, '');
+  gBat.centerEl()&&(gBat.centerEl().querySelector('.card-value').style.color=batClr);
+  const batActLabel={'charge':'⚡ Laden','discharge':'↗ Leveren','lad':'⚡ Laden','ontlad':'↗ Leveren','idle':'— Wacht','hold':'⏸ Hold'};
+  const batActStr=Object.entries(batActLabel).find(([k])=>batAct.includes(k))?.[1]||batAct;
+  setEl('sub-bat-action', (batActStr+(batPwrStr?' · '+batPwrStr:'')).trim()||'Geen batterij');
+  setEl('sub-bat-reason', batReason.length>50?batReason.substring(0,50)+'…':batReason);
+  // Zonneplan integratie
+  const zp=att(E.batSch,'zonneplan');
+  const zpEl=document.getElementById('zp-info');
+  if(zpEl){
+    const zpAvail=zp&&(zp.available||zp.detected);
+    zpEl.style.display=zpAvail?'block':'none';
+    if(zpAvail){
+      const mode=zp.active_mode||'—';
+      const modeLabel={'home_optimization':'🏠 Thuisoptimalisatie','self_consumption':'☀️ Zelfverbruik','powerplay':'⚡ Powerplay','manual_control':'🔧 Handmatig'};
+      setEl('zp-mode', (modeLabel[mode]||mode)+(zp.auto_forecast?' · 🤖 auto':''));
+      const slEl=document.getElementById('zp-sliders');
+      if(slEl&&zp.has_sliders){
+        const zpSt=states[E.batSch];
+        const d2h=zpSt?.attributes?.entity_deliver_to_home;
+        const sc=zpSt?.attributes?.entity_solar_charge;
+        const d2hV=d2h?num(d2h):null;
+        const scV=sc?num(sc):null;
+        if(d2hV!==null||scV!==null){
+          slEl.style.display='block';
+          slEl.textContent=(d2hV!==null?'🏠 '+fmt(d2hV,0)+'W thuis':'')+
+            (d2hV!==null&&scV!==null?' · ':'')+
+            (scV!==null?'☀️ '+fmt(scV,0)+'W PV-lading':'');
+        }
+      }
+      const tg=zp.tariff_group;
+      if(tg){const badge=document.getElementById('zp-badge');if(badge)badge.textContent='ZONNEPLAN · '+tg.toUpperCase();}
+    }
+  }
+
+  // Price gauge
+  const pCt=priceE!==null?priceE*100:null;
+  const pClr=pCt===null?'var(--muted)':pCt<8?'var(--green)':pCt<20?'var(--purple)':pCt<35?'var(--amber)':'var(--red)';
+  gPrice.set(pCt!==null?Math.min(1,pCt/50):0, pClr);
+  setCenterHTML(gPrice, pCt!==null?fmt(pCt,1):'—', 'ct');
+  gPrice.centerEl()&&(gPrice.centerEl().querySelector('.card-value').style.color=pClr);
+  [0,1,2,3].forEach(i=>{const e=document.getElementById('pt'+i);if(e)e.classList.toggle('active',
+    (i===0&&pCt<8)||(i===1&&pCt>=8&&pCt<20)||(i===2&&pCt>=20&&pCt<35)||(i===3&&pCt>=35));});
+  const nxt=att(E.price,'next_hour_eur_kwh');
+  if(nxt!==null&&priceE!==null){const d=(nxt-priceE)*100;setEl('sub-price',(d>=0?'+':'')+d.toFixed(1)+' ct volgend uur');}
+
+  // Phases
+  ['l1','l2','l3'].forEach(ph=>{
+    const a=num(E[ph]), vEl=document.getElementById('v'+ph), bEl=document.getElementById('b'+ph);
+    if(!vEl)return;
+    if(a===null){vEl.textContent='—';return;}
+    vEl.textContent=fmt(Math.abs(a),1);
+    const pct=Math.min(100,(Math.abs(a)/MAX_A)*100);
+    if(bEl){bEl.style.width=pct+'%';bEl.style.background=pct>88?'var(--red)':pct>70?'var(--amber)':'var(--green)';}
+    vEl.style.color=pct>88?'var(--red)':pct>70?'var(--amber)':'var(--text)';
+  });
+
+  // Flow
+  renderFlow(netW, solW, batPct);
+
+  // Sparklines
+  drawSpark('sp-net', hist.net||[], imp?'var(--red)':'var(--green)', MAX_W);
+  drawSpark('sp-sol', hist.sol||[], 'var(--amber)', MAX_SOL);
+
+  // Cheap hours
+  renderCheap();
+
+  // Sim banner
+  const simSt=st(E.test), simOn=simSt?.state==='on';
+  const banner=document.getElementById('sim-banner');
+  if(banner)banner.style.display=simOn?'flex':'none';
+  document.body.classList.toggle('sim-on',simOn);
+  if(simOn)setEl('sim-rem',`Auto-stop over ${simSt.attributes?.remaining_min||0} min`);
+
+  // Footer
+  setEl('ft-ver','v'+(att(E.watchdog,'cloudems_version')||'3.7'));
+  setEl('ft-update','Update: '+new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+}
+
+// ── CHEAP HOURS BAR CHART ──────────────────────────────────────────
+function renderCheap(){
+  const list=document.getElementById('cheap-list'); if(!list)return;
+  const nowH=new Date().getHours();
+  const cheapH=att(E.cheap4,'hours')||[];
+  const avg4=att(E.cheap4,'avg_price_eur_kwh');
+  // today_prices is a list of {hour, price, ...} from sensor.cloudems_energy_price
+  const todayPricesList=att(E.cheap24,'today_prices')||[];
+  let entries=[];
+  if(Array.isArray(todayPricesList)&&todayPricesList.length){
+    entries=todayPricesList.map(e=>({h:parseInt(e.hour??e.h??0),p:parseFloat(e.price??e.p??0)})).sort((a,b)=>a.h-b.h);
+  }
+
+  if(entries.length){
+    const maxP=Math.max(...entries.map(e=>e.p))||1;
+    const show=[];
+    for(let i=nowH-1;i<=nowH+7;i++){const sl=entries.find(e=>e.h===((i+24)%24));if(sl)show.push(sl);}
+    const toShow=show.length?show:entries.slice(0,8);
+    list.innerHTML=toShow.map(e=>{
+      const isNow=e.h===nowH, pCt=(e.p*100).toFixed(1);
+      const barPct=Math.round((e.p/maxP)*100);
+      const isChp=cheapH.includes(e.h);
+      const barClr=isChp?'var(--green)':e.p<0.08?'var(--green2)':e.p<0.20?'var(--muted)':'#7f1d1d';
+      return`<div class="ch-row${isNow?' now':''}">
+        <span class="ch-time">${String(e.h).padStart(2,'0')}:00</span>
+        <div class="ch-track"><div class="ch-fill" style="width:${barPct}%;background:${barClr}"></div></div>
+        <span class="ch-ct">${pCt}ct</span></div>`;
+    }).join('');
+    setEl('cheap-avg',avg4?`4u gem: ${(avg4*100).toFixed(1)} ct/kWh`:'');
+    return;
+  }
+  // fallback: show cheap hours only
+  if(!cheapH.length){
+    const s=att(E.cheap4,'start_hour'), e=att(E.cheap4,'end_hour');
+    if(s!==null&&e!==null)for(let h=s;h!==((e+1)%24);h=(h+1)%24)cheapH.push(h);
+  }
+  if(!cheapH.length){list.innerHTML='<span style="color:var(--muted);font-size:.7rem">Geen EPEX data</span>';return;}
+  list.innerHTML=cheapH.map(h=>`<div class="ch-row${h===nowH?' now':''}">
+    <span class="ch-time">${String(h).padStart(2,'0')}:00</span>
+    <div class="ch-track"><div class="ch-fill" style="width:80%"></div></div>
+    <span class="ch-ct">laag</span></div>`).join('');
+  setEl('cheap-avg',avg4?`gem: ${(avg4*100).toFixed(1)} ct/kWh`:'');
+}
+
+// ── AUTH ───────────────────────────────────────────────────────────
+async function resolveToken(){
+  const srcs=[window.hassConnection,window.parent?.hassConnection];
+  for(const src of srcs){
+    try{
+      if(src&&typeof src.then==='function'){
+        const c=await Promise.race([src,new Promise((_,r)=>setTimeout(()=>r(),1500))]);
+        const auth=c?.options?.auth||c?.auth;
+        const t=auth?.data?.access_token||auth?.access_token;
+        if(t)return t;
+      }else if(src){
+        const auth=src.options?.auth||src.auth;
+        const t=auth?.data?.access_token||auth?.access_token;
+        if(t)return t;
+      }
+    }catch(_){}
+  }
+  try{
+    const raw=Object.keys(localStorage).filter(k=>k.startsWith('hassTokens'))
+      .map(k=>{try{return JSON.parse(localStorage.getItem(k))}catch{return null}}).filter(Boolean)[0];
+    if(raw?.access_token)return raw.access_token;
+  }catch(_){}
+  return null;
+}
+
+function setLive(v){const d=document.getElementById('dot');if(d)d.className='live-dot'+(v?' on':'');}
+function showErr(m){const b=document.getElementById('err-bar');b.textContent=m;b.style.display='block';setTimeout(()=>b.style.display='none',4000);}
+
+async function fetchAll(){
+  const hdr={}; if(token)hdr['Authorization']='Bearer '+token;
+  try{
+    const r=await fetch('/api/states',{headers:hdr,credentials:'same-origin'});
+    if(!r.ok){showErr('HA: '+r.status);setLive(false);return;}
+    const all=await r.json();
+    all.forEach(s=>states[s.entity_id]=s);
+    setLive(true); renderAll();
+  }catch(e){showErr('Verbinding mislukt');setLive(false);}
+}
+
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss':'ws';
+  ws=new WebSocket(`${proto}://${location.host}/api/websocket`);
+  ws.onmessage=ev=>{
+    const m=JSON.parse(ev.data);
+    if(m.type==='auth_required'){ws.send(JSON.stringify({type:'auth',access_token:token||''}));}
+    else if(m.type==='auth_ok'){setLive(true);ws.send(JSON.stringify({id:wsId++,type:'subscribe_events',event_type:'state_changed'}));fetchAll();}
+    else if(m.type==='event'&&m.event?.data){
+      const d=m.event.data;
+      if(Object.values(E).includes(d.entity_id)){states[d.entity_id]=d.new_state;renderAll();}
+    }else if(m.type==='auth_invalid'){ws.close();startPoll();}
+  };
+  ws.onerror=()=>startPoll();
+  ws.onclose=()=>{setLive(false);setTimeout(connectWS,5000);};
+}
+
+let pollTmr=null;
+function startPoll(){if(pollTmr)return;fetchAll();pollTmr=setInterval(fetchAll,POLL_MS);}
+
+async function stopSim(){
+  if(!token)return;
+  await fetch('/api/services/cloudems/simulator_clear',{
+    method:'POST',headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},body:'{}'});
+}
+
+// BOOT
+(async()=>{
+  token=await resolveToken();
+  connectWS();
+  setTimeout(()=>{if(!Object.keys(states).length)startPoll();},3000);
+})();
+</script>
+</body>
+</html>

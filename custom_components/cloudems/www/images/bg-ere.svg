@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.07" fill="none" stroke="#a5d6a7" stroke-width="1.5">
+  <!-- certificaat / medaille -->
+  <circle cx="400" cy="260" r="100"/>
+  <circle cx="400" cy="260" r="80"/>
+  <!-- ster in certificaat -->
+  <polygon points="400,180 420,240 485,240 433,278 453,340 400,303 347,340 367,278 315,240 380,240"/>
+  <!-- lint -->
+  <path d="M 340 340 L 300 480 L 400 430 L 500 480 L 460 340"/>
+  <!-- bladeren rondom -->
+  <path d="M 290 180 Q 240 160 260 220 Q 280 280 320 260 Q 300 200 290 180"/>
+  <path d="M 510 180 Q 560 160 540 220 Q 520 280 480 260 Q 500 200 510 180"/>
+  <!-- stralenkrans -->
+  <line x1="400" y1="140" x2="400" y2="110"/>
+  <line x1="400" y1="380" x2="400" y2="410"/>
+  <line x1="260" y1="200" x2="238" y2="181"/>
+  <line x1="540" y1="200" x2="562" y2="181"/>
+  <line x1="260" y1="320" x2="238" y2="339"/>
+  <line x1="540" y1="320" x2="562" y2="339"/>
+</g>
+</svg>

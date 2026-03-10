@@ -1,0 +1,54 @@
+<svg viewBox="0 0 460 150" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+  <rect width="460" height="150" rx="12" fill="#1c1c2e"/>
+  <text x="230" y="18" text-anchor="middle" font-size="10" fill="#94a3b8" font-weight="600">Apparaat gestart tijdens dure stroom → CloudEMS verschuift naar goedkoopste uur</text>
+
+  <!-- Step 1: Device starts (expensive) -->
+  <rect x="15" y="30" width="100" height="90" rx="10" fill="#ef444418" stroke="#ef444455" stroke-width="1.5"/>
+  <text x="65" y="52" text-anchor="middle" font-size="18">🧺</text>
+  <text x="65" y="70" text-anchor="middle" font-size="9" fill="#f87171" font-weight="600">Gebruiker</text>
+  <text x="65" y="82" text-anchor="middle" font-size="9" fill="#f87171" font-weight="600">start apparaat</text>
+  <rect x="28" y="90" width="74" height="18" rx="5" fill="#ef44441a" stroke="#ef444455" stroke-width="1"/>
+  <text x="65" y="103" text-anchor="middle" font-size="8" fill="#ef4444">💸 €0.38/kWh</text>
+
+  <!-- Arrow 1 -->
+  <line x1="116" y1="75" x2="138" y2="75" stroke="#f97316" stroke-width="2" marker-end="url(#arr2)"/>
+  <defs>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#f97316"/>
+    </marker>
+    <marker id="arr3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#22c55e"/>
+    </marker>
+  </defs>
+
+  <!-- Step 2: CloudEMS detects + waits -->
+  <rect x="140" y="30" width="110" height="90" rx="10" fill="#6366f118" stroke="#6366f155" stroke-width="1.5"/>
+  <text x="195" y="52" text-anchor="middle" font-size="18">⏳</text>
+  <text x="195" y="70" text-anchor="middle" font-size="9" fill="#818cf8" font-weight="600">CloudEMS</text>
+  <text x="195" y="82" text-anchor="middle" font-size="9" fill="#818cf8" font-weight="600">schakelt UIT</text>
+  <text x="195" y="94" text-anchor="middle" font-size="8" fill="#64748b">wacht op goedkoop</text>
+  <rect x="153" y="102" width="84" height="12" rx="4" fill="#6366f11a"/>
+  <text x="195" y="112" text-anchor="middle" font-size="7.5" fill="#a5b4fc">melding naar HA</text>
+
+  <!-- Arrow 2 -->
+  <line x1="251" y1="75" x2="273" y2="75" stroke="#22c55e" stroke-width="2" marker-end="url(#arr3)"/>
+
+  <!-- Step 3: Starts at cheap hour -->
+  <rect x="275" y="30" width="100" height="90" rx="10" fill="#22c55e18" stroke="#22c55e55" stroke-width="1.5"/>
+  <text x="325" y="52" text-anchor="middle" font-size="18">✅</text>
+  <text x="325" y="70" text-anchor="middle" font-size="9" fill="#22c55e" font-weight="600">Automatisch</text>
+  <text x="325" y="82" text-anchor="middle" font-size="9" fill="#22c55e" font-weight="600">AAN gezet</text>
+  <rect x="288" y="90" width="74" height="18" rx="5" fill="#22c55e1a" stroke="#22c55e55" stroke-width="1"/>
+  <text x="325" y="103" text-anchor="middle" font-size="8" fill="#22c55e">💚 €0.09/kWh</text>
+
+  <!-- Savings badge -->
+  <rect x="385" y="30" width="68" height="90" rx="10" fill="#fbbf2418" stroke="#fbbf2455" stroke-width="1.5"/>
+  <text x="419" y="58" text-anchor="middle" font-size="16">💰</text>
+  <text x="419" y="74" text-anchor="middle" font-size="9" fill="#fbbf24" font-weight="700">Besparing</text>
+  <text x="419" y="86" text-anchor="middle" font-size="8" fill="#94a3b8">tot 75%</text>
+  <text x="419" y="98" text-anchor="middle" font-size="8" fill="#94a3b8">goedkoper</text>
+  <text x="419" y="110" text-anchor="middle" font-size="8" fill="#fbbf24">per wasbeurt</text>
+
+  <!-- Arrow from step2 to savings -->
+  <line x1="381" y1="75" x2="383" y2="75" stroke="#fbbf24" stroke-width="1" stroke-dasharray="3,2"/>
+</svg>
