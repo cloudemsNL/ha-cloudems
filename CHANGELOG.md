@@ -2,6 +2,17 @@
 
 Alle noemenswaardige wijzigingen per versie.
 
+## [4.4.4] - 2026-03-10
+
+### Bugfix
+
+- **Auto-deploy dashboard**: twee fouten opgelost die zichtbaar waren in de HA logs:
+  - `'LovelaceData' object has no attribute 'get'` — `hass.data["lovelace"]` is een `LovelaceData`
+    TypedDict, geen gewone dict. Fix: gebruik `dashboards_collection` key die HA zelf opslaat
+    in `hass.data["lovelace"]["dashboards_collection"]` (zie `lovelace/async_setup`)
+  - `Detected blocking call to read_text` — YAML-bestand werd gelezen op de event loop.
+    Fix: lezen via `hass.async_add_executor_job()`
+
 ## [4.4.3] - 2026-03-10
 
 ### Bugfix
