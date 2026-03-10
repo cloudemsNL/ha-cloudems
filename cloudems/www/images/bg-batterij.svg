@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.07" fill="none" stroke="#4fc3f7" stroke-width="1.5">
+  <!-- grote batterij rechts -->
+  <rect x="500" y="120" width="220" height="380" rx="12"/>
+  <rect x="570" y="100" width="80" height="25" rx="4"/>
+  <!-- peil cellen -->
+  <rect x="520" y="380" width="180" height="50" rx="4" fill="rgba(79,195,247,0.07)"/>
+  <rect x="520" y="310" width="180" height="50" rx="4" fill="rgba(79,195,247,0.07)"/>
+  <rect x="520" y="240" width="180" height="50" rx="4" fill="rgba(79,195,247,0.05)"/>
+  <rect x="520" y="170" width="180" height="50" rx="4"/>
+  <!-- bliksem -->
+  <polyline points="615,175 590,300 620,300 595,435" stroke-width="3"/>
+  <!-- laadkabel links -->
+  <path d="M 80 300 Q 200 200 300 300 Q 400 400 500 300" stroke-dasharray="8,5" stroke-width="2"/>
+  <circle cx="80" cy="300" r="15"/>
+  <line x1="66" y1="286" x2="66" y2="314"/>
+  <line x1="94" y1="286" x2="94" y2="314"/>
+</g>
+</svg>

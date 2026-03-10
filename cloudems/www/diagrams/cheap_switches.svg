@@ -1,0 +1,52 @@
+<svg viewBox="0 0 460 150" xmlns="http://www.w3.org/2000/svg" font-family="sans-serif">
+  <rect width="460" height="150" rx="12" fill="#1c1c2e"/>
+  <text x="230" y="18" text-anchor="middle" font-size="10" fill="#94a3b8" font-weight="600">Automatisch AAN bij het goedkoopste stroomblok van de dag</text>
+
+  <!-- 24h price bars — simplified 12 bars -->
+  <!-- expensive bars (red) -->
+  <rect x="20"  y="100" width="14" height="32" rx="2" fill="#ef444444" stroke="#ef4444" stroke-width="1"/>
+  <rect x="38"  y="88"  width="14" height="44" rx="2" fill="#ef444444" stroke="#ef4444" stroke-width="1"/>
+  <rect x="56"  y="80"  width="14" height="52" rx="2" fill="#ef444444" stroke="#ef4444" stroke-width="1"/>
+  <!-- cheap block (green, highlighted) -->
+  <rect x="77"  y="98"  width="14" height="34" rx="2" fill="#22c55e88" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="95"  y="104" width="14" height="28" rx="2" fill="#22c55e88" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="113" y="110" width="14" height="22" rx="2" fill="#22c55e88" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="131" y="108" width="14" height="24" rx="2" fill="#22c55e88" stroke="#22c55e" stroke-width="1.5"/>
+  <!-- medium/expensive again -->
+  <rect x="152" y="94"  width="14" height="38" rx="2" fill="#f9731644" stroke="#f97316" stroke-width="1"/>
+  <rect x="170" y="86"  width="14" height="46" rx="2" fill="#ef444444" stroke="#ef4444" stroke-width="1"/>
+  <rect x="188" y="90"  width="14" height="42" rx="2" fill="#f9731644" stroke="#f97316" stroke-width="1"/>
+  <rect x="206" y="100" width="14" height="32" rx="2" fill="#f9731644" stroke="#f97316" stroke-width="1"/>
+  <rect x="224" y="95"  width="14" height="37" rx="2" fill="#ef444444" stroke="#ef4444" stroke-width="1"/>
+
+  <!-- baseline -->
+  <line x1="16" y1="133" x2="245" y2="133" stroke="#334155" stroke-width="1"/>
+  <text x="130" y="145" text-anchor="middle" font-size="8" fill="#64748b">24 uur EPEX-prijzen</text>
+
+  <!-- green block bracket -->
+  <line x1="77" y1="72" x2="145" y2="72" stroke="#22c55e" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <text x="111" y="69" text-anchor="middle" font-size="8" fill="#22c55e" font-weight="700">goedkoopste blok</text>
+
+  <!-- Arrow from cheap block to switch -->
+  <line x1="260" y1="100" x2="290" y2="100" stroke="#22c55e" stroke-width="2" marker-end="url(#arr)"/>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#22c55e"/>
+    </marker>
+  </defs>
+  <text x="275" y="93" text-anchor="middle" font-size="8" fill="#22c55e">AAN!</text>
+
+  <!-- Switch icon box -->
+  <rect x="295" y="68" width="80" height="60" rx="10" fill="#22c55e18" stroke="#22c55e55" stroke-width="1.5"/>
+  <text x="335" y="89" text-anchor="middle" font-size="22">🔌</text>
+  <text x="335" y="108" text-anchor="middle" font-size="9" fill="#22c55e" font-weight="600">Schakelaar</text>
+  <text x="335" y="120" text-anchor="middle" font-size="8" fill="#94a3b8">automatisch AAN</text>
+
+  <!-- CloudEMS brain -->
+  <rect x="385" y="55" width="65" height="90" rx="10" fill="#6366f118" stroke="#6366f155" stroke-width="1.5"/>
+  <text x="418" y="80" text-anchor="middle" font-size="18">⚡</text>
+  <text x="418" y="96" text-anchor="middle" font-size="8" fill="#818cf8" font-weight="600">CloudEMS</text>
+  <text x="418" y="108" text-anchor="middle" font-size="7" fill="#64748b">bewaakt</text>
+  <text x="418" y="118" text-anchor="middle" font-size="7" fill="#64748b">EPEX live</text>
+  <text x="418" y="130" text-anchor="middle" font-size="7" fill="#64748b">en schakelt</text>
+</svg>

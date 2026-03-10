@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.07" fill="none" stroke="#c5e1a5" stroke-width="1.5">
+  <!-- fiets frame -->
+  <circle cx="220" cy="400" r="80"/>
+  <circle cx="520" cy="400" r="80"/>
+  <circle cx="220" cy="400" r="20"/>
+  <circle cx="520" cy="400" r="20"/>
+  <!-- frame driehoek -->
+  <polyline points="220,400 320,240 520,400"/>
+  <polyline points="320,240 440,400"/>
+  <polyline points="320,240 320,200"/>
+  <!-- stuur -->
+  <line x1="300" y1="200" x2="340" y2="200"/>
+  <line x1="320" y1="200" x2="320" y2="240"/>
+  <!-- zadel -->
+  <line x1="430" y1="290" x2="460" y2="290"/>
+  <line x1="440" y1="290" x2="440" y2="330"/>
+  <!-- bliksem -->
+  <polyline points="600,120 575,200 610,200 580,290" stroke-width="2.5"/>
+  <!-- wiel spaakjes -->
+  <line x1="220" y1="320" x2="220" y2="400"/><line x1="220" y1="480" x2="220" y2="400"/>
+  <line x1="140" y1="400" x2="220" y2="400"/><line x1="300" y1="400" x2="220" y2="400"/>
+  <line x1="163" y1="343" x2="220" y2="400"/><line x1="277" y1="457" x2="220" y2="400"/>
+  <line x1="520" y1="320" x2="520" y2="400"/><line x1="520" y1="480" x2="520" y2="400"/>
+  <line x1="440" y1="400" x2="520" y2="400"/><line x1="600" y1="400" x2="520" y2="400"/>
+</g>
+</svg>
