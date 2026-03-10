@@ -1853,8 +1853,29 @@ class NILMDetector:
             _LOGGER.debug("PowerLearner feedback fout: %s", _ple)
 
     def dismiss_device(self, device_id: str) -> None:
-        self._devices.pop(device_id, None)
-        # v4.5: cleanup co-occurrence paren voor verwijderd apparaat
+        """Wijs een NILM-apparaat permanent af.
+
+        v4.5.3: in plaats van het apparaat direct te verwijderen uit _devices,
+        zetten we user_suppressed=True. Zo wordt het bij de volgende async_save()
+        opgeslagen in de store en na herstart NIET opnieuw getoond.
+
+        Het apparaat verdwijnt uit get_devices_for_ha() (die filtert op user_suppressed),
+        maar blijft in _devices zodat de store het persistent bijhoudt.
+        """
+        dev = self._devices.get(device_id)
+        if dev is not None:
+            dev.user_suppressed = True
+            dev.is_on = False        # zet uit zodat het stroomverbruik niet mee-telt
+            dev.current_power = 0.0
+            _LOGGER.info(
+                "NILM: apparaat '%s' (id=%s, type=%s) afgewezen door gebruiker — "
+                "user_suppressed=True, wordt niet meer getoond",
+                dev.user_name or dev.name or dev.device_type, device_id, dev.device_type,
+            )
+        else:
+            _LOGGER.debug("NILM dismiss: device_id '%s' niet gevonden in _devices", device_id)
+
+        # v4.5: cleanup co-occurrence paren voor afgewezen apparaat
         if self._co_occurrence:
             self._co_occurrence.on_device_removed(device_id)
 
@@ -2434,19 +2455,26 @@ class NILMDetector:
         # v4.4: naam-gebaseerde keyword-filter — verwijder infrastructure-sensoren
         # die via de naam herkenbaar zijn maar niet via source_entity_id gefilterd werden.
         # Dit pakt apparaten die al geleerd waren vóór de coordinator-filter ze kon blokkeren.
-        _INFRA_NAME_KEYWORDS = (
+        _INFRA_NAME_KEYWORDS_EARLY = (
             "energiemeter", "energy meter", "stroomprijs", "uurprijs",
             "stroom tegen", "elektriciteitsgemiddelde",
             "elektriciteitsverbruik", "elektriciteitsproductie",
             "connect energi", "slimme meter", "p1 meter",
             "net import", "net export", "grid import", "grid export",
             "solar production", "pv productie",
+            # v4.5.3: extra termen
+            "energieproductie", "energieverbruik", "electricity meter",
         )
         def _is_infra_name(dev_dict: dict) -> bool:
             if dev_dict.get("source") == "smart_plug":
                 return False
             name = (dev_dict.get("name") or "").lower()
-            return any(kw in name for kw in _INFRA_NAME_KEYWORDS)
+            if any(kw in name for kw in _INFRA_NAME_KEYWORDS_EARLY):
+                return True
+            # Extra patroon: "meter" + energie-term
+            if "meter" in name and any(w in name for w in ("verbruik", "productie", "energy", "elektric")):
+                return True
+            return False
         raw = [d for d in raw if not _is_infra_name(d)]
 
         # Filter: verwijder altijd device-types die nooit huishoudapparaten zijn.
@@ -2496,19 +2524,36 @@ class NILMDetector:
             "zonnepanelen productie", "zonnepanelen verbruik",
             "teruglevering", "netlevering", "netafname",
             "huidig verbruik", "huidig gebruik",
+            # v4.5.3: extra NL termen die in de praktijk voorkomen
+            "energieproductie", "energieverbruik", "stroomlevering",
+            "netto verbruik", "netto levering",
             # Engels
             "electricity meter", "energy meter", "smart meter",
             "grid power", "grid import", "grid export",
             "solar production", "solar power", "pv production",
             "net metering", "feed-in", "feedin",
             "current consumption", "current production",
+            # v4.5.3: combo-namen die DSMR/P1 meters soms produceren
+            # bijv. "Electricity Meter Energieproductie", "Meter Energieverbruik"
+            "electricity meter energieproductie", "electricity meter energieverbruik",
+            "meter energieproductie", "meter energieverbruik",
             # Merknamen die typisch infra zijn
             "connect energiemeter", "stroom tegen uurprijzen",
             "p1 telegram",
         }
         def _has_infra_keyword(name: str) -> bool:
             n = (name or "").lower()
-            return any(kw in n for kw in _INFRA_NAME_KEYWORDS)
+            # Exacte substring match op alle keywords
+            if any(kw in n for kw in _INFRA_NAME_KEYWORDS):
+                return True
+            # v4.5.3: extra patroon — naam bevat "meter" + (verbruik|productie|levering|import|export)
+            if "meter" in n and any(w in n for w in ("verbruik", "productie", "levering", "import", "export", "energy", "elektric")):
+                return True
+            # v4.5.3: naam begint met bekende infra-prefix
+            _INFRA_PREFIXES = ("electricity ", "electric meter", "dsmr ", "p1 ", "slimme ")
+            if any(n.startswith(pfx) for pfx in _INFRA_PREFIXES):
+                return True
+            return False
 
         raw = [
             d for d in raw

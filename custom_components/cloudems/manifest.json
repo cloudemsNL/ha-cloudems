@@ -1,7 +1,7 @@
 {
   "domain": "cloudems",
   "name": "CloudEMS - Energy Management System",
-  "version": "4.4.4",
+  "version": "4.5.4",
   "documentation": "https://github.com/cloudemsNL/ha-cloudems",
   "issue_tracker": "https://github.com/cloudemsNL/ha-cloudems/issues",
   "dependencies": [],
@@ -9,7 +9,7 @@
     "@cloudemsNL"
   ],
   "requirements": [],
-  "iot_class": "local_push",
+  "iot_class": "cloud_polling",
   "config_flow": true,
   "integration_type": "service"
 }

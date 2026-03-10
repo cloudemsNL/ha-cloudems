@@ -343,8 +343,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._micro_mobility     = None
         self._notification_engine = None
         self._categories         = None
+        # v4.5.0: externe provider manager
+        self._provider_manager   = None
         self._cost_forecaster    = None
         self._thermal_model      = None
+        self._floor_buffer       = None
+        self._ml_forecaster      = None
         self._self_consumption   = None
         self._day_classifier     = None
         self._pv_accuracy        = None
@@ -1002,7 +1006,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         }
 
     def _apply_price_components(self, price_info: dict) -> dict:
-        """Add tax/BTW/supplier markup fields to price_info without changing the base EPEX price."""
+        """Add tax/BTW/supplier markup fields to price_info without changing the base EPEX price.
+
+        v4.5.1: Als prices_from_provider=True zijn de prijzen al all-in (leverancier levert
+        echte tarieven inclusief alle toeslagen). Dan alleen meta-velden toevoegen, géén
+        extra markup stapelen — dat zou de prijs dubbel verhogen.
+        """
         cfg     = self._config
         country = cfg.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
 
@@ -1018,7 +1027,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if supplier_key == "custom":
             sup_markup = custom_markup
 
+        # v4.5.1: provider-prijzen zijn already all-in — géén markup toepassen
+        from_provider = price_info.get("prices_from_provider", False)
+
         def _enrich(base):
+            if from_provider:
+                # Prijs is al all-in van de leverancier — toon ongewijzigd
+                return round(base, 5) if base is not None else None
             tax_c   = tax if include_tax else 0.0
             sub     = base + tax_c + sup_markup
             btw_c   = sub * vat if include_btw else 0.0
@@ -1029,16 +1044,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         today_display = []
         for slot in price_info.get("today_all", []):
             today_display.append({**slot,
-                "price_display": _enrich(slot["price"]),
-                "price_all_in":  _enrich(slot["price"])})
+                "price_display": _enrich(slot["price"]) if slot.get("price") is not None else None,
+                "price_all_in":  _enrich(slot["price"]) if slot.get("price") is not None else None})
 
         return {
             **price_info,
-            "tax_per_kwh":         round(tax, 5),
+            "tax_per_kwh":         round(tax, 5) if not from_provider else 0.0,
             "vat_rate":            round(vat, 4),
-            "supplier_markup_kwh": round(sup_markup, 5),
-            "price_include_tax":   include_tax,
-            "price_include_btw":   include_btw,
+            "supplier_markup_kwh": round(sup_markup, 5) if not from_provider else 0.0,
+            "price_include_tax":   include_tax and not from_provider,
+            "price_include_btw":   include_btw and not from_provider,
             "country":             country,
             "current_all_in":        _enrich(cur) if cur is not None else None,
             "current_display":       _enrich(cur) if cur is not None else cur,
@@ -1293,12 +1308,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             rec["tp"] = rec.get("tp", 0) + 1
 
     def dismiss_nilm_device(self, device_id: str) -> None:
+        # v4.5.3: dismiss zet user_suppressed=True (persistent) i.p.v. delete
+        dev = self._nilm._devices.get(device_id)
         self._nilm.dismiss_device(device_id)
         self._review_skip_set.discard(device_id)
         if device_id in self._review_skip_history:
             self._review_skip_history.remove(device_id)
         # v2.4.17: registreer als false positive voor adaptieve drempels
-        dev = self._nilm._devices.get(device_id)
         if dev:
             dtype = getattr(dev, "device_type", "unknown") or "unknown"
             rec = self._adaptive_thresholds.setdefault(dtype, {"tp": 0, "fp": 0})
@@ -1308,6 +1324,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 rec["min_events"] = min(rec.get("min_events", 3) + 1, 20)
             # Direct doorgeven aan detector
             self._nilm.set_adaptive_overrides(self._adaptive_thresholds)
+
+        # v4.5.3: onmiddellijk opslaan zodat dismissal persistent is na herstart
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self._nilm.async_save())
+        except Exception:
+            pass
 
     # ── v2.4.14: NILM review queue ────────────────────────────────────────────
 
@@ -1657,6 +1682,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._learning_backup = LearningBackup(self.hass)
         await self._learning_backup.async_setup()
 
+        # ── Externe providers (v4.5.0) ────────────────────────────────────────
+        try:
+            from .provider_manager import ProviderManager
+            self._provider_manager = ProviderManager(self.hass, self._config)
+            await self._provider_manager.async_setup()
+            _LOGGER.info("CloudEMS ProviderManager: %d provider(s) actief",
+                         self._provider_manager.active_count)
+        except Exception as _pm_exc:
+            _LOGGER.warning("CloudEMS ProviderManager setup mislukt: %s", _pm_exc)
+            self._provider_manager = None
+
         country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
         self._prices = EnergyPriceFetcher(
             country=country,
@@ -1705,6 +1741,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.thermal_model import ThermalHouseModel
         self._thermal_model = ThermalHouseModel(self.hass)
         await self._thermal_model.async_setup()
+
+        # v4.4.5: Vloer thermische buffer (EMHASS-geïnspireerd physics model)
+        from .energy_manager.floor_thermal_buffer import FloorThermalBuffer
+        _floor_area = float(self._config.get("floor_area_m2", 30.0))
+        _floor_type = self._config.get("floor_type", "beton")
+        self._floor_buffer = FloorThermalBuffer(self.hass, floor_area_m2=_floor_area, floor_type=_floor_type)
+        await self._floor_buffer.async_setup()
+
+        # v4.4.5: ML verbruiksforecaster (k-NN met temperatuur + seizoensfeatures)
+        from .energy_manager.consumption_ml_forecast import MLConsumptionForecaster
+        self._ml_forecaster = MLConsumptionForecaster(self.hass)
+        await self._ml_forecaster.async_setup()
 
         # v1.11.0: Self-consumption ratio tracker
         from .energy_manager.self_consumption import SelfConsumptionTracker
@@ -2312,6 +2360,24 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._ollama_cfg.get("enabled") and time.time() - self._ollama_health_last_check > 60:
                 await self.async_check_ollama_health()
 
+            # ── v4.5.1: Poll provider prices EARLY so they are available for price_info ──
+            # Provider prices (Tibber, Frank Energie, Octopus, etc.) zijn already
+            # all-in prijzen rechtstreeks van de leverancier — dit is de meest
+            # correcte bron. We cachen het resultaat en hergebruiken het later in de
+            # cycle voor ext_inverters / ext_ev / ext_appliances.
+            _provider_poll_cache: dict = {}
+            _provider_prices: dict = {}
+            if self._provider_manager and self._provider_manager.active_count > 0:
+                try:
+                    from .provider_manager import (
+                        extract_inverter_summary, extract_ev_summary,
+                        extract_appliance_summary, extract_energy_prices,
+                    )
+                    _provider_poll_cache = await self._provider_manager.async_poll_all()
+                    _provider_prices = extract_energy_prices(_provider_poll_cache)
+                except Exception as _pp_err:
+                    _LOGGER.debug("ProviderManager vroegtijdige poll fout: %s", _pp_err)
+
             current_price = self._prices.current_price if self._prices else 0.0
 
             # v1.15.0: contract type — dynamic (EPEX) or fixed tariff
@@ -2337,12 +2403,86 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "contract_type":  CONTRACT_TYPE_FIXED,
                     "is_cheap_hour":  True,
                 }
+            elif _provider_prices.get("current_price") is not None:
+                # ── v4.5.1: Leverancier-prijzen als primaire bron ──────────────
+                # Providers als Tibber, Frank Energie en Octopus leveren all-in
+                # prijzen inclusief alle toeslagen. Deze zijn nauwkeuriger dan
+                # EPEX + vaste markup. We bouwen price_info direct van provider data.
+                _pp = _provider_prices
+                _today_slots_raw = _pp.get("today_prices", [])
+                _tomorrow_slots_raw = _pp.get("tomorrow_prices", [])
+                _today_prices = [s["price"] for s in _today_slots_raw if s.get("price") is not None]
+                from statistics import mean as _mean
+                _avg_today = round(_mean(_today_prices), 5) if _today_prices else None
+                _cur = float(_pp["current_price"])
+
+                # Goedkoopste uren bepalen op basis van provider-prijzen
+                _next_hours_provider = []
+                import datetime as _dt
+                _now_h = _dt.datetime.now().hour
+                for _slot in _today_slots_raw:
+                    if _slot.get("hour") is not None and _slot.get("price") is not None:
+                        _next_hours_provider.append({
+                            "hour":  _slot["hour"],
+                            "price": float(_slot["price"]),
+                            "label": f"{_slot['hour']:02d}:00",
+                        })
+                for _slot in _tomorrow_slots_raw:
+                    if _slot.get("hour") is not None and _slot.get("price") is not None:
+                        _next_hours_provider.append({
+                            "hour":  _slot["hour"],
+                            "price": float(_slot["price"]),
+                            "label": f"{_slot['hour']:02d}:00",
+                        })
+
+                from .energy.prices import (
+                    _find_cheapest_window, _find_cheapest_window_indices, _cheapest_window_detail,
+                )
+                _sorted_prov = sorted(_next_hours_provider, key=lambda h: h["price"])
+                _cheapest_hours_prov = [h["hour"] for h in _sorted_prov]
+
+                price_info = {
+                    "current":             _cur,
+                    "is_negative":         _cur <= 0.0,
+                    "min_today":           round(min(_today_prices), 5) if _today_prices else None,
+                    "max_today":           round(max(_today_prices), 5) if _today_prices else None,
+                    "avg_today":           _avg_today,
+                    "rolling_avg_30d":     _avg_today,  # beste benadering zonder 30d history
+                    "next_hours":          _next_hours_provider,
+                    "today_all":           _today_slots_raw,
+                    "tomorrow_all":        _tomorrow_slots_raw,
+                    "tomorrow_available":  len(_tomorrow_slots_raw) > 0,
+                    "cheapest_2h_start":   _find_cheapest_window(_next_hours_provider, 2),
+                    "cheapest_3h_start":   _find_cheapest_window(_next_hours_provider, 3),
+                    "cheapest_4h_start":   _find_cheapest_window(_next_hours_provider, 4),
+                    "cheapest_4h_block":   _cheapest_window_detail(_next_hours_provider, 4),
+                    "in_cheapest_1h":      0 in _find_cheapest_window_indices(_next_hours_provider, 1),
+                    "in_cheapest_2h":      0 in _find_cheapest_window_indices(_next_hours_provider, 2),
+                    "in_cheapest_3h":      0 in _find_cheapest_window_indices(_next_hours_provider, 3),
+                    "in_cheapest_4h":      0 in _find_cheapest_window_indices(_next_hours_provider, 4),
+                    "cheapest_1h_hours":   _cheapest_hours_prov[:1],
+                    "cheapest_2h_hours":   _cheapest_hours_prov[:2],
+                    "cheapest_3h_hours":   _cheapest_hours_prov[:3],
+                    "cheapest_4h_hours":   _cheapest_hours_prov[:4],
+                    "source":              _pp.get("source", "provider"),
+                    "provider_key":        _pp.get("provider_key", ""),
+                    "prices_from_provider": True,  # markeer als all-in, geen markup meer toepassen
+                    "contract_type":       "dynamic",
+                    "slot_count":          len(_today_slots_raw),
+                }
+                # current_price ook updaten voor modules die rechtstreeks _prices.current_price lezen
+                current_price = _cur
+                _LOGGER.debug(
+                    "CloudEMS prijzen: %.4f €/kWh via provider '%s' (%d slots vandaag)",
+                    _cur, _pp.get("source", "?"), len(_today_slots_raw),
+                )
             else:
-                # EPEX price info (FIX: get_price_info() now exists)
+                # EPEX price info (standaard: geen provider geconfigureerd)
                 price_info: dict = self._prices.get_price_info() if self._prices else {}
                 price_info["contract_type"] = CONTRACT_TYPE_FIXED if contract_type == CONTRACT_TYPE_FIXED else "dynamic"
 
             # v1.13.0: apply tax/BTW/markup to produce all-in price fields
+            # v4.5.1: bij provider-prijzen wordt in _apply_price_components geen markup opgestapeld
             price_info = self._apply_price_components(price_info)
 
             # Dynamic loader (threshold-based, keeps running for price logic)
@@ -2917,10 +3057,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             solar_surplus = self._calc_pv_surplus(_solar_w_now, _grid_w_now, _batt_w_now)
 
             # v1.18.1: stroomuitval — alle PV + netspanning = 0 overdag
+            # v4.5.4: Verbeterde check — ook accu en huisverbruik meenemen.
+            # Bij NOM (Nul Op Meter) en zelfvoorzienende huizen kan solar=0 EN grid=0
+            # tegelijkertijd voorkomen terwijl de accu het huis volledig voedt.
+            # In dat geval is er GEEN stroomstoring.
             _solar_w = _solar_w_now
             _grid_w  = abs(_grid_w_now)
             _hour    = datetime.now(timezone.utc).hour
-            if 7 <= _hour <= 20 and _solar_w < 10 and _grid_w < 5:
+            _batt_discharge = max(0.0, -getattr(self, "_last_battery_w", 0.0))  # ontladen = positief
+            _house_w_check  = self._calc_house_load(_solar_w_now, _grid_w_now,
+                                                    getattr(self, "_last_battery_w", 0.0))
+            # Stroomstoring: PV=0, grid=0 én ook de accu ontlaadt niets en huis verbruikt niets
+            # → alle meetpunten zijn 0 of nul terwijl het overdag is.
+            # NOM/zelfvoorzienend: accu ontlaadt actief (batt_discharge > 50W) → geen storing
+            _truly_zero = (
+                _solar_w < 10
+                and _grid_w < 5
+                and _batt_discharge < 50      # accu ontlaadt niet → geen spanning in huis
+                and _house_w_check < 50       # ook geen huidig huisverbruik meetbaar
+            )
+            if 7 <= _hour <= 20 and _truly_zero:
                 self._outage_streak = getattr(self, '_outage_streak', 0) + 1
                 if self._outage_streak >= 3 and not getattr(self, '_outage_active', False):
                     self._outage_active = True
@@ -3134,6 +3290,40 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             cost_forecast = self._cost_forecaster.get_forecast(price_info)
             seasonal_summary = self._cost_forecaster.get_seasonal_summary()
 
+            # v4.4.5: ML verbruiksforecast observatie (1x per uur)
+            ml_forecast_data: dict = {}
+            if self._ml_forecaster:
+                try:
+                    _now_h = datetime.now(timezone.utc)
+                    if _now_h.minute == 0 and _now_h.second < 30:  # Begin van elk uur
+                        _kwh_last_hour = data.get("import_kwh_today", 0.0)
+                        _outside_temp  = float(self._read_state(self._config.get("outside_temp_entity","")) or self._thermal_model._last_outside_temp if self._thermal_model else 10.0)
+                        _pv_yesterday  = data.get("pv_kwh_yesterday", 0.0)
+                        if not self.learning_frozen:
+                            self._ml_forecaster.add_observation(
+                                kwh_this_hour    = _kwh_last_hour / max(1, _now_h.hour or 1),
+                                t_outside_c      = _outside_temp,
+                                pv_kwh_yesterday = _pv_yesterday,
+                            )
+                    # Voorspelling bouwen
+                    _t_forecast = [float(self._read_state(self._config.get("outside_temp_entity","")) or 10.0)] * 24
+                    ml_result = self._ml_forecaster.forecast(
+                        t_outside_forecast = _t_forecast,
+                        pv_kwh_yesterday   = data.get("pv_kwh_yesterday", 0.0),
+                    )
+                    ml_forecast_data = {
+                        "next_hour_kwh":    ml_result.next_hour_kwh,
+                        "forecast_24h":     ml_result.forecast_24h,
+                        "model_trained":    ml_result.model_trained,
+                        "training_samples": ml_result.training_samples,
+                        "mape_7d_pct":      ml_result.mape_7d_pct,
+                        "method":           ml_result.method,
+                        "feature_importance": self._ml_forecaster.get_feature_importance(),
+                    }
+                    await self._ml_forecaster.async_maybe_save()
+                except Exception as _ml_err:
+                    _LOGGER.debug("MLForecast fout: %s", _ml_err)
+
             # v1.10.3: Home baseline anomaly + standby + occupancy (always-on)
             grid_w = data.get("grid_power", 0.0)
             baseline_data = self._home_baseline.update(grid_w) if (self._home_baseline and not self.learning_frozen) else {}
@@ -3337,6 +3527,42 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "last_outside_temp_c": therm_obj.last_outside_temp_c,
                 }
                 await self._thermal_model.async_maybe_save()
+
+            # v4.4.5: Vloer thermische buffer update
+            floor_buffer_data: dict = {}
+            if self._floor_buffer:
+                try:
+                    outside_temp_eid = self._config.get("outside_temp_entity", "")
+                    _t_out  = self._read_state(outside_temp_eid) if outside_temp_eid else 5.0
+                    _t_room = self._read_state(self._config.get("indoor_temp_entity", "")) or 20.0
+                    _t_floor_eid = self._config.get("floor_temp_entity", "")
+                    _t_floor = self._read_state(_t_floor_eid) if _t_floor_eid else None
+                    # Vloerverwarmingsvermogen via NILM of config
+                    _p_floor = 0.0
+                    for dev in nilm_devices_trusted:
+                        if dev.get("device_type") in ("floor_heat", "underfloor") and dev.get("is_on"):
+                            _p_floor += float(dev.get("current_power") or 0)
+                    if not self.learning_frozen:
+                        self._floor_buffer.update(
+                            p_floor_w   = _p_floor,
+                            t_floor_c   = _t_floor,
+                            t_room_c    = float(_t_room),
+                            t_outside_c = float(_t_out or 5.0),
+                        )
+                    fb_status = self._floor_buffer.get_status()
+                    floor_buffer_data = {
+                        "state":             fb_status.state,
+                        "t_floor_c":         fb_status.t_floor_c,
+                        "c_floor_wh_k":      fb_status.c_floor_wh_k,
+                        "ua_floor_w_k":      fb_status.ua_floor_w_k,
+                        "charge_windows":    fb_status.charge_windows,
+                        "savings_today_eur": fb_status.savings_today_eur,
+                        "confidence":        fb_status.confidence,
+                        "advice":            fb_status.advice,
+                    }
+                    await self._floor_buffer.async_maybe_save()
+                except Exception as _fb_err:
+                    _LOGGER.debug("FloorBuffer update fout: %s", _fb_err)
 
             # v1.15.0: Outdoor temp fallback via Open-Meteo when no sensor configured
             outside_temp_eid = self._config.get("outside_temp_entity", "")
@@ -5353,7 +5579,31 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "solar_dimmer":         self._solar_dimmer.get_curtailment_stats() if self._solar_dimmer else {},
                 # v2.4.0: tarief-anomalie (berekende kosten vs geconfigureerd tarief × import)
                 "tariff_check":         self._calc_tariff_check(p1_data, price_info),
+                # v4.5.0: externe provider data (omvormers, EV, apparaten, leveranciers)
+                "external_providers_status": (
+                    self._provider_manager.get_status()
+                    if self._provider_manager else []
+                ),
             }
+
+            # v4.5.0: poll alle externe providers asynchroon
+            # v4.5.1: resultaat is al gecached in _provider_poll_cache (vroeg in de cyclus)
+            if self._provider_manager and self._provider_manager.active_count > 0:
+                try:
+                    from .provider_manager import (
+                        extract_inverter_summary, extract_ev_summary,
+                        extract_appliance_summary, extract_energy_prices,
+                    )
+                    # Gebruik cache als die gevuld is, anders opnieuw pollen
+                    _ext = locals().get("_provider_poll_cache") or await self._provider_manager.async_poll_all()
+                    self._data["ext_inverters"]  = extract_inverter_summary(_ext)
+                    self._data["ext_ev"]         = extract_ev_summary(_ext)
+                    self._data["ext_appliances"] = extract_appliance_summary(_ext)
+                    _ext_prices = extract_energy_prices(_ext)
+                    if _ext_prices:
+                        self._data["ext_energy_prices"] = _ext_prices
+                except Exception as _ext_err:
+                    _LOGGER.debug("ProviderManager poll fout: %s", _ext_err)
 
             # v1.12.0: Notification engine — ingest alle alerts en verstuur
             if self._notification_engine:

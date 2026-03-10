@@ -2,6 +2,243 @@
 
 Alle noemenswaardige wijzigingen per versie.
 
+## [4.5.4] — 2026-03-11
+
+### 🐛 Bugfixes
+
+**Issue #3: Dashboard mist entiteiten — entity_id mismatches (sensor.py)**
+Root cause: HA genereert entity_ids automatisch van `_attr_name`, maar de namen kwamen niet overeen
+met de entity_ids die het dashboard verwacht. Expliciete `self.entity_id` toegevoegd aan:
+- `CloudEMSBatterySocSensor`: `sensor.cloudems_battery_soc` → `sensor.cloudems_battery_so_c`
+- `CloudEMSPhaseCurrentSensor`: `sensor.cloudems_grid_phase_l1_current` → `sensor.cloudems_current_l1/l2/l3`
+- `CloudEMSSelfConsumptionSensor`: `sensor.cloudems_pv_zelfconsumptiegraad` → `sensor.cloudems_self_consumption`
+- `CloudEMSSolarSystemSensor`: `sensor.cloudems_solar_system_intelligence` → `sensor.cloudems_solar_system`
+- `CloudEMSPriceCurrentSensor`: `sensor.cloudems_energy_price_current_hour` → `sensor.cloudems_price_current_hour`
+
+**Issue #4: Foutieve vermogensberekening huisverbruik in dashboard (www/dashboard.html)**
+Root cause: `homeW = solar + netW` hield geen rekening met batterijvermogen.
+Bij ontladen (bijv. -3000W) toonde het dashboard 0W huis terwijl er wel 3kW verbruik was.
+Fix: `homeW = max(0, solar + netW - batPwrW)` — dezelfde Kirchhoff-formule als `_calc_house_load()`.
+
+**Issue #8: Vals alarm stroomstoring bij NOM / zelfvoorzienend huis (coordinator.py)**
+Root cause: detectie alleen op `solar < 10W AND grid < 5W` — bij batterij-ontlading
+is dit exact de normale toestand (accu dekt alles, PV=0 's nachts).
+Fix: extra checks toegevoegd:
+  - `battery_discharge < 50W` — als accu ontlaadt is er geen storing
+  - `house_load < 50W` — als huisverbruik berekend > 50W is er geen storing
+  Alleen als ÁLle meetpunten nul zijn telt het als potentiële stroomstoring.
+
+### ℹ️ Analyse overige gemelde issues
+
+**Issue #1/2: Entiteiten werken niet / dubbel gezien**
+Na de entity_id fixes (boven) zullen gebruikers die al een installatie hadden zowel de
+oude (automatisch gegenereerde) als de nieuwe entiteit in HA zien. De oude kan handmatig
+worden verwijderd via Instellingen → Entiteiten, of via de OrphanPruner. Bij een nieuwe
+installatie treedt dit niet op.
+
+**Issue #5: NILM afwijzen werkt niet** — opgelost in v4.5.3 (user_suppressed persistent)
+
+**Issue #6: NILM apparaten soms fout gedetecteerd** — gedeeltelijk opgelost in v4.5.3
+(betere infra-naam filtering). NILM-detectie verbetert naarmate het systeem meer data
+verzamelt. Aanbeveling: gebruik 'Bevestigen' / 'Afwijzen' in de CloudEMS app.
+
+**Issue #7: Aanwezigheidsdetector + accu**
+De coordinator stuurt al `_calc_house_load(solar, grid, battery)` naar de absence detector,
+dus de huisverbruiksberekening is correct. De 'sleeping' melding bij lage accu-verbruiker
+komt van de nacht-standby detectie. Dit is beoogd gedrag.
+
+**Issue #9: EPEX prijzen ipv leveranciersprijs** — opgelost in v4.5.1/4.5.2
+
+**Issue #10: Dashboard** — verbeteringen in v4.5.1 en nu entity_id fixes in v4.5.4
+
+## [4.5.3] — 2026-03-11
+
+### 🐛 Bugfixes
+
+**NILM afwijzen werkt nu permanent (nilm/detector.py + coordinator.py)**
+- Root cause: `dismiss_device()` verwijderde het apparaat uit `_devices` met `.pop()`,
+  maar de store sloeg `user_suppressed=True` nooit op → na herstart HA verscheen het apparaat terug
+- Fix: `dismiss_device()` zet nu `user_suppressed=True` en laat het apparaat in `_devices` staan.
+  `get_devices_for_ha()` filtert al op `user_suppressed`, dus het verdwijnt direct uit de UI.
+  Bij de volgende `async_save()` wordt de flag gepersisteerd.
+- `dismiss_nilm_device()` in coordinator triggert nu onmiddellijk `async_save()` via event loop task
+
+**"Electricity Meter Energieproductie" en vergelijkbare systeemnamen in NILM (nilm/detector.py)**
+- Uitgebreide naam-keyword filters (beide passes in `get_devices_for_ha()`):
+  - Nieuwe termen: `energieproductie`, `energieverbruik`, `stroomlevering`, `netto verbruik`
+  - Nieuw patroon: naam bevat "meter" + een energie-term → altijd infra
+  - Nieuw patroon: naam begint met "electricity ", "dsmr ", "p1 ", "slimme "
+  - Combo-namen: "electricity meter energieproductie", "meter energieverbruik"
+
+**Prijs = 0.0 werd als False behandeld (sensor.py)**
+- `ep.get("current_display") or ep.get("current")` → bij prijs exact 0.0 ct viel het terug naar base
+- Fix: expliciete `is not None` check
+
+**Daggrafiek toonde altijd basis EPEX ipv all-in (sensor.py)**
+- `sensor.cloudems_energy_price` gaf altijd `today_all` (basis EPEX) terug als `today_prices`
+- Fix: als `today_all_display` (all-in met tax/BTW/markup) beschikbaar is, wordt dat gebruikt
+- `today_prices_base` attribuut toegevoegd voor debugging/vergelijking
+
+### ✨ Verbeteringen
+
+**Setup wizard: eerst land, dan leverancier (www/setup-wizard.html)**
+- Stap 5 "Prijsbron" toont nu eerst een landkeuze (🇳🇱 NL / 🇧🇪 BE / 🇩🇪 DE / 🇫🇷 FR / 🇦🇹 AT / 🇳🇴 / 🇸🇪 / 🇩🇰)
+- Nadat een land gekozen is, verschijnen alleen de leveranciers die in dat land beschikbaar zijn
+- "← Land wijzigen" knop om terug te gaan naar landkeuze
+- NL: EPEX (EnergyZero) · Frank Energie · Tibber · Octopus · Eneco · Vattenfall · Essent · ANWB · NieuweStroom
+- DE/AT: EPEX (Awattar) · Tibber · Octopus
+- BE: EPEX (ENTSO-E) · Tibber · Octopus
+- NO/SE/DK: EPEX (Nordpool) · Tibber
+
+**Prijssensor attributen uitgebreid (sensor.py)**
+- `prices_from_provider`, `price_include_tax/btw`, `tax_per_kwh`, `vat_rate`, `supplier_markup_kwh`
+  nu ook beschikbaar op `sensor.cloudems_energy_price` (was alleen op current_hour sensor)
+
+## [4.5.2] — 2026-03-11
+
+### ✨ Prijsleverancier koppeling — setup wizard & config flow
+
+**Nieuwe stap in de setup wizard (www/setup-wizard.html)**
+- Stap 5 "Prijsbron instellen" toegevoegd (was 5 stappen, nu 6)
+- Keuze uit: EPEX dag-vooruit · Frank Energie · Tibber · Octopus Energy · Eneco/Vattenfall/Essent/ANWB/NieuweStroom
+- Inline credentials-invoer per provider:
+  - Tibber: API Token-veld met link naar developer.tibber.com
+  - Octopus: API-sleutel-veld
+  - Login-providers (Eneco etc.): e-mail + wachtwoordveld
+  - Frank Energie + EPEX: geen credentials nodig
+- Validatie: "Volgende"-knop geblokkeerd totdat credentials volledig zijn
+- Opslaan via HA WebSocket service call (`cloudems.set_price_provider`)
+- Graceful fallback als service nog niet beschikbaar: toont uitleg met verwijzing naar opties-flow
+
+**Nieuwe en uitgebreide stappen in config flow (config_flow.py)**
+- `async_step_price_provider`: leverancierskeuze na de prijzen-stap (setup flow)
+- `async_step_price_provider_credentials`: credentials invullen indien vereist (setup flow)
+- `_register_price_provider()`: schrijft provider naar `external_providers` met `_price_provider: true` markering
+- `async_step_prices_opts`: leverancierskeuze bovenaan toegevoegd (opties flow)
+- `async_step_price_provider_creds_opts`: credentials-stap in opties flow
+- `_apply_price_provider_opts()`: schrijft/verwijst provider via config entry update
+
+**Nieuwe constanten (const.py)**
+- `CONF_PRICE_PROVIDER` / `DEFAULT_PRICE_PROVIDER`
+- `PRICE_PROVIDER_CREDENTIALS`: welke credentials-velden elke provider vereist
+- `PRICE_PROVIDER_LABELS`: weergavenamen voor UI
+
+**strings.json / translations**
+- Nieuwe stap-definities: `price_provider`, `price_provider_credentials`, `price_provider_creds_opts`
+- `prices_opts` bijgewerkt met nieuw `price_provider` veld en beschrijvingsplaceholder
+
+## [4.5.1] — 2026-03-11
+
+### 🐛 Bugfixes — Energieprijzen & dashboard
+
+**Leverancier als primaire prijsbron (coordinator.py)**
+- Provider-prijzen (Tibber, Frank Energie, Octopus, etc.) worden nu vroeg in de update-cyclus opgehaald zodat ze beschikbaar zijn als `price_info` wordt samengesteld
+- Als een energieleverancier-provider actief is worden zijn all-in prijzen direct als `price_info` gebruikt — geen EPEX + vaste markup meer stapelen bovenop echte leveranciersprijzen
+- Nieuw veld `prices_from_provider: true` markeert de data als reeds all-in
+
+**`_apply_price_components` — geen dubbele markup (coordinator.py)**
+- Bij provider-prijzen (all-in) worden belasting, BTW en leveranciersmarge niet nogmaals opgeteld
+- EPEX-flow ongewijzigd
+
+**`sensor.cloudems_price_current_hour` — attributes (sensor.py)**
+- `next_hour_eur_kwh` was altijd `None`: index-fout gecorrigeerd (index 0 = huidig uur, index 1 = volgend)
+- Nieuwe attributen: `prices_from_provider`, `price_source`, `provider_key`
+
+**ProviderManager — geen dubbele poll (coordinator.py)**
+- Poll-resultaat gecached in `_provider_poll_cache` en hergebruikt aan het einde van de cyclus
+
+### ✨ Dashboard verbeteringen (www/dashboard.html)
+
+- **Prijs-card label** dynamisch: "EPEX prijs" bij EPEX, "Stroomprijs" bij provider
+- **Prijs-bron badge** zichtbaar onder de gauge: toont bijv. "Tibber", "Frank Energie", "EPEX · EnergyZero"
+- **Eenheid** in gauge center: "ct all-in" bij provider/belasting, "ct/kWh" bij kale EPEX
+- **Negatieve prijzen** correct: minteken, cyaan kleur, bar vanuit rechts
+- **Delta volgend uur** werkt nu correct (was altijd leeg door index-bug)
+- **Goedkope-uren chart**: toont `price_display` (all-in) indien beschikbaar; header toont prijstype; negatieve prijzen correct
+- **`nilmDevices`** entiteit toegevoegd aan E-config (veroorzaakte gemiste WebSocket-events)
+
+
+### Nieuwe integraties (cloud-native, geen HACS afhankelijkheden)
+
+#### ☀️ PV Omvormers
+- **SolarEdge** — Monitoring Portal API v1
+- **Enphase** — Enlighten API v4
+- **SMA** — Sunny Portal / ennexOS API
+- **Fronius** — Solar.web API (GEN24, Primo, Symo)
+- **Huawei FusionSolar** — OpenAPI
+- **GoodWe** — SEMS Portal
+- **Growatt** — Growatt Server
+- **Solis** — SolisCloud (HMAC-MD5 signing)
+- **Deye / Sunsynk** — via SolarmanPV API
+
+#### 🚗 Elektrische Auto's
+- **Tesla** — Fleet API (+ owners.api fallback)
+- **BMW / Mini** — ConnectedDrive API
+- **Volkswagen / Audi / SEAT / Škoda** — WeConnect / Cariad API
+- **Hyundai / Kia** — Bluelink / UVO Connect EU API
+- **Renault** — My Renault / Gigya API
+- **Nissan** — NissanConnect EV (Carwings API)
+- **Polestar** — Polestar GraphQL API
+- **Ford** — FordPass API
+- **Mercedes-Benz** — me connect API
+- **Volvo** — Connected Vehicle API v2
+- **Rivian** — GraphQL API
+
+#### 🫧 Huishoudapparaten
+- **BSH HomeConnect** (Bosch, Siemens, Neff, Gaggenau) — officieel gedocumenteerde API
+  - Wasmachine, droger, vaatwasser, oven, koelkast
+  - Remote start, stop, programma selectie
+- **Ariston NET remotethermo v3** — boilers & warmtepompen
+  - CV temperatuur, DHW, vlam-status, modi instellen
+- **Miele@home** — officiële Miele cloud API
+- **Electrolux / AEG** — Electrolux Group API
+- **Candy / Haier** — Simply-Fi / hOn API
+
+#### ⚡ Energieleveranciers
+- **Tibber** — officieel GraphQL API
+- **Octopus Energy** — NL + UK API
+- **Frank Energie** — realtime EPEX prijzen (geen auth nodig)
+- **Eneco** — Mijn Eneco API
+- **Vattenfall** — MyVattenfall API
+- **Essent** — Mijn Essent API
+- **ANWB Energie** — API
+- **NieuweStroom** — API
+
+### Architectuur
+- Nieuw `providers/` package met `base.py`, `inverters.py`, `ev_vehicles.py`, `appliances.py`, `energy_suppliers.py`
+- `ProviderManager` coördineert alle externe providers vanuit de coordinator
+- `UPDATE_HINTS` dict per provider: altijd direct weten waar API-wijzigingen te vinden zijn
+- OAuth2Mixin: herbruikbaar token beheer voor alle OAuth2 providers
+- Cloud-variant ready: geen HA-entiteiten nodig, werkt ook in hosted variant
+
+---
+
+
+## [4.4.5] - 2026-03-10
+
+### Nieuw — EMHASS-geïnspireerde modules
+
+#### Vloer Thermische Buffer (`energy_manager/floor_thermal_buffer.py`)
+Physics-informed model voor vloerverwarming als thermische batterij (gebaseerd op
+Langer & Volling 2020, zoals geïmplementeerd in EMHASS):
+- Modelleert vloertemperatuur via warmtebalans: `T_floor(t+dt) = T_floor(t) + dt/C × (P - UA × ΔT)`
+- Leert `C_floor` (thermische capaciteit, Wh/°C) en `UA_floor` (warmteoverdracht, W/°C)
+  automatisch als een vloertemperatuursensor beschikbaar is
+- `plan_charge_windows()`: berekent optimale laad/afgifte-vensters op basis van
+  24-uurs EPEX-prijsprofiel, COP-curve warmtepomp en comfortgrenzen (NEN-EN 1264: max 29°C)
+- Werkt zonder vloertemperatuursensor via modelschatting
+- Sensor: `cloudems_floor_buffer_status` met t_floor, laadvensters en geschatte besparing
+
+#### ML Verbruiksforecaster (`energy_manager/consumption_ml_forecast.py`)
+Lichtgewicht k-NN verbruiksvoorspelling met weers- en seizoensfeatures (geïnspireerd
+op de scikit-learn/skforecast aanpak van EMHASS). Geen externe dependencies:
+- Features: uur (circulair), weekdag (circulair), seizoen (circulair),
+  buitentemperatuur, PV-opbrengst gisteren, weekend-vlag, Heating Degree Day
+- Gewogen k-NN regressie (K=7) met euclidische afstand in feature-ruimte
+- Fallback op patroongemiddelde als k-NN buren te ver weg zijn
+- Bijhoudt MAPE over 7 dagen en feature-importantie via correlatie-analyse
+- Sensor: `cloudems_ml_consumption_forecast` met 24-uurs voorspelling en modelstatus
+
 ## [4.4.4] - 2026-03-10
 
 ### Bugfix

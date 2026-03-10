@@ -73,6 +73,9 @@ from .const import (
     DEFAULT_BOILER_POWER_W, DEFAULT_BOILER_MIN_ON_MIN, DEFAULT_BOILER_MIN_OFF_MIN,
     CONF_SHUTTER_COUNT, CONF_SHUTTER_CONFIGS, CONF_SHUTTER_GROUPS,
     DEFAULT_SHUTTER_COUNT, DEFAULT_SHUTTER_OVERRIDE_H,
+    CONF_PROVIDERS,
+    CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER,
+    PRICE_PROVIDER_CREDENTIALS, PRICE_PROVIDER_LABELS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1243,7 +1246,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_prices(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_ai_config()
+            return await self.async_step_price_provider()
         country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
         suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
         sup_options = [
@@ -1261,6 +1264,88 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             }),
         )
+
+    # ── 5b. Prijsleverancier koppeling (v4.5.2) ───────────────────────────────
+    async def async_step_price_provider(self, user_input=None):
+        """Optionele directe koppeling met energieleverancier voor realtime prijzen."""
+        if user_input is not None:
+            chosen = user_input.get(CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER)
+            self._config[CONF_PRICE_PROVIDER] = chosen
+            # Credentials-stap als de gekozen provider dat vereist
+            needed = PRICE_PROVIDER_CREDENTIALS.get(chosen, [])
+            if needed:
+                self._config["_price_provider_pending"] = chosen
+                return await self.async_step_price_provider_credentials()
+            # Geen credentials nodig → provider meteen registreren
+            self._register_price_provider(chosen, {})
+            return await self.async_step_ai_config()
+
+        provider_options = [
+            selector.SelectOptionDict(value=k, label=v)
+            for k, v in PRICE_PROVIDER_LABELS.items()
+        ]
+        return self.async_show_form(
+            step_id="price_provider",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_PRICE_PROVIDER, default=DEFAULT_PRICE_PROVIDER):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=provider_options, mode="list"
+                    )),
+            }),
+            description_placeholders={
+                "info": (
+                    "CloudEMS haalt standaard gratis EPEX dag-vooruit prijzen op. "
+                    "Als je een dynamisch contract hebt bij een van onderstaande leveranciers, "
+                    "kun je jouw persoonlijke tarieven (inclusief alle toeslagen) rechtstreeks koppelen."
+                )
+            },
+        )
+
+    async def async_step_price_provider_credentials(self, user_input=None):
+        """Voer credentials in voor de gekozen prijsleverancier."""
+        pending = self._config.get("_price_provider_pending", "")
+        needed  = PRICE_PROVIDER_CREDENTIALS.get(pending, [])
+
+        if user_input is not None:
+            creds = {k: user_input.get(k, "") for k in needed}
+            self._config.pop("_price_provider_pending", None)
+            self._register_price_provider(pending, creds)
+            return await self.async_step_ai_config()
+
+        label = PRICE_PROVIDER_LABELS.get(pending, pending)
+        schema_fields = {}
+        for field in needed:
+            field_label = {
+                "access_token": "API Token / Access Token",
+                "api_key":      "API-sleutel",
+                "username":     "E-mailadres / gebruikersnaam",
+                "password":     "Wachtwoord",
+            }.get(field, field)
+            schema_fields[vol.Optional(field)] = str
+
+        return self.async_show_form(
+            step_id="price_provider_credentials",
+            data_schema=vol.Schema(schema_fields),
+            description_placeholders={"provider_label": label},
+        )
+
+    def _register_price_provider(self, provider_type: str, credentials: dict) -> None:
+        """Voeg de prijsleverancier toe aan external_providers config."""
+        if provider_type in ("none", "", None):
+            return
+        existing: list = list(self._config.get(CONF_PROVIDERS, []))
+        # Verwijder eventuele vorige prijs-provider registratie
+        existing = [
+            p for p in existing
+            if p.get("_price_provider") is not True
+        ]
+        existing.append({
+            "type":           provider_type,
+            "label":          PRICE_PROVIDER_LABELS.get(provider_type, provider_type),
+            "credentials":    credentials,
+            "_price_provider": True,  # markering zodat we hem later kunnen herkennen
+        })
+        self._config[CONF_PROVIDERS] = existing
 
     # ── 6. AI & NILM provider ─────────────────────────────────────────────────
     async def async_step_ai_config(self, user_input=None):
@@ -2540,12 +2625,45 @@ class CloudEMSOptionsFlow(_OptionsBase):
             for k, v in suppliers.items()
         ]
         contract_type = data.get(CONF_CONTRACT_TYPE, DEFAULT_CONTRACT_TYPE)
+
+        # Huidig geconfigureerde prijsleverancier
+        current_price_provider = data.get(CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER)
+        # Detecteer bestaande provider-registratie via external_providers
+        existing_providers: list = list(data.get(CONF_PROVIDERS, []))
+        registered_pp = next((p["type"] for p in existing_providers if p.get("_price_provider")), None)
+        if registered_pp:
+            current_price_provider = registered_pp
+
+        provider_options = [
+            selector.SelectOptionDict(value=k, label=v)
+            for k, v in PRICE_PROVIDER_LABELS.items()
+        ]
+
         if user_input is not None:
-            return self._save(user_input)
+            chosen_pp = user_input.pop(CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER)
+            # Sla overige velden op
+            save_result = self._save(user_input)
+            # Verwerk leverancier-koppeling
+            if chosen_pp != current_price_provider:
+                needed = PRICE_PROVIDER_CREDENTIALS.get(chosen_pp, [])
+                if needed:
+                    # Bewaar keuze en ga naar credentials-stap
+                    self._pending_price_provider = chosen_pp
+                    return await self.async_step_price_provider_creds_opts()
+                else:
+                    # Geen credentials nodig: meteen registreren
+                    self._apply_price_provider_opts(chosen_pp, {})
+            return save_result
+
         return self.async_show_form(
             step_id="prices_opts",
             data_schema=vol.Schema({
-                # v1.15.0: contract type — dynamisch (EPEX) of vast tarief
+                # v4.5.2: directe leverancier-koppeling bovenaan
+                vol.Optional(CONF_PRICE_PROVIDER, default=current_price_provider):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=provider_options, mode="list"
+                    )),
+                # v1.15.0: contract type
                 vol.Optional(CONF_CONTRACT_TYPE, default=contract_type): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value=CONTRACT_TYPE_DYNAMIC, label="⚡ Dynamisch (EPEX dag-vooruit)"),
@@ -2554,7 +2672,6 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 ),
                 vol.Optional(CONF_FIXED_IMPORT_PRICE, default=float(data.get(CONF_FIXED_IMPORT_PRICE, 0.25))): vol.All(vol.Coerce(float), vol.Range(min=0, max=2.0)),
                 vol.Optional(CONF_FIXED_EXPORT_PRICE, default=float(data.get(CONF_FIXED_EXPORT_PRICE, 0.09))): vol.All(vol.Coerce(float), vol.Range(min=0, max=2.0)),
-                # Existing fields
                 vol.Optional(CONF_PRICE_INCLUDE_TAX, default=bool(data.get(CONF_PRICE_INCLUDE_TAX, False))): bool,
                 vol.Optional(CONF_PRICE_INCLUDE_BTW, default=bool(data.get(CONF_PRICE_INCLUDE_BTW, False))): bool,
                 vol.Optional(CONF_SELECTED_SUPPLIER, default=str(data.get(CONF_SELECTED_SUPPLIER, "none"))):
@@ -2562,6 +2679,50 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional(CONF_SUPPLIER_MARKUP, default=float(data.get(CONF_SUPPLIER_MARKUP, 0.0))):
                     vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             }),
+            description_placeholders={
+                "info": "Kies 'EPEX dag-vooruit' voor gratis marktprijzen, of koppel je eigen leverancier voor exacte persoonlijke tarieven."
+            },
+        )
+
+    async def async_step_price_provider_creds_opts(self, user_input=None):
+        """Options flow: credentials invullen voor gekozen prijsleverancier."""
+        pending = getattr(self, "_pending_price_provider", "")
+        needed  = PRICE_PROVIDER_CREDENTIALS.get(pending, [])
+        label   = PRICE_PROVIDER_LABELS.get(pending, pending)
+
+        if user_input is not None:
+            creds = {k: user_input.get(k, "") for k in needed}
+            self._apply_price_provider_opts(pending, creds)
+            self._pending_price_provider = None
+            return self._save({})
+
+        schema_fields = {}
+        for field in needed:
+            schema_fields[vol.Optional(field)] = str
+
+        return self.async_show_form(
+            step_id="price_provider_creds_opts",
+            data_schema=vol.Schema(schema_fields),
+            description_placeholders={"provider_label": label},
+        )
+
+    def _apply_price_provider_opts(self, provider_type: str, credentials: dict) -> None:
+        """Registreer of wis de prijsleverancier in external_providers (options flow)."""
+        data = self._data()
+        existing: list = list(data.get(CONF_PROVIDERS, []))
+        # Verwijder eventuele vorige prijs-provider registratie
+        existing = [p for p in existing if not p.get("_price_provider")]
+        if provider_type not in ("none", "", None):
+            existing.append({
+                "type":           provider_type,
+                "label":          PRICE_PROVIDER_LABELS.get(provider_type, provider_type),
+                "credentials":    credentials,
+                "_price_provider": True,
+            })
+        # Sla gecombineerd op via config entry update
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            options={**self.config_entry.options, CONF_PROVIDERS: existing, CONF_PRICE_PROVIDER: provider_type},
         )
 
 

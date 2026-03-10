@@ -288,7 +288,7 @@ body.sim-on{padding-top:28px}
   <!-- CHEAP HOURS (right col, 2 rows) -->
   <div class="card card-cheap">
     <div class="cheap-col">
-      <span class="cheap-title">Goedkope uren</span>
+      <span class="cheap-title" id="cheap-header">Prijzen vandaag</span>
       <div class="cheap-bar-list" id="cheap-list"><span style="color:var(--muted);font-size:.7rem">Laden&hellip;</span></div>
       <span class="cheap-avg" id="cheap-avg">—</span>
     </div>
@@ -317,7 +317,7 @@ body.sim-on{padding-top:28px}
 
   <!-- PRICE -->
   <div class="card card-price">
-    <span class="card-label">EPEX prijs</span>
+    <span class="card-label" id="price-label">Stroomprijs</span>
     <div class="gauge-wrap" id="gw-price"></div>
     <div class="price-tier-row">
       <div class="price-tier" style="background:var(--green)"  id="pt0"></div>
@@ -326,6 +326,7 @@ body.sim-on{padding-top:28px}
       <div class="price-tier" style="background:var(--red)"    id="pt3"></div>
     </div>
     <span class="card-sub" id="sub-price">—</span>
+    <span id="price-source-badge" style="display:none;font-size:.46rem;font-weight:700;letter-spacing:.1em;padding:.12rem .38rem;border-radius:4px;background:rgba(206,147,216,.15);color:var(--purple);margin-top:.15rem"></span>
   </div>
 </main>
 
@@ -353,6 +354,7 @@ const E={
   cheap24:'sensor.cloudems_energy_price',
   watchdog:'sensor.cloudems_watchdog',
   test:'binary_sensor.cloudems_testmodus',
+  nilmDevices:'sensor.cloudems_nilm_db',
 };
 
 let token=null, ws=null, wsId=1, states={}, hist={};
@@ -449,7 +451,14 @@ function renderFlow(netW,solW,batPct){
   setC('fv-grid', clr);
   setEl('fv-sol',  solW!==null?fmtk(solW)+'W':'—W');
   setEl('fv-bat',  batPct!==null?fmt(batPct,0)+'%':'—%');
-  const homeW=netW!==null?Math.max(0,(solW||0)+netW):null;
+
+  // v4.5.4: include battery power in house load calculation
+  // batPwrW: positive=charging (load), negative=discharging (source)
+  // house = solar + grid_net - battery_net  (Kirchhoff)
+  const batPwrW = att(E.batSch,'power_w') ?? att(E.batSoc,'power_w') ?? 0;
+  const homeW = netW !== null
+    ? Math.max(0, (solW||0) + netW - (batPwrW||0))
+    : null;
   setEl('fv-home', homeW!==null?fmtk(homeW)+'W':'—W');
 
   const solOn=solW!==null&&solW>50;
@@ -641,15 +650,85 @@ function renderAll(){
   }
 
   // Price gauge
-  const pCt=priceE!==null?priceE*100:null;
-  const pClr=pCt===null?'var(--muted)':pCt<8?'var(--green)':pCt<20?'var(--purple)':pCt<35?'var(--amber)':'var(--red)';
-  gPrice.set(pCt!==null?Math.min(1,pCt/50):0, pClr);
-  setCenterHTML(gPrice, pCt!==null?fmt(pCt,1):'—', 'ct');
-  gPrice.centerEl()&&(gPrice.centerEl().querySelector('.card-value').style.color=pClr);
+  // sensor.cloudems_price_current_hour → native_value = current_display (all-in als ingesteld, anders base EPEX)
+  // sensor.cloudems_energy_price       → attributes.data_source, today_prices (altijd base EPEX)
+  const priceAttr   = states[E.price]?.attributes || {};
+  const cheap24Attr = states[E.cheap24]?.attributes || {};
+
+  // Gebruik all-in prijs als beschikbaar (provider of tax/BTW enabled), anders base EPEX
+  const priceAllIn  = priceAttr.price_all_in;
+  const priceBase   = priceAttr.base_epex_price ?? priceE;
+  const displayPrice = priceAllIn ?? priceE;   // wat we tonen in de gauge
+
+  // Prijs-bron detecteren voor label en badge
+  const dataSource  = cheap24Attr.data_source || '';
+  const isProvider  = ['tibber','frank_energie','octopus','eneco','vattenfall','essent','anwb_energie','nieuwestroom'].some(p => dataSource.includes(p));
+  const isFixed     = priceAttr.base_epex_price === undefined && dataSource === '';
+  const sourceLabels = {
+    'tibber':        'Tibber',
+    'frank_energie': 'Frank Energie',
+    'octopus':       'Octopus',
+    'octopus_nl':    'Octopus NL',
+    'eneco':         'Eneco',
+    'vattenfall':    'Vattenfall',
+    'essent':        'Essent',
+    'anwb_energie':  'ANWB Energie',
+    'nieuwestroom':  'NieuweStroom',
+    'energyzero.nl': 'EPEX · EnergyZero',
+    'awattar.de':    'EPEX · Awattar DE',
+    'awattar.at':    'EPEX · Awattar AT',
+    'ENTSO-E':       'EPEX · ENTSO-E',
+  };
+  const sourceLabel = sourceLabels[dataSource] || (dataSource ? dataSource.toUpperCase() : 'EPEX');
+  const priceCardLabel = isProvider ? 'Stroomprijs' : (dataSource ? 'EPEX prijs' : 'Stroomprijs');
+  setEl('price-label', priceCardLabel);
+
+  // Source badge tonen
+  const badgeEl = document.getElementById('price-source-badge');
+  if(badgeEl) {
+    if(dataSource && dataSource !== 'none') {
+      badgeEl.style.display = 'inline-block';
+      badgeEl.textContent   = sourceLabel;
+      // Kleur: groen voor provider (exact), paars voor EPEX+berekening
+      badgeEl.style.background = isProvider ? 'rgba(0,200,83,.15)' : 'rgba(206,147,216,.15)';
+      badgeEl.style.color      = isProvider ? 'var(--green2)' : 'var(--purple)';
+    } else {
+      badgeEl.style.display = 'none';
+    }
+  }
+
+  // Gauge kleur op basis van werkelijke display-prijs (in ct)
+  const pCt = displayPrice !== null ? displayPrice * 100 : null;
+  const isNeg = pCt !== null && pCt < 0;
+  const pClr = pCt === null ? 'var(--muted)'
+             : isNeg        ? 'var(--cyan)'     // negatief = goedkoop/gratis
+             : pCt < 8      ? 'var(--green)'
+             : pCt < 20     ? 'var(--purple)'
+             : pCt < 35     ? 'var(--amber)'
+             :                'var(--red)';
+  gPrice.set(pCt !== null ? Math.min(1, Math.abs(pCt) / 50) : 0, pClr);
+
+  // Gauge center: toon negatieve prijs correct
+  const pCtStr = pCt !== null ? (isNeg ? '−' + Math.abs(pCt).toFixed(1) : fmt(pCt, 1)) : '—';
+  const priceUnit = isProvider ? 'ct all-in' : (priceAllIn !== null && priceAllIn !== priceBase ? 'ct all-in' : 'ct/kWh');
+  setCenterHTML(gPrice, pCtStr, priceUnit);
+  gPrice.centerEl() && (gPrice.centerEl().querySelector('.card-value').style.color = pClr);
+
+  // Tier indicators
   [0,1,2,3].forEach(i=>{const e=document.getElementById('pt'+i);if(e)e.classList.toggle('active',
-    (i===0&&pCt<8)||(i===1&&pCt>=8&&pCt<20)||(i===2&&pCt>=20&&pCt<35)||(i===3&&pCt>=35));});
-  const nxt=att(E.price,'next_hour_eur_kwh');
-  if(nxt!==null&&priceE!==null){const d=(nxt-priceE)*100;setEl('sub-price',(d>=0?'+':'')+d.toFixed(1)+' ct volgend uur');}
+    (i===0&&pCt!==null&&pCt<8)||(i===1&&pCt!==null&&pCt>=8&&pCt<20)||(i===2&&pCt!==null&&pCt>=20&&pCt<35)||(i===3&&pCt!==null&&pCt>=35));});
+
+  // Sub-label: verschil met volgend uur
+  // next_hour_eur_kwh zit op sensor.cloudems_price_current_hour (via _enrich_price_info)
+  const nxt = priceAttr.next_hour_eur_kwh ?? att(E.price, 'next_hour_eur_kwh');
+  if(nxt !== null && displayPrice !== null){
+    const d = (nxt - displayPrice) * 100;
+    setEl('sub-price', (d >= 0 ? '+' : '') + d.toFixed(1) + ' ct volgend uur');
+  } else {
+    // Fallback: toon cheap/expensive label
+    const isChp = priceAttr.is_cheap ?? priceAttr.is_cheap_hour;
+    setEl('sub-price', isChp === true ? '✓ goedkoop uur' : isChp === false ? '↑ duur uur' : '—');
+  }
 
   // Phases
   ['l1','l2','l3'].forEach(ph=>{
@@ -693,41 +772,74 @@ function renderCheap(){
   const nowH=new Date().getHours();
   const cheapH=att(E.cheap4,'hours')||[];
   const avg4=att(E.cheap4,'avg_price_eur_kwh');
-  // today_prices is a list of {hour, price, ...} from sensor.cloudems_energy_price
-  const todayPricesList=att(E.cheap24,'today_prices')||[];
+
+  // today_prices uit sensor.cloudems_energy_price (bevat base EPEX of provider all-in)
+  // today_all_display bevat prijzen mét tax/BTW/markup als die aan staan
+  const ep = states[E.cheap24]?.attributes || {};
+  const todayPricesList = ep.today_prices || ep.today_all || [];
+  const dataSource = ep.data_source || '';
+  const isProviderPrice = ['tibber','frank_energie','octopus','eneco','vattenfall','essent'].some(p=>dataSource.includes(p));
+
+  // Prijs-eenheid label voor de header
+  const priceUnit = isProviderPrice ? 'all-in' : 'EPEX';
+  const headerEl = document.getElementById('cheap-header');
+  if(headerEl) headerEl.textContent = `Prijzen vandaag · ${priceUnit}`;
+
   let entries=[];
   if(Array.isArray(todayPricesList)&&todayPricesList.length){
-    entries=todayPricesList.map(e=>({h:parseInt(e.hour??e.h??0),p:parseFloat(e.price??e.p??0)})).sort((a,b)=>a.h-b.h);
+    entries=todayPricesList
+      .map(e=>({
+        h: parseInt(e.hour ?? e.h ?? 0),
+        // price_display = all-in als tax/BTW aan, anders base; price = altijd base EPEX
+        p: parseFloat(e.price_display ?? e.price ?? e.p ?? 0)
+      }))
+      .filter(e=>!isNaN(e.p))
+      .sort((a,b)=>a.h-b.h);
   }
 
   if(entries.length){
-    const maxP=Math.max(...entries.map(e=>e.p))||1;
+    const hasNeg = entries.some(e=>e.p<0);
+    const maxP = Math.max(...entries.map(e=>Math.abs(e.p)))||1;
+    // Toon huidig uur -1 t/m +7 uur
     const show=[];
-    for(let i=nowH-1;i<=nowH+7;i++){const sl=entries.find(e=>e.h===((i+24)%24));if(sl)show.push(sl);}
-    const toShow=show.length?show:entries.slice(0,8);
+    for(let i=nowH-1;i<=nowH+7;i++){
+      const sl=entries.find(e=>e.h===((i+24)%24));
+      if(sl)show.push(sl);
+    }
+    const toShow=show.length?show:entries.slice(0,9);
+
     list.innerHTML=toShow.map(e=>{
-      const isNow=e.h===nowH, pCt=(e.p*100).toFixed(1);
-      const barPct=Math.round((e.p/maxP)*100);
+      const isNow=e.h===nowH;
+      const isNeg=e.p<0;
+      const pCt=(e.p*100);
+      const pCtStr=(isNeg?'−':'')+Math.abs(pCt).toFixed(1)+'ct';
+      // Bar: negatief = links van center in cyan, positief = rechts in kleur
+      const barPct=Math.round((Math.abs(e.p)/maxP)*100);
       const isChp=cheapH.includes(e.h);
-      const barClr=isChp?'var(--green)':e.p<0.08?'var(--green2)':e.p<0.20?'var(--muted)':'#7f1d1d';
-      return`<div class="ch-row${isNow?' now':''}">
+      const barClr=isNeg?'var(--cyan)':isChp?'var(--green)':e.p<0.08?'var(--green2)':e.p<0.20?'var(--muted)':'#7f1d1d';
+      const nowStyle=isNow?'font-weight:700;color:var(--text)':'';
+      return`<div class="ch-row${isNow?' now':''}" style="${nowStyle}">
         <span class="ch-time">${String(e.h).padStart(2,'0')}:00</span>
-        <div class="ch-track"><div class="ch-fill" style="width:${barPct}%;background:${barClr}"></div></div>
-        <span class="ch-ct">${pCt}ct</span></div>`;
+        <div class="ch-track"><div class="ch-fill" style="width:${barPct}%;background:${barClr}${isNeg?';margin-left:auto':''}"></div></div>
+        <span class="ch-ct" style="color:${barClr}">${pCtStr}</span></div>`;
     }).join('');
-    setEl('cheap-avg',avg4?`4u gem: ${(avg4*100).toFixed(1)} ct/kWh`:'');
+
+    const avg4Str=avg4?`4u: ${(avg4*100).toFixed(1)} ct`:'';
+    const srcStr=dataSource&&dataSource!=='none'?` · ${dataSource.replace('energyzero.nl','EZ').replace('frank_energie','Frank').replace('tibber','Tibber').replace('ENTSO-E','ENTSO-E')}`:'';
+    setEl('cheap-avg',(avg4Str+srcStr).trim()||'');
     return;
   }
-  // fallback: show cheap hours only
+
+  // Fallback: show cheap hours only (geen prijsdata)
   if(!cheapH.length){
     const s=att(E.cheap4,'start_hour'), e=att(E.cheap4,'end_hour');
     if(s!==null&&e!==null)for(let h=s;h!==((e+1)%24);h=(h+1)%24)cheapH.push(h);
   }
-  if(!cheapH.length){list.innerHTML='<span style="color:var(--muted);font-size:.7rem">Geen EPEX data</span>';return;}
+  if(!cheapH.length){list.innerHTML='<span style="color:var(--muted);font-size:.7rem">Geen prijsdata</span>';return;}
   list.innerHTML=cheapH.map(h=>`<div class="ch-row${h===nowH?' now':''}">
     <span class="ch-time">${String(h).padStart(2,'0')}:00</span>
-    <div class="ch-track"><div class="ch-fill" style="width:80%"></div></div>
-    <span class="ch-ct">laag</span></div>`).join('');
+    <div class="ch-track"><div class="ch-fill" style="width:80%;background:var(--green)"></div></div>
+    <span class="ch-ct" style="color:var(--green)">laag</span></div>`).join('');
   setEl('cheap-avg',avg4?`gem: ${(avg4*100).toFixed(1)} ct/kWh`:'');
 }
 

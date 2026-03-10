@@ -873,3 +873,92 @@ DEFAULT_SHUTTER_SUMMER_OFFSET   = 1.0      # setpoint °C lager in zomer (koeler
 DEFAULT_SHUTTER_WINTER_OFFSET   = 0.5      # setpoint °C hoger in winter (warmer houden)
 SHUTTER_SUMMER_MONTHS           = (4, 5, 6, 7, 8, 9)   # april t/m september
 CONF_SHUTTER_TEMP_SENSOR       = "shutter_temp_sensor"   # optionele kamertemperatuursensor per rolluik
+
+# ── Externe providers (v4.5.0) ────────────────────────────────────────────────
+CONF_PROVIDERS                   = "external_providers"
+CONF_PROVIDER_TYPE               = "provider_type"
+CONF_PROVIDER_LABEL              = "provider_label"
+CONF_PROVIDER_CREDENTIALS        = "provider_credentials"
+
+# ── Prijsleverancier koppeling (v4.5.2) ───────────────────────────────────────
+# Slaat op welke energieleverancier als directe prijsbron wordt gebruikt.
+# Waarden: "none" | "tibber" | "frank_energie" | "octopus" | "eneco" |
+#          "vattenfall" | "essent" | "anwb_energie" | "nieuwestroom"
+CONF_PRICE_PROVIDER              = "price_provider"
+DEFAULT_PRICE_PROVIDER           = "none"
+
+# Leverancier → benodigde credentials-velden
+# none/frank_energie (no auth needed for market prices) → geen credentials
+PRICE_PROVIDER_CREDENTIALS: dict = {
+    "none":         [],
+    "frank_energie": [],          # marktprijzen = gratis, geen login
+    "tibber":       ["access_token"],
+    "octopus":      ["api_key"],
+    "eneco":        ["username", "password"],
+    "vattenfall":   ["username", "password"],
+    "essent":       ["username", "password"],
+    "anwb_energie": ["username", "password"],
+    "nieuwestroom": ["username", "password"],
+}
+
+PRICE_PROVIDER_LABELS: dict = {
+    "none":          "⚡ EPEX dag-vooruit (automatisch, gratis)",
+    "frank_energie": "⚡ Frank Energie (realtime EPEX, gratis)",
+    "tibber":        "💡 Tibber (persoonlijk tarief, token vereist)",
+    "octopus":       "🐙 Octopus Energy (API-sleutel vereist)",
+    "eneco":         "🔵 Eneco (login vereist)",
+    "vattenfall":    "🌊 Vattenfall (login vereist)",
+    "essent":        "🔴 Essent (login vereist)",
+    "anwb_energie":  "🚗 ANWB Energie (login vereist)",
+    "nieuwestroom":  "🌿 NieuweStroom (login vereist)",
+}
+
+# Categorie constanten
+PROVIDER_CATEGORY_INVERTER       = "inverter"
+PROVIDER_CATEGORY_EV             = "ev"
+PROVIDER_CATEGORY_APPLIANCE      = "appliance"
+PROVIDER_CATEGORY_ENERGY         = "energy"
+PROVIDER_CATEGORY_HEATING        = "heating"
+
+# Bekende provider IDs
+PROVIDER_SOLAREDGE     = "solaredge"
+PROVIDER_ENPHASE       = "enphase"
+PROVIDER_SMA           = "sma"
+PROVIDER_FRONIUS       = "fronius"
+PROVIDER_HUAWEI_SOLAR  = "huawei_solar"
+PROVIDER_GOODWE        = "goodwe"
+PROVIDER_GROWATT       = "growatt"
+PROVIDER_SOLIS         = "solis"
+PROVIDER_DEYE          = "deye"
+PROVIDER_SUNSYNK       = "sunsynk"
+PROVIDER_TESLA         = "tesla"
+PROVIDER_BMW           = "bmw"
+PROVIDER_MINI          = "mini"
+PROVIDER_VW            = "volkswagen"
+PROVIDER_AUDI          = "audi"
+PROVIDER_SKODA         = "skoda"
+PROVIDER_SEAT          = "seat"
+PROVIDER_HYUNDAI       = "hyundai"
+PROVIDER_KIA           = "kia"
+PROVIDER_RENAULT       = "renault"
+PROVIDER_NISSAN        = "nissan"
+PROVIDER_POLESTAR      = "polestar"
+PROVIDER_FORD          = "ford"
+PROVIDER_MERCEDES      = "mercedes"
+PROVIDER_VOLVO         = "volvo"
+PROVIDER_RIVIAN        = "rivian"
+PROVIDER_HOMECONNECT   = "homeconnect"
+PROVIDER_ARISTON       = "ariston"
+PROVIDER_MIELE         = "miele"
+PROVIDER_ELECTROLUX    = "electrolux"
+PROVIDER_AEG           = "aeg"
+PROVIDER_CANDY         = "candy"
+PROVIDER_HAIER         = "haier"
+PROVIDER_TIBBER        = "tibber"
+PROVIDER_OCTOPUS       = "octopus"
+PROVIDER_FRANK_ENERGIE = "frank_energie"
+PROVIDER_ENECO         = "eneco"
+PROVIDER_VATTENFALL    = "vattenfall"
+PROVIDER_ESSENT        = "essent"
+PROVIDER_ANWB_ENERGIE  = "anwb_energie"
+PROVIDER_NIEUWESTROOM  = "nieuwestroom"

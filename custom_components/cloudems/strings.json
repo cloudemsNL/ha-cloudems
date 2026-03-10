@@ -307,6 +307,23 @@
           "supplier_markup": "Manual markup (€/kWh)"
         }
       },
+      "price_provider": {
+        "title": "⚡ Prijsbron — directe leverancier koppeling",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Prijsbron"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Inloggegevens — {provider_label}",
+        "description": "Voer je inloggegevens in voor {provider_label}. CloudEMS slaat ze veilig op en gebruikt ze alleen om prijzen op te halen.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API-sleutel",
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
+        }
+      },
       "climate": {
         "title": "🌡️ Klimaat & Thermostaten",
         "description": "CloudEMS kan thermostaten, TRV's en airco's intelligent aansturen op basis van EPEX-prijzen, zonne-overschot en aanwezigheid.",
@@ -596,13 +613,17 @@
         }
       },
       "prices_opts": {
-        "title": "💶 Prices & Tax",
-        "description": "Set whether energy prices are shown including tax and VAT.\n\nThe supplier markup is indicative — verify your own contract.",
+        "title": "💶 Prijzen & Belasting",
+        "description": "{info}",
         "data": {
-          "price_include_tax": "Include energy tax",
-          "price_include_btw": "Include VAT",
-          "selected_supplier": "Energy supplier (for markup)",
-          "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected"
+          "price_provider": "Prijsbron (directe leverancier koppeling)",
+          "contract_type": "Contracttype",
+          "fixed_import_price": "Vast importtarief (€/kWh)",
+          "fixed_export_price": "Vast teruglevertarief (€/kWh)",
+          "price_include_tax": "Energiebelasting meenemen",
+          "price_include_btw": "BTW meenemen",
+          "selected_supplier": "Leverancier (voor standaard markup)",
+          "supplier_markup": "Handmatige markup (€/kWh)"
         }
       },
       "nilm_devices_opts": {
@@ -818,6 +839,16 @@
         },
         "data_description": {
           "bat_type": "Detected providers: {detected_providers}"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "🔑 Inloggegevens — {provider_label}",
+        "description": "Voer je inloggegevens in voor {provider_label}.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API-sleutel",
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
         }
       }
     },

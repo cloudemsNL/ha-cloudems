@@ -410,6 +410,62 @@
 
   /* ── Divider ── */
   hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+  /* ── Prijsbron kaarten (step 5) ── */
+  .pp-card {
+    display: flex;
+    align-items: flex-start;
+    gap: .9rem;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: .85rem 1rem;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .pp-card:hover { border-color: var(--accent); background: rgba(34,211,238,.04); }
+  .pp-card.active {
+    border-color: var(--accent);
+    background: rgba(34,211,238,.08);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .pp-icon { font-size: 1.4rem; line-height: 1; margin-top: .1rem; }
+  .pp-card strong { display: block; font-size: .92rem; font-weight: 700; margin-bottom: .2rem; color: var(--text); }
+  .pp-desc { font-size: .78rem; color: var(--muted); line-height: 1.4; }
+
+  /* ── Credentials panel ── */
+  .creds-panel {
+    background: rgba(167,139,250,.06);
+    border: 1px solid rgba(167,139,250,.2);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    margin-top: .5rem;
+  }
+  .creds-title { font-size: .88rem; font-weight: 700; margin-bottom: .4rem; color: var(--accent2); }
+  .creds-desc { font-size: .78rem; color: var(--muted); margin-bottom: .7rem; line-height: 1.5; }
+  .creds-input {
+    width: 100%;
+    background: #0a0e17;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .5rem .75rem;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .82rem;
+    color: var(--text);
+    outline: none;
+    margin-bottom: .4rem;
+  }
+  .creds-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(34,211,238,.15); }
+  .creds-input + .creds-input { margin-top: .4rem; }
+  .info-box {
+    background: rgba(34,211,238,.06);
+    border: 1px solid rgba(34,211,238,.2);
+    border-radius: 7px;
+    padding: .65rem .9rem;
+    font-size: .8rem;
+    color: var(--muted);
+    line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -568,8 +624,72 @@
   <!-- ══════════════════════════════════════════════════════════
        STAP 5 — Controlelijst & klaar
   ══════════════════════════════════════════════════════════ -->
+  <!-- STAP 5 — Prijsbron koppelen (land → leverancier) -->
   <div class="step-card" id="step-4">
-    <div class="step-number">Stap 5 van 5</div>
+    <div class="step-number">Stap 5 van 6</div>
+    <div class="step-title">⚡ Prijsbron instellen</div>
+    <div class="step-subtitle">
+      CloudEMS haalt standaard gratis EPEX dag-vooruit prijzen op.
+      Als je een dynamisch contract hebt, koppel dan je leverancier voor exacte persoonlijke tarieven.
+    </div>
+
+    <!-- Substap A: Land kiezen -->
+    <div id="pp-step-country">
+      <div style="font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:.8rem 0 .5rem">1 · Kies je land</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:.5rem;margin-bottom:1rem" id="pp-countries">
+        <label class="pp-card" id="ppc-NL" onclick="selectCountry('NL',this)"><span class="pp-icon">🇳🇱</span><div><strong>Nederland</strong></div></label>
+        <label class="pp-card" id="ppc-BE" onclick="selectCountry('BE',this)"><span class="pp-icon">🇧🇪</span><div><strong>België</strong></div></label>
+        <label class="pp-card" id="ppc-DE" onclick="selectCountry('DE',this)"><span class="pp-icon">🇩🇪</span><div><strong>Duitsland</strong></div></label>
+        <label class="pp-card" id="ppc-FR" onclick="selectCountry('FR',this)"><span class="pp-icon">🇫🇷</span><div><strong>Frankrijk</strong></div></label>
+        <label class="pp-card" id="ppc-AT" onclick="selectCountry('AT',this)"><span class="pp-icon">🇦🇹</span><div><strong>Oostenrijk</strong></div></label>
+        <label class="pp-card" id="ppc-NO" onclick="selectCountry('NO',this)"><span class="pp-icon">🇳🇴</span><div><strong>Noorwegen</strong></div></label>
+        <label class="pp-card" id="ppc-SE" onclick="selectCountry('SE',this)"><span class="pp-icon">🇸🇪</span><div><strong>Zweden</strong></div></label>
+        <label class="pp-card" id="ppc-DK" onclick="selectCountry('DK',this)"><span class="pp-icon">🇩🇰</span><div><strong>Denemarken</strong></div></label>
+      </div>
+    </div>
+
+    <!-- Substap B: Leverancier kiezen (per land) -->
+    <div id="pp-step-provider" style="display:none">
+      <div style="font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:.6rem 0 .5rem">
+        2 · Kies je prijsbron <button onclick="resetCountry()" style="margin-left:.5rem;font-size:.7rem;background:none;border:1px solid var(--border);border-radius:4px;padding:.1rem .4rem;color:var(--muted);cursor:pointer">← Land wijzigen</button>
+      </div>
+      <div style="margin-bottom:.8rem;display:flex;flex-direction:column;gap:.5rem" id="pp-options">
+        <!-- Dynamisch gevuld via JS op basis van gekozen land -->
+      </div>
+    </div>
+
+    <!-- Credentials panels -->
+    <div id="creds-tibber" class="creds-panel" style="display:none">
+      <div class="creds-title">🔑 Tibber API Token</div>
+      <p class="creds-desc">Haal je Personal Access Token op via <a href="https://developer.tibber.com/settings/access-token" target="_blank" style="color:var(--accent)">developer.tibber.com</a></p>
+      <input type="text" id="tibber-token" class="creds-input" placeholder="Plak hier je Tibber token…" oninput="checkCredsReady()">
+    </div>
+    <div id="creds-octopus" class="creds-panel" style="display:none">
+      <div class="creds-title">🔑 Octopus Energy API-sleutel</div>
+      <p class="creds-desc">Vind je API-sleutel op <a href="https://octopus.energy/dashboard/developer/" target="_blank" style="color:var(--accent)">octopus.energy/dashboard/developer</a></p>
+      <input type="text" id="octopus-key" class="creds-input" placeholder="API-sleutel…" oninput="checkCredsReady()">
+    </div>
+    <div id="creds-login" class="creds-panel" style="display:none">
+      <div class="creds-title">🔑 Leveranciersaccount</div>
+      <p class="creds-desc">Voer je inloggegevens in. CloudEMS gebruikt ze alleen voor het ophalen van tarieven.</p>
+      <input type="email"    id="login-user" class="creds-input" placeholder="E-mailadres…"  oninput="checkCredsReady()">
+      <input type="password" id="login-pass" class="creds-input" placeholder="Wachtwoord…"   oninput="checkCredsReady()">
+    </div>
+    <div id="creds-none" class="creds-panel" style="display:none">
+      <div class="info-box">✓ Geen account of token nodig. CloudEMS haalt automatisch de gratis EPEX-prijzen op.</div>
+    </div>
+
+    <div id="pp-save-status" style="display:none;margin-top:.8rem" class="info-box"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="prevStep()">← Terug</button>
+      <button class="btn btn-primary" id="btnNextPP" onclick="savePriceProvider()" disabled>Opslaan &amp; volgende →</button>
+    </div>
+  </div>
+
+  <!-- STAP 5 — Laatste controle -->
+  <div class="step-card" id="step-5">
+    <div class="step-number">Stap 6 van 6</div>
     <div class="step-title">Laatste controle</div>
     <div class="step-subtitle">Vink alles af en je bent klaar!</div>
 
@@ -623,9 +743,9 @@
 <script>
 // ── State ──────────────────────────────────────────────────────────────
 let currentStep = 0;
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 6;
 let selectedDevice = null;
-const stepLabels = ['Scherm', 'App', 'HA Config', 'Instellen', 'Klaar'];
+const stepLabels = ['Scherm', 'App', 'HA Config', 'Instellen', 'Prijsbron', 'Klaar'];
 const completedSteps = new Set();
 
 // ── Device content definitions ──────────────────────────────────────────
@@ -838,7 +958,201 @@ function copyCode(blockId, btn) {
   });
 }
 
-// ── Step 5: checklist ─────────────────────────────────────────────────
+// ── Step 5: Prijsbron — land → leverancier ───────────────────────────
+// Leveranciers per land: { key: [icon, naam, beschrijving, creds_type] }
+// creds_type: 'none' | 'tibber' | 'octopus' | 'login'
+const PP_BY_COUNTRY = {
+  'NL': [
+    ['none',         '⚡', 'EPEX dag-vooruit (EnergyZero)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['frank_energie','⚡', 'Frank Energie',                 'Realtime EPEX + Frank-tarieven. Geen login.', 'none'],
+    ['tibber',       '💡', 'Tibber',                        'Persoonlijk tarief via API Token.', 'tibber'],
+    ['octopus',      '🐙', 'Octopus Energy NL',             'API-sleutel vereist.', 'octopus'],
+    ['eneco',        '🔵', 'Eneco',                         'Login vereist.', 'login'],
+    ['vattenfall',   '🌊', 'Vattenfall',                    'Login vereist.', 'login'],
+    ['essent',       '🔴', 'Essent',                        'Login vereist.', 'login'],
+    ['anwb_energie', '🚗', 'ANWB Energie',                  'Login vereist.', 'login'],
+    ['nieuwestroom', '🌿', 'NieuweStroom',                  'Login vereist.', 'login'],
+  ],
+  'BE': [
+    ['none',   '⚡', 'EPEX dag-vooruit (ENTSO-E)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber BE',                  'Persoonlijk tarief via API Token.', 'tibber'],
+    ['octopus','🐙', 'Octopus Energy BE',           'API-sleutel vereist.', 'octopus'],
+  ],
+  'DE': [
+    ['none',    '⚡', 'EPEX dag-vooruit (Awattar)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber',  '💡', 'Tibber DE',                   'Persoonlijk tarief via API Token.', 'tibber'],
+    ['octopus', '🐙', 'Octopus Energy DE',            'API-sleutel vereist.', 'octopus'],
+  ],
+  'FR': [
+    ['none',   '⚡', 'EPEX dag-vooruit (ENTSO-E)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber FR',                  'Persoonlijk tarief via API Token.', 'tibber'],
+  ],
+  'AT': [
+    ['none',   '⚡', 'EPEX dag-vooruit (Awattar AT)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber AT',                     'Persoonlijk tarief via API Token.', 'tibber'],
+  ],
+  'NO': [
+    ['none',   '⚡', 'EPEX dag-vooruit (Nordpool)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber NO',                   'Persoonlijk tarief via API Token.', 'tibber'],
+  ],
+  'SE': [
+    ['none',   '⚡', 'EPEX dag-vooruit (Nordpool)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber SE',                   'Persoonlijk tarief via API Token.', 'tibber'],
+  ],
+  'DK': [
+    ['none',   '⚡', 'EPEX dag-vooruit (Nordpool)', 'Gratis marktprijzen. Geen account nodig.', 'none'],
+    ['tibber', '💡', 'Tibber DK',                   'Persoonlijk tarief via API Token.', 'tibber'],
+  ],
+};
+
+const PP_NEEDS_CREDS = {
+  'none': [], 'frank_energie': [],
+  'tibber': ['tibber'], 'octopus': ['octopus'],
+  'eneco': ['login'], 'vattenfall': ['login'], 'essent': ['login'],
+  'anwb_energie': ['login'], 'nieuwestroom': ['login'],
+};
+
+let selectedPP = 'none';
+let selectedCountry = null;
+
+function selectCountry(code, el) {
+  selectedCountry = code;
+  // Highlight
+  document.querySelectorAll('#pp-countries .pp-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+
+  // Bouw provider-opties voor dit land
+  const providers = PP_BY_COUNTRY[code] || PP_BY_COUNTRY['NL'];
+  const container = document.getElementById('pp-options');
+  container.innerHTML = providers.map(([key, icon, name, desc]) => `
+    <label class="pp-card${key==='none'?' active':''}" id="pp-${key}" onclick="selectPP('${key}',this)">
+      <span class="pp-icon">${icon}</span>
+      <div><strong>${name}</strong><div class="pp-desc">${desc}</div></div>
+    </label>`).join('');
+
+  // Standaard EPEX geselecteerd
+  selectedPP = 'none';
+  document.getElementById('pp-step-country').style.display = 'none';
+  document.getElementById('pp-step-provider').style.display = 'block';
+  // Toon info-panel voor EPEX (geen creds)
+  showCredsPanel('none');
+  document.getElementById('btnNextPP').disabled = false;
+}
+
+function resetCountry() {
+  selectedCountry = null;
+  selectedPP = 'none';
+  document.getElementById('pp-step-country').style.display = 'block';
+  document.getElementById('pp-step-provider').style.display = 'none';
+  hideAllCreds();
+  document.getElementById('btnNextPP').disabled = true;
+}
+
+function selectPP(type, el) {
+  selectedPP = type;
+  document.querySelectorAll('#pp-options .pp-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  showCredsPanel(type);
+  checkCredsReady();
+}
+
+function showCredsPanel(type) {
+  hideAllCreds();
+  const credsType = (PP_NEEDS_CREDS[type] || [])[0] || 'none';
+  const panelId = credsType === 'none' ? 'creds-none'
+                : credsType === 'tibber' ? 'creds-tibber'
+                : credsType === 'octopus' ? 'creds-octopus'
+                : 'creds-login';
+  const panel = document.getElementById(panelId);
+  if (panel) panel.style.display = 'block';
+  document.getElementById('pp-save-status').style.display = 'none';
+}
+
+function hideAllCreds() {
+  ['creds-tibber','creds-octopus','creds-login','creds-none'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function checkCredsReady() {
+  const btn = document.getElementById('btnNextPP');
+  if (!btn) return;
+  if (selectedPP === 'tibber') {
+    btn.disabled = (document.getElementById('tibber-token')?.value || '').trim().length < 10;
+  } else if (selectedPP === 'octopus') {
+    btn.disabled = (document.getElementById('octopus-key')?.value || '').trim().length < 6;
+  } else if (['eneco','vattenfall','essent','anwb_energie','nieuwestroom'].includes(selectedPP)) {
+    const u = (document.getElementById('login-user')?.value || '').trim();
+    const p = (document.getElementById('login-pass')?.value || '').trim();
+    btn.disabled = u.length < 4 || p.length < 4;
+  } else {
+    btn.disabled = false;
+  }
+}
+
+async function savePriceProvider() {
+  const btn = document.getElementById('btnNextPP');
+  const status = document.getElementById('pp-save-status');
+  btn.disabled = true;
+  btn.textContent = 'Opslaan…';
+
+  let creds = {};
+  if (selectedPP === 'tibber')  creds = { access_token: document.getElementById('tibber-token').value.trim() };
+  if (selectedPP === 'octopus') creds = { api_key: document.getElementById('octopus-key').value.trim() };
+  if (['eneco','vattenfall','essent','anwb_energie','nieuwestroom'].includes(selectedPP)) {
+    creds = {
+      username: document.getElementById('login-user').value.trim(),
+      password: document.getElementById('login-pass').value.trim(),
+    };
+  }
+
+  try {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/api/websocket`);
+    await new Promise((resolve, reject) => {
+      ws.onmessage = async (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'auth_required') {
+          const raw = Object.keys(localStorage)
+            .filter(k => k.startsWith('hassTokens'))
+            .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } })
+            .filter(Boolean)[0];
+          ws.send(JSON.stringify({ type: 'auth', access_token: raw?.access_token || '' }));
+        } else if (msg.type === 'auth_ok') {
+          ws.send(JSON.stringify({
+            id: 1, type: 'call_service',
+            domain: 'cloudems', service: 'set_price_provider',
+            service_data: { provider: selectedPP, country: selectedCountry, credentials: creds }
+          }));
+        } else if (msg.type === 'result') {
+          ws.close(); resolve(msg.success);
+        } else if (msg.type === 'auth_invalid') {
+          ws.close(); reject(new Error('auth_invalid'));
+        }
+      };
+      ws.onerror = () => reject(new Error('ws_error'));
+      setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 8000);
+    });
+    status.style.cssText = 'display:block;background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3);border-radius:7px;padding:.65rem .9rem;margin-top:.8rem;font-size:.8rem';
+    status.innerHTML = `✓ <strong>${_ppLabel(selectedPP)}</strong> opgeslagen als prijsbron voor ${selectedCountry}.`;
+  } catch {
+    status.style.cssText = 'display:block;background:rgba(251,146,60,.08);border:1px solid rgba(251,146,60,.3);border-radius:7px;padding:.65rem .9rem;margin-top:.8rem;font-size:.8rem';
+    status.innerHTML = `⚠️ Pas dit in na de installatie via <strong>Instellingen → Integraties → CloudEMS → Configureren → Prijzen &amp; Belasting</strong>.`;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Opslaan & volgende →';
+  setTimeout(() => nextStep(), 1800);
+}
+
+function _ppLabel(type) {
+  return { 'none': 'EPEX dag-vooruit', 'frank_energie': 'Frank Energie', 'tibber': 'Tibber',
+    'octopus': 'Octopus Energy', 'eneco': 'Eneco', 'vattenfall': 'Vattenfall',
+    'essent': 'Essent', 'anwb_energie': 'ANWB Energie', 'nieuwestroom': 'NieuweStroom' }[type] || type;
+}
+
+// ── Step 6: checklist ─────────────────────────────────────────────────
 function toggleCheck(el) {
   el.classList.toggle('checked');
   const allChecked = [...document.querySelectorAll('.check-item')].every(i => i.classList.contains('checked'));

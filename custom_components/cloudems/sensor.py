@@ -824,6 +824,8 @@ class CloudEMSPhaseCurrentSensor(CoordinatorEntity, SensorEntity):
         self._phase = phase
         self._attr_name = f"CloudEMS Grid · Phase {phase} Current"
         self._attr_unique_id = f"{entry.entry_id}_current_{phase.lower()}"
+        # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_current_l1/l2/l3
+        self.entity_id = f"sensor.cloudems_current_{phase.lower()}"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1154,6 +1156,8 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_soc"
+        # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_battery_so_c
+        self.entity_id = "sensor.cloudems_battery_so_c"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1917,6 +1921,8 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_price_current_hour"
+        # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_price_current_hour
+        self.entity_id = "sensor.cloudems_price_current_hour"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1925,27 +1931,36 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         ep = (self.coordinator.data or {}).get("energy_price", {})
         # Show all-in price (with tax/BTW/markup) if toggles are on, else base EPEX
-        p = ep.get("current_display") or ep.get("current")
+        # v4.5.3: gebruik 'is not None' i.p.v. 'or' om prijs=0.0 correct door te geven
+        p = ep.get("current_display")
+        if p is None:
+            p = ep.get("current")
         return round(p, 5) if p is not None else None
-
-    @property
-    def extra_state_attributes(self):
         ep = (self.coordinator.data or {}).get("energy_price", {})
+        next_hours = ep.get("next_hours", [])
+        # next_hour = het slot ná het huidige (index 1, want index 0 = huidig uur)
+        next_hour_price = next_hours[1].get("price") if len(next_hours) > 1 else None
         return {
-            "is_negative":         ep.get("is_negative", False),
-            "is_cheap":            ep.get("is_cheap_hour", False),
-            "rank_today":          ep.get("rank_today"),
-            "min_today":           ep.get("min_today"),
-            "max_today":           ep.get("max_today"),
-            "avg_today":           ep.get("avg_today"),
+            "is_negative":          ep.get("is_negative", False),
+            "is_cheap":             ep.get("is_cheap_hour", False),
+            "rank_today":           ep.get("rank_today"),
+            "min_today":            ep.get("min_today"),
+            "max_today":            ep.get("max_today"),
+            "avg_today":            ep.get("avg_today"),
             # Tax breakdown
-            "base_epex_price":     ep.get("current"),
-            "price_all_in":        ep.get("current_all_in"),
-            "tax_per_kwh":         ep.get("tax_per_kwh"),
-            "vat_rate":            ep.get("vat_rate"),
-            "supplier_markup_kwh": ep.get("supplier_markup_kwh"),
-            "price_include_tax":   ep.get("price_include_tax", False),
-            "price_include_btw":   ep.get("price_include_btw", False),
+            "base_epex_price":      ep.get("current"),
+            "price_all_in":         ep.get("current_all_in") or ep.get("current_display"),
+            "tax_per_kwh":          ep.get("tax_per_kwh"),
+            "vat_rate":             ep.get("vat_rate"),
+            "supplier_markup_kwh":  ep.get("supplier_markup_kwh"),
+            "price_include_tax":    ep.get("price_include_tax", False),
+            "price_include_btw":    ep.get("price_include_btw", False),
+            # v4.5.1: prijsbron info voor dashboard
+            "prices_from_provider": ep.get("prices_from_provider", False),
+            "price_source":         ep.get("source", "epex"),
+            "provider_key":         ep.get("provider_key", ""),
+            # Volgend uur (index 1 van next_hours = slot na het huidige)
+            "next_hour_eur_kwh":    round(next_hour_price, 5) if next_hour_price is not None else None,
         }
 
 
@@ -2393,12 +2408,23 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         ep = (self.coordinator.data or {}).get("energy_price", {})
-        today_all = ep.get("today_all", [])
-        tomorrow_all = ep.get("tomorrow_all", [])
+        today_all         = ep.get("today_all", [])
+        today_all_display = ep.get("today_all_display", [])  # all-in (met tax/BTW/markup)
+        tomorrow_all      = ep.get("tomorrow_all", [])
         cur = ep.get("current")
         avg = ep.get("avg_today")
+
+        # v4.5.3: als all-in prijzen beschikbaar zijn, gebruik die als today_prices
+        # zodat de dashboard-grafiek altijd de juiste prijs toont
+        # today_all_display heeft price_display veld; vul ook price in voor compat
+        if today_all_display:
+            today_prices = today_all_display
+        else:
+            today_prices = today_all
+
         return {
-            "today_prices":       today_all,
+            "today_prices":       today_prices,   # all-in als beschikbaar, anders basis EPEX
+            "today_prices_base":  today_all,       # altijd basis EPEX (voor debugging)
             "tomorrow_prices":    tomorrow_all,
             "tomorrow_available": ep.get("tomorrow_available", False),
             "next_hours":         ep.get("next_hours", []),
@@ -2416,9 +2442,16 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "data_source":        ep.get("source", "unknown"),
             "country":            ep.get("country", ""),
             "slot_count":         ep.get("slot_count", 0),
-            "prev_hour_price":    ep.get("prev_hour_price"),   # raw EPEX vorig uur
+            "prev_hour_price":    ep.get("prev_hour_price"),
             "rank_today":         ep.get("rank_today"),
             "is_cheap_hour":      ep.get("is_cheap_hour"),
+            # v4.5.3: prijscomponenten voor transparantie
+            "price_include_tax":  ep.get("price_include_tax", False),
+            "price_include_btw":  ep.get("price_include_btw", False),
+            "tax_per_kwh":        ep.get("tax_per_kwh", 0.0),
+            "vat_rate":           ep.get("vat_rate", 0.0),
+            "supplier_markup_kwh": ep.get("supplier_markup_kwh", 0.0),
+            "prices_from_provider": ep.get("prices_from_provider", False),
         }
 
 
@@ -3069,6 +3102,8 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_solar_system"
+        # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_solar_system
+        self.entity_id = "sensor.cloudems_solar_system"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -4029,6 +4064,8 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_self_consumption"
+        # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_self_consumption
+        self.entity_id = "sensor.cloudems_self_consumption"
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -4037,10 +4074,6 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         sc = (self.coordinator.data or {}).get("self_consumption", {})
         return sc.get("ratio_pct", None)
-
-    @property
-    def extra_state_attributes(self):
-        sc = (self.coordinator.data or {}).get("self_consumption", {})
         return {
             "export_pct":         sc.get("export_pct"),
             "pv_today_kwh":       sc.get("pv_today_kwh"),

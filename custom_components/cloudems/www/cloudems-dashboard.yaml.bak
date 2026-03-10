@@ -1011,13 +1011,12 @@ views:
         }
 
   - type: markdown
-    title: ⚡ Goedkope Uren Schakelaars & Slimme Uitstelmodus
+    title: ⏱️ Goedkope Uren Schakelaars
     content: |
       {%- set cs = state_attr('sensor.cloudems_goedkope_uren_schakelaars', 'switches') or [] -%}
       {%- set actions = state_attr('sensor.cloudems_goedkope_uren_schakelaars', 'last_actions') or [] -%}
       {%- set count = states('sensor.cloudems_goedkope_uren_schakelaars') | int(0) -%}
       {%- set avg_today = state_attr('sensor.cloudems_energy_epex_today', 'avg_today') | float(0) -%}
-      ## ⏱️ Goedkope Uren Schakelaars
       {%- if count > 0 %}
       **{{ count }} schakelaar(s) geconfigureerd**
 
@@ -1028,6 +1027,7 @@ views:
       {%- set diff = (avg_today - blok_prijs) | round(4) if blok_prijs else none -%}
       | `{{ sw.entity_id.split('.')[1] }}` | {{ sw.window_hours }}u | {{ '🟢 actief' if sw.active else '⏸️ inactief' }} | {{ '€' ~ blok_prijs | round(4) if blok_prijs else '—' }} | €{{ avg_today | round(4) }} | {{ ('💚 €' ~ diff | round(4) ~ '/kWh') if diff and diff > 0 else ('➖' if diff is not none else '—') }} |
       {% endfor %}
+
       {%- if actions %}
 
       **Recente acties:**
@@ -1038,14 +1038,40 @@ views:
       {%- else %}
       Geen schakelaars geconfigureerd. Voeg ze toe via **Instellingen → CloudEMS → Goedkope uren schakelaars**.
       {%- endif %}
+    card_mod:
+      style: |
+        ha-card {
+          background: rgb(34,34,34) !important;
+          border: 1px solid rgba(255,255,255,0.06) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
+          --primary-text-color: rgb(255,255,255);
+          --secondary-text-color: rgb(163,163,163);
+          --primary-color: rgb(0,177,64);
+          --card-background-color: transparent;
+          --ha-card-border-color: transparent;
+        }
+        ha-card:hover {
+          border-color: rgba(0,177,64,0.5) !important;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;
+          transform: translateY(-1px) !important;
+        }
+        .card-header {
+          background: transparent !important;
+          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
+          color: rgb(255,255,255) !important;
+          font-size: 12px !important;
+          font-weight: 600 !important;
+          padding: 14px 16px 12px !important;
+        }
 
-      ---
-
+  - type: markdown
+    title: ⏳ Slimme Uitstelmodus
+    content: |
       {%- set sd = state_attr('sensor.cloudems_goedkope_uren_schakelaars', 'smart_delay') or {} -%}
-      {%- set sd_switches = sd.get('switches', []) -%}
+      {%- set switches = sd.get('switches', []) -%}
       {%- set pending  = sd.get('pending_count', 0) -%}
-      ## ⏳ Slimme Uitstelmodus
-      {%- if not sd_switches %}
+      {%- if not switches %}
       Geen schakelaars geconfigureerd. Voeg ze toe via **Instellingen → CloudEMS → Slimme Uitstelmodus**.
       {%- else %}
       {%- if pending > 0 %}
@@ -1056,7 +1082,7 @@ views:
 
       | Apparaat | Status | Modus | Wacht op | Wachtend | Deadline |
       |---|---|---|---|---|---|
-      {%- for sw in sd_switches -%}
+      {%- for sw in switches -%}
       {%- set ds = sw.get('delay_state','idle') -%}
       {%- set icon = '⏳' if ds == 'intercepted' else ('🔍' if ds == 'detected' else ('⏰' if ds == 'deadline_forced' else ('✅' if ds == 'idle' else '🚫'))) -%}
       {%- set lbl = sw.get('label') or sw.get('entity_id') -%}
@@ -1069,89 +1095,23 @@ views:
       {%- set dl_str = (((dl_ts | int) - (now().timestamp() | int)) // 60 | string ~ ' min') if dl_ts else ('∞' if mxh == 0 else mxh | string ~ 'h max') -%}
       | {{ icon }} **{{ lbl }}** | {{ ds }} | {{ modus_badge }} | {{ '%02d:00'|format(tgt) if tgt is not none else '—' }} | {{ (wmin | int | string ~ ' min') if wmin else '—' }} | {{ dl_str }} |
       {%- endfor %}
+
       {%- if pending > 0 %}
 
       **Annuleer uitstel:**
-      {%- for sw in sd_switches if sw.get('delay_state') in ('intercepted','detected','deadline_forced') %}
+      {%- for sw in switches if sw.get('delay_state') in ('intercepted','detected','deadline_forced') %}
       - **{{ sw.get('label') or sw.get('entity_id') }}** — ingeschakeld om {{ '%02d:00'|format(sw.get('target_hour',0)) }}
       {%- endfor %}
       {%- endif %}
       {%- endif %}
     card_mod:
       style: |
-        ha-card {
-          background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.08) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(255,255,255);
-          --secondary-text-color: rgb(163,163,163);
-          --primary-color: rgb(0,177,64);
-          --card-background-color: transparent;
-          --ha-card-border-color: transparent;
-        }
-        ha-card:hover {
-          border-color: rgba(0,177,64,0.4) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.10) !important;
-          transform: translateY(-1px) !important;
-        }
-        .card-header {
-          background: transparent !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          padding: 14px 16px 12px !important;
-        }
-        ha-markdown-element h2 {
-          color: rgb(255,255,255) !important;
-          font-size: 11px !important;
-          font-weight: 700 !important;
-          letter-spacing: .08em !important;
-          text-transform: uppercase !important;
-          margin: 12px 0 8px !important;
-          padding-bottom: 4px !important;
-          border-bottom: 1px solid rgba(255,255,255,0.08) !important;
-        }
-        ha-markdown-element hr {
-          border: none !important;
-          border-top: 1px solid rgba(255,255,255,0.07) !important;
-          margin: 14px 0 !important;
-        }
-        ha-markdown-element table {
-          width: 100% !important;
-          border-collapse: collapse !important;
-          margin: 4px 0 8px !important;
-        }
-        ha-markdown-element th {
-          background: rgba(0,177,64,0.10) !important;
-          color: rgb(0,210,80) !important;
-          font-size: 10px !important;
-          font-weight: 700 !important;
-          text-transform: uppercase !important;
-          padding: 6px 8px !important;
-          text-align: left !important;
-          white-space: nowrap !important;
-        }
-        ha-markdown-element td {
-          color: rgb(163,163,163) !important;
-          border-bottom: 1px solid rgba(255,255,255,0.05) !important;
-          padding: 5px 8px !important;
-          font-size: 12px !important;
-        }
-        ha-markdown-element tr:last-child td {
-          border-bottom: none !important;
-        }
-        ha-markdown-element strong {
-          color: rgb(255,255,255) !important;
-        }
-        ha-markdown-element code {
-          background: rgba(255,255,255,0.07) !important;
-          border-radius: 4px !important;
-          padding: 1px 5px !important;
-          font-size: 11px !important;
-          color: rgb(130,200,255) !important;
-        }
+        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,180,0,0.3) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color: rgb(255,255,255); --card-background-color: transparent; }
+        .card-header { background: transparent !important; border-bottom: 1px solid rgba(255,180,0,0.15) !important; color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+        ha-markdown-element th { background: rgba(255,180,0,0.1) !important; color: rgb(255,200,50) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+        ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
+        ha-markdown-element strong { color: rgb(255,255,255) !important; }
 
   - type: conditional
     conditions:
