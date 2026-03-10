@@ -1,0 +1,20 @@
+Referentie,Waarde,Omschrijving,Pakket,Hoeveelheid,Leverancier,Prijs (€)
+U1,ESP32-S3-DevKitC-1,ESP32-S3 Development Board 38-pin,38-DIP,1,AliExpress/Mouser,5.00
+CT1-CT3,SCT-013-000,Split-core CT 100A/50mA ingebouwde 68Ω burden,Klem,3,AliExpress,2.00
+U2,ZMPT101B,Spanningssensor module 230V→3.3V geïsoleerd,Module,1,AliExpress,1.50
+R1-R3,22Ω 1W,Externe burden weerstand voor SCT-013 (indien 68Ω te hoog),0207,3,Farnell,0.10
+R4-R9,10kΩ 0.25W,Spannningsdeler bias 1.65V per CT-kanaal,0207,6,Farnell,0.05
+C1-C6,100nF 50V,Decoupling condensator ADC-ingang,C0402,6,Farnell,0.05
+C7-C9,10µF 10V,Bulk decoupling per CT-kanaal,C0805,3,Farnell,0.10
+C10,100µF 10V,Bulk decoupling voeding,C1210,1,Farnell,0.15
+D1-D6,1N4148,ESD-bescherming ADC-ingangen,SOD-123,6,Farnell,0.05
+J1-J3,Phoenix 2-pin 3.5mm,CT-aansluiting per fase (schroefklem),PTH,3,Farnell,0.80
+J4,Phoenix 2-pin 3.5mm,ZMPT101B aansluiting,PTH,1,Farnell,0.30
+J5,USB-C female,Voedingsaansluiting 5V,SMD,1,Farnell,0.50
+SW1,RESET,Tactile push button,6x6mm THT,1,Farnell,0.10
+SW2,BOOT,Tactile push button (flash mode),6x6mm THT,1,Farnell,0.10
+LED1,Groen 3mm,Power LED,THT,1,Farnell,0.05
+R10,470Ω,LED weerstand,0207,1,Farnell,0.02
+PCB,-,2-laags 100×80mm FR4 1.6mm HASL,100x80mm,1,JLCPCB,5.00
+Behuizing,-,DIN-rail behuizing 6M 107mm,DIN,1,Weidmüller,8.00
+PSU,-,Mean Well HDR-15-5 DIN-rail voeding 5V/3W,DIN,1,Mouser,12.00
