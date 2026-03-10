@@ -116,47 +116,6 @@ main{display:grid;grid-template-columns:2fr 3fr 2fr;grid-template-rows:1fr 1fr;
 .ch-ct{font-family:var(--mono);font-size:.6rem;color:var(--muted);width:36px;flex-shrink:0;text-align:right}
 .cheap-avg{font-family:var(--mono);font-size:.62rem;color:var(--muted);margin-top:.2rem}
 
-/* NILM FLOW VIEW */
-.nilm-view{display:none;flex-direction:column;width:100%;height:100%;gap:.3rem;overflow:hidden}
-.nilm-view.active{display:flex}
-.flow-view{display:flex;flex-direction:column;width:100%;height:100%}
-.flow-view.hidden{display:none}
-.card-toggle{display:flex;align-items:center;justify-content:center;gap:3px;
-  position:absolute;top:.35rem;right:.5rem;z-index:10}
-.toggle-btn{font-size:.52rem;font-weight:800;letter-spacing:.1em;padding:.15rem .45rem;
-  border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);
-  cursor:pointer;transition:all .2s;font-family:var(--mono)}
-.toggle-btn.active{background:rgba(38,198,218,.15);border-color:var(--cyan);color:var(--cyan)}
-.toggle-btn:hover:not(.active){color:var(--text);border-color:rgba(255,255,255,.2)}
-.nilm-device-list{display:flex;flex-direction:column;gap:2px;flex:1;
-  overflow-y:auto;overflow-x:hidden;scrollbar-width:none;padding:0 .15rem}
-.nilm-device-list::-webkit-scrollbar{display:none}
-.nd-row{display:flex;align-items:center;gap:.4rem;padding:.25rem .4rem;
-  border-radius:4px;background:rgba(255,255,255,.02);border:1px solid transparent;
-  transition:all .3s;position:relative;overflow:hidden;min-height:28px}
-.nd-row.on{border-color:rgba(255,255,255,.07)}
-.nd-row.on::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px}
-.nd-icon{font-size:.9rem;line-height:1;flex-shrink:0;width:16px;text-align:center}
-.nd-name{font-size:.6rem;font-weight:700;letter-spacing:.04em;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:72px}
-.nd-power{font-family:var(--mono);font-size:.68rem;flex-shrink:0;width:38px;text-align:right}
-.nd-conf{font-family:var(--mono);font-size:.52rem;color:var(--muted);flex-shrink:0;width:26px;text-align:right}
-.nd-bar-wrap{flex:1;height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;min-width:20px}
-.nd-bar{height:100%;border-radius:2px;transition:width .8s ease}
-.nilm-summary{display:flex;align-items:center;justify-content:space-between;
-  padding:.2rem .5rem;border-top:1px solid var(--border);flex-shrink:0}
-.nilm-sum-item{display:flex;flex-direction:column;align-items:center;gap:1px}
-.nilm-sum-label{font-size:.48rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-.nilm-sum-val{font-family:var(--mono);font-size:.72rem;color:var(--text)}
-@keyframes nd-pulse{0%,100%{opacity:.6}50%{opacity:1}}
-.nd-row.on .nd-icon{animation:nd-pulse 2s ease-in-out infinite}
-.nd-src{font-size:.45rem;font-weight:700;letter-spacing:.08em;padding:.08rem .2rem;
-  border-radius:2px;flex-shrink:0}
-.nd-src.db{background:rgba(0,230,118,.12);color:var(--green)}
-.nd-src.ai{background:rgba(64,196,255,.12);color:var(--blue)}
-.nd-src.cloud{background:rgba(206,147,216,.12);color:var(--purple)}
-.nd-src.plug{background:rgba(255,171,0,.12);color:var(--amber)}
-
 /* FOOTER */
 footer{display:flex;align-items:center;justify-content:space-between;
   padding:0 1.2rem;border-top:1px solid var(--border);
@@ -212,75 +171,56 @@ body.sim-on{padding-top:28px}
   </div>
 
   <!-- FLOW (centre, 2 rows) -->
-  <div class="card card-flow" style="position:relative;padding-top:1.6rem">
-    <div class="card-toggle">
-      <button class="toggle-btn active" id="btn-flow" onclick="switchView('flow')">STROOM</button>
-      <button class="toggle-btn" id="btn-nilm" onclick="switchView('nilm')">NILM</button>
+  <div class="card card-flow">
+    <div class="flow-svg-wrap">
+      <svg class="flow-svg" id="flow-svg" viewBox="0 0 300 270" preserveAspectRatio="xMidYMid meet">
+        <!-- paths first so nodes render on top -->
+        <path id="fp-sol-grid" d="M82,75 Q115,100 128,122" class="flow-path idle" stroke="var(--amber)" stroke-dasharray="6 4"/>
+        <path id="fp-bat-grid" d="M218,75 Q186,100 172,122" class="flow-path idle" stroke="var(--blue)"  stroke-dasharray="6 4"/>
+        <path id="fp-grid-home" d="M150,175 L150,210"       class="flow-path idle" stroke="var(--cyan)"  stroke-dasharray="6 4"/>
+        <path id="fp-sol-home"  d="M72,80 Q50,180 126,225"  class="flow-path idle" stroke="var(--amber)" stroke-dasharray="4 6" opacity=".5"/>
+
+        <!-- SOLAR -->
+        <circle cx="60" cy="58" r="30" class="fn-circle" stroke="var(--amber)"/>
+        <text x="60" y="52" font-size="16" text-anchor="middle" dominant-baseline="central">&#9728;</text>
+        <text x="60" y="68" class="fn-value" fill="var(--amber)" id="fv-sol">—W</text>
+        <text x="60" y="82" class="fn-label">SOLAR</text>
+
+        <!-- BATTERY -->
+        <circle cx="240" cy="58" r="30" class="fn-circle" stroke="var(--blue)"/>
+        <text x="240" y="52" font-size="15" text-anchor="middle" dominant-baseline="central">&#128267;</text>
+        <text x="240" y="68" class="fn-value" fill="var(--blue)" id="fv-bat">—%</text>
+        <text x="240" y="82" class="fn-label">BATTERIJ</text>
+
+        <!-- GRID (centre) -->
+        <circle cx="150" cy="138" r="36" class="fn-circle" stroke="var(--green)" id="fc-grid"/>
+        <text x="150" y="130" font-size="18" text-anchor="middle" dominant-baseline="central">&#9889;</text>
+        <text x="150" y="148" class="fn-value" fill="var(--green)" id="fv-grid">—W</text>
+        <text x="150" y="162" class="fn-label">NET</text>
+
+        <!-- HOME -->
+        <circle cx="150" cy="228" r="28" class="fn-circle" stroke="var(--cyan)"/>
+        <text x="150" y="222" font-size="14" text-anchor="middle" dominant-baseline="central">&#127968;</text>
+        <text x="150" y="236" class="fn-value" fill="var(--cyan)" id="fv-home">—W</text>
+        <text x="150" y="250" class="fn-label">HUIS</text>
+      </svg>
     </div>
-    <div id="view-flow" style="display:flex;flex-direction:column;width:100%;height:100%">
-      <div class="flow-svg-wrap">
-        <svg class="flow-svg" id="flow-svg" viewBox="0 0 300 270" preserveAspectRatio="xMidYMid meet">
-          <path id="fp-sol-grid" d="M82,75 Q115,100 128,122" class="flow-path idle" stroke="var(--amber)" stroke-dasharray="6 4"/>
-          <path id="fp-bat-grid" d="M218,75 Q186,100 172,122" class="flow-path idle" stroke="var(--blue)"  stroke-dasharray="6 4"/>
-          <path id="fp-grid-home" d="M150,175 L150,210"       class="flow-path idle" stroke="var(--cyan)"  stroke-dasharray="6 4"/>
-          <path id="fp-sol-home"  d="M72,80 Q50,180 126,225"  class="flow-path idle" stroke="var(--amber)" stroke-dasharray="4 6" opacity=".5"/>
-          <circle cx="60" cy="58" r="30" class="fn-circle" stroke="var(--amber)"/>
-          <text x="60" y="52" font-size="16" text-anchor="middle" dominant-baseline="central">&#9728;</text>
-          <text x="60" y="68" class="fn-value" fill="var(--amber)" id="fv-sol">&#8212;W</text>
-          <text x="60" y="82" class="fn-label">SOLAR</text>
-          <circle cx="240" cy="58" r="30" class="fn-circle" stroke="var(--blue)"/>
-          <text x="240" y="52" font-size="15" text-anchor="middle" dominant-baseline="central">&#128267;</text>
-          <text x="240" y="68" class="fn-value" fill="var(--blue)" id="fv-bat">&#8212;%</text>
-          <text x="240" y="82" class="fn-label">BATTERIJ</text>
-          <circle cx="150" cy="138" r="36" class="fn-circle" stroke="var(--green)" id="fc-grid"/>
-          <text x="150" y="130" font-size="18" text-anchor="middle" dominant-baseline="central">&#9889;</text>
-          <text x="150" y="148" class="fn-value" fill="var(--green)" id="fv-grid">&#8212;W</text>
-          <text x="150" y="162" class="fn-label">NET</text>
-          <circle cx="150" cy="228" r="28" class="fn-circle" stroke="var(--cyan)"/>
-          <text x="150" y="222" font-size="14" text-anchor="middle" dominant-baseline="central">&#127968;</text>
-          <text x="150" y="236" class="fn-value" fill="var(--cyan)" id="fv-home">&#8212;W</text>
-          <text x="150" y="250" class="fn-label">HUIS</text>
-        </svg>
+    <!-- Phase bars under flow -->
+    <div class="phases-grid" style="width:88%;padding:0 .4rem .15rem">
+      <div class="ph-col">
+        <span class="ph-label">L&#8321;</span>
+        <span class="ph-val" id="vl1">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl1"></div></div>
       </div>
-      <div class="phases-grid" style="width:88%;padding:0 .4rem .15rem">
-        <div class="ph-col">
-          <span class="ph-label">L&#8321;</span>
-          <span class="ph-val" id="vl1">&#8212;</span><span class="ph-unit">A</span>
-          <div class="ph-track"><div class="ph-fill" id="bl1"></div></div>
-        </div>
-        <div class="ph-col">
-          <span class="ph-label">L&#8322;</span>
-          <span class="ph-val" id="vl2">&#8212;</span><span class="ph-unit">A</span>
-          <div class="ph-track"><div class="ph-fill" id="bl2"></div></div>
-        </div>
-        <div class="ph-col">
-          <span class="ph-label">L&#8323;</span>
-          <span class="ph-val" id="vl3">&#8212;</span><span class="ph-unit">A</span>
-          <div class="ph-track"><div class="ph-fill" id="bl3"></div></div>
-        </div>
+      <div class="ph-col">
+        <span class="ph-label">L&#8322;</span>
+        <span class="ph-val" id="vl2">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl2"></div></div>
       </div>
-    </div>
-    <div class="nilm-view" id="view-nilm">
-      <div class="nilm-device-list" id="nilm-list">
-        <div style="color:var(--muted);font-size:.65rem;text-align:center;padding:1rem 0">Laden&hellip;</div>
-      </div>
-      <div class="nilm-summary">
-        <div class="nilm-sum-item">
-          <span class="nilm-sum-label">Herkend</span>
-          <span class="nilm-sum-val" id="nilm-count">&#8212;</span>
-        </div>
-        <div class="nilm-sum-item">
-          <span class="nilm-sum-label">Actief</span>
-          <span class="nilm-sum-val c-green" id="nilm-active">&#8212;</span>
-        </div>
-        <div class="nilm-sum-item">
-          <span class="nilm-sum-label">Huidig</span>
-          <span class="nilm-sum-val c-cyan" id="nilm-total-w">&#8212; W</span>
-        </div>
-        <div class="nilm-sum-item">
-          <span class="nilm-sum-label">Vandaag</span>
-          <span class="nilm-sum-val c-amber" id="nilm-today-kwh">&#8212; kWh</span>
-        </div>
+      <div class="ph-col">
+        <span class="ph-label">L&#8323;</span>
+        <span class="ph-val" id="vl3">—</span><span class="ph-unit">A</span>
+        <div class="ph-track"><div class="ph-fill" id="bl3"></div></div>
       </div>
     </div>
   </div>
@@ -464,115 +404,6 @@ function renderFlow(netW,solW,batPct){
   setPath('fp-grid-home', homeW!==null&&homeW>50, false, imp?'var(--red)':'var(--cyan)');
 }
 
-
-// ── VIEW SWITCHER ──────────────────────────────────────────────────
-let currentView = 'flow';
-function switchView(v){
-  currentView = v;
-  const flowEl = document.getElementById('view-flow');
-  const nilmEl = document.getElementById('view-nilm');
-  const btnFlow = document.getElementById('btn-flow');
-  const btnNilm = document.getElementById('btn-nilm');
-  if(v === 'nilm'){
-    if(flowEl) flowEl.style.display = 'none';
-    if(nilmEl){ nilmEl.style.display = 'flex'; nilmEl.classList.add('active'); }
-    if(btnFlow) btnFlow.classList.remove('active');
-    if(btnNilm) btnNilm.classList.add('active');
-    renderNILM();
-  } else {
-    if(flowEl) flowEl.style.display = 'flex';
-    if(nilmEl){ nilmEl.style.display = 'none'; nilmEl.classList.remove('active'); }
-    if(btnFlow) btnFlow.classList.add('active');
-    if(btnNilm) btnNilm.classList.remove('active');
-  }
-}
-
-// ── NILM DEVICE ICONS ─────────────────────────────────────────────
-const NILM_ICONS = {
-  refrigerator:'🧊', washing_machine:'🫧', dryer:'♨️', dishwasher:'🍽️',
-  oven:'🍕', microwave:'📡', kettle:'🫖', entertainment:'📺', television:'📺',
-  computer:'💻', heat_pump:'🌡️', boiler:'🚿', ev_charger:'⚡', light:'💡',
-  electric_heater:'🔥', socket:'🔌', battery:'🔋', power_tool:'🔧',
-  unknown:'❓', cluster:'🔍', smart_plug:'🔌',
-};
-const NILM_COLORS = {
-  refrigerator:'var(--blue)',   washing_machine:'var(--cyan)',
-  dryer:'var(--amber)',          dishwasher:'var(--cyan)',
-  oven:'var(--red)',             microwave:'var(--amber)',
-  kettle:'var(--amber)',         entertainment:'var(--purple)',
-  television:'var(--purple)',    computer:'var(--blue)',
-  heat_pump:'var(--red)',        boiler:'var(--amber)',
-  ev_charger:'var(--green)',     light:'var(--amber)',
-  electric_heater:'var(--red)', socket:'var(--muted)',
-  battery:'var(--blue)',         default:'var(--cyan)',
-};
-
-function nilmColor(type){ return NILM_COLORS[type] || NILM_COLORS.default; }
-function nilmIcon(type) { return NILM_ICONS[type] || NILM_ICONS.unknown; }
-function nilmSrcBadge(src){
-  if(!src) return '';
-  if(src==='smart_plug') return '<span class="nd-src plug">PLUG</span>';
-  if(src==='cloud_ai')   return '<span class="nd-src cloud">AI</span>';
-  if(src==='local_ai')   return '<span class="nd-src ai">LOC</span>';
-  return '<span class="nd-src db">DB</span>';
-}
-
-// ── RENDER NILM VIEW ───────────────────────────────────────────────
-function renderNILM(){
-  const listEl = document.getElementById('nilm-list'); if(!listEl) return;
-  const sensor  = st(E.nilmDevices);
-  const devices = sensor?.attributes?.devices || sensor?.attributes?.detected_devices || [];
-
-  if(!devices.length){
-    listEl.innerHTML = '<div style="color:var(--muted);font-size:.65rem;text-align:center;padding:1.5rem 0">Geen apparaten herkend.<br><span style="font-size:.58rem;opacity:.6">NILM leert van uw verbruik.</span></div>';
-    setEl('nilm-count', '0'); setEl('nilm-active', '0');
-    setEl('nilm-total-w', '0 W'); setEl('nilm-today-kwh', '— kWh');
-    return;
-  }
-
-  // Sort: on devices first, then by power desc
-  const sorted = [...devices].sort((a,b)=>{
-    if(a.is_on !== b.is_on) return b.is_on ? 1 : -1;
-    return (b.current_power||0) - (a.current_power||0);
-  });
-
-  const maxW = Math.max(...sorted.map(d=>d.current_power||0), 1);
-  const totalW = sorted.filter(d=>d.is_on).reduce((s,d)=>s+(d.current_power||0), 0);
-  const todayKwh = sorted.reduce((s,d)=>s+(d.energy?.today_kwh||d.today_kwh||0), 0);
-  const activeCount = sorted.filter(d=>d.is_on).length;
-
-  setEl('nilm-count',     sorted.length);
-  setEl('nilm-active',    activeCount);
-  setEl('nilm-total-w',   fmtk(totalW)+' W');
-  setEl('nilm-today-kwh', todayKwh.toFixed(2)+' kWh');
-
-  listEl.innerHTML = sorted.map(dev => {
-    const on    = dev.is_on;
-    const type  = dev.device_type || 'unknown';
-    const name  = dev.user_name || dev.name || type.replace(/_/g,' ');
-    const color = nilmColor(type);
-    const icon  = nilmIcon(type);
-    const pwW   = dev.current_power || 0;
-    const conf  = Math.round((dev.confidence||0)*100);
-    const barPct = on ? Math.min(100, Math.round((pwW/maxW)*100)) : 0;
-    const src   = dev.source || '';
-    const phase = dev.phase || '';
-    const phTag = (phase && phase !== 'ALL') ? \`<span style="font-size:.45rem;color:var(--muted);margin-left:2px">\${phase}</span>\` : '';
-    const kwh   = (dev.energy?.today_kwh ?? dev.today_kwh ?? null);
-    const kwhStr = kwh !== null ? \`\${kwh.toFixed(2)}<span style="font-size:.45rem">k</span>\` : '';
-
-    return \`<div class="nd-row\${on?' on':''}" style="\${on?'--nd-color:'+color:''}">
-      \${on?\`<div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:\${color};border-radius:0 2px 2px 0"></div>\`:''}
-      <span class="nd-icon">\${icon}</span>
-      <span class="nd-name" title="\${name}">\${name}\${phTag}\${dev.co_coupled?'<span title="Co-occurrence" style="font-size:.42rem;color:#bb98ff;margin-left:2px">&#x1F517;</span>':''}</span>
-      \${nilmSrcBadge(src)}
-      <div class="nd-bar-wrap"><div class="nd-bar" style="width:\${barPct}%;background:\${on?color:'var(--muted)'}"></div></div>
-      <span class="nd-power" style="color:\${on?color:'var(--muted)'}">\${on?fmtk(pwW)+'W':kwhStr}</span>
-      <span class="nd-conf" style="opacity:.6">\${conf}%</span>
-    </div>\`;
-  }).join('');
-}
-
 // ── RENDER ALL ─────────────────────────────────────────────────────
 function renderAll(){
   const netW  = num(E.net);
@@ -664,9 +495,6 @@ function renderAll(){
 
   // Flow
   renderFlow(netW, solW, batPct);
-
-  // NILM auto-refresh when NILM view is active
-  if(currentView === 'nilm') renderNILM();
 
   // Sparklines
   drawSpark('sp-net', hist.net||[], imp?'var(--red)':'var(--green)', MAX_W);
@@ -779,7 +607,7 @@ function connectWS(){
     else if(m.type==='auth_ok'){setLive(true);ws.send(JSON.stringify({id:wsId++,type:'subscribe_events',event_type:'state_changed'}));fetchAll();}
     else if(m.type==='event'&&m.event?.data){
       const d=m.event.data;
-      if(Object.values(E).includes(d.entity_id)){states[d.entity_id]=d.new_state;renderAll();if(currentView==='nilm'&&d.entity_id===E.nilmDevices)renderNILM();}
+      if(Object.values(E).includes(d.entity_id)){states[d.entity_id]=d.new_state;renderAll();}
     }else if(m.type==='auth_invalid'){ws.close();startPoll();}
   };
   ws.onerror=()=>startPoll();

@@ -893,12 +893,16 @@
           "sd_power_threshold_w": "Startdetectie drempel (W)",
           "sd_price_threshold_eur": "Prijsdrempel voor uitstel (€/kWh)",
           "sd_grace_s": "Wachttijd voor uitschakelen (s)",
-          "sd_notify": "Melding sturen bij uitgesteld starten"
+          "sd_notify": "Melding sturen bij uitgesteld starten",
+          "sd_wait_mode": "Wachtmodus",
+          "sd_max_wait_h": "Maximale wachttijd (0 = onbeperkt)"
         },
         "data_description": {
           "sd_enabled": "Zet aan als dit apparaat (bijv. vaatwasser, wasmachine) handmatig wordt gestart en je wilt dat CloudEMS wacht op goedkope stroom.",
           "sd_power_sensor": "Als je een vermogenssensor hebt, detecteert CloudEMS betrouwbaarder wanneer het apparaat wordt ingeschakeld.",
-          "sd_price_threshold_eur": "Boven deze prijs schakelt CloudEMS het apparaat uit en wacht op een goedkoper uur."
+          "sd_price_threshold_eur": "Boven deze prijs schakelt CloudEMS het apparaat uit en wacht op een goedkoper uur.",
+          "sd_wait_mode": "Kies 'Goedkoopste prijsblok' om gegarandeerd op het goedkoopste moment van de dag te draaien, ongeacht de prijsdrempel.",
+          "sd_max_wait_h": "Na dit aantal uren schakelt CloudEMS het apparaat toch in, ook als geen goedkoop moment gevonden is. Handig als de vaatwasser 's ochtends klaar moet zijn. 0 = onbeperkt wachten."
         }
       },
       "smart_delay_opts": {

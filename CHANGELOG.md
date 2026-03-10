@@ -2,6 +2,94 @@
 
 Alle noemenswaardige wijzigingen per versie.
 
+## [4.4.0] - 2026-03-10
+
+### Negen structurele verbeteringen
+
+#### 1. NILM Unsupervised Clustering (`nilm/unsupervised_cluster.py`) — nieuw module
+Groepeert onbekende vermogensevents automatisch via incrementele DBSCAN-achtige
+clustering zonder scikit-learn-afhankelijkheid. Als een cluster ≥ 5 events bereikt,
+verschijnt automatisch een gebruikersvraag: "Onbekend apparaat ~1800 W gedetecteerd —
+wat is dit?" Na bevestiging wordt het cluster omgezet naar een NILM-apparaat met
+direct herkenning van toekomstige events. Type-suggestie op basis van vermogen + duur
+(ketel, wasmachine, EV, warmtepomp, etc.). Persistente opslag via HA Store.
+`NILMEventClusterer.add_unknown_event()` aangeroepen vanuit NILMDetector bij
+niet-herkende events.
+
+#### 2. Degradatiekosten-bewuste Batterijplanning (`energy_manager/battery_cycle_economics.py`) — nieuw module
+`BatteryCycleEconomics` berekent voor elk laad/ontlaad-paar de netto winst ná aftrek
+van slijtagekosten. Formule: `netto_spread = (discharge_prijs - charge_prijs / rt_eff) - cycle_cost`.
+Chemie-specifieke factoren (LFP 0.0025, NMC 0.0045, NCA 0.0050, LTO 0.0010 €/kWh/cyclus).
+SoC stress-boetes: diep ontladen (<15%) +30% slijtage, hoog laden (>92%) +20%.
+Eigenverbruik (PV-gevulde batterij dekt directe last) wordt nooit geblokkeerd.
+Integreer in `battery_scheduler._build_schedule()` via `eco.evaluate_slot_pair()`.
+
+#### 3. Leverancier Switchadviseur (`energy_manager/supplier_switch_advisor.py`) — nieuw module
+`build_switch_advice()` gebruikt de ContractComparison-data van supplier_compare.py
+en genereert een concreet switchadvies: "switch_aanbevolen / evalueer / blijf /
+onvoldoende_data". Berekent jaarlijkse besparing, terugverdientijd overstapkosten,
+beste switchmoment op basis van contracteinddatum, en stapsgewijze administratie-tekst.
+Minimale jaarlijkse besparing voor aanbeveling: €60. Maximale terugverdientijd: 3 maanden.
+Sensor: `cloudems_switch_advies`.
+
+#### 4. Coördinator opsplitsen — voorbereiding (`coordinator.py`)
+De 6300+-regels coordinator is te groot voor veilig onderhoud. Architectuurvoorbereiding:
+`CloudEMSConfig.from_dict()` (zie punt 8) vervangt alle verspreid `config.get()`-aanroepen.
+`CloudEMSActionsTracker` (zie punt 10) centraliseert beslissingslogging. Volgende stap
+(v4.5): opsplitsing in `EnergyCoordinator`, `NILMCoordinator`, `ClimateCoordinator`
+als delegate-klassen. Backlog toegevoegd aan coordinator.py commentaar.
+
+#### 5. Getypte Configuratie (`config_schema.py`) — nieuw bestand
+Centrale `CloudEMSConfig` dataclass met sub-configuraties: `BatteryConfig`, `EVConfig`,
+`PVConfig`, `GridConfig`, `PriceConfig`, `AIConfig`, `NotificationConfig`.
+`CloudEMSConfig.from_dict(config)` vervangt verspreid `config.get("key", default)`.
+`cfg.validate()` geeft duidelijke foutmeldingen bij ongeldige waarden.
+Berekende properties: `ev.max_power_w`, `grid.phases`, `battery.enabled`.
+België-autodetectie: `country == "BE"` → `belgium_capacity_enabled = True` automatisch.
+
+#### 6. Unit Tests (`tests/test_cloudems.py`) — nieuwe testsuit
+pytest-tests voor de vijf nieuwe en kritieke bestaande modules:
+  • `TestBatteryCycleEconomics` — 8 parametrized tests incl. chemie, efficiency, SoC-stress
+  • `TestNILMEventClusterer` — 8 tests incl. clustering, type-suggestie, bevestiging
+  • `TestBelgianCapacityCalculator` — 6 tests incl. postcode-detectie, vrije band
+  • `TestCloudEMSConfig` — 6 tests incl. validatie, auto-België, type-conversie
+  • `TestSupplierSwitchAdviseur` — 4 tests incl. edge cases
+  • `TestActionsTracker` — 5 tests incl. headline-generatie, serialisatie
+Uitvoeren: `pytest tests/test_cloudems.py -v`
+
+#### 7. "Wat heeft CloudEMS vandaag voor je gedaan?" (`energy_manager/actions_tracker.py`) — nieuw module
+`CloudEMSActionsTracker` registreert elke CloudEMS-actie gedurende de dag:
+boiler verschoven, EV op PV-surplus geladen, congestie-event afgevangen, etc.
+Om middernacht reset de dagkaart automatisch; gisterenkaart blijft bewaard.
+`DaySummaryCard.build_headline()` genereert leesbare samenvatting:
+"€1.23 bespaard — boiler 2× verschoven, EV 8.4 kWh smart geladen, 1 congestie-event".
+Sensor: `cloudems_dag_acties` met `headline`, `total_saving_eur`, `action_count`,
+`recent_actions[]`. Zichtbaar als prominente kaart op de Overzicht-tab.
+Integratie via `coordinator._actions_tracker.log_action(...)` bij elke beslissing.
+`Actions`-constanten-klasse voorkomt typo's in action_type strings.
+
+#### 8. Installatiescore Dashboard Presenter (`energy_manager/installation_score_presenter.py`) — nieuw module
+`InstallationScorePresenter` maakt de score zichtbaar op de Overzicht-tab (niet alleen
+Diagnose). "Quick wins" gesorteerd op impact/moeite-verhouding met directe actie-URL
+per ontbrekend onderdeel. Score-trending over 7 dagen (richting: stijgend/stabiel/dalend).
+`should_show_persistent_notification()` triggert HA-notificatie als score < 50.
+Sensor `cloudems_setup_score` krijgt `next_step_label`, `next_step_url`, `quick_wins[]`
+als attributen — bruikbaar voor dashboard-knoppen via custom:button-card.
+
+#### 9. België Capaciteitstarief Module (`energy_manager/belgium_capacity.py`) — nieuw module
+Specifieke implementatie voor Belgisch capaciteitstarief (actief 2023):
+  • Grondslag: rolling gemiddelde van 12 hoogste maandpieken (niet alleen huidige maand)
+  • DSO zone-detectie op basis van postcode: Fluvius Antwerpen/Gent/Limburg/Oost-VL/
+    West-VL/Vlaams-Brabant, Ores (Wallonië), Sibelgas (Brussel)
+  • Tarieven 2025 per DSO (37.90–48.20 €/kW/jaar)
+  • Vrije band: eerste 2.5 kW altijd gratis
+  • `estimate_cost_impact(extra_kw)` — berekent extra jaarkosten per kW piek-stijging
+  • Automatisch geactiveerd als `country == "BE"` in config
+  • Sensor: `cloudems_be_capacity_cost` met `rolling_12m_avg_kw`, `estimated_annual_cost`,
+    `monthly_headroom_kw`, `dso`, `warning_level`
+
+---
+
 ## [4.3.5] - 2026-03-09
 
 ### Acht intelligentie-verbeteringen + persistentie

@@ -366,7 +366,89 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Registreer CloudEMS tablet dashboard als custom panel in de HA sidebar
     hass.async_create_task(_async_register_panel(hass))
 
+    # Maak het CloudEMS Lovelace-dashboard automatisch aan als het nog niet bestaat
+    hass.async_create_task(_async_ensure_lovelace_dashboard(hass))
+
     return True
+
+
+async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
+    """Maak het CloudEMS Lovelace-dashboard automatisch aan als het nog niet bestaat.
+
+    Werkt via de HA Lovelace storage API — zelfde mechanisme als de UI gebruikt
+    bij 'Dashboard toevoegen'. Het dashboard wordt aangemaakt in storage-modus met
+    de inhoud van cloudems-dashboard.yaml die meegeleverd is met de component.
+
+    Slug: cloudems-lovelace  →  bereikbaar via /lovelace-cloudems
+    """
+    import pathlib, yaml as _yaml
+
+    _SLUG = "cloudems-lovelace"
+
+    try:
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            _LOGGER.debug("CloudEMS: lovelace niet beschikbaar, dashboard aanmaken overgeslagen")
+            return
+
+        dashboards_store = getattr(lovelace, "dashboards", None)
+        if dashboards_store is None:
+            _LOGGER.debug("CloudEMS: lovelace.dashboards niet beschikbaar, overgeslagen")
+            return
+
+        # Laad de bestaande dashboards
+        await dashboards_store.async_load()
+
+        # Check of het dashboard al bestaat
+        existing = {k: v for k, v in dashboards_store.async_items().items()
+                    if k == _SLUG}
+        if existing:
+            _LOGGER.debug("CloudEMS: Lovelace dashboard '%s' bestaat al", _SLUG)
+            return
+
+        # Lees de YAML-inhoud uit de meegeleverde component-bestanden
+        yaml_path = pathlib.Path(__file__).parent / "www" / "cloudems-dashboard.yaml"
+        if not yaml_path.exists():
+            _LOGGER.warning("CloudEMS: cloudems-dashboard.yaml niet gevonden in www/")
+            return
+
+        dashboard_config = _yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+
+        # Stap 1: Registreer het dashboard (metadata)
+        await dashboards_store.async_create_item({
+            "url_path": _SLUG,
+            "require_admin": False,
+            "title": "⚡ CloudEMS",
+            "icon": "mdi:lightning-bolt",
+            "show_in_sidebar": True,
+            "mode": "storage",
+        })
+
+        # Stap 2: Laad de dashboard-config store en sla de views op
+        from homeassistant.components.lovelace import dashboard as ll_dashboard  # noqa: PLC0415
+        dash_obj = dashboards_store.async_items().get(_SLUG)
+        if dash_obj is None:
+            _LOGGER.warning("CloudEMS: dashboard '%s' aangemaakt maar niet teruggevonden", _SLUG)
+            return
+
+        config_store = getattr(dash_obj, "config", None) or getattr(dash_obj, "_config", None)
+        if config_store is None:
+            # Probeer het via de store loader
+            try:
+                await dash_obj.async_load(force=True)
+                await dash_obj.async_save(dashboard_config)
+            except Exception as _save_err:
+                _LOGGER.warning("CloudEMS: kon dashboard-config niet opslaan: %s", _save_err)
+                return
+        else:
+            await config_store.async_save(dashboard_config)
+
+        _LOGGER.info(
+            "CloudEMS: Lovelace dashboard aangemaakt op /lovelace-%s", _SLUG
+        )
+
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("CloudEMS: kon Lovelace dashboard niet automatisch aanmaken: %s", err)
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -388,7 +470,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         try:
             dst.mkdir(parents=True, exist_ok=True)
             for f in src.rglob("*"):
-                if f.is_file():
+                if f.is_file() and f.name != "cloudems-dashboard.yaml":
                     rel    = f.relative_to(src)
                     dest_f = dst / rel
                     dest_f.parent.mkdir(parents=True, exist_ok=True)
@@ -396,6 +478,17 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
                         shutil.copy2(f, dest_f)
         except Exception as _err:
             _LOGGER.warning("CloudEMS: kon www/ niet kopiëren naar /config/www/: %s", _err)
+
+        # Kopieer cloudems-dashboard.yaml naar /config/ (altijd, zodat hij in sync blijft met de component)
+        yaml_src = src / "cloudems-dashboard.yaml"
+        yaml_dst = pathlib.Path(hass.config.config_dir) / "cloudems-dashboard.yaml"
+        try:
+            if yaml_src.exists():
+                if not yaml_dst.exists() or yaml_src.stat().st_mtime > yaml_dst.stat().st_mtime:
+                    shutil.copy2(yaml_src, yaml_dst)
+                    _LOGGER.info("CloudEMS: cloudems-dashboard.yaml gekopieerd naar /config/")
+        except Exception as _err:
+            _LOGGER.warning("CloudEMS: kon cloudems-dashboard.yaml niet kopiëren naar /config/: %s", _err)
 
     await hass.async_add_executor_job(_copy_www)
 

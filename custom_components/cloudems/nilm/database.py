@@ -442,7 +442,9 @@ class NILMDatabase:
     def classify(self, delta_power: float, rise_time: float = 2.0, language: str = "en",
                  rise_time_reliable: bool = False,
                  power_factor: float | None = None,
-                 inrush_peak_a: float | None = None) -> list:
+                 inrush_peak_a: float | None = None,
+                 reactive_power_var: float | None = None,
+                 thd_pct: float | None = None) -> list:
         """Classify a power event against the database. Returns top-5 ranked matches.
 
         v1.21: rise_time_reliable defaults to False because CloudEMS coordinator
@@ -459,6 +461,16 @@ class NILMDatabase:
         Common energy-management devices (heat pump, boiler, EV charger) are
         intentionally NOT penalised here — they may be statistically less common
         but are critical for CloudEMS to detect accurately.
+
+        v1.23 — ESP32 1kHz feature pipeline volledig benut:
+          inrush_peak_a    — piekstroom bij opstarten → inrush_ratio (A / A_nominaal)
+                             Resistief ≈ 1×, motor 3–8×, LED 50–100× (maar <1ms)
+                             Sterk onderscheidend voor wasmachine vs oven vs waterkoker
+          reactive_power_var — reactief vermogen Q in VAR → power_factor berekenen als
+                             cos φ niet direct beschikbaar; Q≈0 = puur resistief
+          thd_pct          — Total Harmonic Distortion in %
+                             Resistief ≈ 0%, SMPS (laptop/TV) 60–120%, motor 30–70%
+                             Dimmer 40–80%. Scheidend voor overlap P-bereik.
         """
         # Confidence caps for niche/hobby categories.
         # Set these below NILM_MIN_CONFIDENCE (typically 0.75) to block auto-detection.
@@ -527,24 +539,156 @@ class NILMDatabase:
             "tv":              "electronic",
             "gaming":          "electronic",
         }
-        if power_factor is not None and 0.0 < power_factor <= 1.0:
+        # ═══════════════════════════════════════════════════════════════════
+        # GRACEFUL DEGRADATION — ESP32 1kHz features
+        # ═══════════════════════════════════════════════════════════════════
+        # Elk blok hieronder is volledig onafhankelijk en optioneel.
+        # Als een feature None is (geen ESP32, of ESP32 zonder die sensor)
+        # wordt het blok volledig overgeslagen — géén effect op confidence,
+        # géén fout, géén gewijzigde ranking. De basisclassificatie (P + rise_time)
+        # werkt altijd identiek als zonder ESP32.
+        #
+        # Volgorde van toepassing (elk blok sorteert opnieuw):
+        #   1. Power factor (cos φ)  — ±0.10  — al aanwezig in v2.2
+        #   2. Reactief vermogen Q   — ±0.10  — afleiden als PF niet direct beschikbaar
+        #   3. Inrush ratio          — ±0.15  — sterkste discriminator
+        #   4. THD%                  — ±0.12  — onderscheidt SMPS van resistief/motor
+        # ═══════════════════════════════════════════════════════════════════
+
+        # ── Gedeelde lookup-tabellen (hergebruikt in alle blokken) ───────────
+        PF_RANGES: dict = {
+            "resistive":  (0.95, 1.00),
+            "heat":       (0.95, 1.00),
+            "heat_pump":  (0.75, 0.90),
+            "motor":      (0.55, 0.82),
+            "electronic": (0.55, 0.90),
+            "led":        (0.40, 0.70),
+        }
+        TYPE_LOAD: dict = {
+            "oven":            "resistive",
+            "boiler":          "resistive",
+            "cv_boiler":       "resistive",
+            "kettle":          "resistive",
+            "washing_machine": "motor",
+            "dryer":           "motor",
+            "heat_pump":       "heat_pump",
+            "ev_charger":      "motor",
+            "refrigerator":    "motor",
+            "dishwasher":      "motor",
+            "lighting":        "led",
+            "computer":        "electronic",
+            "tv":              "electronic",
+            "gaming":          "electronic",
+        }
+
+        def _load_type(device_type: str) -> str | None:
+            """Vertaal apparaattype naar belastingcategorie. Gebruikt tags als fallback."""
+            load = TYPE_LOAD.get(device_type)
+            if load is None:
+                sigs = self.get_by_type(device_type)
+                for tag in ("resistive", "motor", "heat", "electronic", "led"):
+                    if any(tag in (s.tags or []) for s in sigs):
+                        return tag
+            return load
+
+        # ── [1+2] Power factor — direct of afgeleid uit Q ────────────────────
+        # Alleen actief als power_factor of reactive_power_var beschikbaar is.
+        # Bij geen van beide: blok overgeslagen, ranking ongewijzigd.
+        _pf = power_factor
+        if _pf is None and reactive_power_var is not None:
+            # Q beschikbaar maar cos φ niet → afleiden: cos φ = P / √(P²+Q²)
+            import math as _math
+            _s = _math.sqrt(abs(delta_power) ** 2 + reactive_power_var ** 2)
+            if _s > 1.0:
+                _pf = round(abs(delta_power) / _s, 3)
+
+        if _pf is not None and 0.0 < _pf <= 1.0:
             for m in matches:
-                load = TYPE_LOAD.get(m["device_type"])
-                if load is None:
-                    # haal tag uit database
-                    sigs = self.get_by_type(m["device_type"])
-                    for tag in ("resistive", "motor", "heat", "electronic", "led"):
-                        if any(tag in (s.tags or []) for s in sigs):
-                            load = tag
-                            break
+                load = _load_type(m["device_type"])
                 if load and load in PF_RANGES:
                     pf_min, pf_max = PF_RANGES[load]
                     pf_mid = (pf_min + pf_max) / 2
-                    pf_dev = abs(power_factor - pf_mid) / max(pf_max - pf_min, 0.01)
-                    # bonus/malus: ±0.10 op confidence
-                    pf_adj = max(-0.10, min(0.10, (1.0 - pf_dev) * 0.10))
+                    pf_dev = abs(_pf - pf_mid) / max(pf_max - pf_min, 0.01)
+                    pf_adj = round(max(-0.10, min(0.10, (1.0 - pf_dev) * 0.10)), 3)
                     m["confidence"] = round(max(0.0, min(1.0, m["confidence"] + pf_adj)), 3)
-                    m["pf_adj"] = round(pf_adj, 3)
+                    m["pf_adj"] = pf_adj
+            matches.sort(key=lambda x: x["confidence"], reverse=True)
+
+        # ── [3] Inrush ratio scoring ──────────────────────────────────────────
+        # Alleen actief als inrush_peak_a beschikbaar is (ESP32 1kHz CT-meting).
+        # Geen ESP32 → inrush_peak_a is None → dit blok wordt volledig overgeslagen.
+        #
+        # inrush_ratio = gemeten piekstroom / nominale piekstroom (δP/230V × √2)
+        # Verwachte ratios:
+        #   resistief (oven, waterkoker):  1.0–1.5×   (geen inrush)
+        #   motor (wasmachine, droger):    3.0–8.0×   (groot vliegwiel)
+        #   compressor (koelkast, WP):     2.5–6.0×
+        #   SMPS/elektronisch:             3.0–15×    (condensator laadt op)
+        #   LED (SMPS):                   10–80×      (maar <1ms, snel uitgedoofd)
+        # Max effect: ±0.15 — bewust groter dan PF, inrush is sterker onderscheidend.
+        INRUSH_RANGES: dict = {
+            "resistive":  (1.0,  1.5),
+            "heat":       (1.0,  1.5),
+            "motor":      (2.5,  8.0),
+            "heat_pump":  (2.5,  6.0),
+            "electronic": (3.0, 15.0),
+            "led":        (10.0, 80.0),
+        }
+        if inrush_peak_a is not None and inrush_peak_a > 0.0:
+            rated_a = abs(delta_power) / 230.0 * 1.414
+            if rated_a > 0.1:
+                inrush_ratio = inrush_peak_a / rated_a
+                for m in matches:
+                    load = _load_type(m["device_type"])
+                    if load and load in INRUSH_RANGES:
+                        ir_min, ir_max = INRUSH_RANGES[load]
+                        ir_mid  = (ir_min + ir_max) / 2
+                        ir_half = max((ir_max - ir_min) / 2, 0.1)
+                        ir_dist = abs(inrush_ratio - ir_mid) / ir_half
+                        if ir_min <= inrush_ratio <= ir_max:
+                            ir_adj = round(max(0.0, min(0.15, (1.0 - ir_dist) * 0.15)), 3)
+                        else:
+                            # Buiten bereik: malus schaalt met afstand, max -0.15
+                            overshoot = min(ir_dist - 1.0, 1.0)
+                            ir_adj = round(max(-0.15, -overshoot * 0.15), 3)
+                        m["confidence"] = round(max(0.0, min(1.0, m["confidence"] + ir_adj)), 3)
+                        m["inrush_adj"] = ir_adj
+                matches.sort(key=lambda x: x["confidence"], reverse=True)
+
+        # ── [4] THD scoring ───────────────────────────────────────────────────
+        # Alleen actief als thd_pct beschikbaar is (ESP32 FFT op 1kHz stream).
+        # Geen ESP32 of geen THD-sensor → thd_pct is None → blok overgeslagen.
+        #
+        # THD% typische waarden:
+        #   resistief (oven, waterkoker, gloeilamp):  0–5%
+        #   motor (wasmachine, koelkast):            20–50%
+        #   dimmer (fase-aansnijding):               40–80%
+        #   SMPS (laptop, PC, TV, LED-driver):       60–120%
+        #   warmtepomp (inverter-gestuurd):          15–40%
+        # Max effect: ±0.12
+        THD_RANGES: dict = {
+            "resistive":  (0.0,  8.0),
+            "heat":       (0.0,  8.0),
+            "motor":      (15.0, 55.0),
+            "heat_pump":  (10.0, 45.0),
+            "electronic": (50.0, 130.0),
+            "led":        (40.0, 110.0),
+        }
+        if thd_pct is not None and thd_pct >= 0.0:
+            for m in matches:
+                load = _load_type(m["device_type"])
+                if load and load in THD_RANGES:
+                    thd_min, thd_max = THD_RANGES[load]
+                    thd_mid  = (thd_min + thd_max) / 2
+                    thd_half = max((thd_max - thd_min) / 2, 1.0)
+                    thd_dist = abs(thd_pct - thd_mid) / thd_half
+                    if thd_min <= thd_pct <= thd_max:
+                        thd_adj = round(max(0.0, min(0.12, (1.0 - thd_dist) * 0.12)), 3)
+                    else:
+                        overshoot = min(thd_dist - 1.0, 1.0)
+                        thd_adj = round(max(-0.12, -overshoot * 0.12), 3)
+                    m["confidence"] = round(max(0.0, min(1.0, m["confidence"] + thd_adj)), 3)
+                    m["thd_adj"] = thd_adj
             matches.sort(key=lambda x: x["confidence"], reverse=True)
 
         return matches[:5]

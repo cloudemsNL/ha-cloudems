@@ -2,7 +2,5 @@
   "name": "CloudEMS - Energy Management System",
   "content_in_root": false,
   "render_readme": true,
-  "homeassistant": "2024.1.0",
-  "zip_release": true,
-  "filename": "cloudems-{version}.zip"
+  "homeassistant": "2024.1.0"
 }

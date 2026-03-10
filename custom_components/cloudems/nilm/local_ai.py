@@ -35,8 +35,17 @@ class PowerEvent:
     rms_power:   float
     phase:       str
     # v2.2 — ESPHome 1kHz meter extra features (None = niet beschikbaar)
-    power_factor:  float | None = None   # cos φ  0.0–1.0
-    inrush_peak_a: float | None = None   # piekstroom bij opstarten (A)
+    power_factor:       float | None = None   # cos φ  0.0–1.0
+    inrush_peak_a:      float | None = None   # piekstroom bij opstarten (A)
+    # v4.5 — Reactief vermogen + THD: V-I trajectory benadering via P1-signaal.
+    # Reactief vermogen Q (VAR) en Total Harmonic Distortion (%) zijn proxies
+    # voor de V-I vingerafdruk — ze discrimineren o.a.:
+    #   • motor-apparaten (wasmachine, droger): hoog Q bij opstarten
+    #   • resistief (ketel, oven): Q ≈ 0, THD laag
+    #   • elektronische lasten (laptop, TV): hoog THD, laag Q
+    # Geen raw waveforms nodig — beschikbaar via DSMR P1 of ESPHome 1kHz meter.
+    reactive_power_var: float | None = None   # Q in VAR  (negatief = capacitief)
+    thd_pct:            float | None = None   # THD% totale harmonische vervorming
 
 
 def _extract_features(event: PowerEvent) -> List[float]:
@@ -62,6 +71,26 @@ def _extract_features(event: PowerEvent) -> List[float]:
         # Genormaliseerd: inrush_ratio = piek / (delta_power/230 * √2)
         rated_a = abs(event.delta_power) / 230.0 * 1.414
         feats.append(event.inrush_peak_a / max(rated_a, 0.1))
+
+    # v4.5 — V-I trajectory benadering via reactief vermogen + THD
+    # Feature: reactive_fraction = Q / S (waarbij S = schijnbaar vermogen)
+    # Discrimineert: motor-apparaten (hoog Q), resistief (Q≈0), elektronisch (hoog THD)
+    # Formule: sin(φ) = Q / sqrt(P² + Q²) — geeft de hoek in het vermogensvlak
+    p_abs = abs(event.delta_power)
+    if event.reactive_power_var is not None:
+        q = abs(event.reactive_power_var)
+        s = math.sqrt(p_abs ** 2 + q ** 2)
+        # sin(phi): 0.0 = puur resistief (ketel), 1.0 = puur reactief (motor)
+        feats.append(q / max(s, 1.0))
+        # Teken van Q: positief = inductief (motor), negatief = capacitief (condensator)
+        feats.append(math.copysign(1.0, event.reactive_power_var))
+
+    if event.thd_pct is not None:
+        # THD genormaliseerd: 0–100% → 0.0–1.0
+        # Hoog THD (>20%): elektronische lasten (laptop, LED-driver, TV)
+        # Laag THD (<5%): resistief of motor
+        feats.append(min(event.thd_pct / 100.0, 1.0))
+
     return feats
 
 
@@ -183,12 +212,55 @@ class LocalAIClassifier:
         except Exception as err:
             _LOGGER.error("Local AI opslaan mislukt: %s", err)
 
-    def add_training_sample(self, event: PowerEvent, confirmed_device_type: str) -> None:
+    def add_training_sample(
+        self,
+        event: PowerEvent,
+        confirmed_device_type: str,
+        device_id: str = "",
+    ) -> None:
+        """Voeg een trainingsample toe en hertraïn indien voldoende data.
+
+        v4.5: device_id wordt opgeslagen zodat relabel_device() bestaande
+        samples kan bijwerken als de gebruiker een type corrigeert.
+        """
         features = _extract_features(event)
-        self._training_data.append({"features": features, "label": confirmed_device_type})
-        _LOGGER.debug("Training sample: %s (totaal: %d)", confirmed_device_type, len(self._training_data))
+        self._training_data.append({
+            "features":  features,
+            "label":     confirmed_device_type,
+            "device_id": device_id,   # v4.5: voor relabeling bij type-correctie
+        })
+        _LOGGER.debug("Training sample: %s device=%s (totaal: %d)",
+                      confirmed_device_type, device_id or "?", len(self._training_data))
         if len(self._training_data) >= self.MIN_TRAINING_SAMPLES:
             self._retrain()
+
+    def relabel_device(self, device_id: str, old_type: str, new_type: str) -> int:
+        """Hernoem alle trainingssamples van device_id van old_type naar new_type.
+
+        Wordt aangeroepen vanuit set_feedback() als de gebruiker een type corrigeert.
+        Voorkomt conflicterende labels in de kNN voor dezelfde feature-vector.
+
+        v4.5 fix: zonder dit zouden bestaande samples het oude type blijven leren
+        terwijl nieuwe samples het nieuwe type leren — de kNN raakt verward.
+
+        Returns: aantal herschreven samples.
+        """
+        if not device_id or old_type == new_type:
+            return 0
+        rewritten = 0
+        for sample in self._training_data:
+            if sample.get("device_id") == device_id and sample.get("label") == old_type:
+                sample["label"] = new_type
+                rewritten += 1
+        if rewritten > 0:
+            _LOGGER.info(
+                "LocalAI relabel: %s %d samples %s→%s",
+                device_id, rewritten, old_type, new_type,
+            )
+            # Hertraïn direct zodat de correctie onmiddellijk effect heeft
+            if len(self._training_data) >= self.MIN_TRAINING_SAMPLES:
+                self._retrain()
+        return rewritten
 
     def _retrain(self) -> None:
         rows   = [d["features"] for d in self._training_data]

@@ -127,6 +127,8 @@ from .const import (
     CONF_ESPHOME_POWER_FACTOR_L1, CONF_ESPHOME_POWER_FACTOR_L2, CONF_ESPHOME_POWER_FACTOR_L3,
     CONF_ESPHOME_INRUSH_L1, CONF_ESPHOME_INRUSH_L2, CONF_ESPHOME_INRUSH_L3,
     CONF_ESPHOME_RISE_TIME_L1, CONF_ESPHOME_RISE_TIME_L2, CONF_ESPHOME_RISE_TIME_L3,
+    CONF_ESPHOME_REACTIVE_L1, CONF_ESPHOME_REACTIVE_L2, CONF_ESPHOME_REACTIVE_L3,
+    CONF_ESPHOME_THD_L1, CONF_ESPHOME_THD_L2, CONF_ESPHOME_THD_L3,
 )
 from .nilm.detector import NILMDetector, DetectedDevice, STORAGE_KEY_NILM_LEARNER
 from .nilm.hybrid_nilm import HybridNILM
@@ -366,6 +368,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # v4.0.4: tijdpatroon store
         from .nilm.time_pattern_learner import STORAGE_KEY_TIME_PATTERNS as _SKEY_TP
         self._store_time_patterns = Store(hass, 1, _SKEY_TP)
+        # v4.5: co-occurrence store
+        self._store_co_occurrence = Store(hass, 1, "cloudems_nilm_co_occurrence_v1")
         # v4.0.1: ExportDailyTracker — persistente dagelijkse export-kWh history
         from .energy_manager.export_limit_monitor import (
             ExportDailyTracker, ExportLimitMonitor,
@@ -447,7 +451,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             ai_provider=ai_provider,
             hass=hass,
         )
-        self._nilm.set_stores(self._store_devices, self._store_energy, self._store_learner, self._store_time_patterns)
+        self._nilm.set_stores(self._store_devices, self._store_energy, self._store_learner, self._store_time_patterns, store_co_occurrence=self._store_co_occurrence)
 
         # v1.20: vertel NILM welke entity_ids geconfigureerde infrastructure-sensoren zijn
         # zodat die nooit als huishoudapparaat worden geclassificeerd.
@@ -533,10 +537,24 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _sc = _state.attributes.get("state_class", "")
                 _dc = _state.attributes.get("device_class", "")
                 _unit = (_state.attributes.get("unit_of_measurement") or "").lower()
+                _fname = (_state.attributes.get("friendly_name") or _e.entity_id).lower()
                 if (
+                    # kWh/energie-tellers
                     _sc in ("total_increasing", "total")
                     or _dc == "energy"
                     or _unit in ("kwh", "wh", "mwh", "gj", "m³", "m3")
+                    # v4.4: vermogenssensoren (W) zijn ook geen NILM-verbruikers
+                    or (_dc == "power" and _unit == "w")
+                    # v4.4: naam-gebaseerde keyword-filter als laatste vangnet
+                    # Pakt "Stroom tegen uurprijzen", "Connect energiemeter", enz.
+                    or any(kw in _fname for kw in (
+                        "energiemeter", "energy meter", "stroomprijs", "uurprijs",
+                        "stroom tegen", "elektriciteitsgemiddelde",
+                        "elektriciteitsverbruik", "elektriciteitsproductie",
+                        "connect energi", "slimme meter", "p1 meter",
+                        "net import", "net export", "grid import", "grid export",
+                        "solar production", "pv productie",
+                    ))
                 ):
                     _config_eids.add(_e.entity_id)
 
@@ -692,6 +710,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._esp_rise_time_l1:    Optional[float] = None
         self._esp_rise_time_l2:    Optional[float] = None
         self._esp_rise_time_l3:    Optional[float] = None
+        # v4.4.1 — optionele ESP32 features: None als sensor niet geconfigureerd
+        self._esp_reactive_l1:     Optional[float] = None
+        self._esp_reactive_l2:     Optional[float] = None
+        self._esp_reactive_l3:     Optional[float] = None
+        self._esp_thd_l1:          Optional[float] = None
+        self._esp_thd_l2:          Optional[float] = None
+        self._esp_thd_l3:          Optional[float] = None
         self._ev_session:        Optional[object] = None
         self._nilm_schedule:     Optional[object] = None
 
@@ -1554,6 +1579,42 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     del self._nilm._devices[did]
                 if _stale_ids:
                     await self._nilm.async_save()
+
+                # v4.4.1: eenmalige cleanup — verwijder devices waarvan de naam
+                # overeenkomt met infra-keywords (energiemeter, uurprijzen, enz.).
+                # Draait slechts één keer; vlag opgeslagen in review-store.
+                try:
+                    _review_done = await self._store_review.async_load() or {}
+                    if not _review_done.get("infra_keyword_cleanup_v441"):
+                        from .nilm.smart_sensor_discovery import SmartSensorDiscovery
+                        _kw_stale = []
+                        for did, dev in list(self._nilm._devices.items()):
+                            if getattr(dev, "source", "") == "smart_plug":
+                                continue
+                            _dname = (getattr(dev, "name", "") or "").lower()
+                            _eid   = (getattr(dev, "source_entity_id", "") or "").lower()
+                            _search = f"{_eid} {_dname}"
+                            if (SmartSensorDiscovery._EXCLUDE_PATTERNS.search(_search)
+                                    or any(sub in _search
+                                           for sub in SmartSensorDiscovery._EXCLUDE_SUBSTRINGS)):
+                                _kw_stale.append(did)
+                        for did in _kw_stale:
+                            _LOGGER.info(
+                                "CloudEMS NILM: verwijder infra-ghost '%s' (v4.4.1 eenmalig)",
+                                self._nilm._devices[did].name,
+                            )
+                            del self._nilm._devices[did]
+                        if _kw_stale:
+                            await self._nilm.async_save()
+                            _LOGGER.info(
+                                "CloudEMS NILM: %d infra-ghost(s) eenmalig opgeruimd",
+                                len(_kw_stale),
+                            )
+                        # Markeer als gedaan — nooit meer uitvoeren
+                        _review_done["infra_keyword_cleanup_v441"] = True
+                        await self._store_review.async_save(_review_done)
+                except Exception as _kw_err:
+                    _LOGGER.debug("CloudEMS: keyword cleanup mislukt: %s", _kw_err)
         except Exception as _cl_err:
             _LOGGER.warning("CloudEMS: post-load cleanup mislukt: %s", _cl_err)
 
@@ -2576,15 +2637,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if (self._config.get(CONF_DSMR_SOURCE) == DSMR_SOURCE_ESPHOME
                     and hasattr(self._nilm, "set_esphome_features")):
                 self._nilm.set_esphome_features(
-                    power_factor_l1 = self._esp_power_factor_l1,
-                    power_factor_l2 = self._esp_power_factor_l2,
-                    power_factor_l3 = self._esp_power_factor_l3,
-                    inrush_peak_l1  = self._esp_inrush_peak_l1,
-                    inrush_peak_l2  = self._esp_inrush_peak_l2,
-                    inrush_peak_l3  = self._esp_inrush_peak_l3,
-                    rise_time_l1    = self._esp_rise_time_l1,
-                    rise_time_l2    = self._esp_rise_time_l2,
-                    rise_time_l3    = self._esp_rise_time_l3,
+                    power_factor_l1   = self._esp_power_factor_l1,
+                    power_factor_l2   = self._esp_power_factor_l2,
+                    power_factor_l3   = self._esp_power_factor_l3,
+                    inrush_peak_l1    = self._esp_inrush_peak_l1,
+                    inrush_peak_l2    = self._esp_inrush_peak_l2,
+                    inrush_peak_l3    = self._esp_inrush_peak_l3,
+                    rise_time_l1      = self._esp_rise_time_l1,
+                    rise_time_l2      = self._esp_rise_time_l2,
+                    rise_time_l3      = self._esp_rise_time_l3,
+                    reactive_power_l1 = getattr(self, "_esp_reactive_l1", None),
+                    reactive_power_l2 = getattr(self, "_esp_reactive_l2", None),
+                    reactive_power_l3 = getattr(self, "_esp_reactive_l3", None),
+                    thd_l1            = getattr(self, "_esp_thd_l1", None),
+                    thd_l2            = getattr(self, "_esp_thd_l2", None),
+                    thd_l3            = getattr(self, "_esp_thd_l3", None),
                 )
 
             # Solar learner + PV forecast
@@ -3123,6 +3190,110 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             except Exception as _lf_err:
                 _LOGGER.debug("Levensduur verrijking fout: %s", _lf_err)
 
+            # v4.4.1: Trusted device lijst — één geïntegreerd vertrouwensmodel.
+            #
+            # Een apparaat telt mee in vermogenstotalen als het aan MINIMAAL ÉÉN
+            # van de volgende criteria voldoet:
+            #
+            #   A. Fysiek gemeten     : source="smart_plug" → altijd vertrouwd
+            #   B. Gebruiker bevestigd: confirmed=True + on_events >= 2
+            #   C. PowerCalc HIGH     : SPE confidence=HIGH (merk/model profiel)
+            #   D. NILM geleerd       : confidence >= 0.75 + on_events >= 5
+            #                          + power_w <= max_fase_w * 0.80
+            #
+            # Harde uitsluitingen (ook bij A/B/C):
+            #   • current_power > max_fase_w * 0.80  → hoogstwaarschijnlijk totaalmeting
+            #   • current_power > 6000W              → boven 1 volbelaste 25A fase
+            #
+            # nilm_devices_enriched blijft VOLLEDIG voor het dashboard — gebruiker
+            # kan lage-confidence apparaten zien en bevestigen/afwijzen.
+
+            # Bouw SPE HIGH-set op (entity_ids met PowerCalc HIGH confidence)
+            _spe_high_eids: set = set()
+            if self._power_estimator:
+                try:
+                    for _spe_s in self._power_estimator.get_all_states():
+                        if _spe_s.get("confidence") == "high":
+                            _spe_high_eids.add(_spe_s.get("entity_id", ""))
+                except Exception:
+                    pass
+
+            # Fasevermogen per fase uit de baselines van de NILM-detector
+            _phase_baselines = getattr(self._nilm, "_baseline_power", {})
+            _max_fase_w = max(_phase_baselines.values()) if _phase_baselines else 6000.0
+            # Minimaal 500W als bovengrens zodat kleine installaties niet alles blokkeren
+            _max_fase_w = max(_max_fase_w, 500.0)
+            # Harde maximum: 1 fase bij 25A = 5750W, neem ruim 6000W als absoluut plafond
+            _power_ceiling = min(_max_fase_w * 0.80, 6000.0)
+
+            def _is_trusted(d: dict) -> bool:
+                power_w = float(d.get("current_power") or 0)
+
+                # Harde bovengrens — ongeacht bron
+                if power_w > _power_ceiling and d.get("is_on"):
+                    return False
+
+                # A: fysiek gemeten via smart plug
+                if d.get("source") == "smart_plug":
+                    return True
+
+                # B: gebruiker heeft bevestigd + minimaal 2× gezien
+                if d.get("confirmed") and int(d.get("on_events", 0)) >= 2:
+                    return True
+
+                # C: PowerCalc HIGH confidence (merk/model profiel aanwezig)
+                eid = d.get("entity_id") or d.get("source_entity_id", "")
+                if eid and eid in _spe_high_eids:
+                    return True
+
+                # D: NILM geleerd met voldoende zekerheid en herhaling
+                conf   = float(d.get("confidence", 0))
+                events = int(d.get("on_events", 0))
+                if conf >= 0.75 and events >= 5:
+                    return True
+
+                return False
+
+            # Annoteer elk device met trust_status zodat dashboard dit kan tonen
+            def _trust_reason(d: dict) -> str:
+                power_w = float(d.get("current_power") or 0)
+                if power_w > _power_ceiling and d.get("is_on"):
+                    return f"uitgesloten: vermogen {power_w:.0f}W > plafond {_power_ceiling:.0f}W"
+                if d.get("source") == "smart_plug":
+                    return "vertrouwd: fysiek gemeten"
+                if d.get("confirmed") and int(d.get("on_events", 0)) >= 2:
+                    return "vertrouwd: bevestigd door gebruiker"
+                eid = d.get("entity_id") or d.get("source_entity_id", "")
+                if eid and eid in _spe_high_eids:
+                    return "vertrouwd: PowerCalc profiel"
+                conf   = float(d.get("confidence", 0))
+                events = int(d.get("on_events", 0))
+                if conf >= 0.75 and events >= 5:
+                    return f"vertrouwd: {conf*100:.0f}% confidence, {events}× gezien"
+                return f"onzeker: {conf*100:.0f}% confidence, {events}× gezien"
+
+            for _d in nilm_devices_enriched:
+                _d["trust_status"] = _trust_reason(_d)
+                _d["is_trusted"]   = _is_trusted(_d)
+
+            nilm_devices_trusted = [d for d in nilm_devices_enriched if _is_trusted(d)]
+
+            _trusted_on_w = sum(
+                float(d.get("current_power") or 0)
+                for d in nilm_devices_trusted if d.get("is_on")
+            )
+            _total_on_w = sum(
+                float(d.get("current_power") or 0)
+                for d in nilm_devices_enriched if d.get("is_on")
+            )
+            if _total_on_w > _trusted_on_w + 50:
+                _LOGGER.debug(
+                    "NILM trusted filter: %.0fW → %.0fW "
+                    "(%.0fW uitgesloten: lage confidence of >%.0fW phaseplafond)",
+                    _total_on_w, _trusted_on_w,
+                    _total_on_w - _trusted_on_w, _power_ceiling,
+                )
+
             # v1.10.3: Weather calibration for PV forecast
             weather_calib: dict = {}
             if self._pv_forecast:
@@ -3144,7 +3315,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if outside_temp_c is not None:
                     # Use NILM heating devices or total power as heating proxy
                     heating_w = 0.0
-                    for dev in nilm_devices_raw:
+                    for dev in nilm_devices_trusted:
                         if dev.get("device_type") in ("heat_pump", "boiler", "cv_boiler", "heat") and dev.get("is_on"):
                             heating_w += float(dev.get("current_power") or 0)
                     if heating_w == 0:
@@ -3188,7 +3359,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         hp_electric_w = self._calc.to_watts(hp_eid, raw)
                 else:
                     # Derive from NILM heat pump detections
-                    for dev in nilm_devices_raw:
+                    for dev in nilm_devices_trusted:
                         if dev.get("device_type") in ("heat_pump", "air_source_heat_pump") and dev.get("running"):
                             hp_electric_w += float(dev.get("current_power") or dev.get("power_w") or 0)
                 if hp_th_eid:
@@ -3352,7 +3523,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # Onbevestigde detecties hebben een onzekere baseline en geven anders
                 # valse drift-waarschuwingen voor dingen die de NILM zelf nog niet
                 # goed heeft geleerd.
-                for dev in nilm_devices_enriched:
+                for dev in nilm_devices_trusted:
                     if not (dev.get("is_on") and dev.get("current_power")):
                         continue
                     _confirmed   = bool(dev.get("confirmed", False))
@@ -3415,9 +3586,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if self._home_baseline and hasattr(self._home_baseline, "get_standby_w")
                 else 0.0
             )
+            # v4.4.1: gebruik nilm_devices_trusted ipv enriched — de Other-bucket
+            # moet alleen vertrouwde devices aftrekken, anders ontstaan
+            # negatieve of onrealistische waarden door totaalmetingen.
             other_data = self._nilm_other_tracker.update(
                 grid_import_w = max(0.0, data.get("grid_power", 0.0)),
-                nilm_devices  = nilm_devices_enriched,
+                nilm_devices  = nilm_devices_trusted,
                 estimator     = self._power_estimator,
                 standby_w     = standby_w_now,
             )
@@ -5882,6 +6056,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # ── v2.2: ESPHome NILM-meter features uitlezen ───────────────────
             # Als de gebruiker een DIY ESPHome-meter heeft geconfigureerd,
             # lees dan power factor en inrush uit als extra NILM-features.
+            # v4.4.1: ook reactief vermogen (Q) en THD% — optioneel, None als afwezig.
             if self._config.get(CONF_DSMR_SOURCE) == DSMR_SOURCE_ESPHOME:
                 def _esp_float(key: str) -> Optional[float]:
                     eid = self._config.get(key, "")
@@ -5901,6 +6076,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._esp_rise_time_l1    = _esp_float(CONF_ESPHOME_RISE_TIME_L1)
                 self._esp_rise_time_l2    = _esp_float(CONF_ESPHOME_RISE_TIME_L2)
                 self._esp_rise_time_l3    = _esp_float(CONF_ESPHOME_RISE_TIME_L3)
+                # Reactief vermogen Q (VAR) — None als ESP32-firmware dit niet meet
+                self._esp_reactive_l1     = _esp_float(CONF_ESPHOME_REACTIVE_L1)
+                self._esp_reactive_l2     = _esp_float(CONF_ESPHOME_REACTIVE_L2)
+                self._esp_reactive_l3     = _esp_float(CONF_ESPHOME_REACTIVE_L3)
+                # THD% — None als ESP32-firmware geen FFT/THD uitrekent
+                self._esp_thd_l1          = _esp_float(CONF_ESPHOME_THD_L1)
+                self._esp_thd_l2          = _esp_float(CONF_ESPHOME_THD_L2)
+                self._esp_thd_l3          = _esp_float(CONF_ESPHOME_THD_L3)
 
             # Feed NILM — v1.8: smart fallback cascade
             #

@@ -379,6 +379,15 @@ CONF_ESPHOME_INRUSH_L3        = "esphome_inrush_l3"
 CONF_ESPHOME_RISE_TIME_L1     = "esphome_rise_time_l1"
 CONF_ESPHOME_RISE_TIME_L2     = "esphome_rise_time_l2"
 CONF_ESPHOME_RISE_TIME_L3     = "esphome_rise_time_l3"
+# v4.4.1 — reactief vermogen (VAR) en THD per fase
+# Optioneel: alleen ESP32-firmware met FFT/Q-berekening levert deze waarden.
+# Afwezig = None → geen effect op NILM classificatie (graceful degradation).
+CONF_ESPHOME_REACTIVE_L1      = "esphome_reactive_l1"
+CONF_ESPHOME_REACTIVE_L2      = "esphome_reactive_l2"
+CONF_ESPHOME_REACTIVE_L3      = "esphome_reactive_l3"
+CONF_ESPHOME_THD_L1           = "esphome_thd_l1"
+CONF_ESPHOME_THD_L2           = "esphome_thd_l2"
+CONF_ESPHOME_THD_L3           = "esphome_thd_l3"
 # Bekende DSMR/P1 HA-integratie platforms voor auto-detectie
 DSMR_HA_PLATFORMS = [
     "dsmr",           # officiële DSMR integratie

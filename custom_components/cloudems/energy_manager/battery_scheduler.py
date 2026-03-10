@@ -43,6 +43,7 @@ from .seasonal_strategy import (
     SEASON_TRANSITION, SEASON_SUMMER, SEASON_WINTER,
 )
 from .saldering_context import SalderingContext
+from .battery_cycle_economics import BatteryCycleEconomics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +111,9 @@ class BatteryEPEXScheduler:
         # Learning: track plan accuracy
         self._plan_hits = 0
         self._plan_total = 0
+
+        # v4.4: degradatiekosten-bewuste economics
+        self._economics = BatteryCycleEconomics(config)
 
         # v1.20: seasonal strategy
         self._seasonal_params: Optional[SeasonalParameters] = None
@@ -247,6 +251,9 @@ class BatteryEPEXScheduler:
             "season_reason":    self._seasonal_params.reason if self._seasonal_params else "",
             "season_auto":      self._seasonal_params.auto_detected if self._seasonal_params else True,
             "discharge_window": list(self._seasonal_params.discharge_window) if self._seasonal_params else [17, 21],
+            # v4.4: degradatiekosten info
+            "cycle_cost_eur_per_kwh": self._economics.base_cycle_cost,
+            **self._economics.summary_dict(),
         }
 
     # ── Schedule building ──────────────────────────────────────────────────────
@@ -313,28 +320,27 @@ class BatteryEPEXScheduler:
         remaining = discharge_hours_n - len(disch_from_window)
         disch_extra = out_window[:remaining] if remaining > 0 else []
 
-        # ── v1.21: Saldering-bewuste spreaddcheck ─────────────────────────────
-        # Filter ontlaaduren waarvan de netto waarde onvoldoende is gegeven
-        # het huidige salderingspercentage.
-        # Eigenverbruik (batterij dekt > 50% van huis) wordt NOOIT gefilterd —
-        # dat bespaart altijd de volle inkoopprijs, ongeacht saldering.
-        # Arbitrage naar het net wordt getoetst aan min_discharge_price.
+        # ── v1.21 + v4.4: Saldering-bewuste + degradatiekosten spreadcheck ──────
+        # Ontlaaduren worden dubbel getoetst:
+        #   1. Saldering-check (v1.21): netto verkoopwaarde na salderingskorting
+        #   2. Degradatiecheck (v4.4): netto spread na cycluskosten & round-trip eff
+        # Eigenverbruik wordt NOOIT gefilterd — dat bespaart altijd de volle
+        # inkoopprijs, ongeacht saldering of degradatie.
         sal_ctx = SalderingContext.for_current_year()
         cheapest_charge_price = sorted_asc[0]["price"] if sorted_asc else 0.0
 
         filtered_disch = []
         sal_skipped = []
+        deg_skipped = []
         for slot in disch_from_window + disch_extra:
             sell_p = slot["price"]
-            # Conservatieve aanname: 50% eigenverbruikfractie
-            # (batterij dekt helft van typisch avondverbruik bij 3kW ontlaad)
+
+            # Check 1: saldering
             min_p = sal_ctx.min_discharge_price_for_profit(
                 buy_price_eur_kwh   = cheapest_charge_price,
                 house_load_fraction = 0.5,
             )
-            if sell_p >= min_p:
-                filtered_disch.append(slot)
-            else:
+            if sell_p < min_p:
                 sal_skipped.append(slot)
                 _LOGGER.info(
                     "BatteryScheduler: uur %02d:00 (€%.4f/kWh) overgeslagen — "
@@ -342,11 +348,35 @@ class BatteryEPEXScheduler:
                     slot["hour"], sell_p,
                     round(sal_ctx.saldering_pct * 100), min_p, sal_ctx.year,
                 )
+                continue
+
+            # Check 2: v4.4 degradatiekosten — arbitrage rentabel na slijtage?
+            eco_decision = self._economics.evaluate_slot_pair(
+                charge_price    = cheapest_charge_price,
+                discharge_price = sell_p,
+                soc_at_discharge= soc,
+            )
+            if not eco_decision.worth_it:
+                deg_skipped.append(slot)
+                _LOGGER.info(
+                    "BatteryScheduler: uur %02d:00 (€%.4f/kWh) overgeslagen — "
+                    "%s",
+                    slot["hour"], sell_p, eco_decision.reason,
+                )
+                continue
+
+            filtered_disch.append(slot)
 
         if sal_skipped:
             _LOGGER.info(
                 "BatteryScheduler: %d ontlaadur(en) gefilterd op saldering %d%% (jaar %d)",
                 len(sal_skipped), round(sal_ctx.saldering_pct * 100), sal_ctx.year,
+            )
+        if deg_skipped:
+            _LOGGER.info(
+                "BatteryScheduler: %d ontlaadur(en) gefilterd op degradatiekosten "
+                "(%.4f €/kWh slijtage)",
+                len(deg_skipped), self._economics.base_cycle_cost,
             )
 
         disch_hour_set = {s["hour"] for s in filtered_disch}
@@ -367,7 +397,16 @@ class BatteryEPEXScheduler:
             elif h in disch_hour_set:
                 win_note = " (voorkeur venster)" if disch_window[0] <= h <= disch_window[1] else ""
                 action = "discharge"
-                r = f"Ontlaaduur{win_note} ({p:.4f} €/kWh)"
+                # v4.4: toon netto spread na degradatiekosten in de reden
+                eco = self._economics.evaluate_slot_pair(
+                    charge_price    = cheapest_charge_price,
+                    discharge_price = p,
+                    soc_at_discharge= soc,
+                )
+                r = (
+                    f"Ontlaaduur{win_note} ({p:.4f} €/kWh, "
+                    f"netto {eco.netto_spread*100:.1f} ct/kWh na slijtage)"
+                )"
             else:
                 action = "idle"
                 r      = f"Gemiddeld uur ({p:.4f} €/kWh)"

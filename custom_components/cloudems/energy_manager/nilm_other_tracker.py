@@ -81,12 +81,13 @@ class NilmOtherTracker:
         """Herbereken de bucket op basis van actuele data."""
         now = time.time()
 
-        # 1. NILM bevestigde apparaten die AAN zijn
+        # 1. Vertrouwde NILM apparaten die AAN zijn
+        # Caller geeft nilm_devices_trusted door — geen extra confirmed-filter nodig,
+        # die selectie is al gedaan door het geïntegreerde vertrouwensmodel.
         nilm_on_w = sum(
             float(d.get("current_power") or d.get("power_w") or 0)
             for d in nilm_devices
             if d.get("is_on")
-            and d.get("confirmed")
             and float(d.get("current_power") or d.get("power_w") or 0) > 1.0
         )
 

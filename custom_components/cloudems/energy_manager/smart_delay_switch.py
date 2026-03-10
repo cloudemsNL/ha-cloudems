@@ -23,6 +23,7 @@ Configuratie per schakelaar:
   power_sensor        str?  — optionele vermogenssensor (W)
   power_threshold_w   float — vermogen waarboven "actief" (default: 10 W)
   price_threshold_eur float — prijs waarboven uitschakelen (default: 0.25 €/kWh)
+  wait_mode           str   — wachtmodus: "price" (default) of "cheapest_block"
   window_hours        int   — goedkoopste N uur (1–8, zelfde als cheap_switch)
   earliest_hour       int   — niet eerder dan dit uur inschakelen (0–23)
   latest_hour         int   — niet later dan dit uur inschakelen (0–23)
@@ -88,6 +89,17 @@ class SmartDelayConfig:
     grace_s:            int   = 30
     notify:             bool  = True
     active:             bool  = True
+    # v4.5: wachtmodus
+    # "price"          — wacht tot prijs <= price_threshold_eur (huidige gedrag)
+    # "cheapest_block" — wacht altijd tot het goedkoopste N-uursblok start,
+    #                    ongeacht of de prijs onder de drempel zakt
+    wait_mode:          str   = "price"
+    # v4.5: maximale wachttijd
+    # 0 = onbeperkt wachten (oorspronkelijk gedrag)
+    # >0 = schakel sowieso in na max_wait_h uur, ook als geen goedkoop blok gevonden
+    # Beschermt tegen oneindig wachten bij ontbrekende EPEX-data of geen goedkoop blok
+    # Typisch: vaatwasser=12h (klaar voor ochtend), wasmachine=8h, EV=0 (onbeperkt)
+    max_wait_h:         int   = 0
 
     @classmethod
     def from_dict(cls, d: dict) -> "SmartDelayConfig":
@@ -103,6 +115,8 @@ class SmartDelayConfig:
             grace_s            = int(d.get("grace_s", 30)),
             notify             = bool(d.get("notify", True)),
             active             = bool(d.get("active", True)),
+            wait_mode          = str(d.get("wait_mode", "price")),
+            max_wait_h         = int(d.get("max_wait_h", 0)),
         )
 
     def to_dict(self) -> dict:
@@ -118,6 +132,8 @@ class SmartDelayConfig:
             "grace_s":            self.grace_s,
             "notify":             self.notify,
             "active":             self.active,
+            "wait_mode":          self.wait_mode,
+            "max_wait_h":         self.max_wait_h,
         }
 
 
@@ -203,16 +219,43 @@ class SmartDelayScheduler:
         return float(price_info.get("current", price_info.get("current_price", 0.0)) or 0.0)
 
     def _cheap_start_hour(self, cfg: SmartDelayConfig, price_info: dict) -> Optional[int]:
-        """Geeft het startuur van het goedkoopste blok terug, of None als onbekend."""
-        key = f"cheapest_{cfg.window_hours}h_start"
-        val = price_info.get(key)
-        return int(val) if val is not None else None
+        """Geeft het startuur van het goedkoopste aaneengesloten blok terug, of None.
+
+        prices.py levert cheapest_2h_start / 3h / 4h rechtstreeks.
+        Voor 1h, 6h, 8h: bepaal het startuur als het laagste uur in cheapest_Nh_hours,
+        of val terug op cheapest_hour_1 (laagste individuele uur).
+        Fix v4.5: eerder werd ook gezocht naar "cheapest_Nh_block" key die niet bestaat.
+        """
+        n = cfg.window_hours
+        # Directe _start keys voor 2h/3h/4h
+        direct = price_info.get(f"cheapest_{n}h_start")
+        if direct is not None:
+            return int(direct)
+        # Afleiden uit cheapest_Nh_hours (gesorteerde individuele goedkope uren)
+        hours_list = price_info.get(f"cheapest_{n}h_hours") or []
+        if hours_list:
+            return int(min(hours_list))
+        # Laatste vangnet: goedkoopste individuele uur
+        fallback = price_info.get("cheapest_hour_1")
+        return int(fallback) if fallback is not None else None
 
     def _in_cheap_block(self, cfg: SmartDelayConfig, price_info: dict, now_h: int) -> bool:
-        """True als we momenteel in het goedkope blok zitten."""
-        block_key = f"cheapest_{cfg.window_hours}h_block"
-        block = price_info.get(block_key) or {}
-        return now_h in (block.get("hours") or [])
+        """True als we momenteel in het goedkoopste aaneengesloten blok zitten.
+
+        Fix v4.5: prices.py levert in_cheapest_Nh (bool) voor 1-4h blokken.
+        Voor 6h/8h: check of now_h in cheapest_Nh_hours zit.
+        Eerder werd gezocht naar "cheapest_Nh_block" met een "hours" lijst —
+        die key bestaat niet, waardoor dit altijd False retourneerde.
+        """
+        n = cfg.window_hours
+        # Directe boolean voor 1h–4h
+        direct_key = f"in_cheapest_{n}h"
+        direct = price_info.get(direct_key)
+        if direct is not None:
+            return bool(direct)
+        # Fallback: check uurlijst
+        hours_list = price_info.get(f"cheapest_{n}h_hours") or []
+        return now_h in hours_list
 
     async def _turn_off(self, cfg: SmartDelayConfig) -> bool:
         domain = cfg.entity_id.split(".")[0]
@@ -308,10 +351,11 @@ class SmartDelayScheduler:
                 st.state       = DelayState.DETECTED
                 st.detected_at = now_ts
                 st.target_hour = start_hour
+                _mode_label = "goedkoopste blok" if cfg.wait_mode == "cheapest_block"                     else f"prijs ≤ €{cfg.price_threshold_eur:.4f}/kWh"
                 st.reason      = (
                     f"Actief gedetecteerd om {now_local.strftime('%H:%M')} "
                     f"— prijs €{price:.4f}/kWh > drempel €{cfg.price_threshold_eur:.4f}/kWh. "
-                    f"Goedkoopste {cfg.window_hours}u blok start {start_hour:02d}:00."
+                    f"Wacht op {_mode_label} (goedkoopste {cfg.window_hours}u blok start {start_hour:02d}:00)."
                 )
                 _LOGGER.info(
                     "SmartDelay: %s gedetecteerd — prijs %.4f > %.4f €/kWh, "
@@ -346,6 +390,15 @@ class SmartDelayScheduler:
                         cfg.label or cfg.entity_id, int(elapsed),
                         cfg.window_hours, st.target_hour or 0,
                     )
+                    _wacht_zin = (
+                        f"Het apparaat wordt ingeschakeld zodra het goedkoopste "
+                        f"{cfg.window_hours}-uurs blok start ({st.target_hour:02d}:00) — "
+                        f"ongeacht de absolute prijs."
+                        if cfg.wait_mode == "cheapest_block"
+                        else
+                        f"Het apparaat wordt ingeschakeld om {st.target_hour:02d}:00 "
+                        f"zodra de prijs ≤ €{cfg.price_threshold_eur:.4f}/kWh is."
+                    )
                     await self._notify(
                         cfg,
                         title=f"⏳ {cfg.label or cfg.entity_id} uitgesteld",
@@ -353,9 +406,7 @@ class SmartDelayScheduler:
                             f"CloudEMS heeft **{cfg.label or cfg.entity_id}** uitgeschakeld "
                             f"omdat de stroomprijs nu €{price:.4f}/kWh is "
                             f"(drempel: €{cfg.price_threshold_eur:.4f}/kWh).\n\n"
-                            f"Het apparaat wordt automatisch ingeschakeld om "
-                            f"{st.target_hour:02d}:00 als het goedkoopste "
-                            f"{cfg.window_hours}-uurs blok start.\n\n"
+                            f"{_wacht_zin}\n\n"
                             f"Annuleren via CloudEMS → Goedkope Uren → Annuleer uitstel."
                         ),
                     )
@@ -380,16 +431,69 @@ class SmartDelayScheduler:
                 if now_h < cfg.earliest_hour or now_h > cfg.latest_hour:
                     continue
 
-                # Zijn we in het goedkope blok? Of is het startuur aangebroken?
-                in_block   = self._in_cheap_block(cfg, price_info, now_h)
-                at_start   = (st.target_hour is not None and now_h == st.target_hour)
+                # ── Max wachttijd deadline ────────────────────────────────────
+                # Als max_wait_h > 0: schakel sowieso in na max_wait_h uur,
+                # ook als geen goedkoop blok beschikbaar is of prijs nog hoog is.
+                # Voorkomt oneindig wachten bij ontbrekende EPEX-data of bij
+                # apparaten met een harde deadline (vaatwasser klaar voor ochtend).
+                if cfg.max_wait_h > 0 and st.intercepted_at > 0:
+                    waited_h = (now_ts - st.intercepted_at) / 3600.0
+                    if waited_h >= cfg.max_wait_h:
+                        _LOGGER.warning(
+                            "SmartDelay: %s max wachttijd overschreden "
+                            "(%.1fh >= %dh) — toch inschakelen",
+                            cfg.label or cfg.entity_id, waited_h, cfg.max_wait_h,
+                        )
+                        st.state = DelayState.ACTIVATING
+                        ok = await self._turn_on(cfg)
+                        if ok:
+                            st.state        = DelayState.IDLE
+                            st.activated_at = now_ts
+                            await self._notify(
+                                cfg,
+                                title=f"⏰ {cfg.label or cfg.entity_id} ingeschakeld (deadline)",
+                                message=(
+                                    f"CloudEMS heeft **{cfg.label or cfg.entity_id}** ingeschakeld "
+                                    f"omdat de maximale wachttijd van {cfg.max_wait_h} uur bereikt is.\n\n"
+                                    f"De stroomprijs is nu €{price:.4f}/kWh. "
+                                    f"Geen goedkoper moment kon worden gevonden binnen de deadline."
+                                ),
+                            )
+                            actions.append({
+                                "entity_id": cfg.entity_id,
+                                "label":     cfg.label,
+                                "action":    "deadline_forced",
+                                "price":     price,
+                                "waited_h":  round(waited_h, 1),
+                                "reason":    f"Deadline: {cfg.max_wait_h}h wachttijd bereikt",
+                            })
+                        else:
+                            st.state = DelayState.INTERCEPTED
+                        continue
 
-                if not (in_block or at_start):
-                    continue
+                # ── Wachtmodus ─────────────────────────────────────────────
+                # "price"          (default): schakel in zodra prijs <= drempel.
+                #                  Gebruikt de goedkoopste-blok start enkel als
+                #                  richtpunt; controleert ook prijs op elk moment.
+                # "cheapest_block": wacht ALTIJD tot het goedkoopste N-uursblok
+                #                  start, ook als de prijs al eerder zakt.
+                #                  Garandeert écht het goedkoopste moment van de dag.
+                in_block = self._in_cheap_block(cfg, price_info, now_h)
+                at_start = (st.target_hour is not None and now_h == st.target_hour)
 
-                # Prijs voldoende laag?
-                if price > cfg.price_threshold_eur:
-                    continue
+                if cfg.wait_mode == "cheapest_block":
+                    # Strikt: alleen inschakelen als we IN het goedkoopste blok zitten
+                    if not in_block:
+                        continue
+                    # In het blok: inschakelen ongeacht absolute prijs
+                    # (het IS al het goedkoopste moment van de beschikbare horizon)
+                else:
+                    # Modus "price" (default):
+                    # in_block of at_start én prijs <= drempel
+                    if not (in_block or at_start):
+                        continue
+                    if price > cfg.price_threshold_eur:
+                        continue
 
                 # Inschakelen
                 st.state       = DelayState.ACTIVATING
@@ -466,5 +570,10 @@ class SmartDelayScheduler:
                 "notify":             cfg.notify,
                 "power_sensor":       cfg.power_sensor,
                 "power_threshold_w":  cfg.power_threshold_w,
+                "wait_mode":          cfg.wait_mode,
+                "max_wait_h":         cfg.max_wait_h,
+                "deadline_ts":        (st.intercepted_at + cfg.max_wait_h * 3600)
+                                      if (cfg.max_wait_h > 0 and st.intercepted_at > 0)
+                                      else None,
             })
         return result

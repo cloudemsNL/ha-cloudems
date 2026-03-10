@@ -247,6 +247,21 @@ class HybridNILM:
             for eid in [k for k in self._anchors if k not in current_eids]:
                 del self._anchors[eid]
 
+            # v4.4: purge bestaande ankers waarvan de naam een infra-keyword bevat
+            # (fout-geleerde ankers van vóór de fix)
+            _INFRA_SUBS = (
+                "energiemeter", "energy meter", "uurprijs", "stroom tegen",
+                "connect energi", "elektriciteitsverbruik", "elektriciteitsproductie",
+                "elektriciteitsgemiddelde", "huidig verbruik", "kwh meter",
+            )
+            stale_infra = [
+                eid for eid, anchor in self._anchors.items()
+                if any(sub in anchor.name.lower() for sub in _INFRA_SUBS)
+            ]
+            for eid in stale_infra:
+                _LOGGER.info("HybridNILM: anker '%s' verwijderd — infra-sensor", self._anchors[eid].name)
+                del self._anchors[eid]
+
             # Registreer nieuwe ankers
             for plug in result.plugs:
                 if plug.entity_id not in self._anchors:

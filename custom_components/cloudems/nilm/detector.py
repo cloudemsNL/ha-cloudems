@@ -38,11 +38,13 @@ from homeassistant.core import HomeAssistant
 
 from .database import NILMDatabase
 from .false_positive_memory import FalsePositiveMemory
+from .co_occurrence import CoOccurrenceDetector
 from .macro_load_tracker import MacroLoadTracker
 from .battery_uncertainty import BatteryUncertaintyTracker
 from .local_ai import LocalAIClassifier, PowerEvent
 from .cloud_ai import CloudAIClassifier
 from .power_learner import PowerLearner
+from .unsupervised_cluster import NILMEventClusterer
 from ..const import (
     NILM_MIN_CONFIDENCE, NILM_HIGH_CONFIDENCE,
     NILM_MODE_DATABASE, NILM_MODE_LOCAL_AI, NILM_MODE_CLOUD_AI, NILM_MODE_OLLAMA,
@@ -510,6 +512,8 @@ class NILMDetector:
 
         # v1.31: FalsePositiveMemory — leert afgewezen power-signatures
         self._fp_memory = FalsePositiveMemory(hass)
+        # v4.5: co-occurrence detector
+        self._co_occurrence: Optional[CoOccurrenceDetector] = CoOccurrenceDetector()
 
         # v1.31: MacroLoadTracker — ruis van grootverbruikers onderdrukken
         self._macro_tracker = MacroLoadTracker()
@@ -532,6 +536,11 @@ class NILMDetector:
         # v4.0.5: Time pattern learner (wordt gezet via set_stores)
         self._time_pattern_learner: Optional[Any] = None
         self._store_time_patterns:  Optional[Any] = None
+        self._store_co_occurrence:  Optional[Any] = None  # v4.5
+
+        # v4.4: Unsupervised clustering — groepeert onbekende events automatisch
+        # en vraagt gebruiker om bevestiging als cluster >= CLUSTER_MIN_EVENTS bereikt.
+        self._clusterer: NILMEventClusterer = NILMEventClusterer(hass)
 
         _LOGGER.info("CloudEMS NILM Detector v1.25 initialized")
 
@@ -543,11 +552,13 @@ class NILMDetector:
     # ── Storage setup ─────────────────────────────────────────────────────────
 
     def set_stores(self, store_devices: Store, store_energy: Store,
-                   store_learner=None, store_time_patterns=None) -> None:
+                   store_learner=None, store_time_patterns=None,
+                   store_co_occurrence=None) -> None:
         self._store_devices       = store_devices
         self._store_energy        = store_energy
         self._store_learner       = store_learner
         self._store_time_patterns = store_time_patterns
+        self._store_co_occurrence = store_co_occurrence
         # Instantieer TimePatternLearner zodra store beschikbaar is
         if store_time_patterns is not None and self._time_pattern_learner is None:
             try:
@@ -617,24 +628,34 @@ class NILMDetector:
 
     def set_esphome_features(
         self,
-        power_factor_l1: float | None = None,
-        power_factor_l2: float | None = None,
-        power_factor_l3: float | None = None,
-        inrush_peak_l1:  float | None = None,
-        inrush_peak_l2:  float | None = None,
-        inrush_peak_l3:  float | None = None,
-        rise_time_l1:    float | None = None,
-        rise_time_l2:    float | None = None,
-        rise_time_l3:    float | None = None,
+        power_factor_l1:    float | None = None,
+        power_factor_l2:    float | None = None,
+        power_factor_l3:    float | None = None,
+        inrush_peak_l1:     float | None = None,
+        inrush_peak_l2:     float | None = None,
+        inrush_peak_l3:     float | None = None,
+        rise_time_l1:       float | None = None,
+        rise_time_l2:       float | None = None,
+        rise_time_l3:       float | None = None,
+        reactive_power_l1:  float | None = None,
+        reactive_power_l2:  float | None = None,
+        reactive_power_l3:  float | None = None,
+        thd_l1:             float | None = None,
+        thd_l2:             float | None = None,
+        thd_l3:             float | None = None,
         # Backwards-compat aliassen (oude coordinator-versies)
-        inrush_peak_a:   float | None = None,
-        rise_time_ms:    float | None = None,
+        inrush_peak_a:      float | None = None,
+        rise_time_ms:       float | None = None,
     ) -> None:
         """Sla ESPHome NILM-meter features op voor gebruik bij de volgende event-classificatie.
 
         Aangeroepen elke coordinator-cyclus als een DIY ESPHome-meter geconfigureerd is.
-        De features worden meegestuurd naar database.classify() zodat power_factor
-        de confidence-scores bijstelt (resistief/inductief/capacitief onderscheid).
+        Alle parameters zijn optioneel — ontbrekende features (None) worden volledig
+        overgeslagen in classify() zodat gebruikers zonder ESP32 geen enkel effect merken.
+
+        Graceful degradation: elk feature-blok in classify() controleert zelfstandig
+        op None. Alleen aanwezige features beïnvloeden de confidence-scores.
+
         Ondersteunt zowel 1-fase als 3-fase ESPHome meters.
         """
         self._esp_power_factor: dict[str, float | None] = {
@@ -655,6 +676,18 @@ class NILMDetector:
             "L1": _ms_to_s(rise_time_l1) if rise_time_l1 is not None else _ms_to_s(rise_time_ms),
             "L2": _ms_to_s(rise_time_l2),
             "L3": _ms_to_s(rise_time_l3),
+        }
+        # Reactief vermogen in VAR per fase (None = niet beschikbaar)
+        self._esp_reactive_power: dict[str, float | None] = {
+            "L1": reactive_power_l1,
+            "L2": reactive_power_l2,
+            "L3": reactive_power_l3,
+        }
+        # THD% per fase (None = niet beschikbaar — ESP32 zonder FFT-firmware)
+        self._esp_thd: dict[str, float | None] = {
+            "L1": thd_l1,
+            "L2": thd_l2,
+            "L3": thd_l3,
         }
 
     def set_infra_powers(self, powers: dict) -> None:
@@ -744,6 +777,9 @@ class NILMDetector:
 
     async def async_load(self) -> None:
         await self._fp_memory.async_load()
+        # v4.5: co-occurrence
+        if self._co_occurrence and getattr(self, '_store_co_occurrence', None):
+            await self._co_occurrence.async_load(self._store_co_occurrence)
         if self._store_devices:
             data = await self._store_devices.async_load() or {}
             for dev_data in data.get("devices", []):
@@ -797,12 +833,18 @@ class NILMDetector:
             ldata = await self._store_learner.async_load() or {}
             self._power_learner.load(ldata)
 
+        # v4.4: Unsupervised clusterer laden
+        await self._clusterer.async_setup()
+
         _LOGGER.info("CloudEMS NILM: loaded %d devices", len(self._devices))
         self._storage_loaded = True
 
     async def async_save(self) -> None:
         if self._store_devices:
             await self._fp_memory.async_save()
+            # v4.5: co-occurrence
+            if self._co_occurrence and getattr(self, "_store_co_occurrence", None):
+                await self._co_occurrence.async_save()
             await self._store_devices.async_save({
                 "devices": [d.to_dict() for d in self._devices.values()]
             })
@@ -813,6 +855,8 @@ class NILMDetector:
         # v1.25: PowerLearner state opslaan (elke 5 min)
         if self._store_learner and time.time() - self._last_energy_save > 300:
             await self._store_learner.async_save(self._power_learner.to_dict())
+        # v4.4: Unsupervised clusterer opslaan
+        await self._clusterer.async_save()
 
     # ── Power update ──────────────────────────────────────────────────────────
 
@@ -868,16 +912,33 @@ class NILMDetector:
             last_ev = self._last_event_time.get(phase, 0)
             if timestamp - last_ev > DEBOUNCE_TIME:
                 self._last_event_time[phase] = timestamp
+                # v4.5: ESP-features direct meegeven aan PowerEvent zodat local_ai.classify()
+                # ze ook ontvangt. Voorheen werden ze alleen doorgegeven aan db.classify(),
+                # waardoor de local AI kNN nooit kon leren op power_factor, reactive_power of THD.
+                _pf     = getattr(self, "_esp_power_factor",   {}).get(phase)
+                _inrush = getattr(self, "_esp_inrush_peak",    {}).get(phase)
+                _rt_map = getattr(self, "_esp_rise_time_s",    {})
+                _rt_esp = _rt_map.get(phase) if isinstance(_rt_map, dict) else None
+                _q      = getattr(self, "_esp_reactive_power", {}).get(phase)
+                _thd    = getattr(self, "_esp_thd",            {}).get(phase)
+                # Gebruik ESPHome rise_time als beschikbaar (<1s = betrouwbaar), anders polling
+                _rise   = _rt_esp if (_rt_esp is not None and _rt_esp < 1.0) \
+                          else recent[-1][0] - recent[0][0]
                 event = PowerEvent(
-                    timestamp   = timestamp,
-                    delta_power = delta,
+                    timestamp          = timestamp,
+                    delta_power        = delta,
                     # rise_time from polling is always ~20 s — passed as-is but
                     # flagged unreliable so database.classify() ignores it.
-                    rise_time   = recent[-1][0] - recent[0][0],
-                    duration    = 0.0,
-                    peak_power  = max(p for _, p in recent),
-                    rms_power   = avg,
-                    phase       = phase,
+                    rise_time          = _rise,
+                    duration           = 0.0,
+                    peak_power         = max(p for _, p in recent),
+                    rms_power          = avg,
+                    phase              = phase,
+                    # v4.5: ESP-features voor V-I trajectory benadering
+                    power_factor       = _pf,
+                    inrush_peak_a      = _inrush,
+                    reactive_power_var = _q,
+                    thd_pct            = _thd,
                 )
                 import asyncio
                 try:
@@ -1172,21 +1233,24 @@ class NILMDetector:
         # FIX v1.7: pass scalar args — database.classify(float, float), NOT the PowerEvent object
         # v1.21: rise_time_reliable=False — polling-based detectors always produce ~20 s
         # v2.2: power_factor vanuit ESPHome-meter als extra discriminerende feature
+        # v1.23: reactive_power + THD toegevoegd — None als ESP32 die sensor niet heeft
+        # v4.5: ESP-features komen nu rechtstreeks uit het PowerEvent-object (set in update_power),
+        # zodat db.classify() en local_ai.classify() exact dezelfde features zien.
+        # Graceful degradation: elk None-argument wordt in classify() volledig overgeslagen.
         lang = getattr(getattr(self._hass, "config", None), "language", "en")
         lang = lang[:2].lower() if lang else "en"
-        _esp_pf = getattr(self, "_esp_power_factor", {}).get(event.phase)
-        _esp_rt_map = getattr(self, "_esp_rise_time_s", {})
-        _esp_rt = _esp_rt_map.get(event.phase) if isinstance(_esp_rt_map, dict) else _esp_rt_map
-        _esp_inrush_map = getattr(self, "_esp_inrush_peak", {})
-        _esp_inrush = _esp_inrush_map.get(event.phase) if isinstance(_esp_inrush_map, dict) else getattr(self, "_esp_inrush_peak_a", None)
-        _rt_reliable = _esp_rt is not None and _esp_rt < 1.0   # <1s = ESPHome, betrouwbaar
+        _rt_reliable = event.power_factor is not None or (
+            event.rise_time < 1.0 and event.rise_time > 0
+        )  # ESPHome rise_time is < 1s; polling levert ~20s
         matches: List[Dict] = self._db.classify(
             event.delta_power,
-            _esp_rt if _rt_reliable else event.rise_time,
+            event.rise_time,
             language=lang,
             rise_time_reliable=_rt_reliable,
-            power_factor=_esp_pf,
-            inrush_peak_a=_esp_inrush,
+            power_factor=event.power_factor,
+            inrush_peak_a=event.inrush_peak_a,
+            reactive_power_var=event.reactive_power_var,
+            thd_pct=event.thd_pct,
         )
         self._diag_log_event(event, matches)
         if self._local_ai.is_available:
@@ -1224,6 +1288,24 @@ class NILMDetector:
             except Exception as _he:
                 _LOGGER.debug("HybridNILM enrich fout: %s", _he)
 
+        # ── v4.5: Co-occurrence aanpassing ─────────────────────────────────────
+        # Pas matches aan op basis van co-occurrence kennis:
+        # - BOOST  als een type structureel samen met een actief apparaat voorkomt
+        # - PENALTY als een gekoppeld confirmed apparaat al actief is op zelfde fase
+        if self._co_occurrence and matches:
+            try:
+                _active_ids = [
+                    d.device_id for d in self._devices.values()
+                    if d.is_on and d.device_id
+                ]
+                matches = self._co_occurrence.adjust_matches(
+                    matches            = matches,
+                    active_device_ids  = _active_ids,
+                    detector_devices   = self._devices,
+                )
+            except Exception as _coe:
+                _LOGGER.debug("CoOccurrence adjust fout: %s", _coe)
+
         # ── v1.25: Laag A — per-apparaat vermogensprofiel boost ─────────────────
         # Apparaten met een geleerd profiel (n≥3 observaties) krijgen een confidence-
         # boost als het huidige vermogen goed overeenkomt met het geleerde profiel.
@@ -1255,6 +1337,27 @@ class NILMDetector:
 
         if matches and matches[0]["confidence"] >= NILM_MIN_CONFIDENCE:
             self._handle_match(event, matches[0], matches)
+        elif event.delta_power > 0:
+            # v4.4: geen classificatie-match → voeg event toe aan unsupervised clusterer.
+            # De clusterer groepeert vergelijkbare onbekende events en vraagt
+            # de gebruiker om bevestiging zodra een cluster voldoende groot is.
+            # Alleen positieve deltas (on-events) — off-events zijn geen nieuwe apparaten.
+            try:
+                # v4.5: reactive_fraction (sin phi) meegeven voor V-I-gebaseerde clustering
+                _rfrac: float | None = None
+                if event.reactive_power_var is not None:
+                    import math as _m
+                    _p = abs(event.delta_power)
+                    _q = abs(event.reactive_power_var)
+                    _s = _m.sqrt(_p ** 2 + _q ** 2)
+                    _rfrac = _q / max(_s, 1.0)
+                self._clusterer.add_unknown_event(
+                    power_w    = abs(event.delta_power),
+                    duration_s = 0.0,   # duur onbekend op dit punt
+                    reactive_frac = _rfrac,
+                )
+            except Exception as _ce:
+                _LOGGER.debug("NILM clusterer fout: %s", _ce)
 
         # Formele event-hooks — altijd aanroepen, ook bij geen match
         # Zo kunnen externe modules (SmartPowerEstimator) delta correleren zonder
@@ -1566,6 +1669,22 @@ class NILMDetector:
                 except Exception:
                     pass
 
+        # ── v4.5: Co-occurrence event registratie ─────────────────────────────
+        if self._co_occurrence:
+            try:
+                _active_now = [
+                    d.device_id for d in self._devices.values()
+                    if d.is_on and d.device_id != dev.device_id
+                ]
+                self._co_occurrence.record_event(
+                    device_id          = dev.device_id,
+                    event_type         = "on" if is_on else "off",
+                    timestamp          = event.timestamp,
+                    active_device_ids  = _active_now,
+                )
+            except Exception as _coe_err:
+                _LOGGER.debug("CoOccurrence record fout: %s", _coe_err)
+
         # ── v1.25: PowerLearner — record event, check auto-confirm ───────────
         # Wordt uitgevoerd voor zowel bestaande als nieuwe apparaten.
         try:
@@ -1639,10 +1758,16 @@ class NILMDetector:
         if not dev:
             return
         dev.user_feedback = feedback
+        # Sla old_type op vóór we user_type aanpassen — nodig voor relabeling
+        _old_device_type = dev.device_type
+
         if corrected_name:
             dev.user_name = corrected_name
         if corrected_type:
             dev.user_type = corrected_type
+            # v4.5: update device_type ook zodat display_type consistent is
+            # en toekomstige relabeling het juiste oude type kent
+            dev.device_type = corrected_type
 
         if feedback == NILM_FEEDBACK_CORRECT:
             dev.confirmed = True
@@ -1665,7 +1790,24 @@ class NILMDetector:
                     phase   = dev.phase,
                 )
 
-        # Train local AI with confirmed data
+        # ── Train local AI with confirmed/corrected data ────────────────
+        # v4.5 fix: als het type gecorrigeerd is (corrected_type opgegeven),
+        # hernoem eerst alle bestaande trainingssamples voor dit apparaat zodat
+        # de kNN geen conflicterende labels krijgt voor dezelfde feature-vector.
+        if corrected_type and hasattr(self._local_ai, "relabel_device"):
+            old_type = _old_device_type  # type vóór de correctie (bewaard hierboven)
+            if old_type and old_type != dev.display_type:
+                relabeled = self._local_ai.relabel_device(
+                    device_id = device_id,
+                    old_type  = old_type,
+                    new_type  = dev.display_type,
+                )
+                _LOGGER.info(
+                    "CloudEMS NILM: %s type gecorrigeerd %s→%s, "
+                    "%d trainingssamples herschreven",
+                    device_id, old_type, dev.display_type, relabeled,
+                )
+
         if feedback in (NILM_FEEDBACK_CORRECT,) and dev.current_power > 0:
             synth = PowerEvent(
                 timestamp  = time.time(),
@@ -1676,7 +1818,8 @@ class NILMDetector:
                 rms_power  = dev.current_power,
                 phase      = dev.phase,
             )
-            self._local_ai.add_training_sample(synth, dev.display_type)
+            # v4.5: geef device_id mee zodat relabeling in de toekomst werkt
+            self._local_ai.add_training_sample(synth, dev.display_type, device_id=device_id)
 
         # v1.23: Bayesian prior update op basis van feedback
         if self._bayes_callback is not None:
@@ -1711,6 +1854,9 @@ class NILMDetector:
 
     def dismiss_device(self, device_id: str) -> None:
         self._devices.pop(device_id, None)
+        # v4.5: cleanup co-occurrence paren voor verwijderd apparaat
+        if self._co_occurrence:
+            self._co_occurrence.on_device_removed(device_id)
 
     def cleanup(self, scope: str, days: int = 0) -> dict:
         """
@@ -1910,6 +2056,9 @@ class NILMDetector:
             "power_learner":       self._power_learner.get_diagnostics(),
             "energy_anomaly_ids":  list(self._energy_anomaly_ids),
             "time_patterns":       self._time_pattern_learner.get_diagnostics() if self._time_pattern_learner else {},
+            # v4.4: Unsupervised clusterer diagnostics
+            "unknown_clusters":    self._clusterer.get_all_clusters(),
+            "cluster_suggestions": len(self._clusterer.get_pending_suggestions()),
             # v4.0.3: Laag C — actieve concurrent last per fase
             "concurrent_loads": {
                 phase: {
@@ -1948,6 +2097,64 @@ class NILMDetector:
     def get_all_device_profiles(self) -> dict:
         """v1.30: Alle geleerde profielen als {device_id: dict}."""
         return self._power_learner.get_all_profiles()
+
+    # ── v4.4: Unsupervised clusterer publieke API ─────────────────────────────
+
+    def get_cluster_suggestions(self) -> list[dict]:
+        """
+        Geeft alle clusters terug waarvoor een gebruikersvraag klaar staat.
+        Gebruikt door coordinator voor sensor.cloudems_nilm_unknown_devices
+        en voor de NILM Beheer tab.
+        """
+        return self._clusterer.get_pending_suggestions()
+
+    def get_all_clusters(self) -> list[dict]:
+        """Alle actieve clusters (voor dashboard-weergave)."""
+        return self._clusterer.get_all_clusters()
+
+    def confirm_cluster_as_device(
+        self,
+        cluster_id: str,
+        device_name: str,
+        device_type: str,
+    ) -> Optional[dict]:
+        """
+        Bevestig een cluster als apparaat. Geeft de clusterparameters terug
+        zodat de coordinator een nieuw NILM-apparaat kan aanmaken.
+
+        Aanroepen vanuit coordinator.confirm_nilm_cluster_device() service.
+        """
+        result = self._clusterer.confirm_cluster(cluster_id, device_name, device_type)
+        if result:
+            # Maak direct een DetectedDevice aan zodat toekomstige events herkend worden
+            import uuid as _uuid
+            dev_id = str(_uuid.uuid4())[:8]
+            dev = DetectedDevice(
+                device_id    = dev_id,
+                device_type  = device_type,
+                name         = device_name,
+                confidence   = 0.90,
+                current_power = 0.0,
+                is_on        = False,
+                source       = "cluster",
+                confirmed    = True,
+                detection_count = result.get("event_count", 1),
+                phase        = "L1",
+            )
+            dev.energy = DeviceEnergy(device_id=dev_id)
+            self._devices[dev_id] = dev
+            _LOGGER.info(
+                "NILM cluster bevestigd: '%s' (%s) — %d events, %.0fW",
+                device_name, device_type,
+                result.get("event_count", 0), result.get("power_w", 0),
+            )
+            if self._on_device_found:
+                self._on_device_found(dev, [])
+        return result
+
+    def dismiss_cluster(self, cluster_id: str) -> None:
+        """Verwijder een cluster permanent (gebruiker zegt: niet interessant)."""
+        self._clusterer.dismiss_cluster(cluster_id)
 
     def register_battery_provider(self, label: str, provider: str = "default") -> None:
         """Registreer een batterij-provider bij BatteryUncertaintyTracker (setup-tijd)."""
@@ -2224,6 +2431,24 @@ class NILMDetector:
 
         raw = [d.to_dict() for d in self._devices.values()]
 
+        # v4.4: naam-gebaseerde keyword-filter — verwijder infrastructure-sensoren
+        # die via de naam herkenbaar zijn maar niet via source_entity_id gefilterd werden.
+        # Dit pakt apparaten die al geleerd waren vóór de coordinator-filter ze kon blokkeren.
+        _INFRA_NAME_KEYWORDS = (
+            "energiemeter", "energy meter", "stroomprijs", "uurprijs",
+            "stroom tegen", "elektriciteitsgemiddelde",
+            "elektriciteitsverbruik", "elektriciteitsproductie",
+            "connect energi", "slimme meter", "p1 meter",
+            "net import", "net export", "grid import", "grid export",
+            "solar production", "pv productie",
+        )
+        def _is_infra_name(dev_dict: dict) -> bool:
+            if dev_dict.get("source") == "smart_plug":
+                return False
+            name = (dev_dict.get("name") or "").lower()
+            return any(kw in name for kw in _INFRA_NAME_KEYWORDS)
+        raw = [d for d in raw if not _is_infra_name(d)]
+
         # Filter: verwijder altijd device-types die nooit huishoudapparaten zijn.
         # solar_inverter → PV-omvormer (coordinator geeft dit zelf al door)
         # battery        → thuisbatterij (al apart gemeten)
@@ -2256,6 +2481,40 @@ class NILMDetector:
                     if d.get("source") == "smart_plug"
                     or (d.get("name") or "").lower().strip() not in self._blocked_friendly_names
                 ]
+
+        # v4.4.1: keyword-filter — vang infrastructuur-sensoren die via naam niet
+        # exact matchen maar duidelijk geen huishoudapparaat zijn.
+        # Patronen gebaseerd op observaties: "energiemeter", "uurprijzen", "verbruik",
+        # "productie", "electricity meter", "connect energiemeter" etc.
+        # Smart-plug ankerapparaten worden nooit gefilterd.
+        _INFRA_NAME_KEYWORDS = {
+            # Nederlands
+            "energiemeter", "uurprijzen", "elektriciteitsmeter",
+            "elektriciteitsverbruik", "elektriciteitsproductie",
+            "elektriciteitsgemiddelde", "stroomverbruik", "stroomproductie",
+            "nettometing", "netmeting", "slimme meter", "p1 meter",
+            "zonnepanelen productie", "zonnepanelen verbruik",
+            "teruglevering", "netlevering", "netafname",
+            "huidig verbruik", "huidig gebruik",
+            # Engels
+            "electricity meter", "energy meter", "smart meter",
+            "grid power", "grid import", "grid export",
+            "solar production", "solar power", "pv production",
+            "net metering", "feed-in", "feedin",
+            "current consumption", "current production",
+            # Merknamen die typisch infra zijn
+            "connect energiemeter", "stroom tegen uurprijzen",
+            "p1 telegram",
+        }
+        def _has_infra_keyword(name: str) -> bool:
+            n = (name or "").lower()
+            return any(kw in n for kw in _INFRA_NAME_KEYWORDS)
+
+        raw = [
+            d for d in raw
+            if d.get("source") == "smart_plug"
+            or not _has_infra_keyword(d.get("name", ""))
+        ]
 
         # v2.5: runtime vermogensfilter op basis van _infra_powers.
         #

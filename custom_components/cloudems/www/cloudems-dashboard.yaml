@@ -1080,21 +1080,26 @@ views:
       ✅ Geen uitgestelde schakelaars
       {%- endif %}
 
-      | Apparaat | Status | Drempel | Wacht op | Wachtend |
-      |---|---|---|---|---|
+      | Apparaat | Status | Modus | Wacht op | Wachtend | Deadline |
+      |---|---|---|---|---|---|
       {%- for sw in switches -%}
       {%- set ds = sw.get('delay_state','idle') -%}
-      {%- set icon = '⏳' if ds == 'intercepted' else ('🔍' if ds == 'detected' else ('✅' if ds == 'idle' else '🚫')) -%}
+      {%- set icon = '⏳' if ds == 'intercepted' else ('🔍' if ds == 'detected' else ('⏰' if ds == 'deadline_forced' else ('✅' if ds == 'idle' else '🚫'))) -%}
       {%- set lbl = sw.get('label') or sw.get('entity_id') -%}
       {%- set tgt = sw.get('target_hour') -%}
       {%- set wmin = sw.get('waiting_min') -%}
-      | {{ icon }} **{{ lbl }}** | {{ ds }} | €{{ sw.get('price_threshold', 0.25) | round(2) }}/kWh | {{ '%02d:00'|format(tgt) if tgt is not none else '—' }} | {{ (wmin | int | string ~ ' min') if wmin else '—' }} |
+      {%- set wmode = sw.get('wait_mode','price') -%}
+      {%- set modus_badge = '🏷️ blok' if wmode == 'cheapest_block' else '💶 prijs' -%}
+      {%- set mxh = sw.get('max_wait_h', 0) | int -%}
+      {%- set dl_ts = sw.get('deadline_ts') -%}
+      {%- set dl_str = (((dl_ts | int) - (now().timestamp() | int)) // 60 | string ~ ' min') if dl_ts else ('∞' if mxh == 0 else mxh | string ~ 'h max') -%}
+      | {{ icon }} **{{ lbl }}** | {{ ds }} | {{ modus_badge }} | {{ '%02d:00'|format(tgt) if tgt is not none else '—' }} | {{ (wmin | int | string ~ ' min') if wmin else '—' }} | {{ dl_str }} |
       {%- endfor %}
 
       {%- if pending > 0 %}
 
       **Annuleer uitstel:**
-      {%- for sw in switches if sw.get('delay_state') in ('intercepted','detected') %}
+      {%- for sw in switches if sw.get('delay_state') in ('intercepted','detected','deadline_forced') %}
       - **{{ sw.get('label') or sw.get('entity_id') }}** — ingeschakeld om {{ '%02d:00'|format(sw.get('target_hour',0)) }}
       {%- endfor %}
       {%- endif %}
@@ -4294,6 +4299,36 @@ views:
           border-bottom: 1px solid rgba(255,255,255,0.05) !important;
           padding: 7px 10px !important;
         }
+        ha-markdown-element strong { color: rgb(255,255,255) !important; }
+
+  - type: markdown
+    title: 🔗 Co-occurrence — Gekoppelde Apparaten
+    content: |
+      {%- set diag = state_attr('sensor.cloudems_nilm_diagnostics', 'co_occurrence') or {} -%}
+      {%- set pairs = diag.get('top_coupled', []) -%}
+      {%- set total = diag.get('total_pairs', 0) -%}
+      {%- set coupled = diag.get('coupled_pairs', 0) -%}
+      {%- set candidate = diag.get('candidate_pairs', 0) -%}
+      **{{ coupled }}** gekoppeld · **{{ candidate }}** kandidaat · **{{ total }}** paren totaal
+      {%- if pairs %}
+
+      | Apparaat A | Apparaat B | Ratio | Events |
+      |---|---|---|---|
+      {%- for p in pairs %}
+      {%- set badge = '🔗' if p.get('coupled') else '🔍' %}
+      | {{ badge }} {{ p.get('device_a','?') | replace('_',' ') }} | {{ p.get('device_b','?') | replace('_',' ') }} | {{ (p.get('co_ratio',0)*100) | round(0) | int }}% | {{ p.get('total',0) }} |
+      {%- endfor %}
+      {%- else %}
+      *Nog geen co-occurrence data. Verschijnt na ~{{ 6 }} gelijktijdige on-events per paar.*
+      {%- endif %}
+    card_mod:
+      style: |
+        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(147,112,219,0.25) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color: rgb(163,163,163); --card-background-color: transparent; --ha-card-border-color: transparent; }
+        ha-card:hover { border-color: rgba(147,112,219,0.5) !important; }
+        .card-header { background: transparent !important; border-bottom: 1px solid rgba(147,112,219,0.15) !important; color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+        ha-markdown-element th { background: rgba(147,112,219,0.1) !important; color: rgb(187,152,255) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+        ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
         ha-markdown-element strong { color: rgb(255,255,255) !important; }
 
   - type: horizontal-stack

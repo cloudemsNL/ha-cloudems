@@ -4930,10 +4930,15 @@ class CloudEMSCheapSwitchesSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        cs = (self.coordinator.data or {}).get("cheap_switches", {})
+        data = self.coordinator.data or {}
+        cs = data.get("cheap_switches", {})
+        # v4.5 fix: voeg smart_delay toe zodat dashboard YAML
+        # state_attr(..., 'smart_delay') correct leest
+        sd = data.get("smart_delay", {})
         return {
-            "switches": cs.get("switches", []),
+            "switches":     cs.get("switches", []),
             "last_actions": cs.get("actions", []),
+            "smart_delay":  sd,
         }
 
 

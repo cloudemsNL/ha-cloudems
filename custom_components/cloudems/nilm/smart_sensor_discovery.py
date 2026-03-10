@@ -426,6 +426,20 @@ class SmartSensorDiscovery:
         re.IGNORECASE,
     )
 
+    # v4.4: aanvullende uitsluitpatronen die NIET in bovenstaande word-boundary
+    # regex passen omdat ze meerdere woorden of vrije substrings zijn.
+    # Matcht op entity_id + friendly_name gecombineerd (lowercase).
+    _EXCLUDE_SUBSTRINGS = (
+        "energiemeter", "energy meter", "energy_meter",
+        "uurprijs", "stroom_tegen", "stroom tegen",
+        "connect energi", "connect_energi",
+        "elektriciteitsgemiddelde", "elektriciteitsverbruik",
+        "elektriciteitsproductie", "electriciteitsverbruik",
+        "huidig verbruik", "huidig_verbruik",
+        "net_power", "net power", "grid_power",
+        "kwh_meter", "kwh meter",
+    )
+
     def _classify_plug(self, entity_id: str, attrs: dict) -> Optional[DiscoveredPlug]:
         """
         Koppel een vermogenssensor aan een apparaattype.
@@ -449,6 +463,9 @@ class SmartSensorDiscovery:
         if entity_id in self._excluded_entity_ids:
             return None
         if self._EXCLUDE_PATTERNS.search(search):
+            return None
+        # v4.4: aanvullende substring-uitsluitingen (energiemeter, uurprijs, enz.)
+        if any(sub in search for sub in self._EXCLUDE_SUBSTRINGS):
             return None
 
         best_type = None

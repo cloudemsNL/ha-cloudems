@@ -2149,6 +2149,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     "latest_hour":         int(user_input.get("latest_hour", 23)),
                     "grace_s":             int(user_input.get("sd_grace_s", 30)),
                     "notify":              bool(user_input.get("sd_notify", True)),
+                    "wait_mode":           user_input.get("sd_wait_mode", "price"),
+                    "max_wait_h":          int(user_input.get("sd_max_wait_h", 0)),
                     "active":              True,
                 }
             self._opts.setdefault("cheap_switches", []).append(switch_cfg)
@@ -2228,6 +2230,31 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("sd_notify",
                              default=bool(ex_sd.get("notify", True))):
                     selector.BooleanSelector(),
+                vol.Optional("sd_wait_mode",
+                             default=ex_sd.get("wait_mode", "price")):
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(
+                                    value="price",
+                                    label="Wacht tot prijs ≤ drempel (€/kWh)"
+                                ),
+                                selector.SelectOptionDict(
+                                    value="cheapest_block",
+                                    label="Wacht op goedkoopste prijsblok (aanbevolen)"
+                                ),
+                            ],
+                            mode="list",
+                        )
+                    ),
+                vol.Optional("sd_max_wait_h",
+                             default=int(ex_sd.get("max_wait_h", 0))):
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0, max=24, step=1,
+                            unit_of_measurement="uur", mode="slider"
+                        )
+                    ),
             }),
             description_placeholders={
                 "switch_num":   str(i),
@@ -2264,6 +2291,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "latest_hour":         int(user_input.get("latest_hour", 23)),
                 "grace_s":             int(user_input.get("grace_s", 30)),
                 "notify":              bool(user_input.get("notify", True)),
+                "wait_mode":           user_input.get("wait_mode", "price"),
                 "active":              True,
             })
             self._smart_delay_step += 1
