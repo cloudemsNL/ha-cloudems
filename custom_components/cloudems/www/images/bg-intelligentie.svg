@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.06" fill="none" stroke="#80deea" stroke-width="1.5">
+  <!-- neuraal netwerk -->
+  <!-- input laag -->
+  <circle cx="100" cy="150" r="18"/><circle cx="100" cy="250" r="18"/><circle cx="100" cy="350" r="18"/>
+  <circle cx="100" cy="450" r="18"/>
+  <!-- hidden laag 1 -->
+  <circle cx="300" cy="120" r="18"/><circle cx="300" cy="220" r="18"/><circle cx="300" cy="320" r="18"/>
+  <circle cx="300" cy="420" r="18"/><circle cx="300" cy="500" r="18"/>
+  <!-- hidden laag 2 -->
+  <circle cx="500" cy="150" r="18"/><circle cx="500" cy="260" r="18"/><circle cx="500" cy="370" r="18"/>
+  <circle cx="500" cy="470" r="18"/>
+  <!-- output laag -->
+  <circle cx="700" cy="200" r="18"/><circle cx="700" cy="320" r="18"/><circle cx="700" cy="440" r="18"/>
+  <!-- verbindingen (subset) -->
+  <g stroke-width="0.8" opacity="0.7">
+    <line x1="118" y1="150" x2="282" y2="120"/><line x1="118" y1="150" x2="282" y2="220"/>
+    <line x1="118" y1="150" x2="282" y2="320"/>
+    <line x1="118" y1="250" x2="282" y2="120"/><line x1="118" y1="250" x2="282" y2="220"/>
+    <line x1="118" y1="250" x2="282" y2="420"/>
+    <line x1="118" y1="350" x2="282" y2="220"/><line x1="118" y1="350" x2="282" y2="320"/>
+    <line x1="118" y1="350" x2="282" y2="500"/>
+    <line x1="118" y1="450" x2="282" y2="320"/><line x1="118" y1="450" x2="282" y2="420"/>
+    <line x1="118" y1="450" x2="282" y2="500"/>
+    <line x1="318" y1="120" x2="482" y2="150"/><line x1="318" y1="120" x2="482" y2="260"/>
+    <line x1="318" y1="220" x2="482" y2="150"/><line x1="318" y1="220" x2="482" y2="370"/>
+    <line x1="318" y1="320" x2="482" y2="260"/><line x1="318" y1="320" x2="482" y2="370"/>
+    <line x1="318" y1="420" x2="482" y2="370"/><line x1="318" y1="420" x2="482" y2="470"/>
+    <line x1="318" y1="500" x2="482" y2="470"/>
+    <line x1="518" y1="150" x2="682" y2="200"/><line x1="518" y1="260" x2="682" y2="200"/>
+    <line x1="518" y1="260" x2="682" y2="320"/><line x1="518" y1="370" x2="682" y2="320"/>
+    <line x1="518" y1="370" x2="682" y2="440"/><line x1="518" y1="470" x2="682" y2="440"/>
+  </g>
+</g>
+</svg>

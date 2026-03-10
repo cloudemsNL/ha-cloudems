@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice">
+<g opacity="0.07" fill="none" stroke="#90caf9" stroke-width="1.5">
+  <!-- raamkozijn -->
+  <rect x="200" y="80" width="400" height="440" rx="6"/>
+  <!-- rolluik lamellen (deels neer) -->
+  <line x1="200" y1="120" x2="600" y2="120"/>
+  <line x1="200" y1="155" x2="600" y2="155"/>
+  <line x1="200" y1="190" x2="600" y2="190"/>
+  <line x1="200" y1="225" x2="600" y2="225"/>
+  <line x1="200" y1="260" x2="600" y2="260"/>
+  <line x1="200" y1="295" x2="600" y2="295"/>
+  <!-- rolkast boven -->
+  <rect x="195" y="60" width="410" height="30" rx="4"/>
+  <!-- bedieningsknoppen opzij -->
+  <circle cx="640" cy="200" r="18"/>
+  <line x1="640" y1="182" x2="640" y2="218"/>
+  <line x1="622" y1="200" x2="658" y2="200"/>
+  <circle cx="640" cy="280" r="18"/>
+  <line x1="631" y1="271" x2="649" y2="289"/>
+  <line x1="649" y1="271" x2="631" y2="289"/>
+  <!-- zonnestralen achter raam -->
+  <g opacity="0.5">
+    <line x1="400" y1="360" x2="340" y2="480"/>
+    <line x1="400" y1="360" x2="400" y2="490"/>
+    <line x1="400" y1="360" x2="460" y2="480"/>
+    <line x1="400" y1="360" x2="300" y2="450"/>
+    <line x1="400" y1="360" x2="500" y2="450"/>
+  </g>
+</g>
+</svg>

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CloudEMS · Tablet Setup Wizard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600;700&display=swap');
+
+  :root {
+    --bg:       #0a0e17;
+    --surface:  #111827;
+    --border:   #1e293b;
+    --accent:   #22d3ee;
+    --accent2:  #a78bfa;
+    --green:    #4ade80;
+    --orange:   #fb923c;
+    --red:      #f87171;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --done:     #1e3a2f;
+    --done-b:   #4ade80;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    padding: 0;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    background: linear-gradient(135deg, #0f172a 0%, #1e1040 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 1.2rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-logo { font-size: 1.5rem; }
+  .header h1 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: .02em;
+  }
+  .header p { font-size: .8rem; color: var(--muted); margin-top: .1rem; }
+
+  /* ── Progress bar ── */
+  .progress-bar {
+    height: 3px;
+    background: var(--border);
+    position: relative;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ── Main layout ── */
+  .main {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 4rem;
+  }
+
+  /* ── Step nav ── */
+  .step-nav {
+    display: flex;
+    gap: .5rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+  .step-dot {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .35rem .75rem;
+    border-radius: 99px;
+    font-size: .75rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all .2s;
+    background: var(--surface);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .step-dot.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(34,211,238,.08);
+  }
+  .step-dot.done {
+    border-color: var(--done-b);
+    color: var(--done-b);
+    background: var(--done);
+  }
+  .step-dot .check { display: none; }
+  .step-dot.done .check { display: inline; }
+  .step-dot.done .num  { display: none; }
+
+  /* ── Step card ── */
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    display: none;
+    animation: fadeIn .3s ease;
+  }
+  .step-card.active { display: block; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .step-number {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .7rem;
+    color: var(--accent);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin-bottom: .5rem;
+  }
+  .step-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: .4rem;
+    line-height: 1.2;
+  }
+  .step-subtitle {
+    font-size: .9rem;
+    color: var(--muted);
+    margin-bottom: 1.8rem;
+    line-height: 1.5;
+  }
+
+  /* ── Info blocks ── */
+  .info-block {
+    background: rgba(34,211,238,.05);
+    border: 1px solid rgba(34,211,238,.15);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.2rem;
+    font-size: .875rem;
+    line-height: 1.6;
+  }
+  .info-block.warn {
+    background: rgba(251,146,60,.06);
+    border-color: rgba(251,146,60,.2);
+  }
+  .info-block.success {
+    background: rgba(74,222,128,.06);
+    border-color: rgba(74,222,128,.2);
+  }
+  .info-label {
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: .4rem;
+    color: var(--accent);
+  }
+  .info-block.warn .info-label  { color: var(--orange); }
+  .info-block.success .info-label { color: var(--green); }
+
+  /* ── Instruction steps ── */
+  .steps-list {
+    list-style: none;
+    counter-reset: step-counter;
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+    margin-bottom: 1.5rem;
+  }
+  .steps-list li {
+    counter-increment: step-counter;
+    display: flex;
+    align-items: flex-start;
+    gap: .9rem;
+    font-size: .9rem;
+    line-height: 1.5;
+  }
+  .steps-list li::before {
+    content: counter(step-counter);
+    min-width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(34,211,238,.12);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .7rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── Code blocks ── */
+  .code-block {
+    background: #060a12;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    margin: .8rem 0 1.2rem;
+    position: relative;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .8rem;
+    line-height: 1.7;
+    color: #94a3b8;
+    overflow-x: auto;
+  }
+  .code-block .hl  { color: #22d3ee; }
+  .code-block .hl2 { color: #a78bfa; }
+  .code-block .hl3 { color: #4ade80; }
+  .code-block .comment { color: #475569; font-style: italic; }
+  .copy-btn {
+    position: absolute;
+    top: .6rem;
+    right: .6rem;
+    background: var(--border);
+    border: none;
+    color: var(--muted);
+    font-size: .7rem;
+    font-family: 'IBM Plex Mono', monospace;
+    padding: .3rem .7rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .copy-btn:hover { background: var(--accent); color: #000; }
+  .copy-btn.copied { background: var(--green); color: #000; }
+
+  /* ── Input for IP ── */
+  .input-row {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin: .8rem 0 1.2rem;
+    flex-wrap: wrap;
+  }
+  .ip-input {
+    background: #060a12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .6rem 1rem;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: .9rem;
+    width: 200px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .ip-input:focus { border-color: var(--accent); }
+  .ip-hint { font-size: .75rem; color: var(--muted); }
+
+  /* ── Buttons ── */
+  .btn-row {
+    display: flex;
+    gap: .8rem;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: .7rem 1.6rem;
+    border-radius: 10px;
+    border: none;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: .9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .2s;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+  }
+  .btn-primary:hover { background: #67e8f9; transform: translateY(-1px); }
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { color: var(--text); border-color: var(--muted); }
+  .btn-done {
+    background: var(--done);
+    color: var(--green);
+    border: 1px solid var(--done-b);
+  }
+  .btn-done:hover { background: #1a4a35; }
+
+  /* ── Pill badge ── */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: .2rem .6rem;
+    border-radius: 99px;
+  }
+  .pill-free { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
+  .pill-app  { background: rgba(34,211,238,.12); color: var(--accent); border: 1px solid rgba(34,211,238,.3); }
+
+  /* ── Option cards ── */
+  .option-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1.2rem 0;
+  }
+  @media (max-width: 540px) { .option-cards { grid-template-columns: 1fr; } }
+
+  .option-card {
+    background: #060a12;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 1.2rem;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .option-card:hover, .option-card.selected {
+    border-color: var(--accent);
+    background: rgba(34,211,238,.05);
+  }
+  .option-card .icon { font-size: 1.8rem; margin-bottom: .6rem; }
+  .option-card h3 { font-size: .95rem; font-weight: 700; margin-bottom: .3rem; }
+  .option-card p  { font-size: .78rem; color: var(--muted); line-height: 1.4; }
+
+  /* ── Check list ── */
+  .checklist {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    margin: 1rem 0;
+  }
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    font-size: .9rem;
+    padding: .7rem 1rem;
+    background: #060a12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .check-item:hover { border-color: var(--accent); }
+  .check-item.checked {
+    border-color: var(--done-b);
+    background: var(--done);
+  }
+  .check-box {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    border: 2px solid var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: .7rem;
+    transition: all .2s;
+  }
+  .check-item.checked .check-box {
+    background: var(--green);
+    border-color: var(--green);
+    color: #000;
+  }
+
+  /* ── Final screen ── */
+  .final-screen {
+    text-align: center;
+    padding: 2rem 1rem;
+  }
+  .final-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
+  }
+  .final-screen h2 { font-size: 1.8rem; font-weight: 700; margin-bottom: .5rem; }
+  .final-screen p  { color: var(--muted); font-size: .95rem; line-height: 1.6; max-width: 460px; margin: 0 auto 1.5rem; }
+
+  /* ── Dynamic code ── */
+  .dynamic { color: #fb923c; font-weight: 600; }
+
+  /* ── Divider ── */
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo">📟</div>
+  <div>
+    <h1>CloudEMS · Tablet Setup</h1>
+    <p>Zet een tablet als wandpaneel in — zonder inloggen</p>
+  </div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+<div class="main">
+
+  <!-- Step nav -->
+  <div class="step-nav" id="stepNav"></div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STAP 1 — Kies je scherm
+  ══════════════════════════════════════════════════════════ -->
+  <div class="step-card active" id="step-0">
+    <div class="step-number">Stap 1 van 5</div>
+    <div class="step-title">Welk scherm gebruik je?</div>
+    <div class="step-subtitle">De setup verschilt een beetje per apparaat. Kies wat het dichtst bij jouw situatie past.</div>
+
+    <div class="option-cards">
+      <div class="option-card" onclick="selectDevice('android')" id="opt-android">
+        <div class="icon">📱</div>
+        <h3>Android tablet</h3>
+        <p>Goedkoop scherm, Samsung, Lenovo, of een willekeurige Android tablet van €40–€100</p>
+      </div>
+      <div class="option-card" onclick="selectDevice('fire')" id="opt-fire">
+        <div class="icon">🔥</div>
+        <h3>Amazon Fire tablet</h3>
+        <p>Fire HD 8 / HD 10 — populaire goedkope optie. Werkt prima na kleine aanpassing</p>
+      </div>
+      <div class="option-card" onclick="selectDevice('ipad')" id="opt-ipad">
+        <div class="icon">🍎</div>
+        <h3>iPad</h3>
+        <p>Gebruik de HA Companion app + Guided Access om de app te vergrendelen</p>
+      </div>
+      <div class="option-card" onclick="selectDevice('chromebook')" id="opt-chromebook">
+        <div class="icon">💻</div>
+        <h3>Chromebook / TV</h3>
+        <p>Gewone browser in fullscreen kiosk mode, of Google Cast voor een TV</p>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" onclick="nextStep()" id="btnNext0" disabled>Volgende →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STAP 2 — App installeren
+  ══════════════════════════════════════════════════════════ -->
+  <div class="step-card" id="step-1">
+    <div class="step-number">Stap 2 van 5</div>
+    <div class="step-title" id="s2title">App installeren</div>
+    <div class="step-subtitle" id="s2sub">Installeer de juiste app op je apparaat.</div>
+
+    <div id="s2content"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="prevStep()">← Terug</button>
+      <button class="btn btn-primary" onclick="nextStep()">Volgende →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STAP 3 — HA instellen: trusted networks
+  ══════════════════════════════════════════════════════════ -->
+  <div class="step-card" id="step-2">
+    <div class="step-number">Stap 3 van 5</div>
+    <div class="step-title">Automatisch inloggen instellen</div>
+    <div class="step-subtitle">
+      Apparaten op je thuisnetwerk kunnen HA openen <strong>zonder wachtwoord</strong>.
+      Dit doe je één keer in HA's configuratie.
+    </div>
+
+    <div class="info-block warn">
+      <div class="info-label">⚠️ Let op</div>
+      Dit geldt <strong>alleen voor apparaten op je thuisnetwerk</strong> (WiFi thuis).
+      Van buitenaf (4G, ander WiFi) blijft de normale login gewoon werken.
+    </div>
+
+    <ul class="steps-list">
+      <li>Ga in HA naar <strong>Instellingen → Systeem → Bewerken configuratie</strong> of open het bestand <code>configuration.yaml</code> in een editor.</li>
+      <li>Kopieer de onderstaande code en plak hem helemaal <strong>bovenaan</strong> in het bestand (vóór eventuele andere regels).</li>
+      <li>Vervang <code class="dynamic">UW_GEBRUIKER_ID</code> door jouw eigen ID (zie tip hieronder).</li>
+      <li>Sla het bestand op en <strong>herstart Home Assistant</strong>.</li>
+    </ul>
+
+    <div class="info-block">
+      <div class="info-label">💡 Jouw gebruikers-ID vinden</div>
+      Ga naar <strong>Instellingen → Gebruikers → klik op jouw naam</strong>.<br>
+      In de URL staat je ID: <code>/config/users/<span style="color:var(--accent)">dit-lange-getal-is-jouw-id</span></code><br>
+      Kopieer dat lange getal.
+    </div>
+
+    <div class="input-row">
+      <input class="ip-input" id="haUserId" placeholder="b2f3a1c9d4e8..." maxlength="80"
+             oninput="updateCode()" style="width:280px">
+      <span class="ip-hint">Plak hier je gebruikers-ID (optioneel, voor live preview)</span>
+    </div>
+
+    <div class="code-block" id="trustedCode">
+      <button class="copy-btn" onclick="copyCode('trustedCode', this)">Kopiëren</button>
+<span class="comment"># Zet dit BOVENAAN je configuration.yaml</span>
+<span class="hl">homeassistant</span>:
+  <span class="hl2">auth_providers</span>:
+    - <span class="hl3">type</span>: trusted_networks
+      <span class="hl3">trusted_networks</span>:
+        - <span class="hl">192.168.1.0/24</span>    <span class="comment"># jouw thuisnetwerk</span>
+      <span class="hl3">trusted_users</span>:
+        <span class="hl">192.168.1.0/24</span>:
+          - <span class="hl2 dynamic" id="userIdSpan">UW_GEBRUIKER_ID</span>
+      <span class="hl3">allow_bypass_login</span>: <span class="hl">true</span>
+    - <span class="hl3">type</span>: homeassistant  <span class="comment"># normaal login blijft werken</span>
+    </div>
+
+    <div class="info-block warn">
+      <div class="info-label">📡 Ander netwerk-adres?</div>
+      <code>192.168.1.0/24</code> is het meest gebruikelijk. Twijfel je? Ga op je tablet naar WiFi-instellingen en kijk wat het IP-adres begint met. Begint het met <code>192.168.0</code>? Pas dan de code aan naar <code>192.168.0.0/24</code>.
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="prevStep()">← Terug</button>
+      <button class="btn btn-primary" onclick="nextStep()">Herstart gedaan →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STAP 4 — App configureren
+  ══════════════════════════════════════════════════════════ -->
+  <div class="step-card" id="step-3">
+    <div class="step-number">Stap 4 van 5</div>
+    <div class="step-title" id="s4title">App instellen op je tablet</div>
+    <div class="step-subtitle">Stel de app in zodat hij direct naar het CloudEMS dashboard gaat.</div>
+
+    <div class="input-row">
+      <input class="ip-input" id="haIpInput" placeholder="192.168.1.100" maxlength="40"
+             oninput="updateUrls()">
+      <span class="ip-hint">Vul het IP-adres van je HA in (kijk bij Instellingen → Systeem → Netwerk)</span>
+    </div>
+
+    <div id="s4content"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="prevStep()">← Terug</button>
+      <button class="btn btn-primary" onclick="nextStep()">Volgende →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       STAP 5 — Controlelijst & klaar
+  ══════════════════════════════════════════════════════════ -->
+  <div class="step-card" id="step-4">
+    <div class="step-number">Stap 5 van 5</div>
+    <div class="step-title">Laatste controle</div>
+    <div class="step-subtitle">Vink alles af en je bent klaar!</div>
+
+    <div class="checklist">
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span>App geïnstalleerd op de tablet</span>
+      </div>
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span><code>trusted_networks</code> toegevoegd aan <code>configuration.yaml</code></span>
+      </div>
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span>Home Assistant herstart</span>
+      </div>
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span>HA-adres ingesteld in de app</span>
+      </div>
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span>Tablet opent CloudEMS automatisch zonder wachtwoord</span>
+      </div>
+      <div class="check-item" onclick="toggleCheck(this)">
+        <div class="check-box">✓</div>
+        <span>Scherm blijft aan (laadkabel aangesloten)</span>
+      </div>
+    </div>
+
+    <hr>
+
+    <div class="final-screen" id="finalScreen" style="display:none">
+      <div class="final-icon">🎉</div>
+      <h2>Klaar!</h2>
+      <p>Je tablet werkt nu als wandpaneel voor CloudEMS — zonder wachtwoord, altijd zichtbaar, direct inzicht in je energieverbruik.</p>
+      <div class="btn-row" style="justify-content:center">
+        <button class="btn btn-primary" onclick="window.location.href='/lovelace/0'">→ Naar CloudEMS dashboard</button>
+        <button class="btn btn-secondary" onclick="location.reload()">Opnieuw beginnen</button>
+      </div>
+    </div>
+
+    <div class="btn-row" id="finalBtnRow">
+      <button class="btn btn-secondary" onclick="prevStep()">← Terug</button>
+      <button class="btn btn-done" onclick="finish()">✓ Alles gedaan — Klaar!</button>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+let currentStep = 0;
+const TOTAL_STEPS = 5;
+let selectedDevice = null;
+const stepLabels = ['Scherm', 'App', 'HA Config', 'Instellen', 'Klaar'];
+const completedSteps = new Set();
+
+// ── Device content definitions ──────────────────────────────────────────
+const deviceContent = {
+  android: {
+    s2title: 'HA Companion App installeren',
+    s2sub:   'De officiële Home Assistant app — gratis, werkt perfect als wandpaneel.',
+    s2html: `
+      <div class="info-block success">
+        <div class="info-label">✅ Beste keuze</div>
+        De HA Companion app is gratis, direct van de HA-makers, en ondersteunt automatisch inloggen via trusted networks.
+      </div>
+      <ul class="steps-list">
+        <li>Open de <strong>Google Play Store</strong> op je tablet.</li>
+        <li>Zoek op <strong>"Home Assistant"</strong> — de app met het oranje huisje.</li>
+        <li>Tik op <strong>Installeren</strong> en wacht tot het klaar is.</li>
+        <li>Open de app nog <em>niet</em> — dat doen we in stap 4.</li>
+      </ul>
+      <div class="info-block">
+        <div class="info-label">💡 Extra tip: scherm aan houden</div>
+        Ga naar <strong>Instellingen → Scherm → Slaapstand</strong> op de tablet en zet hem op <strong>Nooit</strong>. Zorg ook dat de tablet altijd aan de lader hangt.
+      </div>`,
+    s4title: 'Companion app instellen',
+    s4html: (ip) => `
+      <ul class="steps-list">
+        <li>Open de <strong>Home Assistant</strong> app op de tablet.</li>
+        <li>Tik op <strong>"Home Assistant instellen"</strong> als je dat scherm ziet, of ga naar <strong>Instellingen → Companion App → Server</strong>.</li>
+        <li>Vul het adres van je HA in:<br>
+            <div class="code-block" style="margin:.5rem 0"><span class="hl">http://<span class="dynamic" id="urlSpan1">${ip || '192.168.1.100'}</span>:8123</span></div>
+        </li>
+        <li>Tik op <strong>Verbinden</strong>. Als trusted networks goed is ingesteld, log je <strong>automatisch in</strong> — geen wachtwoord nodig.</li>
+        <li>Navigeer naar het <strong>CloudEMS dashboard</strong> en tik rechtsboven op de drie puntjes → <strong>"Aan beginscherm toevoegen"</strong>.</li>
+      </ul>
+      <div class="info-block">
+        <div class="info-label">🔒 Kiosk modus (optioneel)</div>
+        Wil je dat niemand de app kan verlaten? Voeg <code>?kiosk</code> toe aan de URL in de app: <br>
+        <code>http://<span class="dynamic" id="urlSpan2">${ip || '192.168.1.100'}</span>:8123/lovelace/0?kiosk</code><br>
+        Hiermee verdwijnt de HA-navigatiebalk volledig.
+      </div>`
+  },
+
+  fire: {
+    s2title: 'HA Companion App sideloaden',
+    s2sub:   'Amazon Fire tablets hebben geen Google Play — we installeren de app handmatig.',
+    s2html: `
+      <div class="info-block warn">
+        <div class="info-label">⚠️ Iets meer stappen</div>
+        Amazon Fire tablets hebben geen Google Play Store. We installeren de HA app handmatig (sideloaden). Dit is veilig en eenmalig.
+      </div>
+      <ul class="steps-list">
+        <li>Ga op de Fire tablet naar <strong>Instellingen → Beveiliging</strong> en zet <strong>"Apps uit onbekende bronnen"</strong> aan.</li>
+        <li>Open de browser op de tablet en ga naar:<br>
+            <div class="code-block" style="margin:.4rem 0"><span class="hl">github.com/home-assistant/android/releases</span></div>
+        </li>
+        <li>Download het nieuwste bestand dat eindigt op <code>-full-release.apk</code>.</li>
+        <li>Open het gedownloade bestand via <strong>Bestanden</strong> en tik op <strong>Installeren</strong>.</li>
+        <li>Open de app — ga verder bij stap 4.</li>
+      </ul>
+      <div class="info-block">
+        <div class="info-label">💡 Scherm aan houden</div>
+        Ga naar <strong>Instellingen → Scherm → Slaapstand</strong> en zet op <strong>Nooit</strong>. Houd de tablet aan de lader.
+      </div>`,
+    s4title: 'Companion app instellen (Fire)',
+    s4html: (ip) => `
+      <ul class="steps-list">
+        <li>Open de <strong>Home Assistant</strong> app op de Fire tablet.</li>
+        <li>Vul bij het serveradres in:<br>
+            <div class="code-block" style="margin:.5rem 0"><span class="hl">http://<span class="dynamic" id="urlSpan1">${ip || '192.168.1.100'}</span>:8123</span></div>
+        </li>
+        <li>Als trusted networks goed staat ingesteld, log je <strong>automatisch in</strong>.</li>
+        <li>Navigeer naar het CloudEMS dashboard. Klaar!</li>
+      </ul>`
+  },
+
+  ipad: {
+    s2title: 'HA Companion App installeren (iPad)',
+    s2sub:   'De iOS versie van de Companion app — gratis in de App Store.',
+    s2html: `
+      <ul class="steps-list">
+        <li>Open de <strong>App Store</strong> op de iPad.</li>
+        <li>Zoek op <strong>"Home Assistant"</strong>.</li>
+        <li>Tik op <strong>Ophalen / Installeren</strong>.</li>
+        <li>Om de app te vergrendelen zodat niemand eruit kan: ga naar <strong>Instellingen → Toegankelijkheid → Guided Access</strong> en zet dit aan.</li>
+        <li>Open HA, navigeer naar CloudEMS, druk 3× snel op de zijknop en tik <strong>Guided Access starten</strong>.</li>
+      </ul>
+      <div class="info-block">
+        <div class="info-label">💡 Scherm aan houden</div>
+        Ga naar <strong>Instellingen → Scherm en helderheid → Automatisch vergrendelen</strong> → <strong>Nooit</strong>.
+      </div>`,
+    s4title: 'Companion app instellen (iPad)',
+    s4html: (ip) => `
+      <ul class="steps-list">
+        <li>Open de <strong>Home Assistant</strong> app op de iPad.</li>
+        <li>Vul het serveradres in:<br>
+            <div class="code-block" style="margin:.5rem 0"><span class="hl">http://<span class="dynamic" id="urlSpan1">${ip || '192.168.1.100'}</span>:8123</span></div>
+        </li>
+        <li>Log automatisch in via trusted networks.</li>
+        <li>Navigeer naar CloudEMS en activeer Guided Access als je de app wil vastzetten.</li>
+      </ul>`
+  },
+
+  chromebook: {
+    s2title: 'Browser in kiosk mode',
+    s2sub:   'Op een Chromebook of TV gebruik je gewoon de browser in volledig scherm.',
+    s2html: `
+      <div class="info-block success">
+        <div class="info-label">✅ Geen app nodig</div>
+        Op een Chromebook of Smart TV met browser heb je geen extra app nodig.
+      </div>
+      <ul class="steps-list">
+        <li>Open <strong>Chrome</strong> op je Chromebook of TV-browser.</li>
+        <li>Navigeer naar het HA-adres (zie stap 4).</li>
+        <li>Druk op <strong>F11</strong> (of Volledig scherm-knop) om fullscreen te gaan.</li>
+        <li>Op een Smart TV: gebruik de ingebouwde browser en zet hem op de HA-URL als startpagina.</li>
+      </ul>`,
+    s4title: 'Browser instellen',
+    s4html: (ip) => `
+      <ul class="steps-list">
+        <li>Open Chrome en ga naar:<br>
+            <div class="code-block" style="margin:.5rem 0"><span class="hl">http://<span class="dynamic" id="urlSpan1">${ip || '192.168.1.100'}</span>:8123/lovelace/0</span></div>
+        </li>
+        <li>Log in — via trusted networks gaat dit automatisch.</li>
+        <li>Klik rechtsboven op <strong>⋮ → Meer hulpprogramma's → Snelkoppeling maken</strong> en vink <em>"Als venster openen"</em> aan.</li>
+        <li>Druk <strong>F11</strong> voor volledig scherm.</li>
+      </ul>`
+  }
+};
+
+// ── Init ──────────────────────────────────────────────────────────────
+function buildNav() {
+  const nav = document.getElementById('stepNav');
+  nav.innerHTML = '';
+  stepLabels.forEach((label, i) => {
+    const isDone = completedSteps.has(i);
+    const isActive = i === currentStep;
+    nav.innerHTML += `
+      <div class="step-dot ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}"
+           onclick="goToStep(${i})">
+        <span class="num">${i + 1}</span>
+        <span class="check">✓</span>
+        ${label}
+      </div>`;
+  });
+}
+
+function updateProgress() {
+  const pct = ((currentStep) / (TOTAL_STEPS - 1)) * 100;
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+function goToStep(i) {
+  if (i > currentStep && !completedSteps.has(currentStep - 1) && i > 1) return;
+  document.querySelectorAll('.step-card').forEach(c => c.classList.remove('active'));
+  document.getElementById('step-' + i).classList.add('active');
+  currentStep = i;
+  buildNav();
+  updateProgress();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function nextStep() {
+  completedSteps.add(currentStep);
+  goToStep(currentStep + 1);
+}
+
+function prevStep() {
+  goToStep(currentStep - 1);
+}
+
+// ── Step 1: device select ─────────────────────────────────────────────
+function selectDevice(type) {
+  selectedDevice = type;
+  document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('opt-' + type).classList.add('selected');
+  document.getElementById('btnNext0').disabled = false;
+
+  // Pre-fill step 2 content
+  const d = deviceContent[type];
+  document.getElementById('s2title').textContent = d.s2title;
+  document.getElementById('s2sub').textContent   = d.s2sub;
+  document.getElementById('s2content').innerHTML = d.s2html;
+
+  // Pre-fill step 4
+  document.getElementById('s4title').textContent = d.s4title;
+  const ip = document.getElementById('haIpInput')?.value || '';
+  document.getElementById('s4content').innerHTML = d.s4html(ip);
+}
+
+// ── Step 3: live code preview ─────────────────────────────────────────
+function updateCode() {
+  const val = document.getElementById('haUserId').value.trim() || 'UW_GEBRUIKER_ID';
+  document.getElementById('userIdSpan').textContent = val;
+}
+
+// ── Step 4: live URL preview ──────────────────────────────────────────
+function updateUrls() {
+  const ip = document.getElementById('haIpInput').value.trim() || '192.168.1.100';
+  if (!selectedDevice) return;
+  document.getElementById('s4content').innerHTML = deviceContent[selectedDevice].s4html(ip);
+}
+
+// ── Copy code ─────────────────────────────────────────────────────────
+function copyCode(blockId, btn) {
+  const block = document.getElementById(blockId);
+  const text = block.innerText.replace('Kopiëren', '').replace('Gekopieerd!', '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Gekopieerd!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'Kopiëren'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ── Step 5: checklist ─────────────────────────────────────────────────
+function toggleCheck(el) {
+  el.classList.toggle('checked');
+  const allChecked = [...document.querySelectorAll('.check-item')].every(i => i.classList.contains('checked'));
+  if (allChecked) {
+    setTimeout(() => {
+      document.getElementById('finalBtnRow').style.display = 'none';
+      document.getElementById('finalScreen').style.display = 'block';
+    }, 300);
+  }
+}
+
+function finish() {
+  document.getElementById('finalBtnRow').style.display = 'none';
+  document.getElementById('finalScreen').style.display = 'block';
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────────────
+buildNav();
+updateProgress();
+</script>
+</body>
+</html>

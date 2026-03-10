@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudEMS Testmodus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0a0e17;
+      --surface:  #111827;
+      --surface2: #1a2234;
+      --border:   rgba(255,255,255,0.07);
+      --green:    #00e676;
+      --amber:    #ffab00;
+      --red:      #ff5252;
+      --blue:     #40c4ff;
+      --orange:   #ff9800;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --font-num: 'DM Mono', monospace;
+      --font-ui:  'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+
+    /* ── Active banner ─────────────────────────────────────────── */
+    #active-banner {
+      display: none;
+      align-items: center; gap: .8rem;
+      background: rgba(255,152,0,.12); border: 1px solid rgba(255,152,0,.4);
+      padding: .7rem 1.2rem; border-radius: 8px;
+      margin-bottom: 1.5rem; font-size: .82rem;
+    }
+    #active-banner.on { display: flex; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); animation: blink 1.1s ease infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
+    .banner-time { color: var(--amber); font-family: var(--font-num); }
+    .stop-btn {
+      margin-left: auto; background: rgba(255,82,82,.15);
+      border: 1px solid rgba(255,82,82,.5); color: var(--red);
+      padding: .3rem .9rem; border-radius: 5px; cursor: pointer;
+      font-family: var(--font-ui); font-weight: 700; font-size: .78rem;
+      transition: background .15s;
+    }
+    .stop-btn:hover { background: rgba(255,82,82,.3); }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .logo { color: var(--orange); }
+    .logo svg { width: 28px; height: 28px; }
+    h1 { font-size: 1.3rem; font-weight: 800; letter-spacing: .04em; }
+    h1 span { color: var(--orange); }
+    .subtitle { color: var(--muted); font-size: .75rem; font-family: var(--font-num); margin-left: auto; }
+
+    /* ── Grid layout ──────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+
+    /* ── Card ─────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.2rem;
+    }
+    .card-title {
+      font-size: .65rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 1rem;
+    }
+    .card-title span { color: var(--orange); margin-right: .4rem; }
+
+    /* ── Slider row ───────────────────────────────────────────── */
+    .slider-row {
+      display: flex; align-items: center; gap: .8rem;
+      margin-bottom: .9rem;
+    }
+    .slider-label {
+      font-size: .72rem; color: var(--muted);
+      font-family: var(--font-num); width: 110px; flex-shrink: 0;
+    }
+    input[type=range] {
+      flex: 1; height: 4px; accent-color: var(--orange);
+      background: var(--surface2); border-radius: 2px;
+      outline: none; cursor: pointer;
+    }
+    .slider-val {
+      font-family: var(--font-num); font-size: .78rem; font-weight: 500;
+      color: var(--text); width: 72px; text-align: right; flex-shrink: 0;
+    }
+    .slider-val.c-green { color: var(--green); }
+    .slider-val.c-red   { color: var(--red); }
+    .slider-val.c-amber { color: var(--amber); }
+
+    /* ── Zone block ───────────────────────────────────────────── */
+    .zone-block {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 7px; padding: .9rem; margin-bottom: .8rem;
+    }
+    .zone-name {
+      font-size: .7rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--blue); margin-bottom: .7rem;
+    }
+
+    /* ── Stove temp toggle ─────────────────────────────────────── */
+    .stove-row {
+      display: flex; align-items: center; gap: .5rem;
+      margin-top: .5rem; padding-top: .5rem;
+      border-top: 1px solid var(--border);
+    }
+    .stove-row label { font-size: .7rem; color: var(--muted); flex: 1; font-family: var(--font-num); }
+
+    /* ── Apply button ─────────────────────────────────────────── */
+    .apply-section { margin-top: 1.5rem; display: flex; gap: .8rem; align-items: center; }
+    .apply-btn {
+      background: rgba(255,152,0,.2); border: 1px solid rgba(255,152,0,.5);
+      color: var(--orange); padding: .6rem 1.6rem; border-radius: 6px;
+      cursor: pointer; font-family: var(--font-ui); font-weight: 700;
+      font-size: .85rem; transition: background .15s;
+    }
+    .apply-btn:hover { background: rgba(255,152,0,.35); }
+    .apply-btn.active-state {
+      background: rgba(255,82,82,.15); border-color: rgba(255,82,82,.5); color: var(--red);
+    }
+    #timeout-sel { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: .5rem .8rem; border-radius: 5px; font-family: var(--font-num); font-size: .8rem; }
+    #status-msg { font-size: .75rem; color: var(--muted); font-family: var(--font-num); }
+
+    /* ── Scenario presets ─────────────────────────────────────── */
+    .presets { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+    .preset-btn {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); padding: .35rem .9rem; border-radius: 20px;
+      cursor: pointer; font-size: .72rem; font-family: var(--font-num);
+      transition: all .15s;
+    }
+    .preset-btn:hover { border-color: var(--orange); color: var(--orange); }
+
+    /* ── Live values panel ─────────────────────────────────────── */
+    #live-panel {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; padding: .9rem; font-family: var(--font-num);
+      font-size: .72rem; color: var(--muted);
+    }
+    #live-panel h3 { font-size: .6rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .6rem; font-family: var(--font-ui); }
+    .live-row { display: flex; justify-content: space-between; padding: .2rem 0; border-bottom: 1px solid var(--border); }
+    .live-row:last-child { border-bottom: none; }
+    .live-val { color: var(--text); }
+    .live-val.sim { color: var(--orange); }
+
+    /* ── Zones detected ───────────────────────────────────────── */
+    #zones-detected { font-size: .7rem; color: var(--muted); font-family: var(--font-num); margin-bottom: 1rem; }
+    #zones-detected span { color: var(--blue); }
+
+    /* ── Info note ─────────────────────────────────────────────── */
+    .info-note {
+      background: rgba(64,196,255,.06); border-left: 2px solid rgba(64,196,255,.4);
+      padding: .6rem .9rem; border-radius: 0 5px 5px 0;
+      font-size: .72rem; color: var(--muted); font-family: var(--font-num);
+      margin-top: 1rem; line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+<div id="active-banner">
+  <span class="dot"></span>
+  <span>Testmodus actief — leerprocessen bevroren</span>
+  <span class="banner-time" id="banner-time"></span>
+  <button class="stop-btn" onclick="stopSim()">■ Stop</button>
+</div>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+    </svg>
+  </div>
+  <div>
+    <h1>CloudEMS <span>Testmodus</span></h1>
+  </div>
+  <div class="subtitle" id="subtitle">Niet verbonden</div>
+  <button onclick="clearToken()" title="Token wissen en opnieuw instellen"
+    style="background:none; border:none; color:#475569; font-size:.7rem; cursor:pointer; margin-left:.5rem; padding:2px 6px; border-radius:4px;"
+    onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#475569'">🔑</button>
+</header>
+
+<!-- Scenario presets -->
+<div class="presets">
+  <button class="preset-btn" onclick="applyPreset('pv_surplus')">☀️ PV surplus</button>
+  <button class="preset-btn" onclick="applyPreset('grid_import')">⚡ Hoog verbruik</button>
+  <button class="preset-btn" onclick="applyPreset('export')">↗ Export</button>
+  <button class="preset-btn" onclick="applyPreset('cold_house')">🥶 Koude woning</button>
+  <button class="preset-btn" onclick="applyPreset('stove_on')">🔥 Kachel aan</button>
+  <button class="preset-btn" onclick="applyPreset('cheap_price')">💚 Goedkope prijs</button>
+  <button class="preset-btn" onclick="applyPreset('expensive_price')">💸 Dure prijs</button>
+  <button class="preset-btn" onclick="applyPreset('battery_low')">🔋 Batterij laag</button>
+</div>
+
+<div class="grid">
+
+  <!-- Energie & Net -->
+  <div class="card">
+    <div class="card-title"><span>⚡</span>Net & Energie</div>
+
+    <div class="slider-row">
+      <div class="slider-label">Net (W)</div>
+      <input type="range" id="s-grid" min="-15000" max="15000" step="100" value="0" oninput="upd(this,'v-grid')">
+      <div class="slider-val" id="v-grid">0 W</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">PV (W)</div>
+      <input type="range" id="s-pv" min="0" max="15000" step="100" value="0" oninput="upd(this,'v-pv')">
+      <div class="slider-val c-green" id="v-pv">0 W</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">Gas (m³/u)</div>
+      <input type="range" id="s-gas" min="0" max="4" step="0.05" value="0" oninput="upd(this,'v-gas')">
+      <div class="slider-val" id="v-gas">0.0 m³/u</div>
+    </div>
+  </div>
+
+  <!-- Batterij -->
+  <div class="card">
+    <div class="card-title"><span>🔋</span>Batterij</div>
+    <div class="slider-row">
+      <div class="slider-label">SoC (%)</div>
+      <input type="range" id="s-soc" min="0" max="100" step="1" value="50" oninput="upd(this,'v-soc')">
+      <div class="slider-val" id="v-soc">50 %</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">Vermogen (W)</div>
+      <input type="range" id="s-bat" min="-10000" max="10000" step="100" value="0" oninput="upd(this,'v-bat')">
+      <div class="slider-val" id="v-bat">0 W</div>
+    </div>
+  </div>
+
+  <!-- Fasen -->
+  <div class="card">
+    <div class="card-title"><span>〰</span>Fasen (W)</div>
+    <div class="slider-row">
+      <div class="slider-label">L1</div>
+      <input type="range" id="s-l1" min="-5000" max="5000" step="50" value="0" oninput="upd(this,'v-l1')">
+      <div class="slider-val" id="v-l1">0 W</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">L2</div>
+      <input type="range" id="s-l2" min="-5000" max="5000" step="50" value="0" oninput="upd(this,'v-l2')">
+      <div class="slider-val" id="v-l2">0 W</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">L3</div>
+      <input type="range" id="s-l3" min="-5000" max="5000" step="50" value="0" oninput="upd(this,'v-l3')">
+      <div class="slider-val" id="v-l3">0 W</div>
+    </div>
+  </div>
+
+  <!-- Prijs & Temperatuur -->
+  <div class="card">
+    <div class="card-title"><span>💶</span>Prijs & Klimaat</div>
+    <div class="slider-row">
+      <div class="slider-label">EPEX (€/kWh)</div>
+      <input type="range" id="s-epex" min="-0.2" max="1.5" step="0.005" value="0.12" oninput="upd(this,'v-epex')">
+      <div class="slider-val" id="v-epex">€ 0.120</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-label">Buiten (°C)</div>
+      <input type="range" id="s-out" min="-20" max="40" step="0.5" value="10" oninput="upd(this,'v-out')">
+      <div class="slider-val" id="v-out">10.0 °C</div>
+    </div>
+  </div>
+
+  <!-- Klimaatzones -->
+  <div class="card" style="grid-column: span 2">
+    <div class="card-title"><span>🌡️</span>Klimaatzones</div>
+    <div id="zones-detected">Zones laden…</div>
+    <div id="zones-container">
+      <!-- Zones worden hier dynamisch gegenereerd -->
+    </div>
+    <div class="info-note">
+      Zone-temperaturen worden als echte HA states geïnjecteerd.
+      Als een zone geen externe sensor heeft, maakt CloudEMS automatisch
+      een virtual sensor aan (<code>sensor.cloudems_sim_zone_*</code>).
+      WoodStoveDetector detecteert "brandend" zodra de kacheltemp boven
+      zijn geleerde branddrempel komt (~60% van piektemp boven baseline).
+    </div>
+  </div>
+
+  <!-- Live status -->
+  <div class="card">
+    <div class="card-title"><span>📡</span>Live status coordinator</div>
+    <div id="live-panel">
+      <h3>Actuele waarden (gesimuleerd = oranje)</h3>
+      <div id="live-rows">Laden…</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Apply -->
+<div class="apply-section">
+  <select id="timeout-sel">
+    <option value="15">15 min</option>
+    <option value="30" selected>30 min</option>
+    <option value="60">1 uur</option>
+    <option value="120">2 uur</option>
+  </select>
+  <button class="apply-btn" id="apply-btn" onclick="applySim()">▶ Start testmodus</button>
+  <span id="status-msg"></span>
+</div>
+
+<!-- ── Token overlay ──────────────────────────────────────────────────── -->
+<div id="token-overlay" style="display:none; position:fixed; inset:0; background:rgba(10,14,23,0.92); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#111827; border:1px solid rgba(255,255,255,0.1); border-radius:16px; padding:2rem; max-width:420px; width:90%; text-align:center;">
+    <div style="font-size:2rem; margin-bottom:.8rem;">🔑</div>
+    <div style="font-size:1.1rem; font-weight:700; color:#e2e8f0; margin-bottom:.4rem;">HA Token instellen</div>
+    <div style="font-size:.8rem; color:#64748b; margin-bottom:1.2rem; line-height:1.5;">
+      Eenmalig nodig voor lokale panels.<br>
+      Maak aan via <strong style="color:#94a3b8">Profiel → Lange-termijn toegangstokens</strong>.
+    </div>
+    <input id="token-input" type="password"
+      placeholder="eyJhbGciOiJ…"
+      onkeydown="if(event.key==='Enter') submitToken()"
+      style="width:100%; padding:.6rem .8rem; background:#1a2234; border:1px solid rgba(255,255,255,0.12); border-radius:8px; color:#e2e8f0; font-family:monospace; font-size:.78rem; margin-bottom:.6rem; outline:none;">
+    <div id="token-error" style="font-size:.75rem; color:#ff5252; min-height:1.2rem; margin-bottom:.8rem;"></div>
+    <button onclick="submitToken()"
+      style="width:100%; padding:.65rem; background:#00b140; border:none; border-radius:8px; color:#fff; font-weight:700; font-size:.9rem; cursor:pointer;">
+      Verbinden
+    </button>
+    <div style="margin-top:.8rem; font-size:.72rem; color:#475569;">
+      Token wordt lokaal opgeslagen in je browser — alleen voor dit apparaat.
+    </div>
+  </div>
+</div>
+
+<script>
+// ── HA connection ──────────────────────────────────────────────────────────
+let haToken = null;
+let ws = null;
+let wsId = 1;
+let simActive = false;
+let simRemaining = 0;
+let knownZones = [];
+
+// ── Auth: universele token-ophaler ───────────────────────────────────────────
+// Volgorde: hassConnection Promise → sync parent → meta/hash → localStorage
+// → cookie → overlay (manueel)
+
+function extractTokenFromConn(conn) {
+  if (!conn) return null;
+  const auth = conn.options?.auth || conn.auth;
+  if (!auth) return null;
+  return auth.data?.access_token || auth.access_token
+    || (typeof auth.accessToken === 'string' ? auth.accessToken : null);
+}
+
+async function resolveHassToken() {
+  // hassConnection is een Promise in HA 2023.4+
+  // Zowel window als window.parent worden geprobeerd (iframe-panels)
+  const sources = [];
+  try { sources.push(window.hassConnection); } catch(e) {}
+  try { sources.push(window.parent?.hassConnection); } catch(e) {}
+
+  for (const src of sources) {
+    if (!src) continue;
+    try {
+      if (typeof src.then === 'function') {
+        const conn = await Promise.race([
+          src,
+          new Promise((_, rej) => setTimeout(() => rej(), 1500))
+        ]);
+        const t = extractTokenFromConn(conn);
+        if (t) return t;
+      } else {
+        const t = extractTokenFromConn(src);
+        if (t) return t;
+      }
+    } catch(e) {}
+  }
+
+  // hass object (Lovelace custom panels)
+  try {
+    const hass = window.parent?.hass;
+    if (hass?.auth?.data?.access_token) return hass.auth.data.access_token;
+  } catch(e) {}
+
+  return null;
+}
+
+function getStaticToken() {
+  try {
+    const meta = document.querySelector('meta[name="ha-token"]');
+    if (meta?.content?.length > 10) return meta.content;
+  } catch(e) {}
+  try {
+    const hash = new URLSearchParams(location.hash.slice(1));
+    const t = hash.get('token');
+    if (t) { history.replaceState(null, '', location.pathname); return t; }
+  } catch(e) {}
+  return null;
+}
+
+async function validateToken(token) {
+  try {
+    const r = await fetch('/api/', { headers: { Authorization: `Bearer ${token}` } });
+    return r.ok;
+  } catch(e) { return false; }
+}
+
+async function init() {
+  // 1. hassConnection Promise (werkt in browser én Companion app)
+  haToken = await resolveHassToken();
+  if (haToken && !await validateToken(haToken)) haToken = null;
+
+  // 2. meta-tag / URL hash
+  if (!haToken) {
+    haToken = getStaticToken();
+    if (haToken && !await validateToken(haToken)) haToken = null;
+  }
+
+  // 3. Eerder opgeslagen token
+  if (!haToken) {
+    const stored = localStorage.getItem('cloudems_ha_token');
+    if (stored && await validateToken(stored)) {
+      haToken = stored;
+    } else {
+      localStorage.removeItem('cloudems_ha_token');
+    }
+  }
+
+  // 4. Cookie-sessie (browser met ingelogde HA sessie)
+  if (!haToken) {
+    try {
+      const r = await fetch('/api/', { credentials: 'include' });
+      if (r.ok) haToken = '__cookie__';
+    } catch(e) {}
+  }
+
+  if (!haToken) {
+    showTokenUI();
+    return;
+  }
+
+  hideTokenUI();
+  connectWS();
+  setInterval(pollStatus, 10000);
+  await pollStatus();
+}
+
+function showTokenUI() {
+  document.getElementById('token-overlay').style.display = 'flex';
+  document.getElementById('subtitle').textContent = 'Niet verbonden';
+}
+
+function hideTokenUI() {
+  document.getElementById('token-overlay').style.display = 'none';
+}
+
+async function submitToken() {
+  const input = document.getElementById('token-input').value.trim();
+  if (!input) return;
+  const err = document.getElementById('token-error');
+  err.textContent = 'Controleren…';
+  try {
+    const test = await fetch('/api/', { headers: { Authorization: `Bearer ${input}` } });
+    if (test.ok) {
+      haToken = input;
+      localStorage.setItem('cloudems_ha_token', haToken);
+      hideTokenUI();
+      connectWS();
+      setInterval(pollStatus, 10000);
+      await pollStatus();
+    } else {
+      err.textContent = '✗ Token ongeldig (status ' + test.status + ')';
+    }
+  } catch(e) { err.textContent = '✗ Verbindingsfout'; }
+}
+
+function clearToken() {
+  localStorage.removeItem('cloudems_ha_token');
+  haToken = null;
+  showTokenUI();
+}
+
+function authFetch(url, options = {}) {
+  if (haToken === '__cookie__') {
+    // Cookie-auth: geen Authorization header, maar credentials meesturen
+    return fetch(url, { ...options, credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+  }
+  return fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${haToken}`, ...(options.headers || {}) },
+  });
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/api/websocket`);
+  ws.onopen = () => {};
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'auth_required') {
+      const tok = (haToken && haToken !== '__cookie__') ? haToken : '';
+      ws.send(JSON.stringify({type:'auth', access_token: tok}));
+    }
+    if (msg.type === 'auth_ok') {
+      document.getElementById('subtitle').textContent = 'Verbonden';
+      subscribeStates();
+    }
+    if (msg.type === 'auth_invalid') {
+      clearToken();
+    }
+    if (msg.type === 'event' && msg.event?.event_type === 'state_changed') {
+      const d = msg.event.data;
+      if (d.entity_id === 'binary_sensor.cloudems_testmodus') updateBanner(d.new_state);
+    }
+  };
+  ws.onclose = () => { if (haToken) setTimeout(connectWS, 3000); }
+}
+
+function subscribeStates() {
+  ws.send(JSON.stringify({id: wsId++, type: 'subscribe_events', event_type: 'state_changed'}));
+}
+
+async function pollStatus() {
+  if (!haToken) return;
+  try {
+    const r = await authFetch('/api/states/binary_sensor.cloudems_testmodus');
+    if (r.ok) updateBanner(await r.json());
+
+    const r2 = await authFetch('/api/states/sensor.cloudems_watchdog');
+    if (r2.ok) {
+      const ws2 = await r2.json();
+      const zones = ws2.attributes?.known_zones || ws2.attributes?.climate_zones || [];
+      if (zones.length > 0 && zones.join() !== knownZones.join()) {
+        knownZones = zones;
+        renderZones();
+      }
+    }
+
+    const r3 = await authFetch('/api/states/sensor.cloudems_solar_system');
+    if (r3.ok) renderLive(await r3.json());
+  } catch(e) {}
+}
+
+function updateBanner(state) {
+  if (!state) return;
+  simActive = state.state === 'on';
+  simRemaining = state.attributes?.remaining_min || 0;
+  const banner = document.getElementById('active-banner');
+  banner.classList.toggle('on', simActive);
+  if (simActive) {
+    document.getElementById('banner-time').textContent = `Auto-stop over ${simRemaining} min`;
+  }
+  document.getElementById('apply-btn').textContent = simActive ? '↺ Update testmodus' : '▶ Start testmodus';
+  document.getElementById('apply-btn').classList.toggle('active-state', simActive);
+
+  // Zone-data uit binary sensor attributes
+  const zones = state.attributes?.known_zones || [];
+  if (zones.length > 0 && zones.join() !== knownZones.join()) {
+    knownZones = zones;
+    renderZones();
+  }
+  if (knownZones.length === 0 && !simActive) {
+    // Try harder: fetch watchdog
+  }
+}
+
+// ── Zone rendering ───────────────────────────────────────────────────────
+function renderZones() {
+  const det = document.getElementById('zones-detected');
+  det.innerHTML = `<span>${knownZones.length}</span> zone${knownZones.length !== 1 ? 's' : ''} gevonden: ${knownZones.map(z => `<span>${z}</span>`).join(', ')}`;
+
+  const container = document.getElementById('zones-container');
+  container.innerHTML = '';
+  knownZones.forEach(zone => {
+    const slug = zone.toLowerCase().replace(/\s+/g, '_');
+    const el = document.createElement('div');
+    el.className = 'zone-block';
+    el.id = `zone-${slug}`;
+    el.innerHTML = `
+      <div class="zone-name">🏠 ${zone}</div>
+      <div class="slider-row">
+        <div class="slider-label">Temp (°C)</div>
+        <input type="range" id="zt-${slug}" min="10" max="30" step="0.5" value="20"
+               oninput="updZone(this,'ztv-${slug}','${zone}')">
+        <div class="slider-val" id="ztv-${slug}">20.0 °C</div>
+      </div>
+      <div class="stove-row">
+        <label>Houtkachel aanwezig?</label>
+        <input type="checkbox" id="stove-en-${slug}"
+               onchange="toggleStoveSlider('${slug}')">
+      </div>
+      <div id="stove-block-${slug}" style="display:none; margin-top:.6rem">
+        <div class="slider-row">
+          <div class="slider-label">Kachel (°C)</div>
+          <input type="range" id="st-${slug}" min="15" max="350" step="5" value="25"
+                 oninput="updStove(this,'stv-${slug}','${zone}')">
+          <div class="slider-val" id="stv-${slug}">25 °C — koud</div>
+        </div>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+function toggleStoveSlider(slug) {
+  const cb  = document.getElementById(`stove-en-${slug}`);
+  const blk = document.getElementById(`stove-block-${slug}`);
+  blk.style.display = cb.checked ? 'block' : 'none';
+}
+
+// ── Slider helpers ───────────────────────────────────────────────────────
+function upd(el, valId) {
+  const v = parseFloat(el.value);
+  const id = el.id;
+  let txt = v.toFixed(0);
+  let cls = '';
+  if (id === 's-grid') {
+    txt = (v > 0 ? '+' : '') + Math.round(v) + ' W';
+    cls = v > 500 ? 'c-red' : v < -500 ? 'c-green' : '';
+  } else if (id === 's-pv') {
+    txt = Math.round(v) + ' W'; cls = v > 0 ? 'c-green' : '';
+  } else if (id === 's-gas') {
+    txt = v.toFixed(2) + ' m³/u';
+  } else if (id === 's-soc') {
+    txt = v.toFixed(0) + ' %';
+    cls = v < 20 ? 'c-red' : v > 80 ? 'c-green' : '';
+  } else if (id === 's-bat') {
+    txt = (v > 0 ? '+' : '') + Math.round(v) + ' W';
+  } else if (id.startsWith('s-l')) {
+    txt = (v > 0 ? '+' : '') + Math.round(v) + ' W';
+  } else if (id === 's-epex') {
+    txt = '€ ' + v.toFixed(3);
+    cls = v > 0.30 ? 'c-red' : v < 0.05 ? 'c-green' : 'c-amber';
+  } else if (id === 's-out') {
+    txt = v.toFixed(1) + ' °C';
+    cls = v < 5 ? 'c-blue' : '';
+  }
+  const el2 = document.getElementById(valId);
+  el2.textContent = txt;
+  el2.className = 'slider-val' + (cls ? ' ' + cls : '');
+}
+
+function updZone(el, valId, zone) {
+  const v = parseFloat(el.value);
+  document.getElementById(valId).textContent = v.toFixed(1) + ' °C';
+  // Live update als simulator al actief
+  if (simActive) debounce(() => sendZoneTemp(zone, v), 500, `zt-${zone}`)();
+}
+
+function updStove(el, valId, zone) {
+  const v = parseFloat(el.value);
+  let label = v < 50 ? '— koud' : v < 100 ? '— opwarmen' : v < 180 ? '— brandend' : '🔥 heet';
+  document.getElementById(valId).textContent = v.toFixed(0) + ' °C ' + label;
+  if (simActive) debounce(() => sendStoveTemp(zone, v), 500, `st-${zone}`)();
+}
+
+// ── Live panel ───────────────────────────────────────────────────────────
+function renderLive(state) {
+  if (!state) return;
+  const a = state.attributes || {};
+  const simFields = a.sim_fields || [];
+  const rows = [
+    ['Net', (a.grid_power_w || 0).toFixed(0) + ' W', simFields.includes('grid_w')],
+    ['PV', (a.pv_power_w || a.solar_power_w || 0).toFixed(0) + ' W', simFields.includes('pv_w')],
+    ['Batterij SoC', (a.battery_soc || 0).toFixed(0) + ' %', simFields.includes('battery_soc')],
+    ['EPEX', '€ ' + (a.epex_now || a.energy_price || 0).toFixed(3), simFields.includes('epex_now')],
+    ['Buiten', (a.outdoor_temp_c || 0).toFixed(1) + ' °C', simFields.includes('outdoor_temp_c')],
+  ];
+  document.getElementById('live-rows').innerHTML = rows.map(([k,v,sim]) =>
+    `<div class="live-row"><span>${k}</span><span class="live-val${sim ? ' sim' : ''}">${v}</span></div>`
+  ).join('');
+}
+
+// ── Apply / Stop ─────────────────────────────────────────────────────────
+async function applySim() {
+  if (!haToken) { setMsg('Niet verbonden — herlaad de pagina'); return; }
+  const timeout = parseInt(document.getElementById('timeout-sel').value);
+
+  // Energie overrides
+  const overrides = {
+    grid_w:        parseFloat(document.getElementById('s-grid').value),
+    pv_w:          parseFloat(document.getElementById('s-pv').value),
+    battery_soc:   parseFloat(document.getElementById('s-soc').value),
+    battery_w:     parseFloat(document.getElementById('s-bat').value),
+    l1_w:          parseFloat(document.getElementById('s-l1').value),
+    l2_w:          parseFloat(document.getElementById('s-l2').value),
+    l3_w:          parseFloat(document.getElementById('s-l3').value),
+    gas_m3h:       parseFloat(document.getElementById('s-gas').value),
+    outdoor_temp_c:parseFloat(document.getElementById('s-out').value),
+    epex_now:      parseFloat(document.getElementById('s-epex').value),
+  };
+
+  // Zone-temperaturen
+  const zone_temps = {};
+  const stove_temps = {};
+  knownZones.forEach(zone => {
+    const slug = zone.toLowerCase().replace(/\s+/g, '_');
+    const zt = document.getElementById(`zt-${slug}`);
+    if (zt) zone_temps[zone] = parseFloat(zt.value);
+    const cb = document.getElementById(`stove-en-${slug}`);
+    const st = document.getElementById(`st-${slug}`);
+    if (cb && cb.checked && st) stove_temps[zone] = parseFloat(st.value);
+  });
+
+  setMsg('Starten…');
+  try {
+    const r = await authFetch('/api/services/cloudems/simulator_set', {
+      method: 'POST',
+      body: JSON.stringify({ ...overrides, zone_temps, stove_temps, timeout_min: timeout }),
+    });
+    setMsg(r.ok ? '✓ Testmodus actief' : '✗ Fout: ' + r.status);
+    if (r.ok) setTimeout(pollStatus, 1500);
+  } catch(e) { setMsg('✗ Verbindingsfout'); }
+}
+
+async function stopSim() {
+  if (!haToken) return;
+  try {
+    await authFetch('/api/services/cloudems/simulator_clear', {
+      method: 'POST',
+      body: '{}',
+    });
+    setMsg('Testmodus gestopt');
+    setTimeout(pollStatus, 1000);
+  } catch(e) {}
+}
+
+async function sendZoneTemp(zone, temp_c) {
+  await authFetch('/api/services/cloudems/simulator_zone_temp', {
+    method: 'POST',
+    body: JSON.stringify({ zone, temp_c }),
+  });
+}
+
+async function sendStoveTemp(zone, temp_c) {
+  await authFetch('/api/services/cloudems/simulator_stove_temp', {
+    method: 'POST',
+    body: JSON.stringify({ zone, temp_c }),
+  });
+}
+
+// ── Scenario presets ─────────────────────────────────────────────────────
+const PRESETS = {
+  pv_surplus:      { 's-grid': -3000, 's-pv': 5000, 's-epex': 0.08, 's-out': 18, 's-bat': 2000, 's-soc': 85 },
+  grid_import:     { 's-grid':  6000, 's-pv':    0, 's-epex': 0.28, 's-out': -2, 's-bat': -1000, 's-soc': 15 },
+  export:          { 's-grid': -6000, 's-pv': 8000, 's-epex': -0.05, 's-out': 20 },
+  cold_house:      { 's-grid': 4000, 's-pv': 0, 's-epex': 0.35, 's-out': -8 },
+  stove_on:        { 's-out': 2 },  // stove handled via zone sliders
+  cheap_price:     { 's-epex': 0.02 },
+  expensive_price: { 's-epex': 0.80 },
+  battery_low:     { 's-soc': 5, 's-bat': 0 },
+};
+
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  Object.entries(p).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) { el.value = val; el.dispatchEvent(new Event('input')); }
+  });
+  if (name === 'stove_on') {
+    // Zet houtkachel checkboxes aan voor alle zones en set temp hoog
+    knownZones.forEach(zone => {
+      const slug = zone.toLowerCase().replace(/\s+/g, '_');
+      const cb = document.getElementById(`stove-en-${slug}`);
+      if (cb) { cb.checked = true; toggleStoveSlider(slug); }
+      const st = document.getElementById(`st-${slug}`);
+      if (st) { st.value = 200; st.dispatchEvent(new Event('input')); }
+    });
+  }
+  if (name === 'cold_house') {
+    knownZones.forEach(zone => {
+      const slug = zone.toLowerCase().replace(/\s+/g, '_');
+      const zt = document.getElementById(`zt-${slug}`);
+      if (zt) { zt.value = 14.5; zt.dispatchEvent(new Event('input')); }
+    });
+  }
+}
+
+// ── Debounce helper ──────────────────────────────────────────────────────
+const _timers = {};
+function debounce(fn, ms, key) {
+  return () => {
+    clearTimeout(_timers[key]);
+    _timers[key] = setTimeout(fn, ms);
+  };
+}
+
+function setMsg(txt) {
+  document.getElementById('status-msg').textContent = txt;
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Init alle slider display waarden
+  document.querySelectorAll('input[type=range]').forEach(el => {
+    el.dispatchEvent(new Event('input'));
+  });
+  init();
+});
+</script>
+</body>
+</html>
