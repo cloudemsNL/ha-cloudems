@@ -2,6 +2,37 @@
 
 Alle noemenswaardige wijzigingen per versie.
 
+## [4.4.3] - 2026-03-10
+
+### Bugfix
+
+- **Auto-deploy dashboard**: volledige herschrijving van `_async_ensure_lovelace_dashboard()`.
+  Vorige versie probeerde via de `DashboardsCollection` API te gaan, maar die is na `async_setup`
+  van de lovelace component niet toegankelijk via `hass.data`. Nieuwe aanpak schrijft direct naar
+  de HA `.storage/` bestanden (zelfde methode als backup/restore tools):
+  - `.storage/lovelace_dashboards` → dashboard-registratie (metadata + slug)
+  - `.storage/lovelace.cloudems-lovelace` → views en kaarten (yaml-inhoud)
+  Daarna hot-registratie voor de huidige sessie via `LovelaceStorage` + `frontend.async_register_built_in_panel`
+  zodat geen herstart nodig is.
+
+## [4.4.2] - 2026-03-10
+
+### Dashboard
+
+- **Verbruiksverdeling**: "Verbruik per Categorie" en "Verbruiksverdeling (huidig)" samengevoegd tot één kaart met totaal vandaag, Nu/Vandaag/%-tabel en insight
+
+## [4.4.1] - 2026-03-10
+
+### Bugfixes
+
+- **Auto-deploy dashboard**: 4 bugs opgelost in `_async_ensure_lovelace_dashboard()`:
+  - `async_items()` geeft een lijst terug, geen dict — `.get()` en `.items()` werkten niet
+  - `"mode": "storage"` veroorzaakte een Voluptuous schema-fout bij `async_create_item`
+  - Dashboard-object werd op de verkeerde plek opgezocht na aanmaken
+  - Race condition opgelost met `asyncio.sleep(0)` zodat de `CHANGE_ADDED`-listener kan uitvoeren
+- **Dashboard duplicaat verwijderd**: `cloudems/cloudems-dashboard.yaml` (root) verwijderd — enige bron is nu `custom_components/cloudems/www/cloudems-dashboard.yaml`
+- **Auto-copy dashboard YAML**: `cloudems-dashboard.yaml` wordt bij elke start automatisch gekopieerd naar `/config/` (alleen als de component-versie nieuwer is)
+
 ## [4.4.0] - 2026-03-10
 
 ### Negen structurele verbeteringen

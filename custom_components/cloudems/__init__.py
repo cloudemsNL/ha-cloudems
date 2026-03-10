@@ -375,80 +375,101 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
     """Maak het CloudEMS Lovelace-dashboard automatisch aan als het nog niet bestaat.
 
-    Werkt via de HA Lovelace storage API — zelfde mechanisme als de UI gebruikt
-    bij 'Dashboard toevoegen'. Het dashboard wordt aangemaakt in storage-modus met
-    de inhoud van cloudems-dashboard.yaml die meegeleverd is met de component.
+    Schrijft direct naar de HA .storage/ bestanden — zelfde aanpak als
+    homeassistant.helpers.storage.Store, precies zoals backup/restore tools doen.
 
-    Slug: cloudems-lovelace  →  bereikbaar via /lovelace-cloudems
+    Twee storage-bestanden:
+      .storage/lovelace_dashboards        — dashboard-registratie (metadata + slug)
+      .storage/lovelace.cloudems-lovelace — de views/kaarten (yaml-inhoud)
+
+    Daarna hot-registratie voor de huidige sessie zonder herstart:
+      1. LovelaceStorage-object in hass.data["lovelace"]["dashboards"][slug]
+      2. Sidebar-panel via frontend.async_register_built_in_panel(..., "lovelace")
     """
-    import pathlib, yaml as _yaml
+    import pathlib
+    import yaml as _yaml
+    from homeassistant.helpers.storage import Store
+    from homeassistant.components import frontend as _frontend
 
     _SLUG = "cloudems-lovelace"
+    _DOMAIN = "lovelace"
 
     try:
-        lovelace = hass.data.get("lovelace")
-        if lovelace is None:
-            _LOGGER.debug("CloudEMS: lovelace niet beschikbaar, dashboard aanmaken overgeslagen")
-            return
-
-        dashboards_store = getattr(lovelace, "dashboards", None)
-        if dashboards_store is None:
-            _LOGGER.debug("CloudEMS: lovelace.dashboards niet beschikbaar, overgeslagen")
-            return
-
-        # Laad de bestaande dashboards
-        await dashboards_store.async_load()
-
-        # Check of het dashboard al bestaat
-        existing = {k: v for k, v in dashboards_store.async_items().items()
-                    if k == _SLUG}
-        if existing:
-            _LOGGER.debug("CloudEMS: Lovelace dashboard '%s' bestaat al", _SLUG)
-            return
-
-        # Lees de YAML-inhoud uit de meegeleverde component-bestanden
+        # ── 0. YAML-inhoud laden ────────────────────────────────────────────
         yaml_path = pathlib.Path(__file__).parent / "www" / "cloudems-dashboard.yaml"
         if not yaml_path.exists():
             _LOGGER.warning("CloudEMS: cloudems-dashboard.yaml niet gevonden in www/")
             return
-
         dashboard_config = _yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
 
-        # Stap 1: Registreer het dashboard (metadata)
-        await dashboards_store.async_create_item({
-            "url_path": _SLUG,
-            "require_admin": False,
-            "title": "⚡ CloudEMS",
-            "icon": "mdi:lightning-bolt",
-            "show_in_sidebar": True,
-            "mode": "storage",
-        })
-
-        # Stap 2: Laad de dashboard-config store en sla de views op
-        from homeassistant.components.lovelace import dashboard as ll_dashboard  # noqa: PLC0415
-        dash_obj = dashboards_store.async_items().get(_SLUG)
-        if dash_obj is None:
-            _LOGGER.warning("CloudEMS: dashboard '%s' aangemaakt maar niet teruggevonden", _SLUG)
-            return
-
-        config_store = getattr(dash_obj, "config", None) or getattr(dash_obj, "_config", None)
-        if config_store is None:
-            # Probeer het via de store loader
-            try:
-                await dash_obj.async_load(force=True)
-                await dash_obj.async_save(dashboard_config)
-            except Exception as _save_err:
-                _LOGGER.warning("CloudEMS: kon dashboard-config niet opslaan: %s", _save_err)
-                return
-        else:
-            await config_store.async_save(dashboard_config)
-
-        _LOGGER.info(
-            "CloudEMS: Lovelace dashboard aangemaakt op /lovelace-%s", _SLUG
+        # ── 1. lovelace_dashboards storage (de registry) ─────────────────────
+        dashboards_store = Store(hass, 1, "lovelace_dashboards")
+        registry = await dashboards_store.async_load() or {"items": []}
+        already_registered = any(
+            i.get("url_path") == _SLUG or i.get("id") == _SLUG
+            for i in registry.get("items", [])
         )
+        if not already_registered:
+            registry.setdefault("items", []).append({
+                "id": _SLUG,
+                "url_path": _SLUG,
+                "require_admin": False,
+                "title": "\u26a1 CloudEMS",
+                "icon": "mdi:lightning-bolt",
+                "show_in_sidebar": True,
+                "mode": "storage",
+            })
+            await dashboards_store.async_save(registry)
+            _LOGGER.debug("CloudEMS: dashboard toegevoegd aan lovelace_dashboards storage")
+
+        # ── 2. lovelace.<slug> storage (de views/kaarten) ──────────────────
+        config_store = Store(hass, 1, f"lovelace.{_SLUG}")
+        existing_cfg = await config_store.async_load()
+        if not existing_cfg:
+            await config_store.async_save({"config": dashboard_config})
+            _LOGGER.debug("CloudEMS: dashboard-config opgeslagen in lovelace.%s storage", _SLUG)
+
+        # ── 3. Hot-registratie voor de huidige sessie (geen herstart nodig) ──
+        ll_data = hass.data.get(_DOMAIN)
+        if ll_data is not None and _SLUG not in ll_data.get("dashboards", {}):
+            from homeassistant.components.lovelace.dashboard import LovelaceStorage  # noqa: PLC0415
+
+            item_meta = {
+                "id": _SLUG,
+                "url_path": _SLUG,
+                "require_admin": False,
+                "title": "\u26a1 CloudEMS",
+                "icon": "mdi:lightning-bolt",
+                "show_in_sidebar": True,
+                "mode": "storage",
+            }
+            ll_obj = LovelaceStorage(hass, item_meta)
+            ll_data.setdefault("dashboards", {})[_SLUG] = ll_obj
+
+            try:
+                _frontend.async_register_built_in_panel(
+                    hass,
+                    "lovelace",
+                    sidebar_title="\u26a1 CloudEMS",
+                    sidebar_icon="mdi:lightning-bolt",
+                    frontend_url_path=_SLUG,
+                    config={},
+                    require_admin=False,
+                )
+                _LOGGER.info(
+                    "CloudEMS: Lovelace dashboard live geregistreerd op /lovelace-%s", _SLUG
+                )
+            except Exception as _panel_err:  # noqa: BLE001
+                _LOGGER.debug(
+                    "CloudEMS: sidebar-panel al aanwezig of registratie overgeslagen: %s",
+                    _panel_err,
+                )
+        else:
+            _LOGGER.debug("CloudEMS: Lovelace dashboard '%s' bestaat al in sessie", _SLUG)
 
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("CloudEMS: kon Lovelace dashboard niet automatisch aanmaken: %s", err)
+
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:

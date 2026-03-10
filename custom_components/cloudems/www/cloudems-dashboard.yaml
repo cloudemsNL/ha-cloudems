@@ -1481,110 +1481,26 @@ views:
           padding: 14px 16px 12px !important;
         }
   - type: markdown
-    title: 📊 Verbruik per Categorie — Vandaag
-    content: |
-      {% set s = states('sensor.cloudems_verbruik_categorien') %}
-      {% if s in ('unavailable','unknown','none','') %}
-      *Sensor nog niet beschikbaar — data wordt opgebouwd.*
-      {% else %}
-      {% set top = state_attr('sensor.cloudems_verbruik_categorien', 'top_category') %}
-      {% set pct = state_attr('sensor.cloudems_verbruik_categorien', 'top_category_pct') %}
-      {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') %}
-      {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
-      {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
-      **Totaal huisverbruik vandaag:** {{ s }} kWh *(excl. batterijladen)*
-      {% if batt_w > 50 %}🔋 Batterij actief: {{ batt_w }} W (niet meegeteld){% endif %}
-      {% if top %}
-      | Categorie | Waarde |
-      |---|---|
-      | Grootste verbruiker | {{ top }} ({{ pct }}%) |
-      {% endif %}
-      {% if insight %}*{{ insight }}*{% endif %}
-      {% endif %}
-    card_mod:
-      style: |
-        ha-card {
-          background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.06) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(163,163,163);
-          --secondary-text-color: rgb(102,102,102);
-          --primary-color: rgb(0,177,64);
-          --card-background-color: transparent;
-          --ha-card-border-color: transparent;
-        }
-        ha-card:hover {
-          border-color: rgba(0,177,64,0.5) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;
-          transform: translateY(-1px) !important;
-        }
-        .card-header {
-          background: transparent !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          padding: 14px 16px 12px !important;
-        }
-        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-        ha-markdown-element th {
-          background: rgba(0,177,64,0.1) !important;
-          color: rgb(0,212,78) !important;
-          font-size: 10px !important;
-          font-weight: 700 !important;
-          letter-spacing: 0.08em !important;
-          text-transform: uppercase !important;
-          padding: 8px 10px !important;
-          border-bottom: 1px solid rgba(0,177,64,0.2) !important;
-        }
-        ha-markdown-element td {
-          color: rgb(163,163,163) !important;
-          border-bottom: 1px solid rgba(255,255,255,0.05) !important;
-          padding: 7px 10px !important;
-        }
-        ha-markdown-element tr:hover td {
-          background: rgba(0,177,64,0.06) !important;
-          color: rgb(255,255,255) !important;
-        }
-        ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }
-        ha-markdown-element em { color: rgb(102,102,102) !important; }
-        ha-markdown-element code {
-          background: rgba(0,177,64,0.12) !important;
-          color: rgb(0,212,78) !important;
-          padding: 1px 6px !important;
-          border-radius: 4px !important;
-          font-size: 12px !important;
-        }
-        ha-markdown-element blockquote {
-          border-left: 3px solid rgb(0,177,64) !important;
-          background: rgba(0,177,64,0.07) !important;
-          padding: 8px 14px !important;
-          border-radius: 0 8px 8px 0 !important;
-          color: rgb(163,163,163) !important;
-        }
-  - type: markdown
-    title: 🍕 Verbruiksverdeling (huidig)
+    title: 📊 Verbruiksverdeling
     content: |
       {% set c = state_attr('sensor.cloudems_verbruik_categorien', 'pie_data') or [] %}
-      {% set total = state_attr('sensor.cloudems_verbruik_categorien', 'total_kwh_today') or 0 %}
-      {% set total_w = state_attr('sensor.cloudems_verbruik_categorien', 'total_w_now') or 0 %}
+      {% set total = state_attr('sensor.cloudems_verbruik_categorien', 'total_kwh_today') or states('sensor.cloudems_verbruik_categorien') | float(0) %}
       {% set insight = state_attr('sensor.cloudems_verbruik_categorien', 'dominant_insight') or '' %}
       {% set batt_dev = state_attr('sensor.cloudems_nilm_running_devices','devices') | selectattr('device_type','eq','battery') | list %}
       {% set batt_w = batt_dev[0].current_power | int if batt_dev | length > 0 else 0 %}
       {% if c | length == 0 %}
       *Categorieën worden opgebouwd gedurende de dag.*
       {% else %}
-      **Totaal huisverbruik: {{ total | round(1) }} kWh** *(batterijladen niet meegerekend)*
+      **Totaal vandaag: {{ total | round(2) }} kWh** *(excl. batterijladen)*
 
       | Categorie | Nu | Vandaag | % |
       |-----------|-----|---------|---|
       {% for cat in c -%}
       | {{ cat.name }} | {{ cat.w_now | int }} W | {{ cat.kwh }} kWh | {{ cat.pct }}% |
       {% endfor %}
-      {% if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | — | — |{% endif %}
+      {%- if batt_w > 50 %}| 🔋 Opslag (batterij) | {{ batt_w }} W | — | — |{% endif %}
 
-      *{{ insight }}*
+      {% if insight %}*{{ insight }}*{% endif %}
       {% endif %}
     card_mod:
       style: |
