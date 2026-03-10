@@ -6,9 +6,9 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/cloudemsNL/ha-cloudems.svg?style=for-the-badge)](https://github.com/cloudemsNL/ha-cloudems/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-blue.svg?style=for-the-badge)](https://www.home-assistant.io/)
+[![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.8%2B-blue.svg?style=for-the-badge)](https://www.home-assistant.io/)
 
-** No extra hardware**
+**Fully local · Privacy-first · No subscription · No extra hardware**
 
 [🌐 cloudems.eu](https://cloudems.eu) &nbsp;·&nbsp; [📖 Wiki](https://github.com/cloudemsNL/ha-cloudems/wiki) &nbsp;·&nbsp; [🐛 Report an issue](https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.yml) &nbsp;·&nbsp; [☕ Buy Me a Coffee](https://buymeacoffee.com/smarthost9m)
 
@@ -184,19 +184,55 @@ CloudEMS builds an optimal daily charge/discharge schedule based on EPEX prices,
 
 ### ♨️ Boiler & hot water
 
-**Boiler cascade control** — manages one or more electric boiler groups (resistive or heat-pump-assisted) with configurable setpoints, comfort thresholds, minimum on/off times, and per-unit priorities. Groups are managed through the wizard — no YAML required.
+**Boiler cascade control (v3.1)** — manages one or more electric boiler groups (resistive or heat-pump-assisted) with configurable setpoints, comfort thresholds, minimum on/off times, and per-unit priorities. Groups are managed through the wizard — no YAML required.
 
-**Wash cycle detector** — when a washing machine or dishwasher is connected (via smart plug or NILM), CloudEMS detects the active wash phase (pre-wash, heating, wash, rinse, spin) from the power profile and estimates remaining programme time. Programme signatures are learned from completed cycles automatically.
+**Self-learning delivery boiler detection** — the cascade automatically learns which boiler is used first for hot water demand (the "delivery" boiler) by tracking temperature deficits and energy consumption per cycle. The delivery boiler is always heated first to ensure hot water is available. Minimum 5 learning cycles needed; confidence reported on the dashboard.
 
-**Smart timing** — boiler heating is deferred to cheap EPEX windows or solar surplus periods automatically, subject to comfort floor constraints.
+**Hourly and day-of-week usage patterns** — a 7×24 matrix of hot water usage is built from flow sensor readings. The system uses this to pre-heat the delivery boiler before expected demand peaks — not just when cheap hours begin. Saturday morning patterns are treated differently from Monday morning.
+
+**Optimal start timing** — instead of starting the boiler as soon as cheap electricity begins (which may be hours early), CloudEMS calculates the exact start time needed so the boiler reaches setpoint just before the predicted demand peak.
+
+**Thermal loss compensation** — the system learns each boiler's cooling rate (°C/hour). This is used to predict when a boiler will fall below the comfort floor, enabling just-in-time re-heating. Dashboard shows "time until cold" per boiler.
+
+**Flow-sensor demand response** — connecting a flow sensor (binary or volume) to each boiler group gives CloudEMS real-time hot water demand signals. When a tap opens, the delivery boiler gets immediate priority regardless of the current cascade schedule.
+
+**Seasonal setpoints** — automatic summer/winter mode based on outdoor temperature trend (3-day hysteresis). Configurable per-season setpoints, or automatic ±5°C adjustment.
+
+**Grid congestion integration** — during grid congestion, buffer boilers are paused while the delivery boiler remains on. This cuts peak load while maintaining hot water availability.
+
+**Proportional dimmer control** — for boilers connected via a dimmer module (RBDimmer, DimmerLink, `number.*`, `light.*`), the power output follows PV surplus proportionally in 5% steps (30-second update rate). Full AAN/UIT control also supported.
+
+**Post-saldering mode** — with Dutch net metering phasing out in 2027, this mode lowers the PV surplus trigger threshold to 40%, aggressively consuming every available solar watt instead of exporting it.
+
+**Anomaly detection** — if daily hot water demand exceeds 2.5× the learned baseline, a persistent HA notification is created. Useful for detecting leaks or unusual household situations.
+
+**P1 direct response** — when a P1 smart meter reader is configured, grid export data is pushed to the boiler controller on every telegram (~1 second). This means the boiler reacts to live grid conditions rather than waiting for the coordinator cycle (30 seconds).
+
+**Week energy budget** — tracks kWh consumption per boiler per ISO week, visible on the dashboard.
+
+**Delta-T setpoint optimisation** — when a boiler is well above its comfort floor, the setpoint is reduced proportionally (max −8°C) to avoid overheating and reduce thermal losses.
+
+**Wash cycle detector** — when a washing machine or dishwasher is connected (via smart plug or NILM), CloudEMS detects the active wash phase (pre-wash, heating, wash, rinse, spin) from the power profile and estimates remaining programme time.
 
 ---
 
-### ⚡ Phase management
+### ⚡ Phase management & capacity tariff
 
 Monitors import and export current per phase (L1/L2/L3) every 10 seconds with automatic load shedding in priority order when limits are approached.
 
-**Phase balancing** — detects structural phase imbalance and provides concrete re-wiring advice. **Peak shaving** — configurable import limit with priority-based shedding. **Congestion shedding** — automatic load reduction during high-price congestion events.
+**Phase balancing** — detects structural phase imbalance and provides concrete re-wiring advice.
+
+**Peak shaving** — configurable import limit with priority-based shedding.
+
+**Congestion shedding** — automatic load reduction during high-price congestion events. Four warning levels: advisory (80%), soon (90%), warning (95%), critical (100%+). Actions are ranked by comfort impact.
+
+**Capacity tariff peak monitor (v3.0)** — tracks the 15-minute average power demand and compares it against the monthly peak. Features:
+- Automatic monthly reset (no manual intervention needed)
+- End-of-quarter projection based on current power trajectory
+- Ranked load-shedding actions with urgency levels (advisory / soon / now)
+- 12-month peak history with indicative cost per month
+- Headroom indicator: W available before setting a new monthly peak
+- Relevant for Belgium (active), Netherlands (Liander/Enexis 2025+)
 
 ---
 
@@ -338,6 +374,8 @@ The dashboard reads the CloudEMS version dynamically from HA — updating the in
 ---
 
 ## Support CloudEMS
+
+CloudEMS is **completely free and open source**. If it saves you money on your energy bill — please consider a small contribution.
 
 <div align="center">
 

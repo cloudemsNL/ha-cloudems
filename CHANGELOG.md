@@ -1,8 +1,671 @@
 # Changelog
 
+Alle noemenswaardige wijzigingen per versie.
+
+## [4.3.5] - 2026-03-09
+
+### Acht intelligentie-verbeteringen + persistentie
+
+#### 1. LoadPlanAccuracyTracker (`load_plan_accuracy.py`) — nieuw module
+Vergelijkt elke ochtend het gisteren gegenereerde LoadPlanner-plan (estimated_savings_eur)
+met de werkelijke EPEX-data en het verbruik uit price_hour_history. Leert correctiefactoren
+voor PV-forecast-bias en prijsforecast-bias via trage EMA. Persistente opslag via Store.
+Sensor: correctiefactoren, accuracy-percentage, 14-daags overzicht.
+
+#### 2. CapacityPeakMonitor persistentie (`capacity_peak.py`)
+De 12-maanden piekhistorie en huidige maandpiek worden nu opgeslagen via HA Store.
+Na een herstart is de piekdrempel direct beschikbaar — geen gemiste maand-peak meer.
+`async_setup()` en `async_maybe_save()` toegevoegd.
+
+#### 3. SensorEMA persistentie (`sensor_ema.py`)
+EMA-states (ema, interval_ema, alpha) worden bewaard bij herstart. De eerste minuten
+na een herstart zijn nu ruis-vrij — de EMA werkt direct alsof hij nooit gestopt was.
+
+#### 4. InstallationScore trending (`installation_score.py`)
+Score-verloop over de laatste 7 dagen bijgehouden in Store. Als de score > 5 punten
+daalt (bv. door een uitgevallen sensor) verschijnt `trend_alert` in de sensor-attributen
+en een WARNING in de coordinator-log.
+
+#### 5. Supplier_compare dynamische tarieven (`supplier_compare.py`)
+Nieuwe functie `derive_actual_tariff()` berekent het consumption-weighted gemiddelde
+import- en exporttarief uit price_hour_history. De vergelijking toont nu altijd de
+werkelijke marktprijzen als metadata naast de referentiecontracten.
+
+#### 6. SleepDetector ↔ AbsenceDetector koppeling (`absence_detector.py`)
+`set_sleep_mode(is_sleeping, confidence)` toegevoegd aan AbsenceDetector. Wanneer
+SleepDetector slaap detecteert, wordt het away_score richting 0.35 geblend (slaap ≠
+afwezigheid). Bij confidence ≥ 0.6 overschrijft het de staat direct naar "sleeping".
+
+#### 7. HeatPumpCOP → SmartClimate koppeling (`heat_pump_cop.py`, `smart_climate.py`)
+`get_heating_rate_estimate(outdoor_temp_c)` toegevoegd aan HeatPumpCOPLearner: schaalt
+de geleerde COP naar K/min (COP 3.0 → 0.20 K/min). `seed_from_cop_estimate(zone, rate)`
+in PredictiveStartScheduler zaait zones zonder meetdata met deze COP-prior.
+
+#### 8. LoadPlanner dag-type correctie (`day_classifier.py`)
+DayTypeClassifier houdt nu per weekdag (Ma..Zo) een EMA bij van het uurlijkse
+vermogensprofiel. `get_peak_hours(weekday, top_n=3)` geeft de typische piekuren
+terug — maandag vs. vrijdag worden zo anders behandeld in de LoadPlanner.
+
+### Bugfixes (overgedragen van v4.3.4-hotfix)
+- `sensor.py` lijn 1385: `NameError: name 'time' is not defined` — import-alias
+  `time as _time_mod` niet consistent gebruikt. Gecorrigeerd naar `_time_mod()`.
+- `coordinator.py` lijn 2886: `'VirtualZone' object has no attribute 'area_id'` —
+  ShutterController itereerde zones zonder `getattr`-guard. Gecorrigeerd.
+
+## [4.3.4] - 2026-03-09
+
+### Zeven nieuwe intelligentie-verbeteringen
+
+#### EV-laaddrempel zelfkalibratie (`dynamic_ev_charger.py`)
+`DynamicEVCharger` past de cheap_threshold automatisch aan op het **p35-percentiel
+van de afgelopen 30 dagen EPEX-prijzen**. Bij dure wintermaanden schuift de drempel
+mee omhoog, bij goedkope zomernachten omlaag — zonder handmatige aanpassing.
+Geconfigureerde drempel blijft de fallback; kalibratie blijft binnen ±50%.
+`feed_price_history()` aangeroepen vanuit coordinator na elke hourly update.
+
+#### BDE 24-uurs gewichtenmatrix (`bde_feedback.py`)
+`BDEFeedbackTracker` beheert naast globale gewichten nu ook een **24-uurs profiel
+per beslissingstype**. Een "epex_cheap" beslissing om 03:00 heeft een andere
+historische trefkans dan om 14:00. BDE-confidence wordt voor de actieve beslissing
+geschaald met `get_weight_for_hour(source, hour)` vóór uitvoering. Persistente
+opslag in dezelfde Store (backward compatible).
+
+#### SalderingCalibrator (`saldering_context.py`)
+Nieuwe klasse `SalderingCalibrator` leert het **werkelijke salderingspercentage**
+vanuit dagelijks gemeten import/export data. Wettelijke waarden (36% in 2026) worden
+gecorrigeerd als de energiemaatschappij in de praktijk afwijkt. Elke nacht om 03:00
+wordt een dagmeting opgeslagen. `get_calibrated_context()` geeft een gecalibreerde
+`SalderingContext` terug als drop-in vervanging.
+
+#### GasPredictor stuksgewijze fit (`gas_predictor.py`)
+Het gasmodel gebruikt nu een **stuksgewijze lineaire regressie** met drie
+temperatuurzones (< 5°C, 5–12°C, > 12°C). Per zone een eigen helling en intercept,
+zodat het niet-lineaire gedrag van vloerverwarming, warmtepompen en stookgrenzen
+correct wordt gevangen. R² wordt gerapporteerd vanuit de geselecteerde zone.
+
+#### NILMScheduleLearner ↔ BehaviourCoach koppeling
+`NILMScheduleLearner.apply_coach_feedback()` ontvangt aanbevelingen van
+`BehaviourCoach` en slaat het **aanbevolen verschuivingsuur + maandelijkse besparing**
+op per apparaat in `DeviceSchedule`. Zichtbaar in sensor-attributen en klaar voor
+dashboard-badges ("verschuif naar 03:00 → €4.20/mnd").
+Coordinator roept `apply_coach_feedback()` automatisch aan na elke coach-analyse.
+
+#### Notificatie-moeheids-detectie (`notification_engine.py`)
+`NotificationEngine` telt via `ignored_count` hoe vaak een alert opnieuw verstuurd
+wordt zonder dat het opgelost raakt. Na 5× negeren wordt de cooldown verdubbeld
+(elk blok van 5 extra negeertijden verdubbelt opnieuw: 1×, 2×, 4×, 8×...).
+Bij oplossing reset `ignored_count` naar 0. `get_fatigue_summary()` toont welke
+alerts moeheid vertonen — nuttig voor drempel-optimalisatie.
+
+#### ApplianceROI cumulatieve besparingstracking (`appliance_roi.py`)
+`ApplianceROICalculator` heeft nu een HA Store (`cloudems_appliance_roi_v1`) en
+accumuleeert dagelijks de werkelijke besparing per NILM-apparaat. Na een jaar:
+`get_lifetime_summary()` geeft een overzicht zoals "EV-lader: €340 bespaard,
+1.240 kWh". Zichtbaar in `to_sensor_dict()` via nieuw veld `total_saved_eur`.
+## [4.3.3] - 2026-03-09
+
+### Volledige zelflerend-audit — alles in één release
+
+#### Persistentie — vier modules die leerden maar alles vergaten bij herstart
+
+**`AbsenceDetector`** — weekpatroon (7×24 slots) en nacht-standby EMA worden nu
+opgeslagen via HA Store (`cloudems_absence_detector_v1`). Na een herstart begint
+aanwezigheidsdetectie meteen op het geleerde patroon in plaats van opnieuw te
+leren. `async_setup()` wordt aangeroepen vanuit coordinator setup.
+
+**`ShutterThermalLearner`** — geleerde raamoriëntaties per kamer (azimuth-buckets)
+worden persistent opgeslagen (`cloudems_shutter_thermal_v1`). Het leren van een
+oriëntatie kost een heel seizoen aan zonnedagen — dit verlies bij iedere herstart
+is nu voorkomen. Constructor accepteert nu `hass` parameter.
+
+**`SensorSanityGuard`** — het geleerde gemiddelde per sensor (gebruikt voor
+spike-detectie) wordt opgeslagen (`cloudems_sensor_sanity_v1`). Na herstart wordt
+de history voorgevuld met het geleerde gemiddelde zodat de eerste uren geen valse
+spike-alarmen worden gegenereerd.
+
+**`PredictiveStartScheduler`** (in SmartClimate) — geleerde opwarmsnelheden per
+zone (K/min) worden opgeslagen (`cloudems_predictive_scheduler_v1`). Na herstart
+klopt de voorverwarmingstijd meteen, zonder een dag te wachten op nieuwe metingen.
+
+#### Cross-module leerloops — vier nieuwe koppelingen
+
+**HomeBaseline standby → BatteryUncertaintyTracker** — de grid-delta schatting
+voor stale batterijen gebruikt nu de geleerde standby-basislast van HomeBaseline
+(`get_standby_w()`) in plaats van de hardcoded 500W default.
+
+**AbsenceDetector "weg" → NILM gevoeligheid** — als aanwezigheid met ≥70%
+zekerheid als "away" of "vacation" wordt geclassificeerd, verdubbelt de
+`AdaptiveNILMThreshold` automatisch zijn drempel. Koelkast- en routerfluctuaties
+worden dan niet als nieuwe apparaten geregistreerd. Bij thuiskomst keert de
+drempel terug naar de geleerde waarde.
+
+**NILM confirmed standby → HomeBaseline correctie** — elke nacht om 03:00 worden
+bevestigde always-on apparaten (koelkast, router, alarm) vanuit NILM doorgegeven
+aan `HomeBaselineLearner.adjust_standby()` zodat de standby-drempel klopt met de
+werkelijke installatie.
+
+**PVAccuracy bias → PVForecast kalibratie** — de dagelijkse en maandelijkse
+afwijkingsfactor van PVAccuracyTracker (werkelijk vs voorspeld) wordt elke nacht
+via EMA doorgegeven aan de `_calib_factor` van alle omvormerprofielen in
+PVForecast. De volgende dag start de voorspelling al gecorrigeerd.
+
+#### Seizoenskalibratie — BoilerController auto-setpoints
+
+`BoilerController.auto_calibrate_season()` past zomer/wintersetpoints automatisch
+aan op basis van de buitentemperatuur als de gebruiker geen expliciete setpoints
+heeft geconfigureerd:
+- Buiten ≥15°C → setpoint_summer = setpoint − 5°C (minder stilstandsverlies)
+- Buiten ≤5°C  → setpoint_winter = setpoint + 3°C (extra thermische buffer)
+
+Wordt elke nacht om 03:00 aangeroepen vanuit de nachtcyclus.
+
+#### AdaptiveNILMThreshold uitbreiding
+
+`set_away_mode(True/False)` — drempel ×2 bij afwezigheid, terugzetten bij
+thuiskomst. Zichtbaar in `sensor.cloudems_nilm_diagnose` als `away_mode: true`.
+## [4.3.2] - 2026-03-09
+
+### NILM — Volledig autonome zelfverbetering (geen gebruikersfeedback nodig)
+
+CloudEMS NILM leert nu automatisch elke dag, zonder enige gebruikersinteractie.
+
+**Vier autonome leerbronnen voor FalsePositiveMemory:**
+
+1. **Steady-state validatie** — als na 35s de baseline niet stijgt met het verwachte
+   vermogen, was het apparaat een false positive. De power-signature wordt nu automatisch
+   opgeslagen zodat hetzelfde vermogen de volgende keer geblokkeerd wordt (was: alleen
+   verwijderd zonder te leren).
+
+2. **Korte sessies (<8s)** — een apparaat dat binnen 8 seconden alweer uitgaat is bijna
+   zeker een transitiefluctuatie (batterij-ramp, EPEX-schakelaar, netwissel). Wordt nu
+   automatisch als false-positive geleerd.
+
+3. **Nachtelijke confidence-vloer sweep (03:00)** — niet-bevestigde apparaten met
+   `effective_confidence < 0.15` die al 3+ dagen niet meer gezien zijn, worden
+   automatisch naar FP-geheugen geschreven en verwijderd.
+
+4. **Duplicate watt-klasse detectie (03:00)** — als twee niet-bevestigde apparaten
+   tegelijk dezelfde watt-klasse (±200W) op dezelfde fase hebben, wordt de minst
+   geziene verwijderd en geleerd. Vangt de "Nexus maakt drie 3kW-ghosts" situatie op.
+
+5. **Lange ghost-sessies (03:00)** — niet-cycling apparaten die al >6u "aan" staan
+   zonder off-edge worden als stranded detection herkend, geleerd en opgeruimd.
+
+**Elke nacht om 03:00** draait `auto_prune_ghosts()` automatisch. Na een week heeft
+CloudEMS de typische false-positive-patronen van jouw installatie geleerd en blokkeert
+ze nog voor classificatie.
+
+### MacroLoadTracker verbetering
+Suppression-teller per grootverbruiker — het systeem monitort nu hoeveel events per
+apparaat worden onderdrukt, wat inzicht geeft in welke verbruiker de meeste ruis
+produceert (zichtbaar in `sensor.cloudems_nilm_diagnose`).
+## [4.3.1] - 2026-03-09
+
+### NILM — Batterij-onzekerheid (Nexus / traag gemeten accu's)
+
+**Nieuw: `BatteryUncertaintyTracker`** — dedicated bescherming voor thuisbatterijen
+met vertraagde of ontbrekende metingen (Zonneplan Nexus: ~60–90s updatevertraging).
+
+Vier beschermingslagen die vervangen de oude EMA-decay-naar-0 staleness-guard:
+
+- **Stale-breedte masker** — als een battery-entity geen verse meting heeft, wordt het
+  onzekerheidsvenster verbreed rondom de *laatste bekende waarde* (niet gedecayed naar 0).
+  Events die binnen dat venster vallen worden onderdrukt.
+- **Burst-update detectie** — als na een stale periode ineens een grote vermogenssprong
+  binnenkomt (bijv. Nexus springt van 0 → 3200 W in één tick), worden alle NILM-apparaten
+  die tijdens de stale periode aangemaakt zijn en qua vermogen overeenkomen achteraf verwijderd.
+- **Grid-delta schatting** — als geen batterijmeting beschikbaar is maar grid + solar wél
+  gemeten worden, schatten we het batterijvermogen als `P_solar - P_grid - P_baseline` zodat
+  het masker ook zonder directe meting actief blijft.
+- **Provider-profielen** — `nexus`/`zonneplan` krijgt 75s stale-drempel en 120s burst-masker;
+  `cloud` 45s/60s; `local` 25s/30s. Wordt automatisch afgeleid uit `battery_type` in de config.
+
+**Nieuw: `FalsePositiveMemory`** — persistent geheugen voor afgewezen power-signatures.
+Wanneer de gebruiker een apparaat als "incorrect" markeert, slaat dit de power-signature
+(vermogen + fase + tijdvak) op. Volgende events met hetzelfde vermogen worden automatisch
+onderdrukt. Opgeslagen via HA Store (`cloudems_nilm_fp_memory_v1`), vervalt na 90 dagen.
+
+**Nieuw: `MacroLoadTracker`** — ruis-onderdrukking voor grote verbruikers (EV-lader,
+warmtepomp, boiler). Berekent de standaarddeviatie van het vermogensvenster per apparaat
+en blokkeert NILM-events die kleiner zijn dan 3,5× die σ. Leert ook vaste schakelstappen
+(bijv. boiler-thermostaat ±2500 W).
+
+### Bugfix — staleness-guard
+De oude `_BATTERY_EMA_HOLD = 0.85` decay was onjuist: een Nexus die 3 kW laadt en 60s
+geen update geeft, laadt waarschijnlijk nog steeds ~3 kW. Na 6 cycli (60s) was de
+gerapporteerde waarde 38% van de werkelijkheid — NILM dacht dat de batterij inactief was.
+Vervangen door *hold-laatste-waarde* + groeiend onzekerheidsvenster.
+
+### Diagnostics
+`sensor.cloudems_nilm_diagnose` bevat nu ook:
+- `fp_memory` — opgeslagen signatures, top-5 meest afgewezen
+- `macro_load` — actieve grootverbruikers en hun σ/drempel
+- `battery_uncertainty` — per batterij: effectief vermogen, stale-status, masker
+## [4.3.0] - 2026-03-09
+
+### Toegevoegd
+- **Sub-apparaten in HA**: Elke device-groep verschijnt nu als genest kind-apparaat onder CloudEMS Energy Manager
+  - CloudEMS NILM Bediening (bevestig/afwijs knoppen)
+  - CloudEMS Rolluiken (rolluik actie-knoppen + schakelaar)
+  - CloudEMS PV Dimmer (omvormer schakelaars + sliders)
+  - CloudEMS Zonne-energie (omvormer profiel/clipping sensoren)
+  - CloudEMS Zone Klimaat (per-zone klimaat + kostensensoren)
+- **Centrale orphan pruner**: Alle verouderde dynamische entiteiten (NILM, rolluiken, omvormer, zones) worden automatisch opgeruimd via `orphan_pruner.py`
+- **Persistente orphan grace-tellers**: `_absent` tellers worden bewaard in HA storage (`cloudems_orphan_pruner_v1`) — herstart van HA reset de tellers niet meer
+- **Zone klimaat entiteiten**: Correct gegroepeerd onder parent apparaat, dynamisch geregistreerd via coordinator listener
+- **Slimme Uitstel** geïntegreerd in Goedkope Uren Schakelaars flow
+- **EPEX prijsstaven**: Kleur op basis van prijsklasse in dashboard
+- **Rolluik dashboard**: Volledig dynamisch op basis van geconfigureerde rolluiken
+- **Versie centraal**: `VERSION` wordt uitgelezen uit `manifest.json` — `const.py`, sensor attributen en dashboard footers volgen automatisch
+- **Persistente orphan grace-tellers**: grace-tellers bewaard in HA storage, updates gebufferd tot store geladen is
+- **Ghost device indicator**: NILM beheer tab toont apparaten die > 7 dagen niet gezien zijn
+- **Systeem gezondheid visual**: Diagnose tab toont health score 0-10 als visuele balk met kleurcodering
+- **EPEX morgen hint**: Als alle uren van vandaag voorbij zijn, toont het goedkoopste uur van morgen
+- **Goedkope uren besparing**: Schakelaar tabel toont blokprijs vs daggemiddelde en geschatte besparing per kWh
+- **Smoke tests**: `tests/test_smoke.py` controleert semver, manifest-const sync en hacs.json
+- **Zonneplan override detail**: Override tabel toont modus + minuten actief, auto-sturing label toegevoegd
+
+### Opgelost
+- `CloudEMSZoneClimateCostSensor`: verkeerde `entity_id` gegenereerd (`sensor.cloudems_klimaatkosten_vandaag` → `sensor.cloudems_zone_klimaat_kosten_vandaag`)
+- Orphan pruner verwijderde ten onrechte NILM switches (`nilm_active`, `hmm_active`, `bayes_active`)
+- `room_overview` en `zone_climate_cost_today` werden ten onrechte als dynamisch beschouwd en gepruned
+- Dashboard: deprecated `call-service` → `perform-action` (HA 2024.8+)
+- Dashboard: `content: >` block scalars vervangen door `content: |` (HA card parser compatibiliteit)
+- Dashboard: alle hardcoded versienummers vervangen door dynamische template
+- Dashboard: `call-service` entiteitsrijen vervangen door markdown referentiekaart
+
+### Gewijzigd
+- `orphan_pruner.py` v1.1.0: volledige herschrijving met dirty-flag opslag, persistente tellers en correcte shutter support
+- `const.py`: `VERSION` is nu een computed property gelezen uit `manifest.json`
+
+## [4.1.0] - 2026-03-09
+
+### Vergeten-aan detectie (Appliance Over-On Guard)
+- 🚨 **Nieuw: `energy_manager/appliance_overon_guard.py`** — detecteert apparaten die significant
+  langer aan staan dan normaal of een gevaarlijke maximale aan-tijd bereiken.
+  - **Twee detectielagen:**
+    1. *Geleerd maximum* — per apparaat: huidige aan-tijd > 2,5× gemiddelde sessieduur → WARNING
+    2. *Hard maximum* — per apparaattype: absolute bovengrens ongeacht leergeschiedenis → CRITICAL
+  - **30+ apparaattypen** in de hard-maximum tabel: friteuse (1 u), strijkijzer (30 min),
+    stijltang (30 min), grill (1,5 u), airfryer (1 u), waterkoker (10 min), toaster (10 min),
+    ruimteverwarmer (8 u), elektrisch deken (4 u), stroomgereedschap (2 u), enz.
+  - Prioriteit-escalatie: WARNING bij geleerd max, CRITICAL bij hard max
+  - Alert vanzelf opgelost zodra apparaat uitgeschakeld wordt
+- 🔧 **`nilm/detector.py`** — `DetectedDevice.to_dict()` exporteert nu `on_since_ts`
+  (timestamp van het moment dat het apparaat aanging), nodig voor de over-on guard.
+- 🔔 **`notification_engine.py`** — roept `build_overon_alerts()` aan als extra alertlaag,
+  samengesteld met de bestaande NILM alerts dict.
+
+## [4.0.9] - 2026-03-08
+
+### Geen externe afhankelijkheden meer (HA-integratie)
+- ♻️ **`local_ai.py` herschreven** — pure Python k-NN classifier vervangt scikit-learn + numpy
+  - Algoritme: gewogen k-Nearest Neighbors (k=5, Manhattan distance)
+  - Normalisatie: min-max in pure Python
+  - Opslag: JSON in plaats van pickle — leesbaar, portable, geen binary
+  - Zelfde interface (`PowerEvent`, `classify()`, `add_training_sample()`)
+  - Trainingsdata van bestaande installaties blijft gewoon werken (features ongewijzigd)
+- 🔌 **`aiohttp.ClientSession()` overal vervangen** door `async_get_clientsession(hass)`
+  - Bestanden: `coordinator.py`, `price_fetcher.py`, `thermal_model.py`,
+    `nilm/detector.py`, `nilm/database.py`, `log_reporter.py`
+  - HA beheert de HTTP-sessie — betere connection pooling, geen resource-leaks
+- 📦 **`manifest.json` requirements leeg** — `numpy>=1.21.0` en `aiohttp>=3.8.0` verwijderd
+  - Nieuwe installaties downloaden geen extra pakketten meer
+  - Bestaande installaties werken ongewijzigd (numpy/aiohttp staan gewoon stil)
+- 🏗️ **`entity_provider.py` + `ha_provider.py` toegevoegd** — abstractielaag voor cloud-compatibiliteit
+  - `EntityProvider` abstracte basisklasse met `get_state()`, `get_all_of_domain()`, `call_service()`
+  - `EntityState` dataclass vervangt HA's `State` object in de engine
+  - `HAEntityProvider` wikkelt `hass.states` en `hass.services` — gedrag ongewijzigd
+  - Provider registry met `@register_provider` decorator
+  - Coordinator heeft `self._provider`, `_async_get_state()`, `_async_call_service()`
+  - Gedocumenteerd in `docs/ARCHITECTURE_ENTITY_PROVIDER.md`
+- 🐛 **`nilm_filter.py`** corrupt bestand (afgekapt) vervangen door stub
+
+## [4.0.8] - 2026-03-08
+
+### Nieuwe feature — CloudEMS als thermostaat
+- 🌡️ **`climate.py` platform** — CloudEMS registreert nu zelf `climate.cloudems_<zone>` entities in HA
+  - Één entity per HA Area (automatisch ontdekt via zone_climate_manager)
+  - HVAC modes: `heat` / `auto` / `off`
+  - Presets: `comfort` / `eco` / `boost` / `sleep` / `away` / `solar` / `eco_window`
+  - Setpoint-wijziging → zone comfort-temperatuur + 4u override
+  - Preset-keuze → VirtualZone override (automatisch verlopen na 4u)
+  - `hvac_mode off` → away-preset met 24u override (vorstbeveiliging blijft actief)
+  - Extra attributen: heat_demand, best_source, cost_today_eur, window_open, preheat_min
+- 🔧 `ZoneClimateManager.async_update` geeft zones nu als dict (area_id → ZoneSnapshot) ipv lijst
+- ⚙️ `climate_mgr_enabled` toggle in config flow stap 3
+
+### Activeren
+Zet `climate_mgr_enabled: true` in de CloudEMS opties (via Integraties → CloudEMS → Configureren).
+CloudEMS ontdekt dan automatisch zones op basis van je HA Area-indeling.
+
+## [4.0.7] - 2026-03-08
+
+### Bestaande functies versterkt
+- 🔋 **Budget → BDE koppeling** — bij budgetoverschrijding schakelt BDE automatisch naar 'conservative' modus (minder laden)
+- 🔢 **Health Score numeriek** — `sensor.cloudems_systeemgezondheid` geeft nu 0-10 score (was tekst "ok/degraded")
+- 🚗 **EV EPEX+PV gecombineerde planning** — dynamisch gewogen score: bewolkt = prijs domineert, zonnig = PV domineert; toont top-5 uren met score
+
+### Nieuwe features
+- 💰 **Energiecontract vergelijker** (`supplier_compare.py`) — berekent wat je bij vast/dal-piek/groen contract had betaald op basis van werkelijk verbruiksprofiel
+- ⚡ **P1 spanning + storingen** — parser uitgebreid met `voltage_l1/2/3` (V), `power_failures`, `long_power_failures`, `voltage_sags_l1/2/3`; zichtbaar in dashboard
+- 📊 **Dashboard**: Health Score 0-10 balk, Contract vergelijker tabel, P1 Netspanning & Storingen kaart
+
+### Storage keys nieuw
+Geen — supplier_compare is stateless (herberekend uit price_hour_history)
+
+## [4.0.6] - 2026-03-08
+
+### Technische schuld opgelost
+- 🔒 **`_safe_state()` wrapper** — alle `hass.states.get()` aanroepen in coordinator vervangen door centrale wrapper met exception-handling; voorkomt crashes bij HA-herstart
+
+### Nieuwe features
+- ☀️ **Zelfconsumptie-ratio sensor** (`sensor.cloudems_zelfconsumptie`) — % PV direct gebruikt; zelfvoorzieningsgraad als extra attribuut
+- ☀️ **Zelfvoorzieningsgraad sensor** (`sensor.cloudems_zelfvoorzieningsgraad`) — % huis-verbruik gedekt door eigen PV
+- 💡 **NILM Apparaat-ROI** (`appliance_roi.py`) — kosten per apparaat (€/mnd, €/jaar), potentiële besparing bij tijdverschuiving, tips per apparaat; live in data dict
+- 🔋 **Batterij-efficiëntie tracker** (`battery_efficiency.py`) — meet dagelijks round-trip efficiency, waarschuwing bij < 80%, persistent 90-dagen history
+- 🌙 **OffPeak detector → BDE Laag 3b** — automatische dal-tarief detectie uit 30-dagen prijshistorie
+- 🔁 **BDE Feedback loop** — zelflerend gewichtensysteem (0.5–1.5×) op basis van terugkijkende prijsevaluatie
+- 🌡️ **Gas-voorspelling** (`gas_predictor.py`) — lineair regressiemodel (temp → m³), stookgrens, HDD, maandkosten
+- 💰 **Tariefwijziging-detector** (`tariff_change_detector.py`) — vergelijkt werkelijke opslag met geconfigureerde; HA-notificatie bij wijziging
+- 🕐 **NILM tijdpatroon** (`time_pattern_learner.py`) — 7×24 uurhistogram, anomalie-notificatie
+- 🔍 **Watchdog silent hang detectie** — `report_update_started()` + `check_silent_hang()` detecteert hangende netwerk-aanroepen zonder exception
+
+### Storage keys nieuw
+`cloudems_battery_efficiency_v1`, `cloudems_bde_feedback_v1`, `cloudems_gas_predictor_v1`,
+`cloudems_tariff_detector_v1`, `cloudems_nilm_time_patterns_v1`
+
+## [4.0.5] - 2026-03-08
+
+### Toegevoegd
+- 🏆 **Dashboard "Installatiescore"** — cirkel met score/100, tabel per criterium, verbeter-tips; score bijgewerkt met BDE + ExportTracker criteria (max 102→100 genormaliseerd)
+- 🕐 **TimePatternLearner** (`nilm/time_pattern_learner.py`) — 7×24 uurhistogram per NILM-apparaat, persistentie via HA Store, anomalie-detectie + persistent notification bij ongewoon gebruik
+- 🌙 **OffPeakDetector** (`energy/off_peak_detector.py`) — automatische dal-tarief detectie op basis van 30-dagen prijshistorie; Laag 3b in BatteryDecisionEngine: laden tijdens gedetecteerde dal-uren
+- 🔁 **BDE Feedback Loop** (`energy/bde_feedback.py`) — registreert elke beslissing, evalueert per uur of charge/discharge voordelig was vs. daggemiddelde, past confidence-gewichten aan (leertempo 5%, range 0.5–1.5)
+- 🌤️ **Seizoensgecorrigeerde jaarschatting** in ExportDailyTracker — `get_season_factor()`, `get_monthly_avg()`, `extrapolate_annual_kwh()` voor nauwkeurigere export-projectie
+
+### Technisch
+- `DecisionContext`: nieuw veld `off_peak_active`
+- `coordinator.py`: 6 nieuwe attributen (`_time_pattern_learner`, `_off_peak_detector`, `_bde_feedback`, stores), evaluatie bij uurwisseling, opslaan bij dagcyclus
+- Storage keys: `cloudems_nilm_time_patterns_v1`, `cloudems_bde_feedback_v1`
+
+## [4.0.4] - 2026-03-08
+
+### Toegevoegd
+- ⚡ **PowerLearner Laag C geïntegreerd** — `adjust_delta_for_concurrent_load()` wordt nu aangeroepen bij elk on-event; concurrent context wordt gelogd op DEBUG niveau
+- 📊 **`concurrent_loads` in NILM diagnostics** — per fase: total_w, apparatenlijst, count
+- 📈 **`concurrent_load` in coordinator data** — per fase L1/L2/L3 beschikbaar voor BDE en andere modules
+- 🖥️ **Dashboard "⚡ Actieve Last per Fase (Laag C)"** — tabel L1/L2/L3, PowerLearner stats (boosts, off-matches, auto-confirm), top-5 geleerde profielen
+
+### Opgelost
+- 🐛 **`_nilm_detector` attribuut bestaat niet** — BDE pakte altijd 0W concurrent load door verkeerde attribuutnaam; gecorrigeerd naar `self._nilm`
+
+## [4.0.3] - 2026-03-08
+
+### Toegevoegd
+- 🔋 **BatteryDecisionEngine v2** — Laag 1b peak shaving: batterij ontlaadt automatisch als grid-import > geconfigureerd limiet (capaciteitstarief bescherming)
+- 🎯 **target_soc_pct** op elke beslissing (bijv. 80% bij LOW tariefgroep, 20% bij ontladen)
+- ✅ **Actie-uitvoering** — als `confidence ≥ 0.75` stuurt coordinator automatisch modus naar Zonneplan bridge (`self_consumption` / `home_optimization`)
+- 📊 **Dashboard "🧠 Batterij beslissing"** — volledig herbouwd met explain-lijst, uitvoeringstatus, doelwaarde SOC, peak shaving indicatie
+
+### Gewijzigd
+- `coordinator.py`: één `self._battery_decision_engine` instantie (was twee losse aanroepen), `pv_forecast_tomorrow_kwh` correct doorgegeven (was hardcoded 0.0), `peak_shaving` context meegegeven
+- `DecisionContext`: nieuwe velden `peak_shaving_active`, `grid_import_w`, `grid_peak_limit_w`
+- Output dict `battery_decision`: nieuwe velden `target_soc_pct`, `executed`
+
+## [4.0.2] - 2026-03-08
+
+### Toegevoegd
+- 📊 **ExportDailyTracker** — persistente rolling 30-dagen buffer voor dagelijkse export-kWh (overleeft herstart via HA Store `cloudems_export_daily_history_v1`)
+- 🔋 **Batterij-aanbeveling in ExportLimitMonitor** — berekent optimale batterijcapaciteit en ROI op basis van piekexport
+- 📉 **Dashboard: "Salderingsafbouw & Teruglevering"** — toont echte dagdata, jaar-voor-jaar tabel 2026/2027/0% en batterijadvies met alert banner
+
+### Gewijzigd
+- `export_limit_monitor.py` volledig herschreven (v2.0): echte daggemiddelden ipv `export_w * 24 * 0.3`, geen dubbele instantiatie, juiste saldering % (2026: 36%, 2027: 0%)
+- `coordinator.py`: `ExportDailyTracker` geladen bij `async_setup()`, dagelijkse recording bij DailySummary trigger (7:30), real-time update elke cyclus
+
+### Technisch
+- Nieuwe output velden in `export_limit` dict: `avg_daily_export_kwh`, `peak_daily_kwh`, `recommend_battery_kwh`, `battery_roi_years`, `days_of_data`
+- Salderingspercentages gecorrigeerd: 2025=64%, 2026=36%, 2027=0% (was 2026=27%)
+
+## [4.0.1] - 2026-03-08
+
+### Toegevoegd
+- 🚫 **NILM Exclude via HA-area** — verplaats een device in Home Assistant naar de kamer "CloudEMS Exclude" om het volledig uit te sluiten van NILM en device-tracking. Werkt automatisch, geen herstart nodig.
+
+### Technisch
+- `coordinator.py`: Laag 4 toegevoegd aan `_config_eids` uitbreiding — scant `area_registry` en `device_registry` op area naam "cloudems exclude" (case-insensitive). Ondersteunt zowel device-level als entity-level area toewijzing.
+
+## [4.0.0] - 2026-03-08
+
+### Toegevoegd
+- 🪟 Rolluiken module — volledige integratie met config flow, switch, sensor en dashboard tab
+- 🌡️ ShutterThermalLearner — leert raamoriëntatie via temperatuur/zon correlatie
+- 🔋 BatteryDecisionEngine basis in coordinator
+- 📊 Systeem Status tabel tabelweergave gefixed
+- 📋 Geleerde Voertuigprofielen tabel gefixed
+- 🔍 Voertuigtype classificatie tabel gefixed
+- ⚡ Batterij vermogen fix (kW → W conversie Zonneplan Nexus)
+- 💾 Alle module-toggles persistent na herstart (Zonneplan auto-sturing, PV Forecast, NILM etc.)
+- 🟢 Systeem Status kaart toont nu correct ✅/⭕ per module
+
+### Gewijzigd
+- `sensor.py`: module status flags lezen nu `_pv_forecast_enabled` en `_battery_sched_enabled` (was object check)
+- `zonneplan_bridge.py`: power conversie fix voor kW sensoren (<50W drempel)
+- `coordinator.py`: `_save_nilm_toggles` / `_load_nilm_toggles` uitgebreid met alle 16 module-toggles
+
 Alle noemenswaardige wijzigingen worden in dit bestand bijgehouden.
 
 Het formaat is gebaseerd op [Keep a Changelog](https://keepachangelog.com/nl/1.0.0/).
+
+## [3.5.5] - 2026-03-07
+
+### Toegevoegd
+- **Testmodus / Simulator** — activeer via `cloudems.simulator_set` met sliders voor net, PV, batterij, EPEX-prijs etc.
+  - Auto-timeout (standaard 30 min, instelbaar via `timeout_min`)
+  - Persistent notification in HA bij activatie met resterende tijd
+  - Oranje banner bovenaan het dashboard zolang testmodus actief is, met "Stop" knop
+  - `binary_sensor.cloudems_testmodus` — ON als simulator actief, attributen: `remaining_min`, `simulated_fields`, `overrides`
+- **Leer-freeze** — alle 16 leermodules (NILM, baseline, EV-sessie, thermisch model, HP COP, dagclassificatie, apparaatdrift, capaciteitspiek, weekvergelijking, micro-mobiliteit, batterij SoC, sensor EMA, P1-direct) worden bevroren zolang de simulator actief is. Historische data en leermodellen worden nooit overschreven.
+
+### Opgelost
+- `log_reporter.py` — syntax error: unterminated string literal op r331 (`"\\n".join(lines)`)
+- Simulator beïnvloedt nu geen historische data, leerprocessen of opgeslagen statistieken
+
+---
+
+## [3.2.1] — 2026-03-07
+
+### Hotfix — Privacy correcties log_reporter
+
+- Anonimisering: alleen IP-adressen en postcodes/coördinaten maskeren (was: ook entity IDs en energiewaarden)
+- Sensor snapshot: exacte waarden (W, °C) in plaats van bandbreedtes — betere diagnostiek
+- Boiler tabel uitgebreid: entity ID, exacte temperatuur, kWh/cyclus
+- Token-logica: config flow token indien aanwezig, anders anoniem (GitHub publieke repo)
+- Preview tekst gecorrigeerd
+
+---
+
+## [3.2.0] — 2026-03-07
+
+### Log Reporter — automatische GitHub Issue uploads
+
+#### log_reporter.py (nieuw — 425 regels)
+
+Privacy-first diagnose-uploads bij kritieke fouten:
+
+**Wat wordt geanonimiseerd:**
+- Entity IDs vervangen door type-labels (`[sensor]`, `[cloudems_sensor]`)
+- IP-adressen gemaskeerd als `[IP]`
+- Energiewaarden weergegeven als bandbreedtes (bijv. `500–1000 W`)
+- Geen locatie-informatie, geen persoonsnamen
+
+**Wat er wél in zit:**
+- HA-logs gefilterd op `cloudems` (laatste 200 regels)
+- Guardian actieve issues (geanonimiseerd)
+- Module-configuratie (welke modules actief, zonder waarden)
+- CloudEMS versie + HA versie + Python versie
+- Boiler-status als booleans (boven/onder setpoint, aan/uit)
+- Capaciteitstarief waarschuwingsniveau
+
+**Triggers:**
+- Automatisch bij nieuwe kritieke Guardian-fouten (cooldown: 1 uur)
+- Handmatig via HA-service `cloudems.upload_diagnostic_report`
+
+**Cooldown:** maximaal 1 automatisch rapport per uur om spam te voorkomen
+
+#### .github/workflows/analyse-auto-report.yml (nieuw)
+
+GitHub Actions workflow die automatisch draait bij elk nieuw `auto-report` issue:
+
+1. Claude analyseert het rapport (waarschijnlijke oorzaak, concrete stappen, code-aanbeveling)
+2. Analyse wordt als comment geplaatst op het issue
+3. Extra labels worden toegevoegd: `severity:critical/error/warning` + `module:boiler/ev/etc.`
+
+Vereist: `ANTHROPIC_API_KEY` als GitHub repository secret
+
+#### Config flow — Diagnostics stap (nieuw)
+
+Nieuwe laatste wizard-stap met:
+- `github_log_token`: GitHub PAT met `public_repo` scope
+- `notification_service`: HA mobile app service naam voor push-meldingen
+
+#### Guardian integratie
+- LogReporter geïnitialiseerd in `async_setup()` als token aanwezig
+- Auto-report getriggerd bij nieuwe kritieke issues in `_apply_actions()`
+
+#### Coordinator
+- `cloudems.upload_diagnostic_report` service geregistreerd in `__init__.py`
+
+---
+
+## [3.1.0] — 2026-03-07
+
+### System Guardian — autonome bewakingsrobot
+
+#### guardian.py (nieuw — 666 regels)
+
+Vier bewakers die elke 60 seconden draaien:
+
+**CoordinatorGuard** — stale data (>3 min oud), herhaalde crashes vanuit de watchdog, configuratiefouten uit de health check
+
+**ModuleGuard** — boiler-cascades die niet opwarmen terwijl dat wel zou moeten, EV-lader unavailable, NILM zonder detectie
+
+**SensorGuard** — kritieke sensoren (net, PV) ontbreken of leveren bevroren waarden. Boilertemperatuur stuck terwijl verwarmingselement aan is
+
+**BoilerCascadeGuard** — anomalie-detectie (>2.5× normaal verbruik), leveringsboiler dreigt koud, seizoenswisseling notificatie
+
+**Bijsturing (voorzichtig regime):**
+- 2 faalcycli → notificatie via persistent_notification + push
+- 3 faalcycli → HA integration reload
+- 5 faalcycli → veilige stand (boilers uit, EV minimum)
+- Module structureel defect → uitschakelen tot handmatige reset
+
+**Rapportage:**
+- `persistent_notification` bij elk nieuw issue
+- Push via configureerbare `notification_service` voor warnings en hoger
+- Weekrapport elke maandag 08:00 met overzicht crashes, boiler-energie, actieve issues
+
+**Persistentie:** `/config/.storage/cloudems_guardian.json` — onthoudt uitgeschakelde modules en tijdstip weekrapport over HA-herstarts heen
+
+#### Coordinator
+- Guardian geïnitialiseerd in `async_setup()` na health check
+- `async_evaluate()` aangeroepen elke update-cyclus (intern begrensd op 60s)
+- `guardian` sleutel toegevoegd aan `self._data`
+
+#### Dashboard
+- **🤖 System Guardian** kaart in Diagnose tab: statusbadge, issue-tabel met level-kleuren, recent-opgeloste issues, veilige-stand indicator, weekrapport timestamp
+
+---
+
+## [3.0.0] — 2026-03-07
+
+### Grote release — Netbeleid NL + Health Check + Documentatie
+
+#### Capaciteitstarief Piekbewaker (capacity_peak.py v3.0)
+- Automatische maandreset — geen handmatige reset meer nodig
+- Eindpiek-projectie per kwartier op basis van lopend verloop
+- Gerangschikte load-shedding acties met urgentieniveaus (advisory/soon/now)
+- Sheddable loads parameter: EV + boiler vermogen meegegeven voor concreet advies
+- 12-maanden piekhistoriek met indicatieve maandkosten (€4,37/kW, NL Liander)
+- Headroom indicator: W beschikbaar zonder nieuwe maandpiek
+- `cost_impact_eur`: geschatte kostenstijging als eindpiek boven drempel uitkomt
+
+#### Grid Congestion Detector (grid_congestion.py)
+- Capaciteitstarief-bewuste acties: al bij 80% utilisation advies (was 90%)
+- Urgentieniveaus per actie (advisory/soon/now)
+- Capaciteitstarief-waarschuwing bij 95%+ (nog geen congestie, maar piek-risico)
+
+#### Setup Health Check (health_check.py v1.0 — nieuw)
+- Controleert na setup alle geconfigureerde entiteiten in HA
+- Drie categorieën: missing (bestaat niet), stale (unavailable/unknown), zero (verdachte waarde)
+- Kritieke sensoren (grid, PV) geven 'error'; optionele sensoren 'warning'
+- Boiler-units en fase-sensoren apart gecontroleerd
+- Resultaat beschikbaar als `health_check` attribuut op `sensor.cloudems_watchdog`
+- HA log-entry bij fouten/waarschuwingen na setup
+
+#### Coordinator
+- Capacity peak: `sheddable_loads_w` (EV + boiler) meegegeven aan `update()`
+- Handmatige maandreset verwijderd (nu automatisch)
+- Health check uitgevoerd aan einde van `async_setup()`
+
+#### Dashboard
+- **⚡ Kwartier-piek & Capaciteitstarief**: volledig herschreven met ASCII progress bar, projectie, headroom, load-shedding acties met urgentie-kleur, maandhistoriek tabel, kostenwaarschuwing
+- **🏥 Setup Health Check**: nieuwe kaart in Diagnose tab met issues-tabel en suggesties per probleem
+
+#### Documentatie
+- README: boiler sectie volledig herschreven met alle v2.8/v2.9/v3.0 features
+- Blogpost: *Capaciteitstarief in Nederland* — uitleg, rekenvoorbeelden, tarieven
+- Blogpost: *Netcongestie in Nederland* — uitleg, verschil met capaciteitstarief, CloudEMS werking
+- Blogpost: *Post-saldering 2027* — impact afbouw saldering, zelfconsumptie strategie, rekenvoorbeelden
+
+---
+
+
+
+### Boiler Controller v3.1 — Intelligent leren & optimalisaties
+
+#### Backend
+- **Dag-van-de-week patroon**: 7×24 gebruiksmatrix per cascade-groep; `should_preheat()` gebruikt nu weekdag-specifiek patroon vóór het globale 24-uurs patroon als fallback
+- **Optimale opwarmtijd** (`optimal_start_before_minutes`): berekent het exacte starttijdstip zodat de boiler warm is vóór de verwachte vraag, in plaats van zo vroeg mogelijk te starten bij goedkope uren
+- **Afwijkingsdetectie**: telt cycli per dag; stuurt HA persistent notification bij >2.5× normaal gebruik (mogelijke lekkage of logeerpartij)
+- **Delta-T optimalisatie** (`delta_t_optimize: true`): verlaagt dynamisch het setpoint als de boiler ruim boven de comfort-grens zit (max −8°C); vermijdt onnodige warmte-overschotten
+- **Post-saldering modus** (`post_saldering_mode: true`): verlaagt PV-surplus drempel naar 40% voor agressievere zelfconsumptie — voorbereiding op afschaffing saldering 2027
+- **P1 directe respons** (`async_p1_update`): coordinator pusht elke P1-telegram (< 1s) naar boiler controller; effectief surplus combineert P1-meting met solar surplus
+- **Weekbudget tracking**: `get_weekly_budget()` telt kWh per boiler per ISO-week; persistente in-memory opslag
+
+#### Coordinator
+- P1-telegram net_power_w wordt direct doorgestuurd naar `BoilerController.async_p1_update()`
+- `boiler_weekly_budget` en `boiler_p1_active` toegevoegd aan coordinator data
+
+#### Sensor
+- `sensor.cloudems_boiler_status` heeft nu `weekly_budget` en `p1_direct_active` attributen
+
+#### Dashboard
+- **Nieuw: 📅 Gebruikspatroon per dag van de week**: 7-rijen heatmap met 7 tijdblokken per dag (ASCII bars)
+- **Nieuw: ⏱️ Wanneer is het warm? + Optimal start**: tabel met opwarmtijd per boiler, optimal-start indicator en P1-direct badge
+- **Nieuw: 💰 Warmwater energiebudget**: kWh-verbruik per boiler deze week, cycle_kwh live, post-saldering indicator
+
+---
+
+
+
+### Boiler Controller v3.0 — Volledig intelligent systeem
+
+#### Backend (boiler_controller.py)
+- **Persistente cycle_kwh**: kWh-teller per boiler overleeft HA-herstarts via `cloudems_boiler_learn.json`
+- **Gebruikspatroon per uur**: exponentieel gewogen leermodel per uur van de dag (0-23) via `flow_sensor`; `should_preheat()` activeert cascade preventief vóór piekperiodes
+- **Thermische verliescompensatie**: afkoelsnelheid (°C/u) per boiler geleerd via temperatuurhistorie; `time_until_cold()` berekent tijd tot comfort-grens
+- **Vraaggestuurde prioriteit**: `flow_sensor` koppeling registreert warm-water-onttrekking per uur; leveringsboiler krijgt direct hogere prioriteit na gebruik
+- **Seizoenspatroon**: automatische zomer/winter detectie op basis van buitentemperatuur met 3-daagse hysterese; seizoensspecifieke setpoints via `setpoint_summer_c` / `setpoint_winter_c`
+- **Netcongestie koppeling**: bufferboilers worden uitgesteld bij congestie; leveringsboiler blijft warm voor comfort
+- **Proportionele dimmer sturing**: `dimmer_proportional: true` schakelt PV-surplus-proportioneel dimmen in (5%-stappen, max update elke 30s)
+
+#### Dashboard
+- **Cascade groepen kaart**: uitgebreid met seizoen-status, "Tot Koud" kolom (minuten/uren) en thermisch verlies (°C/u) per boiler
+- **Nieuw: 📊 Gebruikspatroon per uur**: ASCII-bar visualisatie van warmwatergebruik per uur op basis van flow-sensor leerdata
+- **Nieuw: 🌡️ Thermisch verlies & voorspelling**: tabel met verliescoëfficiënt, confidence, kWh per cyclus en tijd tot comfort-grens per boiler
+- **Nieuw: 🔌 Dimmer & proportionele sturing**: statusoverzicht van dimmer-gestuurde boilers inclusief proportioneel-modus indicator
 
 ---
 
