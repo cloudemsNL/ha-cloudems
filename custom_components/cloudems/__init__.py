@@ -399,9 +399,6 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
 
         # Controleer of het dashboard al bestaat (dashboards is een dict url_path -> object)
         dashboards = ll_data.get("dashboards") if hasattr(ll_data, "get") else getattr(ll_data, "dashboards", {})
-        if _SLUG in dashboards:
-            _LOGGER.debug("CloudEMS: Lovelace dashboard '%s' bestaat al", _SLUG)
-            return
 
         # Lees YAML via executor — niet op de event loop (blocking I/O)
         yaml_path = pathlib.Path(__file__).parent / "www" / "cloudems-dashboard.yaml"
@@ -414,6 +411,16 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
             return
 
         dashboard_config = await hass.async_add_executor_job(_read_yaml)
+
+        if _SLUG in dashboards:
+            # v4.5.21: dashboard bestaat al — inhoud updaten (bijv. na HACS update)
+            dash_obj = dashboards[_SLUG]
+            try:
+                await dash_obj.async_save(dashboard_config)
+                _LOGGER.info("CloudEMS: Lovelace dashboard bijgewerkt op /lovelace-%s", _SLUG)
+            except Exception as _uerr:
+                _LOGGER.debug("CloudEMS: dashboard update overgeslagen: %s", _uerr)
+            return
 
         # Stap 1: registreer via DashboardsCollection (triggert CHANGE_ADDED listener
         # in lovelace/__init__.py die het object aanmaakt én het sidebar-panel registreert)
@@ -476,9 +483,12 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         yaml_dst = pathlib.Path(hass.config.config_dir) / "cloudems-dashboard.yaml"
         try:
             if yaml_src.exists():
-                if not yaml_dst.exists() or yaml_src.stat().st_mtime > yaml_dst.stat().st_mtime:
+                import hashlib
+                src_hash = hashlib.md5(yaml_src.read_bytes()).hexdigest()
+                dst_hash = hashlib.md5(yaml_dst.read_bytes()).hexdigest() if yaml_dst.exists() else ""
+                if src_hash != dst_hash:
                     shutil.copy2(yaml_src, yaml_dst)
-                    _LOGGER.info("CloudEMS: cloudems-dashboard.yaml gekopieerd naar /config/")
+                    _LOGGER.info("CloudEMS: cloudems-dashboard.yaml bijgewerkt in /config/")
         except Exception as _err:
             _LOGGER.warning("CloudEMS: kon cloudems-dashboard.yaml niet kopiëren naar /config/: %s", _err)
 
