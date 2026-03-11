@@ -623,8 +623,18 @@ class NILMDetector:
 
         Apparaten waarvan de naam overeenkomt worden gefilterd uit get_devices_for_ha(),
         ook als ze geen source_entity_id hebben.
+        v4.5.6: verwijder ook direct uit _devices zodat al opgeslagen ghosts verdwijnen.
         """
         self._blocked_friendly_names = {n.lower().strip() for n in names if n}
+        # Direct purge van al opgeslagen devices met een geblokkeerde naam
+        to_remove = [
+            did for did, dev in self._devices.items()
+            if getattr(dev, "source", "") != "smart_plug"
+            and (getattr(dev, "name", "") or "").lower().strip() in self._blocked_friendly_names
+        ]
+        for did in to_remove:
+            _LOGGER.info("NILM: verwijder infra-ghost '%s' via blocked_friendly_names", self._devices[did].name)
+            self._devices.pop(did, None)
 
     def set_esphome_features(
         self,
@@ -2470,11 +2480,16 @@ class NILMDetector:
         def _is_infra_name(dev_dict: dict) -> bool:
             if dev_dict.get("source") == "smart_plug":
                 return False
-            name = (dev_dict.get("name") or "").lower().strip()
+            # Check zowel name als user_name
+            raw_name = dev_dict.get("user_name") or dev_dict.get("name") or ""
+            name = raw_name.lower().strip()
             if any(kw in name for kw in _INFRA_NAME_KEYWORDS_EARLY):
                 return True
             # Extra patroon: "meter" + energie-term
             if "meter" in name and any(w in name for w in ("verbruik", "productie", "energy", "elektric")):
+                return True
+            # v4.5.6: elke naam die begint met "electricity" is een netmeter
+            if name.startswith("electricity"):
                 return True
             # v4.5.6: device_type uitsluitingen — hoofdmeter is nooit een NILM apparaat
             _INFRA_TYPES = {
@@ -2483,7 +2498,7 @@ class NILMDetector:
             }
             if dev_dict.get("device_type", "").lower() in _INFRA_TYPES:
                 return True
-            # v4.5.6: naam is exact "electricity meter" (DSMR/P1 hoofdmeter)
+            # v4.5.6: naam is exact een bekende infra-label
             if name in ("electricity meter", "energiemeter", "energy meter", "slimme meter"):
                 return True
             return False
@@ -2562,7 +2577,7 @@ class NILMDetector:
             if "meter" in n and any(w in n for w in ("verbruik", "productie", "levering", "import", "export", "energy", "elektric")):
                 return True
             # v4.5.3: naam begint met bekende infra-prefix
-            _INFRA_PREFIXES = ("electricity ", "electric meter", "dsmr ", "p1 ", "slimme ")
+            _INFRA_PREFIXES = ("electricity", "electric meter", "dsmr ", "p1 ", "slimme ")
             if any(n.startswith(pfx) for pfx in _INFRA_PREFIXES):
                 return True
             # v4.5.6: exacte naam-match voor veelvoorkomende hoofdmeter-labels
@@ -2574,7 +2589,7 @@ class NILMDetector:
             d for d in raw
             if d.get("source") == "smart_plug"
             or (
-                not _has_infra_keyword(d.get("name", ""))
+                not _has_infra_keyword(d.get("user_name") or d.get("name", ""))
                 and d.get("device_type", "").lower() not in {
                     "electricity_meter", "energy_meter", "main_meter", "grid_meter",
                     "smart_meter", "p1_meter", "dsmr", "net_meter",

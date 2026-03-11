@@ -1639,9 +1639,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         _review_done["infra_keyword_cleanup_v441"] = True
                         await self._store_review.async_save(_review_done)
 
-                    # v4.5.6: aanvullende cleanup — verwijder "Electricity Meter" en andere
+                    # v4.5.6b: aanvullende cleanup — verwijder "Electricity Meter" en andere
                     # hoofdmeter-namen die door eerdere versies in de database zijn opgeslagen.
-                    if not _review_done.get("infra_meter_cleanup_v456"):
+                    # Gebruikt v456b vlag zodat verbeterde logica opnieuw draait na update.
+                    if not _review_done.get("infra_meter_cleanup_v456b"):
                         _INFRA_EXACT_NAMES = {
                             "electricity meter", "energiemeter", "energy meter",
                             "slimme meter", "main meter", "hoofdmeter",
@@ -1658,24 +1659,32 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             if getattr(dev, "source", "") == "smart_plug":
                                 continue
                             _dname = (getattr(dev, "name", "") or "").lower().strip()
+                            _uname = (getattr(dev, "user_name", "") or "").lower().strip()
                             _dtype = (getattr(dev, "device_type", "") or "").lower()
-                            if (_dname in _INFRA_EXACT_NAMES
-                                    or _dtype in _INFRA_DEVICE_TYPES
-                                    or any(sub in _dname for sub in _INFRA_NAME_SUBSTRINGS)):
+                            # Check op name, user_name én device_type
+                            if (
+                                _dname in _INFRA_EXACT_NAMES
+                                or _uname in _INFRA_EXACT_NAMES
+                                or _dtype in _INFRA_DEVICE_TYPES
+                                or any(sub in _dname for sub in _INFRA_NAME_SUBSTRINGS)
+                                or any(sub in _uname for sub in _INFRA_NAME_SUBSTRINGS)
+                                or _dname.startswith("electricity")
+                                or _uname.startswith("electricity")
+                            ):
                                 _meter_stale.append(did)
                         for did in _meter_stale:
                             _LOGGER.info(
-                                "CloudEMS NILM: verwijder hoofdmeter-ghost '%s' (v4.5.6)",
+                                "CloudEMS NILM: verwijder hoofdmeter-ghost '%s' (v4.5.6b)",
                                 self._nilm._devices[did].name,
                             )
                             del self._nilm._devices[did]
                         if _meter_stale:
                             await self._nilm.async_save()
                             _LOGGER.info(
-                                "CloudEMS NILM: %d hoofdmeter-ghost(s) opgeruimd (v4.5.6)",
+                                "CloudEMS NILM: %d hoofdmeter-ghost(s) opgeruimd (v4.5.6b)",
                                 len(_meter_stale),
                             )
-                        _review_done["infra_meter_cleanup_v456"] = True
+                        _review_done["infra_meter_cleanup_v456b"] = True
                         await self._store_review.async_save(_review_done)
                 except Exception as _kw_err:
                     _LOGGER.debug("CloudEMS: keyword cleanup mislukt: %s", _kw_err)
