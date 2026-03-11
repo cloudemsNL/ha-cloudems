@@ -1873,6 +1873,7 @@ class NILMDetector:
                         )
                         return
 
+            dev = DetectedDevice(
                 device_id      = dev_id,
                 device_type    = best["device_type"],
                 name           = best.get("name", (best.get("device_type") or "unknown").replace("_"," ").title()),
