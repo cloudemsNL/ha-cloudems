@@ -1,5 +1,0 @@
-# nilm_filter.py — verwijderd in v3.9.0
-# Filterfunctionaliteit is geïntegreerd in detector.py via set_infra_powers()
-# en de user_suppressed/include/exclude flags op DetectedDevice.
-# Zie: NILMDetector.set_config_sensor_eids(), inject_battery(), set_infra_powers()
-

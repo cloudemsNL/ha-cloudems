@@ -481,14 +481,12 @@ class NILMDetector:
 
         # v1.16: known battery power — used to skip false NILM edges
         self._battery_power_w: float = 0.0
-        # v4.5.19: rolling battery power window (last 30s) for provider batteries
-        # whose dispatch power changes every cycle. Using max of window prevents
-        # false positives when battery just changed power level.
-        self._battery_power_history: list = []  # list of (timestamp, abs_w)
+        # v4.5.19: peak battery power within last 30s — used to catch provider
+        # batteries that vary dispatch power each cycle (Zonneplan Nexus etc.)
+        self._battery_peak_w: float = 0.0
+        self._battery_peak_ts: float = 0.0
 
-        # v4.5.19: dedup new-device spam — track recently created pending devices
-        # key = (device_type, phase), value = timestamp of last creation
-        self._recent_pending_devices: dict = {}
+        # v1.24: known infrastructure sensor power values (W).
         # Updated every cycle from coordinator. Used to suppress NILM events whose
         # delta closely matches a configured sensor (grid, PV, EV charger, heat pump).
         # key = sensor label, value = abs power in W
@@ -818,12 +816,12 @@ class NILMDetector:
             )
         self._battery_prev_power_w = power_w
         self._battery_power_w = abs(power_w)
-        # v4.5.19: maintain rolling 30s window for provider batteries
-        now = _t.time()
-        self._battery_power_history.append((now, abs(power_w)))
-        self._battery_power_history = [
-            (t, w) for t, w in self._battery_power_history if now - t <= 30
-        ]
+        # v4.5.19: maintain 30s peak for provider batteries with variable dispatch
+        import time as _tp
+        _now = _tp.time()
+        if abs(power_w) >= self._battery_peak_w or _now - self._battery_peak_ts > 30:
+            self._battery_peak_w  = abs(power_w)
+            self._battery_peak_ts = _now
 
     async def async_load(self) -> None:
         await self._fp_memory.async_load()
@@ -1231,23 +1229,21 @@ class NILMDetector:
 
         # ── v1.16: skip events during active battery charge/discharge ─────────
         # Ratio-based check: event delta ≈ battery power → battery-caused edge
-        # v4.5.19: use max of rolling 30s window so provider batteries with
-        # variable dispatch don't slip through between coordinator cycles.
-        _batt_check_w = max(
-            [w for _, w in self._battery_power_history] or [self._battery_power_w]
-        )
-        if _batt_check_w > 300:
-            ratio = abs_delta / _batt_check_w
+        if self._battery_power_w > 300:
+            ratio = abs_delta / self._battery_power_w
             if 0.55 <= ratio <= 1.55:
                 _LOGGER.debug(
                     "NILM: event %.0fW overgeslagen — lijkt op batterijovergang (batterij %.0fW)",
                     event.delta_power, self._battery_power_w,
                 )
                 return
-            # v4.5.13: 3-fase thuisbatterij detectie
-            if _batt_check_w > 2000:
+            # v4.5.13: 3-fase thuisbatterij detectie — een grote transitie
+            # (bijv. -607W → +6830W = delta 7437W) verdeeld over 3 fasen geeft
+            # ~2479W per fase. Blokkeer ook events die overeenkomen met 1/3 of 2/3
+            # van het batterij-vermogen bij grote transities (>2kW).
+            if self._battery_power_w > 2000:
                 for frac in (0.33, 0.67):
-                    frac_w = _batt_check_w * frac
+                    frac_w = self._battery_power_w * frac
                     if frac_w > 200 and 0.7 <= abs_delta / frac_w <= 1.3:
                         _LOGGER.debug(
                             "NILM: event %.0fW overgeslagen — 3-fase batterij fractie (%.0fW × %.0f%%)",
@@ -1845,31 +1841,25 @@ class NILMDetector:
         else:
             dev_id = str(uuid.uuid4())[:8]
             # v4.5.11: als de fase-data geschat is (total_split/total_l1), markeer fase als onzeker.
+            # Het apparaat leert zijn echte fase zodra er per-fase data beschikbaar is.
             _phase_certain = self._phase_source_certain.get(event.phase, True)
             _initial_phase = event.phase if _phase_certain else "?"
 
-            # v4.5.19: dedup — suppress new-device spam when the same type+phase
-            # was already created as a pending device within the last 120s.
-            # This happens with ramping loads (heat pumps starting up) where each
-            # 10s tick has a slightly different power, causing repeated detections.
-            import time as _tdedup
-            _dedup_key = (best.get("device_type", "unknown"), _initial_phase)
-            _dedup_ts  = self._recent_pending_devices.get(_dedup_key, 0)
-            if _tdedup.time() - _dedup_ts < 120:
-                # Already created this type+phase recently — update power on existing
-                # pending device instead of creating a new one
-                for _existing in self._devices.values():
+            # v4.5.19: dedup — als er al een pending apparaat van hetzelfde type+fase
+            # actief is, update alleen het vermogen in plaats van een nieuw aan te maken.
+            if is_on:
+                for _dup in self._devices.values():
                     if (
-                        _existing.device_type == best.get("device_type")
-                        and _existing.phase == _initial_phase
-                        and getattr(_existing, "pending_confirmation", False)
-                        and _existing.is_on
+                        _dup.device_type == best.get("device_type")
+                        and _dup.phase == _initial_phase
+                        and getattr(_dup, "pending_confirmation", False)
+                        and _dup.is_on
                     ):
-                        _existing.current_power = abs_delta
-                        _existing.last_seen     = event.timestamp
+                        _dup.current_power = abs_delta
+                        _dup.last_seen     = event.timestamp
                         _LOGGER.debug(
-                            "NILM: dedup — update bestaand pending apparaat '%s' naar %.0fW",
-                            _existing.name, abs_delta,
+                            "NILM: dedup — bestaand pending '%s' bijgewerkt naar %.0fW",
+                            _dup.name, abs_delta,
                         )
                         return
 
@@ -1882,11 +1872,8 @@ class NILMDetector:
                 is_on          = is_on,
                 source         = best.get("source","database"),
                 phase          = _initial_phase,
-                pending_confirmation = True,
+                pending_confirmation = True,  # v4.5.12: altijd pending bij aanmaken — nooit direct zichtbaar zonder validatie
             )
-            # v4.5.19: register dedup timestamp so same type+phase won't spam new events
-            import time as _treg
-            self._recent_pending_devices[_dedup_key] = _treg.time()
             dev.energy = DeviceEnergy(device_id=dev_id)
             if is_on:
                 dev.on_events    = 1
@@ -2474,14 +2461,10 @@ class NILMDetector:
 
         # v1.16: store battery power so _async_process_event can ignore matching edges
         self._battery_power_w = abs(power_w)
-        # v4.5.19: update rolling window
-        import time as _tinj
-        self._battery_power_history.append((_tinj.time(), abs(power_w)))
-        self._battery_power_history = [
-            (t, w) for t, w in self._battery_power_history if _tinj.time() - t <= 30
-        ]
-        # effective battery power = max of rolling window
-        _eff_batt_w = max([w for _, w in self._battery_power_history] or [abs(power_w)])
+        # v4.5.19: update 30s peak
+        if abs(power_w) >= self._battery_peak_w or _t.time() - self._battery_peak_ts > 30:
+            self._battery_peak_w  = abs(power_w)
+            self._battery_peak_ts = _t.time()
 
         # v1.16: if battery is significantly active, remove any heating/boiler NILM device
         # whose power is within 30% of the battery power — those were false positives from
@@ -2508,9 +2491,8 @@ class NILMDetector:
                 # door een toevallige batterij-transitie worden weggegooid.
                 if getattr(dev, "on_events", 0) >= 1:
                     continue
-                # v4.5.19: use rolling window max so provider dispatch variation
-                # doesn't prevent removal of just-created false positives
-                batt_w = _eff_batt_w
+                # v4.5.19: use peak so variable provider dispatch doesn't miss FPs
+                batt_w = self._battery_peak_w if self._battery_peak_w > 0 else abs(power_w)
                 dev_w  = dev.current_power if dev.current_power > 0 else dev.confidence * batt_w
                 ratio  = dev_w / batt_w if batt_w > 0 else 0
                 # v4.5.13: smaller overlap window voor 3-fase batterij:
