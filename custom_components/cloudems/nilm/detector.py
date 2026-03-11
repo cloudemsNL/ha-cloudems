@@ -2464,15 +2464,27 @@ class NILMDetector:
             "solar production", "pv productie",
             # v4.5.3: extra termen
             "energieproductie", "energieverbruik", "electricity meter",
+            # v4.5.6: standalone "electricity meter" zonder suffix ook blokkeren
+            "electricity meter",
         )
         def _is_infra_name(dev_dict: dict) -> bool:
             if dev_dict.get("source") == "smart_plug":
                 return False
-            name = (dev_dict.get("name") or "").lower()
+            name = (dev_dict.get("name") or "").lower().strip()
             if any(kw in name for kw in _INFRA_NAME_KEYWORDS_EARLY):
                 return True
             # Extra patroon: "meter" + energie-term
             if "meter" in name and any(w in name for w in ("verbruik", "productie", "energy", "elektric")):
+                return True
+            # v4.5.6: device_type uitsluitingen — hoofdmeter is nooit een NILM apparaat
+            _INFRA_TYPES = {
+                "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+                "smart_meter", "p1_meter", "dsmr", "net_meter",
+            }
+            if dev_dict.get("device_type", "").lower() in _INFRA_TYPES:
+                return True
+            # v4.5.6: naam is exact "electricity meter" (DSMR/P1 hoofdmeter)
+            if name in ("electricity meter", "energiemeter", "energy meter", "slimme meter"):
                 return True
             return False
         raw = [d for d in raw if not _is_infra_name(d)]
@@ -2542,7 +2554,7 @@ class NILMDetector:
             "p1 telegram",
         }
         def _has_infra_keyword(name: str) -> bool:
-            n = (name or "").lower()
+            n = (name or "").lower().strip()
             # Exacte substring match op alle keywords
             if any(kw in n for kw in _INFRA_NAME_KEYWORDS):
                 return True
@@ -2553,12 +2565,21 @@ class NILMDetector:
             _INFRA_PREFIXES = ("electricity ", "electric meter", "dsmr ", "p1 ", "slimme ")
             if any(n.startswith(pfx) for pfx in _INFRA_PREFIXES):
                 return True
+            # v4.5.6: exacte naam-match voor veelvoorkomende hoofdmeter-labels
+            if n in ("electricity meter", "energiemeter", "energy meter", "slimme meter", "main meter"):
+                return True
             return False
 
         raw = [
             d for d in raw
             if d.get("source") == "smart_plug"
-            or not _has_infra_keyword(d.get("name", ""))
+            or (
+                not _has_infra_keyword(d.get("name", ""))
+                and d.get("device_type", "").lower() not in {
+                    "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+                    "smart_meter", "p1_meter", "dsmr", "net_meter",
+                }
+            )
         ]
 
         # v2.5: runtime vermogensfilter op basis van _infra_powers.

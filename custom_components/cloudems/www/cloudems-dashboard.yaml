@@ -1054,26 +1054,30 @@ views:
       ✅ Geen uitgestelde schakelaars
       {%- endif %}
 
-      | Apparaat | Status | Modus | Wacht op | Wachtend | Deadline |
-      |---|---|---|---|---|---|
-      {%- for sw in sd_switches -%}
+      | Apparaat | Status | Modus | Doel | Wachtend | Deadline |
+      |:---|:---:|:---:|:---:|:---:|:---:|
+      {% for sw in sd_switches %}
       {%- set ds = sw.get('delay_state','idle') -%}
-      {%- set icon = '⏳' if ds == 'intercepted' else ('🔍' if ds == 'detected' else ('⏰' if ds == 'deadline_forced' else ('✅' if ds == 'idle' else '🚫'))) -%}
-      {%- set lbl = sw.get('label') or sw.get('entity_id') -%}
-      {%- set tgt = sw.get('target_hour') -%}
+      {%- set status_map = {'idle': '✅ klaar', 'detected': '🔍 gedetecteerd', 'intercepted': '⏳ uitgesteld', 'deadline_forced': '⏰ deadline', 'disabled': '🚫 uit'} -%}
+      {%- set status_lbl = status_map.get(ds, ds) -%}
+      {%- set lbl = (sw.get('label') or sw.get('entity_id','?')).split('.')[-1] | replace('_',' ') | title -%}
+      {%- set tgt = sw.get('cheap_block_start') or sw.get('target_hour') -%}
       {%- set wmin = sw.get('waiting_min') -%}
       {%- set wmode = sw.get('wait_mode','price') -%}
       {%- set modus_badge = '🏷️ blok' if wmode == 'cheapest_block' else '💶 prijs' -%}
       {%- set mxh = sw.get('max_wait_h', 0) | int -%}
       {%- set dl_ts = sw.get('deadline_ts') -%}
-      {%- set dl_str = (((dl_ts | int) - (now().timestamp() | int)) // 60 | string ~ ' min') if dl_ts else ('∞' if mxh == 0 else mxh | string ~ 'h max') -%}
-      | {{ icon }} **{{ lbl }}** | {{ ds }} | {{ modus_badge }} | {{ '%02d:00'|format(tgt) if tgt is not none else '—' }} | {{ (wmin | int | string ~ ' min') if wmin else '—' }} | {{ dl_str }} |
-      {%- endfor %}
+      {%- set mins_left = ((dl_ts | int - now().timestamp() | int) // 60) if dl_ts else none -%}
+      {%- set dl_str = ((mins_left | string ~ ' min') if mins_left is not none and mins_left > 0 else '—') if dl_ts else ('∞' if mxh == 0 else (mxh | string ~ 'h max')) -%}
+      | **{{ lbl }}** | {{ status_lbl }} | {{ modus_badge }} | {{ '%02d:00' | format(tgt) if tgt is not none else '—' }} | {{ (wmin | int | string ~ ' min') if wmin is not none else '—' }} | {{ dl_str }} |
+      {% endfor %}
       {%- if pending > 0 %}
 
-      **Annuleer uitstel:**
+      **Apparaten wachten op inschakeling:**
       {%- for sw in sd_switches if sw.get('delay_state') in ('intercepted','detected','deadline_forced') %}
-      - **{{ sw.get('label') or sw.get('entity_id') }}** — ingeschakeld om {{ '%02d:00'|format(sw.get('target_hour',0)) }}
+      {%- set lbl = (sw.get('label') or sw.get('entity_id','?')).split('.')[-1] | replace('_',' ') | title %}
+      {%- set tgt = sw.get('cheap_block_start') or sw.get('target_hour') %}
+      - **{{ lbl }}** — gepland om {{ '%02d:00' | format(tgt) if tgt is not none else '—' }}
       {%- endfor %}
       {%- endif %}
       {%- endif %}

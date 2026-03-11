@@ -75,7 +75,7 @@ from .const import (
     DEFAULT_SHUTTER_COUNT, DEFAULT_SHUTTER_OVERRIDE_H,
     CONF_PROVIDERS,
     CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER,
-    PRICE_PROVIDER_CREDENTIALS, PRICE_PROVIDER_LABELS,
+    PRICE_PROVIDER_CREDENTIALS, PRICE_PROVIDER_LABELS, EPEX_BASED_PROVIDERS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -1203,7 +1203,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_features(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_peak_config() if user_input.get(CONF_PEAK_SHAVING_ENABLED) else await self.async_step_prices()
+            return await self.async_step_peak_config() if user_input.get(CONF_PEAK_SHAVING_ENABLED) else await self.async_step_price_provider()
 
         phase_count = self._config.get(CONF_PHASE_COUNT, 1)
         schema: dict = {
@@ -1230,7 +1230,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_peak_config(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_prices()
+            return await self.async_step_price_provider()
         return self.async_show_form(
             step_id="peak_config",
             data_schema=vol.Schema({
@@ -1246,7 +1246,11 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_prices(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_price_provider()
+            # Herlaad leverancier-opties als land gewijzigd is
+            new_country = user_input.get(CONF_ENERGY_PRICES_COUNTRY)
+            if new_country:
+                self._config[CONF_ENERGY_PRICES_COUNTRY] = new_country
+            return await self.async_step_ai_config()
         country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
         suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
         sup_options = [
@@ -1256,6 +1260,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="prices",
             data_schema=vol.Schema({
+                vol.Optional(CONF_ENERGY_PRICES_COUNTRY, default=country): _country_selector(),
                 vol.Optional(CONF_PRICE_INCLUDE_TAX,  default=False): bool,
                 vol.Optional(CONF_PRICE_INCLUDE_BTW,  default=False): bool,
                 vol.Optional(CONF_SELECTED_SUPPLIER,  default="none"):
@@ -1278,6 +1283,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_price_provider_credentials()
             # Geen credentials nodig → provider meteen registreren
             self._register_price_provider(chosen, {})
+            # EPEX-gebaseerde providers → toon prijzen-stap (belasting, leverancier markup)
+            if chosen in EPEX_BASED_PROVIDERS:
+                return await self.async_step_prices()
+            # Echte leverancier → prijs komt rechtstreeks van API, sla prijzen-stap over
             return await self.async_step_ai_config()
 
         provider_options = [
@@ -1310,6 +1319,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             creds = {k: user_input.get(k, "") for k in needed}
             self._config.pop("_price_provider_pending", None)
             self._register_price_provider(pending, creds)
+            # EPEX-gebaseerde providers → toon prijzen-stap
+            if pending in EPEX_BASED_PROVIDERS:
+                return await self.async_step_prices()
+            # Echte leverancier → prijs komt van API, sla prijzen-stap over
             return await self.async_step_ai_config()
 
         label = PRICE_PROVIDER_LABELS.get(pending, pending)
@@ -2614,56 +2627,112 @@ class CloudEMSOptionsFlow(_OptionsBase):
     # ── 🔋 Batteries (multi-battery, like multi-inverter) ──────────────────────
 
     async def async_step_prices_opts(self, user_input=None):
-        """💶 Prijzen & Belasting — incl. contracttype (dynamisch / vast tarief)."""
+        """Stap 1/3: Land kiezen."""
+        data = self._data()
+        country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+
+        if user_input is not None:
+            self._opts_country = user_input.get(CONF_ENERGY_PRICES_COUNTRY, country)
+            self._save({CONF_ENERGY_PRICES_COUNTRY: self._opts_country})
+            return await self.async_step_prices_provider_opts()
+
+        return self.async_show_form(
+            step_id="prices_opts",
+            data_schema=vol.Schema({
+                vol.Required(CONF_ENERGY_PRICES_COUNTRY, default=country): _country_selector(),
+            }),
+            description_placeholders={"info": "Kies je land. De beschikbare leveranciers worden hierop aangepast."},
+        )
+
+    async def async_step_prices_provider_opts(self, user_input=None):
+        """Stap 2/3: Leverancier kiezen (gefilterd op gekozen land)."""
         from .const import (CONF_CONTRACT_TYPE, CONTRACT_TYPE_DYNAMIC, CONTRACT_TYPE_FIXED,
                             DEFAULT_CONTRACT_TYPE, CONF_FIXED_IMPORT_PRICE, CONF_FIXED_EXPORT_PRICE)
         data = self._data()
-        country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
-        suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
-        sup_options = [
-            selector.SelectOptionDict(value=k, label=v[0])
-            for k, v in suppliers.items()
-        ]
-        contract_type = data.get(CONF_CONTRACT_TYPE, DEFAULT_CONTRACT_TYPE)
+        country = getattr(self, "_opts_country", data.get(CONF_ENERGY_PRICES_COUNTRY, "NL"))
 
         # Huidig geconfigureerde prijsleverancier
         current_price_provider = data.get(CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER)
-        # Detecteer bestaande provider-registratie via external_providers
         existing_providers: list = list(data.get(CONF_PROVIDERS, []))
         registered_pp = next((p["type"] for p in existing_providers if p.get("_price_provider")), None)
         if registered_pp:
             current_price_provider = registered_pp
 
-        provider_options = [
-            selector.SelectOptionDict(value=k, label=v)
-            for k, v in PRICE_PROVIDER_LABELS.items()
-        ]
+        # Bouw leverancier-opties gefilterd op land:
+        # PRICE_PROVIDER_LABELS bevat alle directe API-leveranciers.
+        # SUPPLIER_MARKUPS bevat per-land de relevante leveranciers voor EPEX-opslag.
+        # We tonen alle API-providers + de EPEX optie altijd, maar filteren de
+        # SUPPLIER_MARKUPS leveranciers op land zodat de lijst relevant is.
+        country_suppliers = set(SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"]).keys())
+        provider_options = []
+        for k, v in PRICE_PROVIDER_LABELS.items():
+            # "none" (EPEX) en frank_energie altijd tonen
+            # Echte leveranciers alleen tonen als ze voor dit land beschikbaar zijn
+            if k in EPEX_BASED_PROVIDERS:
+                provider_options.append(selector.SelectOptionDict(value=k, label=v))
+            else:
+                # Toon als er credentials voor zijn (directe API) OF als ze in het land zitten
+                has_direct_api = bool(PRICE_PROVIDER_CREDENTIALS.get(k))
+                in_country = any(k in SUPPLIER_MARKUPS.get(c, {}) for c in [country])
+                if has_direct_api or in_country:
+                    provider_options.append(selector.SelectOptionDict(value=k, label=v))
 
         if user_input is not None:
-            chosen_pp = user_input.pop(CONF_PRICE_PROVIDER, DEFAULT_PRICE_PROVIDER)
-            # Sla overige velden op
-            save_result = self._save(user_input)
-            # Verwerk leverancier-koppeling
+            chosen_pp = user_input.get(CONF_PRICE_PROVIDER, current_price_provider)
+
+            # Credentials nodig?
+            needed = PRICE_PROVIDER_CREDENTIALS.get(chosen_pp, [])
+            if needed and chosen_pp != current_price_provider:
+                self._pending_price_provider = chosen_pp
+                return await self.async_step_price_provider_creds_opts()
+
+            # Geen credentials nodig: provider registreren
             if chosen_pp != current_price_provider:
-                needed = PRICE_PROVIDER_CREDENTIALS.get(chosen_pp, [])
-                if needed:
-                    # Bewaar keuze en ga naar credentials-stap
-                    self._pending_price_provider = chosen_pp
-                    return await self.async_step_price_provider_creds_opts()
-                else:
-                    # Geen credentials nodig: meteen registreren
-                    self._apply_price_provider_opts(chosen_pp, {})
-            return save_result
+                self._apply_price_provider_opts(chosen_pp, {})
+            else:
+                self._apply_price_provider_opts(chosen_pp, {})
+
+            # EPEX → ga naar belasting/markup stap
+            if chosen_pp in EPEX_BASED_PROVIDERS:
+                self._pending_price_provider = chosen_pp
+                return await self.async_step_prices_epex_opts()
+
+            # Echte leverancier → klaar
+            return self._save({CONF_PRICE_PROVIDER: chosen_pp})
 
         return self.async_show_form(
-            step_id="prices_opts",
+            step_id="prices_provider_opts",
             data_schema=vol.Schema({
-                # v4.5.2: directe leverancier-koppeling bovenaan
-                vol.Optional(CONF_PRICE_PROVIDER, default=current_price_provider):
+                vol.Required(CONF_PRICE_PROVIDER, default=current_price_provider):
                     selector.SelectSelector(selector.SelectSelectorConfig(
                         options=provider_options, mode="list"
                     )),
-                # v1.15.0: contract type
+            }),
+            description_placeholders={
+                "info": f"Kies je energieleverancier voor {country}. Bij EPEX-providers stel je daarna belasting en opslag in.",
+            },
+        )
+
+    async def async_step_prices_epex_opts(self, user_input=None):
+        """Stap 3/3: EPEX belasting & leverancier-markup (alleen bij EPEX-provider)."""
+        from .const import (CONF_CONTRACT_TYPE, CONTRACT_TYPE_DYNAMIC, CONTRACT_TYPE_FIXED,
+                            DEFAULT_CONTRACT_TYPE, CONF_FIXED_IMPORT_PRICE, CONF_FIXED_EXPORT_PRICE)
+        data = self._data()
+        country = getattr(self, "_opts_country", data.get(CONF_ENERGY_PRICES_COUNTRY, "NL"))
+        contract_type = data.get(CONF_CONTRACT_TYPE, DEFAULT_CONTRACT_TYPE)
+
+        suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
+        sup_options = [
+            selector.SelectOptionDict(value=k, label=v[0])
+            for k, v in suppliers.items()
+        ]
+
+        if user_input is not None:
+            return self._save(user_input)
+
+        return self.async_show_form(
+            step_id="prices_epex_opts",
+            data_schema=vol.Schema({
                 vol.Optional(CONF_CONTRACT_TYPE, default=contract_type): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value=CONTRACT_TYPE_DYNAMIC, label="⚡ Dynamisch (EPEX dag-vooruit)"),
@@ -2680,7 +2749,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     vol.All(vol.Coerce(float), vol.Range(min=0.0, max=0.5)),
             }),
             description_placeholders={
-                "info": "Kies 'EPEX dag-vooruit' voor gratis marktprijzen, of koppel je eigen leverancier voor exacte persoonlijke tarieven."
+                "info": "Stel energiebelasting, BTW en leverancier-opslag in voor nauwkeurige kostberekeningen.",
             },
         )
 

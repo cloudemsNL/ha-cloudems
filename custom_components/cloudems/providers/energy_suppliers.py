@@ -436,3 +436,80 @@ class NieuweStroomProvider(CloudEMSProvider, OAuth2Mixin):
             "monthly_usage_kwh": _f((data or {}).get("electricity",{}).get("kwh")),
             "source": "nieuwestroom",
         }}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Zonneplan — directe API koppeling voor persoonlijke tarieven
+# ═══════════════════════════════════════════════════════════════════
+@register_provider("zonneplan")
+class ZonneplanProvider(CloudEMSProvider):
+    PROVIDER_ID  = "zonneplan"
+    DISPLAY_NAME = "Zonneplan"
+    CATEGORY     = "energy"
+    ICON         = "mdi:solar-power"
+    API_BASE     = "https://app-api.zonneplan.nl"
+    TOKEN_URL    = "https://app-api.zonneplan.nl/oauth/token"
+    CLIENT_ID    = "zonneplan_one"
+
+    UPDATE_HINTS = {
+        "note": "Zonneplan persoonlijke energieprijzen via directe API koppeling.",
+        "auth": "OAuth2 met access_token. Token wordt automatisch vernieuwd.",
+    }
+
+    async def async_setup(self) -> bool:
+        """Valideer access_token door een test-aanroep te doen."""
+        token = self._credentials.get("access_token", "")
+        if not token:
+            self._last_error = "Geen access_token opgegeven"
+            return False
+        self._zp_token = token
+        # Test de verbinding
+        data = await self._get(
+            f"{self.API_BASE}/energy-contracts",
+            headers={"Authorization": f"Bearer {self._zp_token}"},
+        )
+        if data is None:
+            self._last_error = "Zonneplan API niet bereikbaar of token ongeldig"
+            return False
+        self._api_ok = True
+        return True
+
+    async def async_get_devices(self) -> List[ProviderDevice]:
+        return [_price_dev(self.PROVIDER_ID, "Zonneplan prijzen")]
+
+    async def async_poll(self) -> Dict[str, Any]:
+        """Haal huidige en dagprijzen op van Zonneplan."""
+        token = getattr(self, "_zp_token", self._credentials.get("access_token", ""))
+        headers = {"Authorization": f"Bearer {token}"}
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Probeer tarieven endpoint
+        data = await self._get(
+            f"{self.API_BASE}/energy-contracts/prices?date={today}",
+            headers=headers,
+        )
+        if not data:
+            return {}
+
+        prices_raw = data.get("data", []) or []
+        now_h = datetime.now().hour
+        today_prices = []
+        current = None
+
+        for p in prices_raw:
+            try:
+                hour_str = p.get("datetime") or p.get("from", "")
+                h = datetime.fromisoformat(hour_str.replace("Z", "+00:00")).astimezone().hour
+                price = _f(p.get("price") or p.get("priceIncl") or p.get("electricity_price"))
+                if price is not None:
+                    today_prices.append({"hour": h, "price": price})
+                    if h == now_h:
+                        current = price
+            except Exception:
+                continue
+
+        return {PRICE_DEVICE_ID: {
+            "current_price": current,
+            "today_prices":  today_prices,
+            "source":        "zonneplan",
+        }}

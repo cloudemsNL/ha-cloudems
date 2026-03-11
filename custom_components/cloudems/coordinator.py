@@ -1638,6 +1638,45 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         # Markeer als gedaan — nooit meer uitvoeren
                         _review_done["infra_keyword_cleanup_v441"] = True
                         await self._store_review.async_save(_review_done)
+
+                    # v4.5.6: aanvullende cleanup — verwijder "Electricity Meter" en andere
+                    # hoofdmeter-namen die door eerdere versies in de database zijn opgeslagen.
+                    if not _review_done.get("infra_meter_cleanup_v456"):
+                        _INFRA_EXACT_NAMES = {
+                            "electricity meter", "energiemeter", "energy meter",
+                            "slimme meter", "main meter", "hoofdmeter",
+                        }
+                        _INFRA_DEVICE_TYPES = {
+                            "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+                            "smart_meter", "p1_meter", "dsmr", "net_meter",
+                        }
+                        _INFRA_NAME_SUBSTRINGS = (
+                            "electricity meter", "energieverbruik", "energieproductie",
+                        )
+                        _meter_stale = []
+                        for did, dev in list(self._nilm._devices.items()):
+                            if getattr(dev, "source", "") == "smart_plug":
+                                continue
+                            _dname = (getattr(dev, "name", "") or "").lower().strip()
+                            _dtype = (getattr(dev, "device_type", "") or "").lower()
+                            if (_dname in _INFRA_EXACT_NAMES
+                                    or _dtype in _INFRA_DEVICE_TYPES
+                                    or any(sub in _dname for sub in _INFRA_NAME_SUBSTRINGS)):
+                                _meter_stale.append(did)
+                        for did in _meter_stale:
+                            _LOGGER.info(
+                                "CloudEMS NILM: verwijder hoofdmeter-ghost '%s' (v4.5.6)",
+                                self._nilm._devices[did].name,
+                            )
+                            del self._nilm._devices[did]
+                        if _meter_stale:
+                            await self._nilm.async_save()
+                            _LOGGER.info(
+                                "CloudEMS NILM: %d hoofdmeter-ghost(s) opgeruimd (v4.5.6)",
+                                len(_meter_stale),
+                            )
+                        _review_done["infra_meter_cleanup_v456"] = True
+                        await self._store_review.async_save(_review_done)
                 except Exception as _kw_err:
                     _LOGGER.debug("CloudEMS: keyword cleanup mislukt: %s", _kw_err)
         except Exception as _cl_err:

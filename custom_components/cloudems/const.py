@@ -882,10 +882,13 @@ CONF_PROVIDER_CREDENTIALS        = "provider_credentials"
 
 # ── Prijsleverancier koppeling (v4.5.2) ───────────────────────────────────────
 # Slaat op welke energieleverancier als directe prijsbron wordt gebruikt.
-# Waarden: "none" | "tibber" | "frank_energie" | "octopus" | "eneco" |
-#          "vattenfall" | "essent" | "anwb_energie" | "nieuwestroom"
+# Waarden: "none" | "frank_energie" | "tibber" | "octopus" | "zonneplan" |
+#          "eneco" | "vattenfall" | "essent" | "anwb_energie" | "nieuwestroom"
 CONF_PRICE_PROVIDER              = "price_provider"
 DEFAULT_PRICE_PROVIDER           = "none"
+
+# Providers die EPEX-marktprijzen gebruiken (geen eigen leveranciersprijs)
+EPEX_BASED_PROVIDERS = {"none", "frank_energie"}
 
 # Leverancier → benodigde credentials-velden
 # none/frank_energie (no auth needed for market prices) → geen credentials
@@ -894,6 +897,7 @@ PRICE_PROVIDER_CREDENTIALS: dict = {
     "frank_energie": [],          # marktprijzen = gratis, geen login
     "tibber":       ["access_token"],
     "octopus":      ["api_key"],
+    "zonneplan":    ["access_token"],
     "eneco":        ["username", "password"],
     "vattenfall":   ["username", "password"],
     "essent":       ["username", "password"],
@@ -906,6 +910,7 @@ PRICE_PROVIDER_LABELS: dict = {
     "frank_energie": "⚡ Frank Energie (realtime EPEX, gratis)",
     "tibber":        "💡 Tibber (persoonlijk tarief, token vereist)",
     "octopus":       "🐙 Octopus Energy (API-sleutel vereist)",
+    "zonneplan":     "☀️ Zonneplan (API-token vereist)",
     "eneco":         "🔵 Eneco (login vereist)",
     "vattenfall":    "🌊 Vattenfall (login vereist)",
     "essent":        "🔴 Essent (login vereist)",

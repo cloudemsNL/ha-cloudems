@@ -306,6 +306,7 @@
         "title": "💶 Prijzen & Belasting",
         "description": "Stel energiebelasting en leveranciersmarge in voor nauwkeurige kostenberekening.",
         "data": {
+          "energy_prices_country": "Land (voor leverancier-opties)",
           "price_include_tax": "Energiebelasting meenemen",
           "price_include_btw": "BTW meenemen (21%)",
           "selected_supplier": "Leverancier (voor standaard marge)",
@@ -689,16 +690,10 @@
         }
       },
       "prices_opts": {
-        "title": "💶 Prijzen & Belasting",
-        "description": "Stel in of energieprijzen inclusief belasting en BTW worden getoond.\n\nDe leveranciersopslag is een indicatieve schatting — controleer je eigen contract.",
+        "title": "💶 Prijzen — Land",
+        "description": "{info}",
         "data": {
-          "price_include_tax": "Inclusief energiebelasting (EB)",
-          "price_include_btw": "Inclusief BTW",
-          "selected_supplier": "Energieleverancier (voor opslag)",
-          "supplier_markup": "Eigen opslag (€/kWh) — als 'Aangepaste markup' is geselecteerd",
-          "contract_type": "Contracttype",
-          "fixed_import_price": "Vast invoertarief (€/kWh)",
-          "fixed_export_price": "Vast teruglevertarief (€/kWh)"
+          "energy_prices_country": "Land"
         }
       },
       "gas_opts": {
@@ -926,6 +921,26 @@
           "latest_hour": "Laatste uur (0–23)",
           "grace_s": "Genade-periode (seconden)",
           "notify": "Stuur melding bij uitstel"
+        }
+      },
+      "prices_provider_opts": {
+        "title": "💶 Prijzen — Leverancier",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Prijsbron / Leverancier"
+        }
+      },
+      "prices_epex_opts": {
+        "title": "💶 Prijzen — Belasting & Opslag",
+        "description": "{info}",
+        "data": {
+          "contract_type": "Contracttype",
+          "fixed_import_price": "Vast invoertarief (€/kWh)",
+          "fixed_export_price": "Vast teruglevertarief (€/kWh)",
+          "price_include_tax": "Inclusief energiebelasting (EB)",
+          "price_include_btw": "Inclusief BTW",
+          "selected_supplier": "Energieleverancier (voor opslag)",
+          "supplier_markup": "Eigen opslag (€/kWh) — als Aangepaste markup is geselecteerd"
         }
       }
     },

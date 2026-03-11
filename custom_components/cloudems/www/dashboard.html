@@ -662,13 +662,14 @@ function renderAll(){
 
   // Prijs-bron detecteren voor label en badge
   const dataSource  = cheap24Attr.data_source || '';
-  const isProvider  = ['tibber','frank_energie','octopus','eneco','vattenfall','essent','anwb_energie','nieuwestroom'].some(p => dataSource.includes(p));
+  const isProvider  = ['tibber','frank_energie','octopus','eneco','vattenfall','essent','anwb_energie','nieuwestroom','zonneplan'].some(p => dataSource.includes(p));
   const isFixed     = priceAttr.base_epex_price === undefined && dataSource === '';
   const sourceLabels = {
     'tibber':        'Tibber',
     'frank_energie': 'Frank Energie',
     'octopus':       'Octopus',
     'octopus_nl':    'Octopus NL',
+    'zonneplan':     'Zonneplan',
     'eneco':         'Eneco',
     'vattenfall':    'Vattenfall',
     'essent':        'Essent',
@@ -680,7 +681,8 @@ function renderAll(){
     'ENTSO-E':       'EPEX · ENTSO-E',
   };
   const sourceLabel = sourceLabels[dataSource] || (dataSource ? dataSource.toUpperCase() : 'EPEX');
-  const priceCardLabel = isProvider ? 'Stroomprijs' : (dataSource ? 'EPEX prijs' : 'Stroomprijs');
+  // Dynamisch label: toon leveranciersnaam als actief, anders "EPEX prijs" of generiek "Stroomprijs"
+  const priceCardLabel = isProvider ? `${sourceLabel} prijs` : (dataSource ? 'EPEX prijs' : 'Stroomprijs');
   setEl('price-label', priceCardLabel);
 
   // Source badge tonen
