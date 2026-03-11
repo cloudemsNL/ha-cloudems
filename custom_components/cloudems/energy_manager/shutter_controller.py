@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS — Shutter Controller v1.0
 Beheert rolluiken op basis van thermisch comfort, zonnewarmte en energiebesparing.
 Koppelt aan zone_climate_manager, pv_forecast en de HA cover entiteiten.

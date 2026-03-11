@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS sensor + binary_sensor platform — v1.5.0."""
-# Copyright (c) 2025 CloudEMS - https://cloudems.eu
 from __future__ import annotations
 import logging
 import time as _time_mod
@@ -184,6 +187,8 @@ async def async_setup_entry(
         CloudEMSSanitySensor(coordinator, entry),
         # v4.3.6: runtime warnings sensor (P1 spikes, fase-clamp, learning freeze)
         CloudEMSRuntimeWarningsSensor(coordinator, entry),
+        # v4.5.51: meter topologie boom + upstream learning
+        CloudEMSMeterTopologySensor(coordinator, entry),
         # v1.16.0: schaduwdetectie & clipping-voorspelling
         CloudEMSShadowDetectionSensor(coordinator, entry),
         CloudEMSClippingForecastSensor(coordinator, entry),
@@ -1393,8 +1398,20 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
         # v1.16.1: trim to essential fields only to stay under HA recorder 16 KB limit
         _src_map = {"smart_plug":"smart_plug","injected":"smart_plug",
                     "cloud_ai":"cloud_ai","ollama":"ollama","local_ai":"local_ai"}
+        # v4.5.51: room ophalen uit room_meter engine (device_id → room mapping)
+        _room_map: dict = {}
+        if hasattr(self.coordinator, "_room_meter") and self.coordinator._room_meter:
+            try:
+                for _rname, _rstate in self.coordinator._room_meter._rooms.items():
+                    for _rd in (_rstate.devices or []):
+                        _room_map[_rd.device_id] = _rname
+            except Exception:
+                pass
+
         slim_devices = [
             {
+                # v4.5.51: device_id en room zijn essentieel voor de JS-kaart
+                "device_id":     dv.get("device_id", dv.get("id", "")),
                 "name":          dv.get("name", "Unknown"),
                 "device_type":   dv.get("device_type", "unknown"),
                 "type":          dv.get("device_type", "unknown"),   # alias for card
@@ -1405,6 +1422,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 "power_min":     round(dv.get("power_min", dv.get("current_power", 0)), 1),
                 "confidence":    round(dv.get("confidence", 0) * 100, 0),
                 "confirmed":     dv.get("confirmed", False),
+                "pending":       dv.get("pending", False),  # v4.5.51: wacht op gebruikersbevestiging
                 "user_suppressed": dv.get("user_suppressed", False),
                 "last_seen_days":  round((_time_mod() - dv.get("last_seen", _time_mod())) / 86400.0, 1) if dv.get("last_seen") else None,
                 "on_events":     dv.get("on_events", 0),
@@ -1418,6 +1436,8 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 # v2.4.19: tijdprofiel
                 "primary_slot":  dv.get("primary_slot", ""),
                 "time_mismatch": dv.get("time_mismatch", False),
+                # v4.5.51: kamer uit room_meter engine
+                "room":          _room_map.get(dv.get("device_id", dv.get("id", "")), ""),
             }
             for dv in devices
         ]
@@ -1429,6 +1449,9 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
             "pending_count":   sum(1 for dv in devices if dv.get("pending")),
             "active_count":    sum(1 for dv in devices if dv.get("is_on")),
             "total_power_w":   sum(dv.get("current_power", 0) for dv in devices if dv.get("is_on")),
+            # v4.5.64: onverklaard vermogen
+            "undefined_power_w":    d.get("undefined_power_w"),
+            "undefined_power_name": d.get("undefined_power_name", "Onverklaard vermogen"),
         })
 
 
@@ -1947,9 +1970,19 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
             "is_negative":          ep.get("is_negative", False),
             "is_cheap":             ep.get("is_cheap_hour", False),
             "rank_today":           ep.get("rank_today"),
-            "min_today":            ep.get("min_today"),
-            "max_today":            ep.get("max_today"),
-            "avg_today":            ep.get("avg_today"),
+            # Prijs zonder belasting (kale EPEX of provider excl. EB+BTW)
+            "price_excl_tax":       ep.get("current_excl_tax") or ep.get("current"),
+            "min_today_excl_tax":   ep.get("min_today_excl_tax") or ep.get("min_today"),
+            "max_today_excl_tax":   ep.get("max_today_excl_tax") or ep.get("max_today"),
+            "avg_today_excl_tax":   ep.get("avg_today_excl_tax") or ep.get("avg_today"),
+            # Prijs met belasting (all-in incl. EB+BTW+markup)
+            "price_incl_tax":       ep.get("current_all_in") or ep.get("current_display"),
+            "min_today_incl_tax":   ep.get("min_today_incl_tax") or ep.get("min_today"),
+            "max_today_incl_tax":   ep.get("max_today_incl_tax") or ep.get("max_today"),
+            "avg_today_incl_tax":   ep.get("avg_today_incl_tax") or ep.get("avg_today"),
+            # Labels voor dashboard display
+            "price_label":          ep.get("price_label", "EPEX"),
+            "price_label_excl":     ep.get("price_label_excl", "excl. belasting"),
             # Tax breakdown
             "base_epex_price":      ep.get("current"),
             "price_all_in":         ep.get("current_all_in") or ep.get("current_display"),
@@ -1964,7 +1997,13 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
             "provider_key":         ep.get("provider_key", ""),
             # Volgend uur (index 1 van next_hours = slot na het huidige)
             "next_hour_eur_kwh":    round(next_hour_price, 5) if next_hour_price is not None else None,
-            # v4.5.6: zelfgeleerde markup metadata
+            # v4.5.9: zelflerende totale opslag diagnostics
+            "total_opslag_kwh":        ep.get("total_opslag_kwh"),
+            "opslag_learned":          ep.get("opslag_learned", False),
+            "opslag_source":           ep.get("opslag_source"),
+            "learned_opslag_kwh":      ep.get("learned_opslag_kwh"),
+            "learned_opslag_samples":  ep.get("learned_opslag_samples", 0),
+            # Legacy velden
             "learned_markup_kwh":      ep.get("learned_markup_kwh"),
             "learned_markup_samples":  ep.get("learned_markup_samples", 0),
             "learned_eb_kwh":          ep.get("learned_eb_kwh"),
@@ -2424,23 +2463,79 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
         cur = ep.get("current")
         avg = ep.get("avg_today")
 
-        # v4.5.3: als all-in prijzen beschikbaar zijn, gebruik die als today_prices
-        # zodat de dashboard-grafiek altijd de juiste prijs toont
-        # today_all_display heeft price_display veld; vul ook price in voor compat
+        # v4.5.9: normaliseer today_prices zodat .price altijd de display-prijs is
+        # (all-in met EB/BTW als gebruiker dat heeft ingesteld, anders kale EPEX)
+        # Alle dashboard-code leest .price — één bron van waarheid.
+        def _normalize_slots(slots):
+            """Vervang .price door price_display als dat beschikbaar is."""
+            result = []
+            for s in slots:
+                display = s.get("price_display") or s.get("price_all_in")
+                if display is not None:
+                    result.append({**s, "price": display})
+                else:
+                    result.append(s)
+            return result
+
         if today_all_display:
-            today_prices = today_all_display
+            today_prices = _normalize_slots(today_all_display)
         else:
             today_prices = today_all
 
+        # Herbereken avg/min/max op basis van de display-prijs
+        display_prices = [s["price"] for s in today_prices if s.get("price") is not None]
+        avg_display = round(sum(display_prices) / len(display_prices), 5) if display_prices else avg
+        min_display = min(display_prices) if display_prices else ep.get("min_today")
+        max_display = max(display_prices) if display_prices else ep.get("max_today")
+
+        # Morgen: zelfde normalisatie
+        tomorrow_display = ep.get("tomorrow_all_display", [])
+        if tomorrow_display:
+            tomorrow_prices = _normalize_slots(tomorrow_display)
+        else:
+            tomorrow_prices = tomorrow_all
+
+        # v4.5.66 fix: current_price_display = display-prijs voor huidig uur
+        # (all-in indien beschikbaar, anders kale EPEX) — voor gebruik in dashboard template
+        cur_display = ep.get("current_display") or ep.get("current_all_in") or ep.get("current")
+
+        # v4.5.67 fix: next_hours prijzen ook normaliseren naar display-prijs
+        # next_hours[0] = huidig uur, next_hours[1] = volgend uur
+        # Bouw lookup: hour -> display price vanuit today_prices + tomorrow_prices
+        _price_lookup = {}
+        for _s in today_prices:
+            if _s.get("hour") is not None:
+                _price_lookup[_s["hour"]] = _s.get("price")
+        # tomorrow prices: uren kunnen overlappen (0-23), markeer met offset
+        for _s in (tomorrow_prices if tomorrow_prices else []):
+            if _s.get("hour") is not None:
+                _price_lookup[1000 + _s["hour"]] = _s.get("price")
+
+        _raw_next = ep.get("next_hours", [])
+        _today_hours_seen = set()
+        _use_tomorrow = False
+        _next_hours_display = []
+        for _nh in _raw_next:
+            _h = _nh.get("hour")
+            # Detect rollover to tomorrow (hour resets to 0 after 23)
+            if _today_hours_seen and _h is not None and _h < min(_today_hours_seen):
+                _use_tomorrow = True
+            if _h is not None:
+                _today_hours_seen.add(_h)
+            _lookup_key = (1000 + _h) if _use_tomorrow else _h
+            _display_p = _price_lookup.get(_lookup_key, _nh.get("price"))
+            _next_hours_display.append({**_nh, "price": _display_p if _display_p is not None else _nh.get("price")})
+
         return {
-            "today_prices":       today_prices,   # all-in als beschikbaar, anders basis EPEX
-            "today_prices_base":  today_all,       # altijd basis EPEX (voor debugging)
-            "tomorrow_prices":    tomorrow_all,
+            "current_price_display": cur_display,  # altijd de display-prijs voor dashboard
+            "today_prices":       today_prices,   # .price = display-prijs (all-in of EPEX)
+            "today_prices_base":  today_all,       # altijd kale EPEX (voor debugging)
+            "tomorrow_prices":    tomorrow_prices,
             "tomorrow_available": ep.get("tomorrow_available", False),
-            "next_hours":         ep.get("next_hours", []),
-            "min_today":          ep.get("min_today"),
-            "max_today":          ep.get("max_today"),
-            "avg_today":          avg,
+            "next_hours":         _next_hours_display,
+            "min_today":          min_display,
+            "max_today":          max_display,
+            "avg_today":          avg_display,
             "is_cheap_now":       (cur < avg) if (cur is not None and avg is not None) else None,
             "is_negative":        ep.get("is_negative", False),
             "cheapest_hour_1":    ep.get("cheapest_hour_1"),
@@ -2462,6 +2557,24 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "vat_rate":           ep.get("vat_rate", 0.0),
             "supplier_markup_kwh": ep.get("supplier_markup_kwh", 0.0),
             "prices_from_provider": ep.get("prices_from_provider", False),
+            # v4.5.61: beide varianten altijd beschikbaar voor dashboard toggle
+            "price_label":        ep.get("price_label", "EPEX"),
+            "price_label_excl":   ep.get("price_label_excl", "excl. belasting"),
+            "min_today_incl_tax": ep.get("min_today_incl_tax") or min_display,
+            "max_today_incl_tax": ep.get("max_today_incl_tax") or max_display,
+            "avg_today_incl_tax": ep.get("avg_today_incl_tax") or avg_display,
+            "min_today_excl_tax": ep.get("min_today_excl_tax") or ep.get("min_today"),
+            "max_today_excl_tax": ep.get("max_today_excl_tax") or ep.get("max_today"),
+            "avg_today_excl_tax": ep.get("avg_today_excl_tax") or ep.get("avg_today"),
+            # today_prices_excl_tax: slots met kale EPEX prijs voor dashboard toggle
+            "today_prices_excl_tax": [
+                {**s, "price": s.get("price_excl_tax") or s.get("price")}
+                for s in (ep.get("today_all_display") or today_all)
+            ],
+            "today_prices_incl_tax": [
+                {**s, "price": s.get("price_incl_tax") or s.get("price_all_in") or s.get("price")}
+                for s in (ep.get("today_all_display") or today_all)
+            ],
         }
 
 
@@ -3660,12 +3773,10 @@ class CloudEMSSolarROISensor(CoordinatorEntity, SensorEntity):
                 if all_in_today:
                     roi_price = sum(all_in_today) / len(all_in_today)
                 else:
-                    # Laatste redmiddel: avg_today (kale EPEX) + belasting NL
-                    tax    = pi.get("tax_per_kwh", 0.1228)
-                    markup = pi.get("supplier_markup_kwh", 0.0)
-                    vat_f  = 1.21 if pi.get("price_include_btw") else 1.0
+                    # Laatste redmiddel: avg_today + geleerde totale opslag
+                    opslag = pi.get("total_opslag_kwh") or pi.get("tax_per_kwh", 0.1228)
                     base   = pi.get("avg_today") or 0.10
-                    roi_price = (base + tax + markup) * vat_f
+                    roi_price = base + opslag
                 price_label = "gem. vandaag (all-in)"
             price_display = roi_price
 
@@ -6014,4 +6125,50 @@ class CloudEMSRuntimeWarningsSensor(CoordinatorEntity, SensorEntity):
             # P1-specifiek voor snelle dashboard-check
             "p1_spikes":  next((w.get("detail", "") for w in warnings if w.get("code") == "p1_spikes"), None),
             "p1_stale":   any(w.get("code") == "p1_stale" for w in warnings),
+        }
+
+
+class CloudEMSMeterTopologySensor(CoordinatorEntity, SensorEntity):
+    """
+    Meter topologie — boom van upstream/downstream meter-relaties.
+
+    State  = aantal bevestigde relaties
+    Attributes:
+        tree        — boom als geneste dict (root→kinderen)
+        stats       — { approved, tentative, learning, declined }
+        suggestions — tentative relaties boven de leer-drempel
+    """
+    _attr_name  = "CloudEMS · Meter Topologie"
+    _attr_icon  = "mdi:sitemap"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_meter_topology"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self) -> int:
+        topo = getattr(self.coordinator, "_meter_topology", None)
+        if topo is None:
+            return 0
+        return topo.get_stats().get("approved", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        topo = getattr(self.coordinator, "_meter_topology", None)
+        if topo is None:
+            return {"tree": [], "stats": {}, "suggestions": []}
+
+        def _name(eid: str) -> str:
+            st = self.coordinator.hass.states.get(eid)
+            return st.attributes.get("friendly_name", eid) if st else eid
+
+        return {
+            "tree":        topo.get_tree(name_resolver=_name),
+            "stats":       topo.get_stats(),
+            "suggestions": topo.get_tentative_relations(),
         }

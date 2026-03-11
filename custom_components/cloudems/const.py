@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """Constants for CloudEMS integration — v1.5.0."""
-# Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 DOMAIN = "cloudems"
 # Versie wordt centraal gelezen uit manifest.json — nooit handmatig aanpassen
@@ -185,7 +188,7 @@ DEFAULT_EV_MIN_SOC_THRESHOLD = 20
 CONF_ENABLE_PHASE_BALANCING     = "enable_phase_balancing"
 DEFAULT_PHASE_BALANCE_THRESHOLD = 4.0
 CONF_ENERGY_TAX                 = "energy_tax"
-DEFAULT_ENERGY_TAX_NL           = 0.1228
+DEFAULT_ENERGY_TAX_NL           = 0.11281
 CONF_ENABLE_DIAGNOSTICS         = "enable_diagnostics"
 DIAG_REPORT_EVENT               = f"{DOMAIN}_diagnostic_report"
 
@@ -507,9 +510,9 @@ CONF_PRICE_INCLUDE_BTW     = "price_include_btw"     # bool: add VAT
 CONF_SUPPLIER_MARKUP       = "supplier_markup"        # float: €/kWh markup
 CONF_SELECTED_SUPPLIER     = "selected_supplier"      # str: supplier key
 
-# Energy tax (energiebelasting) per country in €/kWh (2024 values)
+# Energy tax (energiebelasting) per country in €/kWh (2025 values, excl. BTW)
 ENERGY_TAX_PER_COUNTRY = {
-    "NL": 0.12599,   # €/kWh excl. BTW (2024, first 2900 kWh band)
+    "NL": 0.11281,   # €/kWh excl. BTW (2025, eerste schijf t/m 2900 kWh)
     "BE": 0.0445,
     "DE": 0.02050,   # reduced since 2023
     "FR": 0.0225,

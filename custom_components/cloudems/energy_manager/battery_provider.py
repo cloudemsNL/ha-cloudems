@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """
 CloudEMS Battery Provider — v1.0.0
 
@@ -137,6 +141,11 @@ class BatteryProvider(ABC):
         pass  # override indien relevant
 
     # ── Properties ────────────────────────────────────────────────────────────
+
+    @property
+    def provider_id(self) -> str:
+        """Instance-level alias voor PROVIDER_ID (gebruikt door coordinator)."""
+        return self.PROVIDER_ID
 
     @property
     def is_detected(self) -> bool:

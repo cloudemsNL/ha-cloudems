@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS — Zone Entiteit Driver (v2.6).
 
 Auto-detecteert het type van elke climate-entiteit in een zone en

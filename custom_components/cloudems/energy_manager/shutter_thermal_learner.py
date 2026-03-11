@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS — Shutter Thermal Learner v1.0
 Leert per kamer welke raamoriëntatie de rolluiken hebben via correlatie
 tussen temperatuurstijging en zonpositie (azimuth + elevatie).

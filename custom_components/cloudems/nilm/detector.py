@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """
 CloudEMS NILM Detector — v1.30.0
 
@@ -887,11 +891,14 @@ class NILMDetector:
 
         _LOGGER.info("CloudEMS NILM: loaded %d devices", len(self._devices))
         # v4.5.11: verwijder opgeslagen infra-apparaten die vroeger door de filter heen glipten.
+        # v4.5.50: "battery", "pv", "inverter", "opslag" verwijderd uit types —
+        # te breed: acculader/zonnepanelen op smart plug worden anders ook verwijderd.
+        # Alleen expliciete infra-composities (grid_meter, p1_meter, etc.) zijn veilig.
         _INFRA_TYPES_CLEANUP = {
             "electricity_meter", "energy_meter", "main_meter", "grid_meter",
             "smart_meter", "p1_meter", "dsmr", "net_meter",
-            "solar_inverter", "pv_inverter", "pv", "inverter",
-            "battery", "opslag", "home_battery",
+            "solar_inverter", "pv_inverter",
+            "home_battery",
             "grid", "grid_export", "grid_import", "net_power",
         }
         _INFRA_CLEANUP_KW = (
@@ -905,11 +912,16 @@ class NILMDetector:
             "nexus", "zonneplan", "manager power", "vermogen inverter",
             "hub power", "solarflow", "output power",
         )
+        # v4.5.50: bescherm confirmed devices altijd — nooit verwijderen bij laden,
+        # ook niet als de naam of het type op een infra-patroon lijkt.
         _infra_ids = [
             did for did, dev in self._devices.items()
-            if dev.device_type.lower() in _INFRA_TYPES_CLEANUP
-            or any(kw in (dev.name or "").lower() for kw in _INFRA_CLEANUP_KW)
-            or (dev.name or "").lower().startswith("electricity")
+            if not dev.confirmed  # confirmed = door gebruiker gevalideerd, nooit verwijderen
+            and (
+                dev.device_type.lower() in _INFRA_TYPES_CLEANUP
+                or any(kw in (dev.name or "").lower() for kw in _INFRA_CLEANUP_KW)
+                or (dev.name or "").lower().startswith("electricity")
+            )
         ]
         for did in _infra_ids:
             _LOGGER.warning(
@@ -923,6 +935,22 @@ class NILMDetector:
             # Sla op als pending zodat coordinator het na init kan loggen
             self._infra_removed_on_load = _infra_ids
         self._storage_loaded = True
+
+        # v4.5.64: startup summary log — zichtbaar in cloudems_high.log
+        _confirmed = sum(1 for d in self._devices.values() if d.confirmed)
+        _user_named = sum(1 for d in self._devices.values() if d.user_name)
+        _LOGGER.info(
+            "CloudEMS NILM geladen: %d apparaten (%d bevestigd, %d hernoemd, %d infra verwijderd)",
+            len(self._devices), _confirmed, _user_named, len(_infra_ids),
+        )
+        # Schrijf ook naar high log zodat het altijd zichtbaar is
+        self._high_log("nilm_startup", {
+            "devices_loaded":     len(self._devices),
+            "confirmed":          _confirmed,
+            "user_named":         _user_named,
+            "infra_removed":      len(_infra_ids),
+            "infra_removed_ids":  _infra_ids[:10],  # max 10 voor leesbaarheid
+        })
 
     async def async_save(self) -> None:
         if self._store_devices:
@@ -2500,7 +2528,10 @@ class NILMDetector:
                 # Ratio 30-170% was te breed en pakte echte apparaten mee.
                 # Nieuw: 60-140% voor striktere match (echte batterij-artefacten
                 # hebben ratio dicht bij 1.0; echte apparaten zitten er ver naast).
-                if 0.6 <= ratio <= 1.4:
+                # v4.5.61: voeg absolute minimum toe — een apparaat van <150W wordt
+                # nooit verwijderd door batterij-overlap (te veel false negatives).
+                # Alleen verwijderen als het apparaat écht vergelijkbaar groot is.
+                if 0.6 <= ratio <= 1.4 and dev_w >= 150.0:
                     to_remove.append(did)
                     _LOGGER.debug(
                         "NILM: verwijder vals positief '%s' (%.0fW) — batterij (%.0fW, ratio=%.2f)",

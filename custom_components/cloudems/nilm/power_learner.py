@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """
 CloudEMS NILM PowerLearner — v1.0.0
 
@@ -75,8 +79,8 @@ ENERGY_ANOMALY_FACTOR       = 5.0    # >5× expected → anomalie
 ENERGY_DEFICIT_FACTOR       = 0.10   # <10% expected → veel te weinig
 
 # Laag E — auto-confirm
-AUTO_CONFIRM_MIN_DETECTIONS = 8      # v4.5.12: verhoogd van 5 → 8 — meer herhalingen vereist
-AUTO_CONFIRM_MIN_CONFIDENCE = 0.92   # v4.5.12: verhoogd van 0.90 → 0.92
+AUTO_CONFIRM_MIN_DETECTIONS = 12     # v4.5.51: verhoogd van 8 → 12 — bij twijfel nooit auto-confirmen
+AUTO_CONFIRM_MIN_CONFIDENCE = 0.96   # v4.5.51: verhoogd van 0.92 → 0.96 — alleen bij hoge zekerheid
 AUTO_CONFIRM_ENERGY_OK      = True   # energie-validatie vereist voor auto-confirm
 
 # Laag F — Cycling / session-fingerprint dedup (nieuw v1.1)

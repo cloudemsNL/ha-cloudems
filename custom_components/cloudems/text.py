@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS text platform — instelbare tijden per rolluik (nacht/ochtend)."""
-# Copyright (c) 2024-2025 CloudEMS - https://cloudems.eu
 from __future__ import annotations
 import logging
 import re

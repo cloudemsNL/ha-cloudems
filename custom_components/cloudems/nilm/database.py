@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """NILM Appliance Signature Database for CloudEMS — v1.21.0.
 
 Provides a two-layer database:
@@ -8,7 +12,6 @@ Provides a two-layer database:
      If the feed is unavailable (no internet, server down), CloudEMS continues
      to function normally using only the built-in signatures — no errors raised.
 """
-# Copyright (c) 2025 CloudEMS - https://cloudems.eu
 
 from __future__ import annotations
 import asyncio

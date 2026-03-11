@@ -1,3 +1,7 @@
+// Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+// All rights reserved. Unauthorized copying, redistribution, or commercial
+// use of this file is strictly prohibited. See LICENSE for full terms.
+
 /**
  * CloudEMS Shutter Card  v1.0.0
  * Rolluiken — Status, beslissing & automaat-beheer

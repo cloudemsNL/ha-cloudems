@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """CloudEMS SensorEMALayer — v1.15.0.
 
 Smooths delayed cloud sensor readings (e.g. Zonneplan battery: 30-300s updates)

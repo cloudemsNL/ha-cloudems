@@ -988,3 +988,88 @@ zonneplan_apply_forecast:
       selector:
         text: {}
   name: Zonneplan Apply Forecast
+
+meter_topology_approve:
+  name: Meter topologie bevestigen
+  description: Bevestig dat upstream_id de bovenliggende meter is van downstream_id.
+  fields:
+    upstream_id:
+      name: Upstream meter entity_id
+      required: true
+      selector:
+        text: {}
+    downstream_id:
+      name: Downstream meter entity_id
+      required: true
+      selector:
+        text: {}
+
+meter_topology_decline:
+  name: Meter topologie afwijzen
+  description: Wijs af dat upstream_id de bovenliggende meter is van downstream_id.
+  fields:
+    upstream_id:
+      name: Upstream meter entity_id
+      required: true
+      selector:
+        text: {}
+    downstream_id:
+      name: Downstream meter entity_id
+      required: true
+      selector:
+        text: {}
+
+meter_topology_set_root:
+  name: Meter als root instellen
+  description: Markeer een entity als hoofd/root-meter (bijv. de P1-sensor).
+  fields:
+    entity_id:
+      name: Entity ID
+      required: true
+      selector:
+        entity: {}
+    is_root:
+      name: Is root meter
+      required: false
+      selector:
+        boolean: {}
+
+meter_topology_approve:
+  name: Meter topologie bevestigen
+  description: Bevestig dat een meter upstream is van een andere meter.
+  fields:
+    upstream_id:
+      name: Upstream entity ID
+      required: true
+      selector:
+        entity:
+    downstream_id:
+      name: Downstream entity ID
+      required: true
+      selector:
+        entity:
+
+meter_topology_decline:
+  name: Meter topologie afwijzen
+  description: Wijs een upstream→downstream relatie af (nooit opnieuw suggereren).
+  fields:
+    upstream_id:
+      name: Upstream entity ID
+      required: true
+      selector:
+        entity:
+    downstream_id:
+      name: Downstream entity ID
+      required: true
+      selector:
+        entity:
+
+meter_topology_set_root:
+  name: Root meter instellen
+  description: Markeer een entity als root/P1 meter (bovenste knoop in de boom).
+  fields:
+    entity_id:
+      name: Entity ID
+      required: true
+      selector:
+        entity:

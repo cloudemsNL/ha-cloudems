@@ -1,8 +1,241 @@
 # Changelog
 
+## [4.5.66] — 2026-03-11
+
+### Zelflerend batterijsysteem (battery_soc_learner.py — nieuw)
+
+Nieuwe module die zonder geconfigureerde sensoren zelfstandig leert:
+
+- **SOC (state of charge)**: ankerdetectie via vermogenspatronen (vol-anker na ≥10 min laden, leeg-anker na ≥5 min ontladen). Tussen ankerpunten wordt SOC geïntegreerd via vermogen × tijdstap met 96% rendementscorrectie. Confidence daalt gradueel naarmate het laatste anker verder weg is (0.90 → 0.20 over 12 uur). Na 24 uur zonder anker drijft SOC terug naar 50%.
+- **Capaciteit** (twee methoden parallel): methode A met sensor — Wh per SoC-% mediaan over ≥10 samples; methode B zonder sensor — volledige laad/ontlaadcycli integreren, mediaan van ≥3 cycli.
+- **Max-vermogen**: observed maximum + plateau-detectie (stabiel ≥30s = hardware-maximum, geen toevalspiek).
+- Persisteert via HA Store (`cloudems_battery_soc_learner_v1`) — overleeft herstarts.
+- Vervangt de niet-persistente ad-hoc `_battery_learned` dict volledig.
+
+### EnergyBalancer: slimme battery-vs-PV discriminatie (energy_balancer.py)
+
+PV-vermogen verandert langzaam (wolken, zonshoek: typisch <100 W/s). Batterijen springen in één stap van 0 naar ±10 000 W. Als het net snel springt (>500 W/s) maar de battery-sensor nog niet reageert (cloud-lag), infereert de balancer nu de batterijwaarde direct uit de grid-sprong minus geschatte PV-bijdrage. Dit voorkomt het vals-hoog huisverbruik dat voorheen tot `balancer_anomaly: high_imbalance` leidde.
+
+### Bugfix: soc_pct: null in log terwijl Zonneplan SOC wel bekend is
+
+`_last_soc_pct` werd alleen bijgewerkt als `battery_soc_entity` een waarde gaf. De provider-fallback (Zonneplan, en straks alle andere providers) werkte de log-context niet bij. Gecorrigeerd: `_last_soc_pct` wordt nu ook bijgewerkt bij provider-SOC.
+
+### Ontkoppeling Zonneplan (coordinator.py)
+
+Drie plaatsen waar Zonneplan hardcoded was als enige cloud-batterijprovider zijn vervangen door generieke `BatteryProviderRegistry.available_providers` iteratie:
+- SOC-fallback voor `batt_soc` (flex-score, BDE-context)
+- SOC-fallback voor batterijdegradatie-tracking
+- SOC + power-fallback in de battery-config loop
+
+Zonneplan blijft volledig werken via de bestaande `ZonneplanProvider` in de registry. Toekomstige providers (Tibber Volt, Eneco, etc.) werken automatisch mee zonder coordinator-aanpassingen.
+
+
+
+### Bugfixes op basis van log-analyse
+
+- **house_w = 0W bij teruglevering** (`energy_balancer.py`): solar sensor rapporteert 0W terwijl grid sterk negatief is (teruglevering). EnergyBalancer infereert nu solar via Kirchhoff (`house_trend - grid + battery`) als `grid < -500W` en `solar = 0`. Voorkomt dat CloudEMS denkt dat het huis 0W verbruikt terwijl er volop wordt teruggeleverd.
+
+- **Ariston boiler niet aangestuurd** (`boiler_controller.py`): `control_mode = "preset"` werkte alleen voor `climate.*` entiteiten, niet voor `water_heater.*`. Ariston Lydos en vergelijkbare boilers met een `water_heater`-entity worden nu aangestuurd via `water_heater.set_operation_mode` (met fallback naar `set_preset_mode`). `_is_on` leest nu ook `operation_mode` attribuut voor water_heater preset-detectie.
+
+- **Boiler `is_on: null` in log** (`coordinator.py`): `getattr(bd, "is_on", None)` was verkeerd — `BoilerDecision` heeft het veld `current_state`, niet `is_on`. Gecorrigeerd naar `bd.current_state`.
+
+- **Shutter log altijd leeg** (`coordinator.py`): `last_reason` wordt alleen opgeslagen bij een daadwerkelijke actie, nooit bij `idle`. Log gebruikt nu de verse `ShutterDecision` uit `async_evaluate()` zodat de echte reden (bijv. "nacht — al gesloten", "automaat uitgeschakeld") altijd zichtbaar is.
+
+- **NILM battery_overlap te agressief** (`nilm/detector.py`): apparaten van <150W werden onterecht verwijderd door batterij-overlap check. Minimum drempel van 150W toegevoegd — kleine apparaten worden nooit door batterij-overlap weggegooid.
+
+
+
+### Automatische dashboard-update na HACS-installatie
+
+**Probleem:** Na een HACS-update werden de .storage bestanden wel bijgewerkt maar had HA de oude
+dashboard-versie nog in memory. Gebruikers moesten handmatig YAML kopiëren of HA herstarten.
+
+**Oplossing:** `_async_reload_cloudems_dashboards()` — na elke setup roept CloudEMS
+`async_load(force=True)` aan op de live Lovelace dashboard-objecten. HA laadt de nieuwe
+views direct in memory en stuurt een `lovelace_updated` event naar open browsers.
+Resultaat: na HACS-update en HA-reload van de integratie ziet de gebruiker meteen het
+bijgewerkte dashboard zonder herstart en zonder handmatig YAML kopiëren.
+
+## [4.5.55] — 2026-03-11
+
+### cloudems-nilm-card v2.2.0 — Volledig herbouwd
+
+4 tabbladen: Kamers / Topologie / Review / Alle. Topologie met approve/decline per node + suggesties. Review met zekerheidsbar en 3-knops interface. Live pulse-dots per apparaat.
+
+## [4.5.54] — 2026-03-11
+
+### Bugfix
+- DEV dashboard: dubbele YAML root-key (`title`/`views`) verwijderd — veroorzaakte YAMLException op regel 9
+- Versienummer gecorrigeerd (was abusievelijk teruggevallen naar 4.5.52)
+
 Alle noemenswaardige wijzigingen per versie.
 
-## [4.5.14] — 2026-03-11
+## [4.5.53] — 2026-03-11
+
+### DEV Dashboard volledig herbouwd
+
+- **Aanpak gewijzigd:** DEV dashboard is nu een exacte kopie van productie
+  met alle `card_mod` styling-blokken verwijderd (~5500 regels geschrapt)
+- Alle 20 views behouden: Overzicht, Prijzen & Kosten, Huis Intelligentie,
+  Fasen, Solar & PV, Batterij, NILM Apparaten, NILM Beheer, Warm Water,
+  Klimaat, EV & Mobiliteit, E-bike, Zwembad, Rolluiken, Lampen, ERE,
+  Zelflerend, Meldingen, Diagnose, Configuratie
+- DEV oranje banner toegevoegd aan élke view (sticky)
+- Nieuwe JS custom cards op de juiste views ingevoegd:
+  - Overzicht: `cloudems-overview-card` + `cloudems-flow-card`
+  - Prijzen: `cloudems-price-card` + `cloudems-cost-card` + `cloudems-schedule-card`
+  - NILM Apparaten: `cloudems-nilm-card`
+  - NILM Beheer: `cloudems-topology-card`
+- Alle originele productie-kaarten (markdown, entities, conditional, etc.)
+  blijven volledig intact en werken dus zeker
+- Background images vervangen door CSS gradients (geen `/local/` afhankelijkheid)
+
+## [4.5.52] — 2026-03-11
+
+### Nieuw — Meter Topologie volledig geïntegreerd (backend)
+
+- **`coordinator.py`** — `MeterTopologyLearner` correct opgezet:
+  - Persistentie via eigen `Store` (`cloudems_meter_topology_v1`)
+  - Laden bij opstarten, opslaan elke ~5 minuten automatisch
+  - `observe()` aangeroepen elke cyclus voor grid, extra meters en room meters
+- **`sensor.cloudems_meter_topology`** — nieuwe sensor met attributen:
+  `tree` (geneste boom), `stats` (approved/tentative/learning), `suggestions`
+- **3 nieuwe HA services**:
+  `meter_topology_approve`, `meter_topology_decline`, `meter_topology_set_root`
+  Elke service slaat direct op via de store
+
+### Nieuw — JS Kaarten v2.1.0 (`cloudems-cards.js`)
+
+- **`cloudems-cost-card`** — Energie kosten kaart:
+  - Tabs: Dag / Maand / Simulator
+  - Verbruik donut-diagram met categorieën en bar-charts
+  - Bill simulator tab met besparing vs. vast tarief + pulserende animatie
+  - Verwachting en kostentrend
+
+- **`cloudems-schedule-card`** — Schema beheer kaart:
+  - 24-uurs tijdlijn met kleurgecodeerde EPEX-prijsblokken
+  - Batterijplanning (laden/ontladen) direct zichtbaar per uur
+  - Goedkope-uren schakelaars met actieve status
+  - Tooltips per uur met exacte prijs
+
+### Nieuw — DEV Dashboard uitgebreid (9 views)
+
+- **View 7: 💶 Kosten** — cost-card + grafiek 7 dagen + 4 chips
+- **View 8: 📅 Schema** — schedule-card + flex grafiek 24u
+- **View 9: 🤖 Systeem** — health chips, NILM, topologie, runtime warnings
+
+
+
+## [4.5.51] — 2026-03-11
+
+### Nieuw — DEV Dashboard (DTAP-workflow)
+
+- **`cloudems-dashboard-dev.yaml`** — Apart ontwikkel-dashboard (`⚗️ CloudEMS DEV`)
+  in Home Assistant naast het bestaande productiescherm. Bevat 6 nieuwe views:
+  *Live, Prijzen, NILM, Topologie, Flow, Scratchpad*.
+  Workflow: bouw en test in DEV → goedkeuren → overzetten naar productie.
+
+### Nieuw — JS Kaarten v2.0.0 (`cloudems-cards.js`)
+
+- **`cloudems-price-card`** — EPEX uurprijzen heatmap met:
+  - SVG sparkline met animated huidige-uurindicator
+  - Kleurgecodeerde uurblokken (groen=goedkoop → rood=duur)
+  - Morgen samenvatting met goedkoopste uur
+  - Badges met min/max/gem
+
+- **`cloudems-topology-card`** — Meter-boom weergave met:
+  - Inklapbare boom (root → meter → meter → device)
+  - Inline ✓/✗ knoppen voor approve/decline van relaties
+  - Suggesties uit het leer-algoritme
+  - Status-dots met glow per relatie-status
+
+- **`cloudems-overview-card`** — Compacte live hero-kaart:
+  - Grid/Solar/Huis/Batterij in één rij
+  - Pulserende glow-animatie op actieve nodes
+  - Huidige prijs + flex score in statusregel
+
+### Nieuw — Meter Topologie leermodule (`meter_topology.py`)
+
+- Nieuwe module leert welke meetpunten "upstream" van andere hangen
+  via correlatie van vermogensfluctuaties (co-bewegingen)
+- Ondersteunt volledige boom: `root → meter → meter → device`
+- Status per relatie: `tentative` → `approved` / `declined`
+- `MeterTopologyLearner.get_tree()` geeft boom terug voor dashboard
+- Persisteerbaar via `dump()` / `load()`
+
+Alle noemenswaardige wijzigingen per versie.
+
+## [4.5.51] — 2026-03-11
+
+### Nieuw — Meter topologie (meter_topology.py)
+
+- **Nieuw module `meter_topology.py`**: Leert automatisch welke meetpunten achter
+  andere meetpunten hangen via correlatie van co-bewegingen in vermogensdata.
+  Ondersteunt volledige boom: `root_meter → meter → meter → device`.
+- **3 nieuwe HA services**:
+  - `cloudems.meter_topology_approve` — bevestig upstream→downstream relatie
+  - `cloudems.meter_topology_decline` — wijs relatie af (nooit opnieuw suggereren)
+  - `cloudems.meter_topology_set_root` — markeer entity als root/P1-meter
+- Relaties hebben status `tentative` (geleerd), `approved` (gebruiker OK) of
+  `declined` (gebruiker afgewezen). Auto-suggest na ≥8 co-bewegingen.
+
+### Verbeterd — NILM kaart compleet herschreven (cloudems-cards.js v1.9.0)
+
+- **Kamer-navigatie**: klik op een kamer-tegel → kamer-detail view met alle
+  apparaten van die kamer, inclusief fase-topologie als er ≥2 apparaten zijn.
+- **Pending-status "Jij beslist"**: apparaten die wachten op gebruikersinput
+  krijgen een oranje badge en worden bovenaan gesorteerd. Pulserende oranje pill
+  in de header laat direct zien hoeveel apparaten wachten.
+- **Naam bewerken inline**: klik op de naam van een apparaat → modal met
+  nieuw naamlabel + type-selectie.
+- **Filter-tabs per kamer**: filter op Alle / Wacht / Bevestigd / Onzeker.
+- **Topologie-weergave per kamer**: bij meerdere apparaten wordt de
+  fase-structuur als boom getoond (ook als indicator voor sub-circuits).
+- Approve ✓ / Tentative ? / Decline ✗ knoppen consistent en duidelijker.
+
+### Verbeterd — Auto-confirm drempel verhoogd (nilm/power_learner.py)
+
+- `AUTO_CONFIRM_MIN_CONFIDENCE`: 0.92 → **0.96** (alleen bij heel hoge zekerheid)
+- `AUTO_CONFIRM_MIN_DETECTIONS`: 8 → **12** (meer herhalingen vereist)
+- Alles tussen 0.75 en 0.96 confidence blijft `pending_confirmation=True` —
+  de gebruiker beslist zelf via Approve/Tentative/Decline in de NILM-kaart.
+
+### Opgelost — room en device_id ontbraken in sensor attributes (sensor.py)
+
+- `sensor.cloudems_nilm_devices` attributen bevatten nu ook:
+  - `device_id` — vereist voor service-calls vanuit de JS-kaart
+  - `room` — geladen vanuit de room_meter engine op het moment van polling
+  - `pending` — of het apparaat wacht op gebruikersbevestiging
+
+
+
+### Opgelost — NILM devices verdwijnen na herstart
+
+- **Infra-cleanup te agressief** (`nilm/detector.py`):
+  De v4.5.11 cleanup bij het laden verwijderde ten onrechte NILM-apparaten waarvan
+  het `device_type` op `"battery"`, `"pv"`, `"inverter"` of `"opslag"` stond. Een
+  acculader of smart plug bij een zonnepaneel kon zo na elke herstart verdwijnen.
+  Oplossing: deze te brede types uit `_INFRA_TYPES_CLEANUP` verwijderd; alleen
+  expliciete infra-typen (`solar_inverter`, `pv_inverter`, `home_battery`, etc.) blijven.
+- **Confirmed devices beschermd** (`nilm/detector.py`):
+  Apparaten die de gebruiker heeft bevestigd (`confirmed=True`) worden nooit meer
+  door de infra-cleanup verwijderd, ongeacht type of naam.
+
+### Opgelost — Flow kaart: 1 zon bij 2 inverters + maan bij nacht
+
+- **Inverter filter te strikt** (`cloudems-cards.js`):
+  `_getInverters()` filterde inverters met `'peak_w' in i` — als een omvormer
+  nog aan het leren is en `peak_w=null` heeft, viel die weg waardoor er maar
+  1 zon zichtbaar was. Fix: filter alleen op `i != null`, `peak_w=0` is toegestaan.
+- **Maan-icoon bij nacht** (`cloudems-cards.js`):
+  Tussen 22:00–05:59 wordt er nu 1 halvemaan-node getoond in plaats van een
+  inactieve zon. De maan is blauw/zilveren half-circle SVG met zachte glow.
+  `solarNode()` detecteert zelf het uur en toont automatisch zon of maan.
+- **Nacht = altijd 1 node** (`cloudems-cards.js`):
+  Bij nacht wordt de layout teruggebracht naar 1 centrale maan (ongeacht aantal
+  geconfigureerde inverters) zodat de flow-kaart overzichtelijk blijft.
+
+
 
 ### Opgelost — NILM: 3-fase thuisbatterij veroorzaakt geen duplicaten meer
 

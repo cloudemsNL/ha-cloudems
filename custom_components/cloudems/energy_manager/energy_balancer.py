@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""CloudEMS EnergyBalancer — v4.5.7.
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
+"""CloudEMS EnergyBalancer — v4.5.66.
 
 Garandeert een Kirchhoff-consistente energiebalans, ook als cloud-sensoren
 traag zijn. Nieuw in v4.5.7: zelf-lerende vertraging-compensatie.
@@ -54,6 +58,16 @@ LAG_JUMP_THRESHOLD  = 200.0  # minimale sprong (W) om lag-detectie te triggeren
 LAG_MATCH_THRESHOLD = 0.6    # fractie van grid-sprong die target moet volgen
 
 KIRCHHOFF_TOL_W     = 50.0
+
+# ── Slimme battery-vs-PV discriminatie (v4.5.66) ─────────────────────────────
+# PV-omvormers veranderen langzaam (wolken, zonshoek) — max typisch ~200 W/s.
+# Batterijen kunnen in één stap springen: 0 → ±10 000 W in <1 update-cyclus.
+# Als grid snel springt maar de battery-sensor (nog) niet meekome, is de kans
+# groot dat de battery de veroorzaker is en dat de sensor achterloopt (cloud-lag).
+# We onderscheiden dit door de ramp-rate van beide sensoren te vergelijken.
+FAST_RAMP_W_S       = 500.0   # W/s: boven dit niveau = te snel voor PV
+BATTERY_RAMP_FRAC   = 0.7     # grid-sprong moet voor >= 70% van battery komen
+FAST_RAMP_CONF_MIN  = 0.3     # minimale lag-confidence voor fast-ramp inference
 
 
 # ── Dataklassen ───────────────────────────────────────────────────────────────
@@ -254,6 +268,13 @@ class EnergyBalancer:
         self._battery = _SensorTracker()
 
         self._lag_battery = _LagLearner("battery")
+
+        # v4.5.66: ramp-rate tracking voor battery-vs-PV discriminatie
+        self._prev_grid_ts:      float = 0.0
+        self._prev_battery_w:    float = 0.0
+        self._prev_solar_w:      float = 0.0
+        self._fast_ramp_active:  bool  = False   # True als grid-sprong > FAST_RAMP_W_S
+        self._fast_ramp_battery_est: Optional[float] = None  # inferentie tijdens ramp
         self._lag_solar   = _LagLearner("solar")
 
         self._house_trend:      float = 0.0
@@ -276,13 +297,58 @@ class EnergyBalancer:
         if solar_w   is not None: self._solar.update(solar_w)
         if battery_w is not None: self._battery.update(battery_w)
 
-        # 2. Detecteer grid-sprong → feed lag-learners
-        g_now = self._grid.last_value
-        jump  = g_now - self._prev_grid_w
-        if abs(jump) >= LAG_JUMP_THRESHOLD:
-            self._lag_battery.observe(self._grid.buf, self._battery.buf, now, jump)
-            self._lag_solar.observe(self._grid.buf, self._solar.buf, now, jump)
-        self._prev_grid_w = g_now
+        # 2. Detecteer grid-sprong → feed lag-learner + battery-vs-PV discriminatie
+        g_now  = self._grid.last_value
+        g_jump = g_now - self._prev_grid_w
+        dt_s   = (now - self._prev_grid_ts) if self._prev_grid_ts > 0 else 10.0
+        dt_s   = max(dt_s, 0.1)  # division guard
+
+        if abs(g_jump) >= LAG_JUMP_THRESHOLD:
+            self._lag_battery.observe(self._grid.buf, self._battery.buf, now, g_jump)
+            self._lag_solar.observe(self._grid.buf, self._solar.buf, now, g_jump)
+
+            # v4.5.66: battery-vs-PV discriminatie via ramp-rate
+            # PV verandert langzaam (wolken/hoek: typisch <100 W/s).
+            # Batterijen slaan op/ontladen in één stap (0→±10 000 W in <1 cyclus).
+            # → Als grid-sprong > FAST_RAMP_W_S én battery-sensor nog niet reageerde:
+            #   infereer battery = grid-jump (minus geschatte solar-bijdrage).
+            grid_ramp_ws = abs(g_jump) / dt_s
+            b_delta = abs(self._battery.last_value - self._prev_battery_w)
+            s_delta = abs(self._solar.last_value   - self._prev_solar_w)
+
+            if (grid_ramp_ws >= FAST_RAMP_W_S
+                    and b_delta < abs(g_jump) * 0.3):   # battery reageert nog niet
+                # Solar kan maximaal langzaam veranderd zijn — alles wat sneller is dan PV
+                # gaat naar de battery.
+                max_solar_delta = self._solar.last_value * 0.15  # 15% max PV-variatie per stap
+                _inferred_bat = g_jump - min(s_delta, max_solar_delta)
+                self._fast_ramp_battery_est = self._battery.last_value + _inferred_bat
+                self._fast_ramp_active = True
+                _LOGGER.debug(
+                    "EnergyBalancer: snelle grid-ramp %.0fW/s (%.0fW in %.1fs) → "
+                    "battery inferentie %.0fW (sensor=%.0fW, lag nog niet geleerd)",
+                    grid_ramp_ws, g_jump, dt_s,
+                    self._fast_ramp_battery_est,
+                    self._battery.last_value,
+                )
+            else:
+                # Geen snelle ramp of battery reageerde al → reset inferentie
+                self._fast_ramp_active = False
+                self._fast_ramp_battery_est = None
+
+        else:
+            # Kleine of geen sprong — als ramp-inferentie actief was, reset na één stap
+            if self._fast_ramp_active:
+                b_delta = abs(self._battery.last_value - self._prev_battery_w)
+                if b_delta > abs(g_jump) * 0.5 or battery_w is not None:
+                    # Battery-sensor heeft nu ingehaald — inferentie niet meer nodig
+                    self._fast_ramp_active = False
+                    self._fast_ramp_battery_est = None
+
+        self._prev_grid_w     = g_now
+        self._prev_grid_ts    = now
+        self._prev_battery_w  = self._battery.last_value
+        self._prev_solar_w    = self._solar.last_value
 
         # 3. Staleness
         g_stale = self._grid.is_stale()
@@ -299,11 +365,30 @@ class EnergyBalancer:
         lag_comp = False
 
         # 4. Compenseer stale sensoren
-        if b_stale:
-            b_val, b_est, b_lag = self._compensate(
-                self._battery, self._lag_battery,
-                g_val, s_val, "battery", now)
-            lag_comp = lag_comp or b_lag
+        # v4.5.66: battery fast-ramp inferentie heeft prioriteit boven lag-compensatie
+        # als battery-sensor nog niet reageerde op een snelle grid-sprong.
+        if b_stale or (self._fast_ramp_active and self._fast_ramp_battery_est is not None):
+            if (self._fast_ramp_active
+                    and self._fast_ramp_battery_est is not None
+                    and not b_stale):
+                # Sensor is niet stale maar loopt achter door cloud-lag na snelle sprong
+                b_val = self._fast_ramp_battery_est
+                b_est = True
+                lag_comp = True
+                _LOGGER.debug(
+                    "EnergyBalancer: fast-ramp battery-inferentie toegepast: %.0fW",
+                    b_val,
+                )
+            else:
+                b_val, b_est, b_lag = self._compensate(
+                    self._battery, self._lag_battery,
+                    g_val, s_val, "battery", now)
+                # Verfijn met fast-ramp schatting als die beschikbaar is en lag onzeker
+                if (self._fast_ramp_active
+                        and self._fast_ramp_battery_est is not None
+                        and self._lag_battery.confidence < FAST_RAMP_CONF_MIN):
+                    b_val = self._fast_ramp_battery_est
+                lag_comp = lag_comp or b_lag
 
         if s_stale:
             raw_s, s_est, s_lag = self._compensate(
@@ -315,6 +400,21 @@ class EnergyBalancer:
         if g_stale:
             g_val = self._house_trend + b_val - s_val
             g_est = True
+
+        # v4.5.61 Fix: solar sensor rapporteert 0 terwijl grid sterk negatief is
+        # (teruglevering zonder solar is fysiek onmogelijk tenzij accu leeg is).
+        # Als grid < -500W én solar = 0 én solar is niet stale → sensor geeft
+        # waarschijnlijk een false-zero. Infereer solar via Kirchhoff met house_trend
+        # zodat house_w niet onterecht op 0 blijft staan.
+        if s_val == 0.0 and not s_stale and g_val < -500.0 and b_val >= -100.0:
+            _inferred_solar = max(0.0, self._house_trend - g_val + b_val)
+            if _inferred_solar > 200.0:
+                _LOGGER.debug(
+                    "EnergyBalancer: solar=0 maar grid=%.0fW → infereer solar=%.0fW via Kirchhoff",
+                    g_val, _inferred_solar,
+                )
+                s_val = _inferred_solar
+                s_est = True
 
         # 5. Kirchhoff → house (nooit negatief)
         house_w = max(0.0, s_val + g_val - b_val)
@@ -456,4 +556,6 @@ class EnergyBalancer:
             "last_imbalance_w":        round(self._last_balanced.imbalance_w, 1) if self._last_balanced else 0.0,
             "stale_sensors":           self._last_balanced.stale_sensors if self._last_balanced else [],
             "lag_compensated":         self._last_balanced.lag_compensated if self._last_balanced else False,
+            "fast_ramp_active":        self._fast_ramp_active,
+            "fast_ramp_battery_est_w": round(self._fast_ramp_battery_est, 0) if self._fast_ramp_battery_est is not None else None,
         }

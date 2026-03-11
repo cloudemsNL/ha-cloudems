@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
-"""CloudEMS - Energy Management System for Home Assistant — v1.4.1."""
-# Copyright (c) 2025 CloudEMS - https://cloudems.eu
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
+"""CloudEMS - Energy Management System for Home Assistant — v4.5.25."""
 # BUG FIX: Platform.BINARY_SENSOR was missing from PLATFORMS list
 from __future__ import annotations
 import logging
@@ -32,8 +35,17 @@ PLATFORMS = [
     Platform.TEXT,             # v4.3.6: rolluik tijden
 ]
 
-LOVELACE_RESOURCE_URL  = f"/cloudems/cloudems-card.js?v={VERSION}"
+LOVELACE_CARDS_URL     = f"/local/cloudems/cloudems-cards.js?v={VERSION}"
+LOVELACE_CARDMOD_URL   = f"/local/cloudems/cloudems-card-mod.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
+# cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
+# Constante alleen voor opruimen van stale registraties.
+_STALE_CARD_JS_KEYWORD = "cloudems-card.js"
+
+# v4.5.23: externe custom cards die CloudEMS nodig heeft
+# v4.5.33: Alle externe cards zijn nagebouwd als CloudEMS eigen cards.
+# Geen externe downloads meer nodig — alles zit in cloudems-cards.js en cloudems-card-mod.js.
+_EXTERNAL_CARDS: list[dict] = []
 
 # ── CloudEMS HA-ruimte aanmaken ───────────────────────────────────────────────
 
@@ -65,40 +77,80 @@ def _ensure_cloudems_areas(hass: HomeAssistant) -> None:
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
-    """Register the CloudEMS card JS as a Lovelace resource if not already present."""
+    """Register CloudEMS JS files as Lovelace resources.
+
+    Uses the official lovelace storage collection API introduced in HA 2022.x.
+    Falls back gracefully if lovelace is in yaml mode or unavailable.
+    """
     try:
-        lovelace = hass.data.get("lovelace")
-        if lovelace is None:
-            _LOGGER.debug("CloudEMS: lovelace not available yet, skipping resource registration")
+        # The correct public API: import the lovelace component and get its
+        # ResourceStorageCollection via hass.data["lovelace"]["resources"].
+        # We must wait until lovelace has fully loaded.
+        from homeassistant.components import lovelace as lovelace_component  # noqa: PLC0415
+
+        lovelace_data = hass.data.get(lovelace_component.DOMAIN)
+        if lovelace_data is None:
+            _LOGGER.debug("CloudEMS: lovelace component not yet available, skipping resource registration")
             return
 
-        resources = getattr(lovelace, "resources", None)
+        resources = lovelace_data.get("resources") if isinstance(lovelace_data, dict) else getattr(lovelace_data, "resources", None)
         if resources is None:
-            resources = lovelace.get("resources") if hasattr(lovelace, "get") else None
-            _LOGGER.debug("CloudEMS: lovelace resources not available, skipping")
+            _LOGGER.debug("CloudEMS: lovelace in yaml-mode or resources unavailable, skipping")
             return
 
         await resources.async_load()
-        existing = [r for r in resources.async_items() if "cloudems-card.js" in r.get("url", "")]
-        if existing:
-            item = existing[0]
-            if item.get("url") != LOVELACE_RESOURCE_URL:
-                await resources.async_update_item(item["id"], {
-                    "res_type": LOVELACE_RESOURCE_TYPE,
-                    "url": LOVELACE_RESOURCE_URL,
-                })
-                _LOGGER.info("CloudEMS: Lovelace resource updated → %s", LOVELACE_RESOURCE_URL)
-            else:
-                _LOGGER.debug("CloudEMS: Lovelace resource already up-to-date")
-            return
+        current_items = list(resources.async_items())
 
-        await resources.async_create_item({
-            "res_type": LOVELACE_RESOURCE_TYPE,
-            "url": LOVELACE_RESOURCE_URL,
-        })
-        _LOGGER.info("CloudEMS: Lovelace resource registered → %s", LOVELACE_RESOURCE_URL)
+        # Stap 1: verwijder verouderde CloudEMS resource-entries
+        # Inclusief de nooit-bestaande cloudems-card.js die fout werd geregistreerd
+        stale_keywords = ["cloudems-card.js", "cloudems-cards.js", "cloudems-card-mod.js"]
+        correct_urls   = {LOVELACE_CARDS_URL, LOVELACE_CARDMOD_URL}
+        for item in current_items:
+            item_url = item.get("url", "")
+            if any(kw in item_url for kw in stale_keywords) and item_url not in correct_urls:
+                try:
+                    await resources.async_delete_item(item["id"])
+                    _LOGGER.info("CloudEMS: verouderde Lovelace resource verwijderd → %s", item_url)
+                except Exception as _del_err:
+                    _LOGGER.debug("CloudEMS: kon verouderde resource niet verwijderen: %s", _del_err)
+
+        # Herlaad na cleanup zodat current_items actueel is
+        await resources.async_load()
+        current_items = list(resources.async_items())
+        current = {r.get("url", ""): r for r in current_items}
+
+        # Stap 2: registreer/update de correcte resource-entries (alleen bestaande JS files)
+        for url, keyword in [
+            (LOVELACE_CARDS_URL,    "cloudems-cards.js"),
+            (LOVELACE_CARDMOD_URL,  "cloudems-card-mod.js"),
+        ]:
+            matches = [v for k, v in current.items() if keyword in k]
+            if matches:
+                item = matches[0]
+                if item.get("url") != url:
+                    await resources.async_update_item(item["id"], {
+                        "res_type": LOVELACE_RESOURCE_TYPE,
+                        "url": url,
+                    })
+                    _LOGGER.info("CloudEMS: Lovelace resource bijgewerkt → %s", url)
+                else:
+                    _LOGGER.debug("CloudEMS: Lovelace resource al actueel: %s", url)
+            else:
+                await resources.async_create_item({
+                    "res_type": LOVELACE_RESOURCE_TYPE,
+                    "url": url,
+                })
+                _LOGGER.info("CloudEMS: Lovelace resource geregistreerd → %s", url)
+
     except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("CloudEMS: could not auto-register Lovelace resource: %s", err)
+        _LOGGER.warning("CloudEMS: kon Lovelace resources niet registreren: %s", err)
+
+
+async def _async_install_vendor_cards(hass: HomeAssistant) -> None:
+    """v4.5.33: Niet meer nodig — alle externe cards zijn nagebouwd als CloudEMS eigen cards.
+    Functie blijft als no-op om bestaande call sites niet te breken.
+    """
+    _LOGGER.debug("CloudEMS: vendor card installatie overgeslagen — alles ingebouwd")
 
 
 async def _async_apply_tab_visibility(hass: HomeAssistant, hidden_tabs: list[str]) -> None:
@@ -355,8 +407,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as _ep_err:
         _LOGGER.debug("CloudEMS: energy platform registratie niet beschikbaar: %s", _ep_err)
 
-    # Auto-register the Lovelace card resource so users don't have to do it manually
-    hass.async_create_task(_async_register_lovelace_resource(hass))
+    # Auto-register the Lovelace card resource so users don't have to do it manually.
+    # We defer until HA is fully started so lovelace resources are available.
+    from homeassistant.core import callback as _ha_callback
+
+    @_ha_callback
+    def _schedule_lovelace_registration(_now=None):
+        hass.async_create_task(_async_register_lovelace_resource(hass))
+
+    if hass.is_running:
+        # HA already started (e.g. integration reload), register immediately
+        _schedule_lovelace_registration()
+    else:
+        # Wait until HA is fully started before registering Lovelace resources
+        from homeassistant.helpers.start import async_at_started
+        async_at_started(hass, _schedule_lovelace_registration)
 
     # Apply tab visibility (subview flags) based on config
     cfg = {**entry.data, **entry.options}
@@ -367,7 +432,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.async_create_task(_async_register_panel(hass))
 
     # Maak het CloudEMS Lovelace-dashboard automatisch aan als het nog niet bestaat
-    hass.async_create_task(_async_ensure_lovelace_dashboard(hass))
+    # Dashboard aanmaken ook uitstellen tot HA volledig gestart is
+    @_ha_callback
+    def _schedule_dashboard_creation(_now=None):
+        hass.async_create_task(_async_ensure_lovelace_dashboard(hass))
+
+    if hass.is_running:
+        _schedule_dashboard_creation()
+    else:
+        async_at_started(hass, _schedule_dashboard_creation)
 
     return True
 
@@ -375,79 +448,164 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
     """Maak het CloudEMS Lovelace-dashboard automatisch aan als het nog niet bestaat.
 
-    Gebruikt hass.data["lovelace"]["dashboards_collection"] — precies zoals HA zelf
-    dit doet bij het aanmaken van het standaard kaart-dashboard (zie lovelace/__init__.py).
-    YAML wordt gelezen via executor om blocking I/O op de event loop te vermijden.
+    Strategie: schrijf direct naar HA .storage bestanden, precies zoals HA zelf
+    dat doet. Twee bestanden zijn nodig:
+      1. lovelace_dashboards   — registreert het dashboard in de sidebar
+      2. lovelace.{slug}       — bevat de views/kaarten configuratie
+
+    Dit omzeilt alle interne lovelace-API's die tussen HA-versies wisselen.
     """
     import pathlib
     import yaml as _yaml
+    import json
+    import time
 
-    _SLUG = "cloudems-lovelace"
-    _DOMAIN = "lovelace"
+    _STORAGE  = pathlib.Path(hass.config.config_dir) / ".storage"
+    _DASH_REG = _STORAGE / "lovelace_dashboards"
+    _WWW      = pathlib.Path(__file__).parent / "www"
+
+    # Productie + DEV dashboard definitie
+    _DASHBOARDS = [
+        {
+            "slug":      "cloudems-lovelace",
+            "title":     "CloudEMS",
+            "icon":      "mdi:lightning-bolt",
+            "yaml_file": "cloudems-dashboard.yaml",
+            "admin":     False,
+        },
+        {
+            "slug":      "cloudems-dev",
+            "title":     "⚗️ CloudEMS DEV",
+            "icon":      "mdi:flask",
+            "yaml_file": "cloudems-dashboard-dev.yaml",
+            "admin":     True,   # alleen admins — dev-omgeving
+        },
+    ]
+
+    def _do_storage_work():
+        """Alle blocking I/O in één executor-job."""
+        # --- Stap 1: lovelace_dashboards (registratie-lijst) ---
+        try:
+            reg = json.loads(_DASH_REG.read_text(encoding="utf-8"))
+        except Exception:
+            reg = {"version": 1, "minor_version": 1, "key": "lovelace_dashboards", "data": {"items": []}}
+
+        items = reg.get("data", {}).get("items", [])
+        existing_ids = {it.get("url_path") for it in items}
+        reg_changed = False
+        newly_created = []
+
+        for dash in _DASHBOARDS:
+            slug      = dash["slug"]
+            yaml_src  = _WWW / dash["yaml_file"]
+            dash_cfg  = _STORAGE / f"lovelace.{slug}"
+
+            if not yaml_src.exists():
+                _LOGGER.debug("CloudEMS: %s niet gevonden, dashboard overgeslagen", dash["yaml_file"])
+                continue
+
+            dashboard_config = _yaml.safe_load(yaml_src.read_text(encoding="utf-8"))
+
+            # Zorg dat resources in de storage-config de versie-cache-buster hebben.
+            # Hiermee laadt de browser na elke update de nieuwste JS — geen hard refresh nodig.
+            dashboard_config["resources"] = [
+                {"url": f"/local/cloudems/cloudems-cards.js?v={VERSION}",    "type": "module"},
+                {"url": f"/local/cloudems/cloudems-card-mod.js?v={VERSION}", "type": "module"},
+            ]
+
+            # Registreer in sidebar als nog niet aanwezig
+            if slug not in existing_ids:
+                items.append({
+                    "id":              slug,
+                    "url_path":        slug,
+                    "require_admin":   dash["admin"],
+                    "title":           dash["title"],
+                    "icon":            dash["icon"],
+                    "show_in_sidebar": True,
+                    "mode":            "storage",
+                })
+                reg_changed = True
+                newly_created.append(slug)
+                _LOGGER.info("CloudEMS: dashboard '%s' geregistreerd", dash["title"])
+
+            # --- Stap 2: lovelace.{slug} — altijd updaten na HACS-installatie ---
+            cfg_data = {
+                "version": 1, "minor_version": 1,
+                "key": f"lovelace.{slug}",
+                "data": {"config": dashboard_config},
+            }
+            dash_cfg.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            _LOGGER.info("CloudEMS: dashboard config bijgewerkt → %s", dash_cfg.name)
+
+        if reg_changed:
+            reg["data"]["items"] = items
+            _DASH_REG.write_text(json.dumps(reg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return newly_created
 
     try:
-        ll_data = hass.data.get(_DOMAIN)
-        if ll_data is None:
-            _LOGGER.debug("CloudEMS: lovelace niet beschikbaar, dashboard aanmaken overgeslagen")
-            return
+        created = await hass.async_add_executor_job(_do_storage_work)
+        if created:
+            _LOGGER.info("CloudEMS: nieuwe dashboards aangemaakt: %s — herstart HA om sidebar te zien", created)
+        else:
+            _LOGGER.info("CloudEMS: alle dashboard configs bijgewerkt")
 
-        # dashboards_collection is een DashboardsCollection — opgeslagen door lovelace/async_setup
-        dash_col = ll_data.get("dashboards_collection") if hasattr(ll_data, "get") else getattr(ll_data, "dashboards_collection", None)
-        if dash_col is None:
-            _LOGGER.debug("CloudEMS: dashboards_collection niet gevonden in hass.data[lovelace] — dashboard aanmaken overgeslagen")
-            return
-
-        # Controleer of het dashboard al bestaat (dashboards is een dict url_path -> object)
-        dashboards = ll_data.get("dashboards") if hasattr(ll_data, "get") else getattr(ll_data, "dashboards", {})
-
-        # Lees YAML via executor — niet op de event loop (blocking I/O)
-        yaml_path = pathlib.Path(__file__).parent / "www" / "cloudems-dashboard.yaml"
-
-        def _read_yaml():
-            return _yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-
-        if not yaml_path.exists():
-            _LOGGER.warning("CloudEMS: cloudems-dashboard.yaml niet gevonden in www/")
-            return
-
-        dashboard_config = await hass.async_add_executor_job(_read_yaml)
-
-        if _SLUG in dashboards:
-            # v4.5.21: dashboard bestaat al — inhoud updaten (bijv. na HACS update)
-            dash_obj = dashboards[_SLUG]
-            try:
-                await dash_obj.async_save(dashboard_config)
-                _LOGGER.info("CloudEMS: Lovelace dashboard bijgewerkt op /lovelace-%s", _SLUG)
-            except Exception as _uerr:
-                _LOGGER.debug("CloudEMS: dashboard update overgeslagen: %s", _uerr)
-            return
-
-        # Stap 1: registreer via DashboardsCollection (triggert CHANGE_ADDED listener
-        # in lovelace/__init__.py die het object aanmaakt én het sidebar-panel registreert)
-        await dash_col.async_create_item({
-            "url_path": _SLUG,
-            "require_admin": False,
-            "title": "⚡ CloudEMS",
-            "icon": "mdi:lightning-bolt",
-            "show_in_sidebar": True,
-        })
-
-        # Stap 2: geef de event-loop de kans om de CHANGE_ADDED listener te verwerken
-        import asyncio
-        await asyncio.sleep(0)
-
-        # Stap 3: sla de views/kaarten op in het zojuist aangemaakte dashboard-object
-        dashboards_after = ll_data.get("dashboards") if hasattr(ll_data, "get") else getattr(ll_data, "dashboards", {})
-        dash_obj = dashboards_after.get(_SLUG)
-        if dash_obj is None:
-            _LOGGER.warning("CloudEMS: dashboard object niet gevonden na aanmaken — views niet geladen")
-            return
-
-        await dash_obj.async_save(dashboard_config)
-        _LOGGER.info("CloudEMS: Lovelace dashboard aangemaakt op /lovelace-%s", _SLUG)
+        # ── Live reload ────────────────────────────────────────────────────────
+        # Na HACS-update zijn de .storage bestanden bijgewerkt maar HA heeft de
+        # vorige versie nog in memory.  Forceer een reload van elk dashboard-object
+        # zodat gebruikers zonder herstart de nieuwe views zien.
+        await _async_reload_cloudems_dashboards(hass)
 
     except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("CloudEMS: kon Lovelace dashboard niet automatisch aanmaken: %s", err)
+        _LOGGER.warning("CloudEMS: kon Lovelace dashboard niet aanmaken: %s", err)
+
+
+async def _async_reload_cloudems_dashboards(hass: HomeAssistant) -> None:
+    """Herlaad de CloudEMS dashboards in-memory zonder HA herstart.
+
+    Na een HACS-update zijn de .storage bestanden bijgewerkt maar heeft HA de
+    vorige versie nog in memory.  Deze functie roept async_load(force=True) aan
+    op elk dashboard-object dat CloudEMS-views bevat, waarna HA de nieuwe YAML
+    meteen toont in de browser — geen herstart nodig.
+
+    Werkt via de officiële lovelace storage API.  Bij YAML-modus of als het
+    dashboard nog niet bestaat wordt de reload stil overgeslagen.
+    """
+    CLOUDEMS_SLUGS = {"cloudems-lovelace", "cloudems-dev"}
+
+    try:
+        from homeassistant.components import lovelace as _ll  # noqa: PLC0415
+        lovelace = hass.data.get(_ll.DOMAIN)
+        if not lovelace:
+            return
+
+        dashboards = getattr(lovelace, "dashboards", None)
+        if dashboards is None and hasattr(lovelace, "get"):
+            dashboards = lovelace.get("dashboards", {})
+        if not dashboards:
+            return
+
+        reloaded = []
+        for slug, dash in dashboards.items():
+            # Alleen onze eigen dashboards
+            if slug not in CLOUDEMS_SLUGS:
+                continue
+            # YAML-modus dashboards kunnen niet programmatisch worden herladen
+            if getattr(dash, "mode", None) == "yaml":
+                continue
+            try:
+                await dash.async_load(force=True)
+                reloaded.append(slug)
+                _LOGGER.info("CloudEMS: dashboard '%s' in-memory herladen ✓", slug)
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.debug("CloudEMS: reload '%s' mislukt (niet kritiek): %s", slug, e)
+
+        if reloaded:
+            # Stuur een Lovelace updated event zodat open browsers automatisch refreshen
+            hass.bus.async_fire("lovelace_updated", {"url_path": slug} if len(reloaded) == 1 else {})
+
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("CloudEMS: _async_reload_cloudems_dashboards fout (niet kritiek): %s", err)
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -542,6 +700,22 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
 
     async def dismiss_device(call: ServiceCall):
         coordinator.dismiss_nilm_device(call.data["device_id"])
+
+    async def name_undefined_power(call: ServiceCall):
+        """v4.5.64: Geef het onverklaarde vermogen een naam.
+        
+        Het onverklaarde vermogen is het verschil tussen het totale huisverbruik
+        en de som van alle door NILM herkende apparaten. Dit is altijd-aan verbruik
+        dat NILM (nog) niet herkent, zoals een koelkast, waterontharder, of standby-last.
+        
+        Gebruik: cloudems.name_undefined_power met data: {name: "Koelkast + standby"}
+        Leegmaken: {name: ""} reset naar default "Onverklaard vermogen"
+        """
+        name = call.data.get("name", "").strip()
+        coordinator._undefined_power_name = name
+        _LOGGER.info("CloudEMS: onverklaard vermogen hernoemd naar '%s'", name or "(reset)")
+
+
 
     # FIX: New service for feedback (correct/incorrect/maybe)
     async def nilm_feedback(call: ServiceCall):
@@ -692,6 +866,8 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "hide_nilm_device",       hide_nilm_device)
     hass.services.async_register(DOMAIN, "suppress_nilm_device",   suppress_nilm_device)
     hass.services.async_register(DOMAIN, "assign_device_to_room",  assign_device_to_room)
+    hass.services.async_register(DOMAIN, "name_undefined_power",   name_undefined_power,
+        schema=vol.Schema({vol.Optional("name", default=""): str}))
     hass.services.async_register(DOMAIN, "include_nilm_device",    include_nilm_device,
         schema=vol.Schema({vol.Required("device_id"): str}))
     hass.services.async_register(DOMAIN, "exclude_nilm_device",    exclude_nilm_device,
@@ -700,6 +876,50 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         schema=vol.Schema({
             vol.Required("device_id"): str,
             vol.Optional("label", default=""): str,
+        }))
+
+    # ── v4.5.51: Meter topologie services ──────────────────────────────────
+
+    async def meter_topology_approve(call: ServiceCall):
+        """Bevestig een upstream-relatie in de meter-topologie."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if not topo:
+            _LOGGER.warning("meter_topology niet beschikbaar")
+            return
+        topo.approve(call.data["upstream_id"], call.data["downstream_id"])
+
+    async def meter_topology_decline(call: ServiceCall):
+        """Wijs een upstream-relatie af in de meter-topologie."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if not topo:
+            _LOGGER.warning("meter_topology niet beschikbaar")
+            return
+        topo.decline(call.data["upstream_id"], call.data["downstream_id"])
+
+    async def meter_topology_set_root(call: ServiceCall):
+        """Markeer een entity als root-meter (P1 / hoofdmeter)."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if not topo:
+            return
+        if call.data.get("is_root", True):
+            topo.set_root_meter(call.data["entity_id"])
+        else:
+            topo.remove_root_meter(call.data["entity_id"])
+
+    hass.services.async_register(DOMAIN, "meter_topology_approve", meter_topology_approve,
+        schema=vol.Schema({
+            vol.Required("upstream_id"):   str,
+            vol.Required("downstream_id"): str,
+        }))
+    hass.services.async_register(DOMAIN, "meter_topology_decline", meter_topology_decline,
+        schema=vol.Schema({
+            vol.Required("upstream_id"):   str,
+            vol.Required("downstream_id"): str,
+        }))
+    hass.services.async_register(DOMAIN, "meter_topology_set_root", meter_topology_set_root,
+        schema=vol.Schema({
+            vol.Required("entity_id"): str,
+            vol.Optional("is_root", default=True): bool,
         }))
 
     async def zonneplan_battery_charge(call: ServiceCall):
@@ -1806,6 +2026,51 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         DOMAIN, "shutter_cancel_override", shutter_cancel_override,
         schema=vol.Schema({
             vol.Optional("entity_id"): str,
+        }),
+    )
+
+
+# ── v4.5.51: Meter Topologie services ────────────────────────────────────────
+
+    async def meter_topology_approve(call: ServiceCall):
+        """Bevestig een upstream→downstream relatie."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if topo:
+            topo.approve(call.data["upstream_id"], call.data["downstream_id"])
+            await coordinator._store_topo.async_save(topo.dump())
+
+    async def meter_topology_decline(call: ServiceCall):
+        """Wijs een upstream→downstream relatie af."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if topo:
+            topo.decline(call.data["upstream_id"], call.data["downstream_id"])
+            await coordinator._store_topo.async_save(topo.dump())
+
+    async def meter_topology_set_root(call: ServiceCall):
+        """Markeer een entity als root meter (bijv. P1 sensor)."""
+        topo = getattr(coordinator, "_meter_topology", None)
+        if topo:
+            topo.set_root_meter(call.data["entity_id"])
+            await coordinator._store_topo.async_save(topo.dump())
+
+    hass.services.async_register(
+        DOMAIN, "meter_topology_approve", meter_topology_approve,
+        schema=vol.Schema({
+            vol.Required("upstream_id"):   str,
+            vol.Required("downstream_id"): str,
+        }),
+    )
+    hass.services.async_register(
+        DOMAIN, "meter_topology_decline", meter_topology_decline,
+        schema=vol.Schema({
+            vol.Required("upstream_id"):   str,
+            vol.Required("downstream_id"): str,
+        }),
+    )
+    hass.services.async_register(
+        DOMAIN, "meter_topology_set_root", meter_topology_set_root,
+        schema=vol.Schema({
+            vol.Required("entity_id"): str,
         }),
     )
 

@@ -1,0 +1,45 @@
+CloudEMS Proprietary License
+Copyright (c) 2025–2026 CloudEMS (https://cloudems.eu)
+All rights reserved.
+
+TERMS AND CONDITIONS
+
+1. PERMITTED USE
+   You may download, install, and use this software solely for
+   personal, non-commercial home automation purposes on hardware
+   you own or control.
+
+2. PROHIBITED USES
+   The following are strictly prohibited without prior written
+   permission from CloudEMS:
+
+   a) Commercial use — using this software, in whole or in part,
+      in any product, service, or activity that generates revenue,
+      whether directly or indirectly.
+
+   b) Redistribution — copying, sharing, publishing, or otherwise
+      distributing this software or any modified version of it,
+      through any channel (GitHub, HACS, file sharing, etc.).
+
+   c) Derivative works — modifying, adapting, translating,
+      reverse engineering, or creating works derived from this
+      software for distribution to third parties.
+
+   d) Sublicensing — granting others any rights to this software
+      beyond those granted to you in section 1.
+
+3. ATTRIBUTION
+   Any permitted use must retain this license notice, all copyright
+   headers, and a visible reference to https://cloudems.eu in any
+   user-facing interface derived from this software.
+
+4. NO WARRANTY
+   This software is provided "as is", without warranty of any kind.
+   CloudEMS is not liable for any damages arising from its use.
+
+5. TERMINATION
+   Any violation of these terms immediately and automatically
+   terminates your right to use this software.
+
+For commercial licensing or partnership inquiries, contact:
+https://cloudems.eu

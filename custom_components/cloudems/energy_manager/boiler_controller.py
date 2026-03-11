@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
+# All rights reserved. Unauthorized copying, redistribution, or commercial
+# use of this file is strictly prohibited. See LICENSE for full terms.
+
 """
 CloudEMS Smart Boiler / Socket Controller — v3.0.0
 
@@ -1075,6 +1079,11 @@ class BoilerController:
 
         if ctrl == "preset":
             preset_on = boiler.preset_on if boiler else "boost"
+            if domain == "water_heater":
+                # v4.5.61: Ariston en andere water_heater integraties gebruiken
+                # 'operation_mode' als attribuut, niet 'preset_mode'
+                op = s.attributes.get("operation_mode") or s.attributes.get("preset_mode") or s.state
+                return op == preset_on
             return s.attributes.get("preset_mode", s.state) == preset_on
 
         if ctrl == "dimmer":
@@ -1093,6 +1102,12 @@ class BoilerController:
             if domain in ("climate", "water_heater"):
                 return s.state not in ("off", "unavailable", "unknown")
             return s.state == "on"
+
+        # v4.5.61: water_heater met control_mode="switch" (default) werd altijd False
+        # omdat water_heater state nooit "on" is (bijv. "electric", "heat_pump").
+        # Val terug op setpoint-logica voor dit domain.
+        if domain == "water_heater":
+            return s.state not in ("off", "unavailable", "unknown")
 
         return s.state == "on"
 
@@ -1132,11 +1147,24 @@ class BoilerController:
         domain = entity_id.split(".")[0] if "." in entity_id else "switch"
         ctrl   = boiler.control_mode if boiler else "switch"
 
-        if ctrl == "preset" and domain == "climate":
+        if ctrl == "preset":
             preset = (boiler.preset_on if on else boiler.preset_off) if boiler else ("boost" if on else "green")
-            await self._hass.services.async_call("climate", "set_preset_mode",
-                {"entity_id": entity_id, "preset_mode": preset}, blocking=False)
-            return
+            if domain == "climate":
+                await self._hass.services.async_call("climate", "set_preset_mode",
+                    {"entity_id": entity_id, "preset_mode": preset}, blocking=False)
+                return
+            if domain == "water_heater":
+                # v4.5.61: Ariston Lydos e.d. gebruiken set_operation_mode, niet set_preset_mode
+                if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                    await self._hass.services.async_call("water_heater", "set_operation_mode",
+                        {"entity_id": entity_id, "operation_mode": preset}, blocking=False)
+                else:
+                    # Fallback: probeer set_preset_mode (sommige integraties)
+                    await self._hass.services.async_call("water_heater", "set_preset_mode",
+                        {"entity_id": entity_id, "preset_mode": preset}, blocking=False)
+                _LOGGER.debug("BoilerController [%s]: water_heater preset → %s",
+                              boiler.label if boiler else entity_id, preset)
+                return
 
         if ctrl in ("setpoint", "setpoint_boost"):
             sp = ((boiler.active_setpoint_c or boiler.setpoint_c) if on else boiler.min_temp_c) if boiler else (60.0 if on else 40.0)
