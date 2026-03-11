@@ -38,6 +38,7 @@ class ApplianceSignature:
     tags: List[str] = field(default_factory=list)
     source: str = "builtin"  # "builtin" | "community"
     name_nl: Optional[str] = None       # Dutch display name (None = use English name)
+    three_phase: bool = False           # v4.5.13: apparaat verdeelt vermogen over 3 fasen
 
     def matches(self, delta_power: float, rise_time: float,
                 rise_time_reliable: bool = True) -> Tuple[bool, float]:
@@ -89,8 +90,9 @@ class ApplianceSignature:
             rise_diff   = abs(rise_time - self.rise_time) / max(self.rise_time, 1.0)
             confidence += max(0.0, 1.0 - rise_diff) * RISE_W
 
-        # Minimum threshold — slightly lower to account for soft-zone partial matches
-        return confidence >= 0.45, min(confidence, 1.0)
+        # v4.5.12: drempel omhoog — bij twijfel geen match teruggeven aan detector.
+        # Zachte-zone partial matches die net boven 0.45 uitkomen zijn te onzeker.
+        return confidence >= 0.60, min(confidence, 1.0)
 
 
 # ─── BUILT-IN APPLIANCE DATABASE ──────────────────────────────────────────────
@@ -187,6 +189,12 @@ APPLIANCE_DATABASE: List[ApplianceSignature] = [
     ApplianceSignature("heat_pump", "Split AC Cooling (3.5kW)",     800, 1600, 30, 15.0, 20.0, 0.65, tags=["heat_pump"]),
     ApplianceSignature("heat_pump", "Multi-Split AC",              1200, 3000, 50, 20.0, 30.0, 0.65, tags=["heat_pump"]),
     ApplianceSignature("heat_pump", "Air Curtain 2kW",             1800, 2200, 30, 5.0,  8.0),
+    # v4.5.13: 3-fase warmtepompen — vergelijk op totaalvermogen (som L1+L2+L3)
+    ApplianceSignature("heat_pump", "Lucht-WP 3-fase 6kW",   5000,  7000, 50, 20.0, 30.0, 0.55, tags=["heat_pump"], three_phase=True, name_nl="Lucht-warmtepomp 3-fase 6kW"),
+    ApplianceSignature("heat_pump", "Lucht-WP 3-fase 9kW",   7500, 10500, 50, 20.0, 30.0, 0.55, tags=["heat_pump"], three_phase=True, name_nl="Lucht-warmtepomp 3-fase 9kW"),
+    ApplianceSignature("heat_pump", "Lucht-WP 3-fase 12kW", 10000, 14000, 50, 20.0, 30.0, 0.55, tags=["heat_pump"], three_phase=True, name_nl="Lucht-warmtepomp 3-fase 12kW"),
+    ApplianceSignature("heat_pump", "Bodem-WP 3-fase 8kW",   6500,  9500, 50, 30.0, 40.0, 0.55, tags=["heat_pump"], three_phase=True, name_nl="Bodem-warmtepomp 3-fase 8kW"),
+    ApplianceSignature("heat_pump", "Bodem-WP 3-fase 12kW",  9500, 13500, 50, 30.0, 40.0, 0.55, tags=["heat_pump"], three_phase=True, name_nl="Bodem-warmtepomp 3-fase 12kW"),
 
     # ── CV & Central Heating ─────────────────────────────────────────────────
     ApplianceSignature("cv_boiler", "CV Boiler Burner",             1500, 2500, 10, 5.0, 8.0, tags=["heat"]),
@@ -205,11 +213,23 @@ APPLIANCE_DATABASE: List[ApplianceSignature] = [
     ApplianceSignature("ev_charger", "EV Charger 1-phase 10A",    2100,  2400, 0,  5.0, 10.0),
     ApplianceSignature("ev_charger", "EV Charger 1-phase 16A",    3400,  3700, 0,  5.0, 10.0),
     ApplianceSignature("ev_charger", "EV Charger 1-phase 32A",    7000,  7500, 0,  5.0, 10.0),
-    ApplianceSignature("ev_charger", "EV Charger 3-phase 11kW",  10500, 11500, 0,  5.0, 10.0),
-    ApplianceSignature("ev_charger", "EV Charger 3-phase 22kW",  21000, 23000, 0,  5.0, 10.0),
+    # v4.5.13: 3-fase EV profielen matchen op totaalvermogen
+    ApplianceSignature("ev_charger", "EV Charger 3-phase 11kW",  10500, 11500, 0,  5.0, 10.0, three_phase=True),
+    ApplianceSignature("ev_charger", "EV Charger 3-phase 22kW",  21000, 23000, 0,  5.0, 10.0, three_phase=True),
     ApplianceSignature("ev_charger", "E-Bike Charger",               50,   200, 0,  2.0,  5.0),
     ApplianceSignature("ev_charger", "E-Scooter Charger",           100,   400, 0,  2.0,  5.0),
     ApplianceSignature("ev_charger", "E-Cargo Bike Charger",        100,   600, 0,  2.0,  5.0),
+
+    # ── Thuisbatterij (laden) ─────────────────────────────────────────────────
+    # v4.5.13: thuisbatterijen worden via inject_battery() apart bijgehouden,
+    # maar als de SoC-sensor niet gekoppeld is valt de batterijlading als NILM-event binnen.
+    # Deze profielen zorgen dat een 3-fase batterijlading correct gelabeld wordt
+    # in plaats van als warmtepomp/boiler. Ze zijn altijd pending=True.
+    ApplianceSignature("home_battery", "Thuisbatterij laden 3kW",   2700,  3300, 0, 10.0, 10.0, tags=["battery"], three_phase=True, name_nl="Thuisbatterij 3kW laden"),
+    ApplianceSignature("home_battery", "Thuisbatterij laden 5kW",   4500,  5500, 0, 10.0, 10.0, tags=["battery"], three_phase=True, name_nl="Thuisbatterij 5kW laden"),
+    ApplianceSignature("home_battery", "Thuisbatterij laden 6kW",   5500,  6500, 0, 10.0, 10.0, tags=["battery"], three_phase=True, name_nl="Thuisbatterij 6kW laden"),
+    ApplianceSignature("home_battery", "Thuisbatterij laden 7kW",   6500,  7500, 0, 10.0, 10.0, tags=["battery"], three_phase=True, name_nl="Thuisbatterij 7kW laden"),
+    ApplianceSignature("home_battery", "Thuisbatterij laden 10kW",  9000, 11000, 0, 10.0, 10.0, tags=["battery"], three_phase=True, name_nl="Thuisbatterij 10kW laden"),
 
     # ── Lighting ─────────────────────────────────────────────────────────────
     ApplianceSignature("light", "LED Bulb 5-10W",         5,   12, 0, 0.1, 0.1),
@@ -444,7 +464,8 @@ class NILMDatabase:
                  power_factor: float | None = None,
                  inrush_peak_a: float | None = None,
                  reactive_power_var: float | None = None,
-                 thd_pct: float | None = None) -> list:
+                 thd_pct: float | None = None,
+                 total_power_w: float | None = None) -> list:
         """Classify a power event against the database. Returns top-5 ranked matches.
 
         v1.21: rise_time_reliable defaults to False because CloudEMS coordinator
@@ -490,11 +511,20 @@ class NILMDatabase:
             "power_tool":  0.40,  # cirkelzaag, tafelzaag, lasser — nooit auto-detecteren
             "medical":     0.40,  # CPAP, zuurstofconcentrator — nooit auto-detecteren
             "garden":      0.50,  # grasmaaier, heggeschaar — buiten, seizoensgebonden
+            "unknown":     0.55,  # v4.5.12: loopband/ijzer/stofzuiger — te vaag, nooit auto-detecteren
         }
 
         matches = []
         for sig in self._db:
-            matched, confidence = sig.matches(delta_power, rise_time,
+            # v4.5.13: 3-fase apparaten matchen op totaalvermogen (huis_w), niet per-fase delta.
+            # Bij total_split meting is delta_power = totaal/3, waardoor 3-fase last op
+            # verkeerde (te lage) waarde wordt gematcht. Als total_power_w beschikbaar is
+            # gebruiken we dat voor three_phase signatures.
+            if sig.three_phase and total_power_w is not None:
+                match_power = total_power_w
+            else:
+                match_power = delta_power
+            matched, confidence = sig.matches(match_power, rise_time,
                                               rise_time_reliable=rise_time_reliable)
             if matched:
                 # Apply niche cap: rare categories get capped below detection threshold

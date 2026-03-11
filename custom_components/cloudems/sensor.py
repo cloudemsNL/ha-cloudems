@@ -180,7 +180,7 @@ async def async_setup_entry(
         CloudEMSAbsenceDetectorSensor(coordinator, entry),
         CloudEMSClimatePreheatSensor(coordinator, entry),
         CloudEMSPVForecastAccuracySensor(coordinator, entry),
-        CloudEMSEMADiagnosticsSensor(coordinator, entry),
+        CloudEMSBalancerSensor(coordinator, entry),
         CloudEMSSanitySensor(coordinator, entry),
         # v4.3.6: runtime warnings sensor (P1 spikes, fase-clamp, learning freeze)
         CloudEMSRuntimeWarningsSensor(coordinator, entry),
@@ -1936,6 +1936,9 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
         if p is None:
             p = ep.get("current")
         return round(p, 5) if p is not None else None
+
+    @property
+    def extra_state_attributes(self):
         ep = (self.coordinator.data or {}).get("energy_price", {})
         next_hours = ep.get("next_hours", [])
         # next_hour = het slot ná het huidige (index 1, want index 0 = huidig uur)
@@ -1961,6 +1964,11 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
             "provider_key":         ep.get("provider_key", ""),
             # Volgend uur (index 1 van next_hours = slot na het huidige)
             "next_hour_eur_kwh":    round(next_hour_price, 5) if next_hour_price is not None else None,
+            # v4.5.6: zelfgeleerde markup metadata
+            "learned_markup_kwh":      ep.get("learned_markup_kwh"),
+            "learned_markup_samples":  ep.get("learned_markup_samples", 0),
+            "learned_eb_kwh":          ep.get("learned_eb_kwh"),
+            "learned_btw_rate":        ep.get("learned_btw_rate"),
         }
 
 
@@ -2283,6 +2291,8 @@ class CloudEMSNILMTopDeviceSensor(CoordinatorEntity, SensorEntity):
                 "confirmed":     d.get("confirmed", False),
                 "confidence":    round(d.get("confidence", 0) * 100, 1),
                 "phase":         d.get("phase", "?"),
+                "source":        d.get("source", "database"),
+                "source_type":   "smart_plug" if d.get("source") == "smart_plug" else "nilm",
                 "rank":          self._rank,
                 "total_running": len(top),
             }
@@ -4534,38 +4544,55 @@ class CloudEMSPVForecastAccuracySensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSEMADiagnosticsSensor(CoordinatorEntity, SensorEntity):
-    """EMA (Exponential Moving Average) diagnostiek voor vertraagde cloud-sensoren.
-    
-    State = totaal geblokkeerde spikes.
-    Attributes: frozen_sensors, slow_sensors, spikes_blocked.
+class CloudEMSBalancerSensor(CoordinatorEntity, SensorEntity):
+    """EnergyBalancer diagnostiek — Kirchhoff-balans, sensor-intervallen en geleerde battery-lag.
+
+    State = Kirchhoff-imbalans in Watt (ideaal: 0).
+    Attributes: per-sensor interval, stale-status, geleerde battery-vertraging,
+                house_trend_w, lag_learner statistieken.
     """
-    _attr_name  = "CloudEMS EMA Diagnostics"
-    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
-    _attr_icon  = "mdi:chart-bell-curve"
+    _attr_name  = "CloudEMS Energy Balancer"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon  = "mdi:scale-balance"
     _attr_has_entity_name = False
 
     def __init__(self, coord, entry):
         super().__init__(coord)
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_ema_diagnostics"
+        self._attr_unique_id = f"{entry.entry_id}_energy_balancer"
 
     @property
     def device_info(self): return _device_info(self._entry)
 
     @property
     def native_value(self):
-        return (self.coordinator.data or {}).get("ema_diagnostics", {}).get("spikes_blocked", 0)
+        d = (self.coordinator.data or {}).get("energy_balancer", {})
+        return round(d.get("last_imbalance_w", 0.0), 1)
 
     @property
     def extra_state_attributes(self):
-        e = (self.coordinator.data or {}).get("ema_diagnostics", {})
+        d = (self.coordinator.data or {}).get("energy_balancer", {})
         return {
-            "spikes_blocked":  e.get("spikes_blocked", 0),
-            "frozen_sensors":  e.get("frozen_sensors", []),
-            "slow_sensors":    e.get("slow_sensors", []),
-            "tracked_sensors": e.get("tracked_sensors", 0),
-            "summary":         e.get("summary", ""),
+            # Sensor update-intervallen (adaptief gemeten)
+            "grid_interval_s":    d.get("grid_interval_s"),
+            "solar_interval_s":   d.get("solar_interval_s"),
+            "battery_interval_s": d.get("battery_interval_s"),
+            # Stale-status
+            "grid_stale":         d.get("grid_stale", False),
+            "solar_stale":        d.get("solar_stale", False),
+            "battery_stale":      d.get("battery_stale", False),
+            "stale_sensors":      d.get("stale_sensors", []),
+            # Kirchhoff
+            "imbalance_w":        d.get("last_imbalance_w", 0.0),
+            "house_trend_w":      d.get("house_trend_w"),
+            "lag_compensated":    d.get("lag_compensated", False),
+            # Geleerde battery-vertraging (lag-learner)
+            "battery_lag_learned_s":   d.get("battery_learned_lag_s"),
+            "battery_lag_confidence":  d.get("battery_lag_confidence"),
+            "battery_lag_samples":     d.get("battery_lag_samples", 0),
+            "solar_lag_learned_s":     d.get("solar_learned_lag_s"),
+            "solar_lag_confidence":    d.get("solar_lag_confidence"),
         }
 
 

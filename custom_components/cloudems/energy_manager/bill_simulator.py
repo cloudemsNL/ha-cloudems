@@ -230,7 +230,7 @@ class BillSimulator:
             day_night.monthly[mon] = day_night.monthly.get(mon, 0.0) + dn_cost
 
         saving_eur = fixed.cost_eur - dynamic.cost_eur
-        saving_pct = (saving_eur / fixed.cost_eur * 100) if fixed.cost_eur != 0 else 0.0
+        saving_pct = (saving_eur / fixed.cost_eur * 100) if fixed.cost_eur not in (0.0, 0) else 0.0
 
         # Beste/slechtste maand voor dynamisch vs vast
         # best = maand met grootste voordeel, worst = maand dat dynamisch het duurst was

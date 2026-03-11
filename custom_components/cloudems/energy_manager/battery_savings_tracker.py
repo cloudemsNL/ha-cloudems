@@ -164,6 +164,13 @@ class BatterySavingsTracker:
         """
         today_str = str(date.today())
 
+        # v4.5.7: negatieve prijs betekent geen besparing voor batterij-arbitrage.
+        # Clamp naar 0 zodat besparingen niet negatief worden. Powerplay-logica
+        # (zelf profiteren van negatieve prijs) zit elders in tariff_optimizer.
+        current_price = max(0.0, current_price)
+        if charge_price is not None:
+            charge_price = max(0.0, charge_price)
+
         # Dagwissel: zet dagdata over naar yearly en reset
         if today_str != self._last_date:
             self._rollover_day()

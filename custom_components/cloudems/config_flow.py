@@ -2641,7 +2641,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             data_schema=vol.Schema({
                 vol.Required(CONF_ENERGY_PRICES_COUNTRY, default=country): _country_selector(),
             }),
-            description_placeholders={"info": "Kies je land. De beschikbare leveranciers worden hierop aangepast."},
+
         )
 
     async def async_step_prices_provider_opts(self, user_input=None):

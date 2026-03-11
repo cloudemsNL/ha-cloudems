@@ -86,6 +86,10 @@ class LogReporter:
         self._token      = config.get("github_log_token", "")
         self._last_auto  = 0.0
 
+        # Markdown render watcher — leert van HA-logs welke kaarten niet renderen
+        from ..energy_manager.markdown_render_watcher import MarkdownRenderWatcher
+        self._render_watcher = MarkdownRenderWatcher(hass)
+
     # ── Rapport bouwen ────────────────────────────────────────────────────────
 
     async def async_build_report(
@@ -109,17 +113,28 @@ class LogReporter:
         # ── HA logs ─────────────────────────────────────────────────────────
         ha_logs = await self._collect_ha_logs()
 
-        # ── Guardian issues ──────────────────────────────────────────────────
-        issues_section = self._build_issues_section(guardian_status)
+        # ── Markdown render watcher ────────────────────────────────────────
+        await self._render_watcher.async_scan(force=(trigger != "auto"))
+        render_report  = self._render_watcher.get_report()
+        render_issues  = self._render_watcher.get_guardian_issues()
+        render_summary = self._render_watcher.get_markdown_summary()
+        if render_report["active_findings"] > 0:
+            _LOGGER.warning(
+                "CloudEMS LogReporter: render watcher meldt %d actieve render-problemen.",
+                render_report["active_findings"],
+            )
 
-        # ── Module configuratie ──────────────────────────────────────────────
+        # ── Guardian issues (incl. render-issues) ─────────────────────────
+        issues_section = self._build_issues_section(guardian_status, extra=render_issues)
+
+        # ── Module configuratie ─────────────────────────────────────────────
         module_cfg = self._build_module_config(coordinator_data)
 
-        # ── Sensor snapshot ──────────────────────────────────────────────────
+        # ── Sensor snapshot ────────────────────────────────────────────────
         sensor_snap = self._build_sensor_snapshot(coordinator_data)
 
         # ── Markdown body ────────────────────────────────────────────────────
-        body = self._render_markdown(meta, ha_logs, issues_section, module_cfg, sensor_snap)
+        body = self._render_markdown(meta, ha_logs, issues_section, module_cfg, sensor_snap, render_summary)
 
         title = (
             f"[auto-report] {trigger.upper()} — "
@@ -185,7 +200,7 @@ class LogReporter:
             lines = [f"[Kon logs niet ophalen: {err}]"]
         return lines
 
-    def _build_issues_section(self, guardian: dict) -> list[dict]:
+    def _build_issues_section(self, guardian: dict, extra: list | None = None) -> list[dict]:
         """Guardian issues, geanonimiseerd."""
         issues = []
         for i in guardian.get("active_issues", []):
@@ -196,6 +211,16 @@ class LogReporter:
                 "source":  i.get("source"),
                 "count":   i.get("count", 1),
             })
+        # Voeg extra issues toe (bv. van render watcher)
+        if extra:
+            for e in extra:
+                issues.append({
+                    "level":   e.get("level", "warning"),
+                    "title":   e.get("title", ""),
+                    "message": e.get("message", ""),
+                    "source":  e.get("source", "render_watcher"),
+                    "count":   e.get("count", 1),
+                })
         return issues
 
     def _build_module_config(self, data: dict) -> dict:
@@ -258,7 +283,8 @@ class LogReporter:
         return snap
 
     def _render_markdown(self, meta: dict, logs: list, issues: list,
-                          module_cfg: dict, sensor_snap: dict) -> str:
+                          module_cfg: dict, sensor_snap: dict, render_summary: str = "") -> str:
+        """Genereer markdown voor GitHub issue. Logt render-statistieken voor kwaliteitsbewaking."""
         lines = [
             "## CloudEMS Automatisch Diagnostisch Rapport",
             "",
@@ -324,6 +350,7 @@ class LogReporter:
                     f"| {on_str} | {b['season']} | {b.get('cycle_kwh', '-')} |"
                 )
 
+        lines += ["", render_summary]
         lines += ["", "### HA Logs (cloudems filter, IP gemaskeerd)", "```"]
         lines += logs[-200:] if logs else ["[geen logs beschikbaar]"]
         lines += ["```", ""]

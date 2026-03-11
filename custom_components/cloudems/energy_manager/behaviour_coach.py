@@ -198,7 +198,10 @@ class BehaviourCoach:
 
             # Meest voorkomende goedkoopste uur
             from collections import Counter
-            best_hour = Counter(cheapest_hours_list).most_common(1)[0][0]
+            _most_common = Counter(cheapest_hours_list).most_common(1)
+            if not _most_common:
+                continue
+            best_hour = _most_common[0][0]
 
             advice = (
                 f"{label} draait gemiddeld om {peak_hour:02d}:00 "

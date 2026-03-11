@@ -60,7 +60,7 @@ class PhaseBalancer:
         status = self._evaluate(phase_currents)
 
         if not status.balanced and not self._last_imbalanced:
-            _LOGGER.warning(
+            _LOGGER.info(
                 "PhaseBalancer: imbalance %.1fA (threshold %.1fA) — %s",
                 status.imbalance_a,
                 self._threshold,

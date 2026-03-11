@@ -42,9 +42,9 @@ STORAGE_KEY     = "cloudems_nilm_clusters_v1"
 STORAGE_VERSION = 1
 
 # Clustering parameters
-CLUSTER_EPS_W        = 150.0   # W — max verschil om bij cluster te voegen
-CLUSTER_EPS_DUR_S    = 180.0   # s — max verschil in duur
-CLUSTER_MIN_EVENTS   = 5       # minimum events voor suggestie
+CLUSTER_EPS_W        = 120.0   # W — max verschil om bij cluster te voegen (strikter: was 150)
+CLUSTER_EPS_DUR_S    = 150.0   # s — max verschil in duur (strikter: was 180)
+CLUSTER_MIN_EVENTS   = 8       # v4.5.12: verhoogd van 5 → 8 — meer bewijs nodig voor suggestie
 CLUSTER_MAX_AGE_DAYS = 90      # verwijder clusters ouder dan dit
 MAX_CLUSTERS         = 50      # maximaal aantal clusters bijhouden
 

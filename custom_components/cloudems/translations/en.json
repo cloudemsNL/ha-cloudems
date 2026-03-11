@@ -495,6 +495,23 @@
         "data_description": {
           "dsmr_source": "Choose how CloudEMS retrieves grid meter data. Use the DSMR/HomeWizard integration if you already have it set up in HA, otherwise select sensors manually or configure a direct connection."
         }
+      },
+      "price_provider": {
+        "title": "⚡ Price source — direct supplier connection",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Price source"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Credentials — {provider_label}",
+        "description": "Enter your credentials for {provider_label}. CloudEMS stores them securely and uses them only to fetch prices.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API key",
+          "username": "Email address",
+          "password": "Password"
+        }
       }
     },
     "abort": {
@@ -953,6 +970,36 @@
           "latest_hour": "Latest hour (0–23)",
           "grace_s": "Grace period (seconds)",
           "notify": "Send notification on delay"
+        }
+      },
+      "prices_provider_opts": {
+        "title": "⚡ Prices — Energy supplier",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Price source"
+        }
+      },
+      "prices_epex_opts": {
+        "title": "💶 Prices — Tax & markup",
+        "description": "{info}",
+        "data": {
+          "contract_type": "Contract type",
+          "fixed_import_price": "Fixed import tariff (€/kWh)",
+          "fixed_export_price": "Fixed feed-in tariff (€/kWh)",
+          "price_include_tax": "Include energy tax",
+          "price_include_btw": "Include VAT",
+          "selected_supplier": "Energy supplier (for markup)",
+          "supplier_markup": "Custom markup (€/kWh)"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "🔑 Credentials — {provider_label}",
+        "description": "Enter your credentials for {provider_label}.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API key",
+          "username": "Email address",
+          "password": "Password"
         }
       }
     },

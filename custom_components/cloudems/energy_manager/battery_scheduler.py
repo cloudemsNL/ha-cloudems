@@ -406,7 +406,7 @@ class BatteryEPEXScheduler:
                 r = (
                     f"Ontlaaduur{win_note} ({p:.4f} €/kWh, "
                     f"netto {eco.netto_spread*100:.1f} ct/kWh na slijtage)"
-                )"
+                )
             else:
                 action = "idle"
                 r      = f"Gemiddeld uur ({p:.4f} €/kWh)"

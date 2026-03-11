@@ -100,10 +100,6 @@ views:
         entity: sensor.cloudems_grid_net_power
         name: Net
         invert_state: false
-        secondary_info:
-          entity: sensor.cloudems_energy_price_current_hour
-          unit_of_measurement: EUR/kWh
-          decimals: 4
       solar:
         entity: sensor.cloudems_solar_system_intelligence
         name: Zonne-energie
@@ -2512,8 +2508,13 @@ views:
     title: ☀️ Omvormers — Live status
     content: |
       {% set invs = state_attr('sensor.cloudems_solar_system_intelligence', 'inverters') or [] %}
+      {% set inv_count_cfg = state_attr('sensor.cloudems_solar_system_intelligence', 'inverter_count') %}
       {% if invs | length == 0 %}
+      {% if inv_count_cfg is none %}
+      ⏳ *Omvormerdata wordt geladen...*
+      {% else %}
       *Geen omvormers geconfigureerd.*
+      {% endif %}
       {% else %}
       | Omvormer | Nu | Piek 7d | Rated | Benutting | Richting | Fase | Clipping |
       |----------|----|---------|-------|-----------|----------|------|----------|
@@ -3465,6 +3466,7 @@ views:
       {% set opt_wp     = state_attr('sensor.cloudems_pv_opbrengst_terugverdientijd', 'optimal_wp') | float(0) %}
       {% set exp_kwp    = state_attr('sensor.cloudems_pv_opbrengst_terugverdientijd', 'expansion_advice_kwp') %}
       {% set self_pct   = state_attr('sensor.cloudems_pv_opbrengst_terugverdientijd', 'self_sufficiency_pct') | float(0) %}
+      {% set price_row  = ('Stroomprijs (vast tarief)' if is_fixed else 'Stroomprijs (' ~ price_lbl ~ ')') %}
       {% if wp > 0 %}
       | Gegeven | Waarde |
       |---|---|
@@ -3472,14 +3474,8 @@ views:
       | Hoogste gemeten productie | {{ peak_w | round(0) | int }} W |
       | Geschatte jaaropbrengst | {{ kwh_yr | round(0) | int }} kWh |
       | Financiële jaarwaarde | **€{{ eur_yr | round(0) | int }}** |
-      {% if is_fixed %}
-      | Stroomprijs (vast tarief) | €{{ price | round(4) }}/kWh |
-      {% else %}
-      | Stroomprijs ({{ price_lbl }}) | €{{ price | round(4) }}/kWh |
-      {% endif %}
-      {% if self_pct > 0 %}
-      | Zelfvoorzieningsgraad | {{ self_pct }}% |
-      {% endif %}
+      | {{ price_row }} | €{{ price | round(4) }}/kWh |
+      {% if self_pct > 0 %}| Zelfvoorzieningsgraad | {{ self_pct }}% |{% endif %}
 
       {% if eur_yr > 0 %}
       | Investering | Terugverdientijd |
@@ -3499,11 +3495,11 @@ views:
       Optimaal vermogen: **{{ (opt_wp/1000)|round(1) }} kWp** — advies uitbreiding: **+{{ exp_kwp }} kWp**
       ≈ {{ ((exp_kwp * 1000) / 400) | round(0) | int }}–{{ ((exp_kwp * 1000) / 300) | round(0) | int }} extra panelen (300–400 Wp/paneel)
 
+      {% set extra_eur   = exp_kwp * 850 * price %}
+      {% set invest_low  = (exp_kwp * 700)  | round(0) | int %}
+      {% set invest_high = (exp_kwp * 1000) | round(0) | int %}
       | Uitbreiding | Geschatte invest. | Terugverdientijd |
       |---|---|---|
-      {% set extra_eur = exp_kwp * 850 * price %}
-      {% set invest_low  = (exp_kwp * 700) | round(0) | int %}
-      {% set invest_high = (exp_kwp * 1000) | round(0) | int %}
       | +{{ exp_kwp }} kWp | €{{ invest_low }}–€{{ invest_high }} | {{ (invest_low / extra_eur) | round(1) }}–{{ (invest_high / extra_eur) | round(1) }} jaar |
       {% endif %}
       {% endif %}
@@ -3643,18 +3639,39 @@ views:
       {%- if providers | length == 0 and zp is none -%}
       ℹ️ Geen beheerde provider gevonden. Heb je Zonneplan of Tibber? Installeer de integratie en configureer via **Instellingen → CloudEMS → Batterijen & Providers**.
       {%- else %}
-      | Provider | Status | Modus |
-      |---|---|---|
+      {%- set balancer = bp.get('balancer', {}) %}
+      {%- set lag_s    = balancer.get('battery_lag_s') %}
+      {%- set lag_n    = balancer.get('battery_lag_samples', 0) %}
+      {%- set lag_c    = balancer.get('battery_lag_conf') %}
+      {%- set int_s    = balancer.get('battery_interval_s') %}
+      {%- set stale    = balancer.get('battery_stale', false) %}
+      {%- if lag_s is not none %}
+        {%- set lag_label = '⏱ ' ~ (lag_s | round(1) | string) ~ 's' %}
+        {%- if lag_c is not none %}
+          {%- set lag_label = lag_label ~ ' (' ~ (lag_c * 100) | round(0) | int | string ~ '%)' %}
+        {%- endif %}
+      {%- elif lag_n > 0 %}
+        {%- set lag_label = '⏱ lerend ' ~ lag_n | string ~ '/5' %}
+      {%- else %}
+        {%- set lag_label = '⏱ —' %}
+      {%- endif %}
+      {%- if int_s is not none %}
+        {%- set int_label = ('⚠ ' if stale else '') ~ (int_s | round(1) | string if int_s < 10 else int_s | round(0) | int | string) ~ 's' %}
+      {%- else %}
+        {%- set int_label = '—' %}
+      {%- endif %}
+      | Provider | Status | Modus | Interval | Vertraging |
+      |---|---|---|---|---|
       {%- if zp is not none %}
       {%- set ok = zp.get('available', false) %}
       {%- set det = zp.get('detected', false) %}
       {%- set mode_raw = zp.get('active_mode') %}
       {%- set mode_map = {'home_optimization':'🏠 Thuisopt.','self_consumption':'☀️ Zelfverbruik','powerplay':'⚡ Powerplay','manual_control':'🔧 Handmatig','Thuisoptimalisatie':'🏠 Thuisopt.','Zelfverbruik':'☀️ Zelfverbruik','Powerplay':'⚡ Powerplay','Huisoptimalisatie':'🏠 Thuisopt.','thuisoptimalisatie':'🏠 Thuisopt.','huisoptimalisatie':'🏠 Thuisopt.','zelfverbruik':'☀️ Zelfverbruik','handmatig':'🔧 Handmatig'} %}
       {%- set mode = mode_map.get(mode_raw, (mode_raw | replace('_',' ') | title) if mode_raw else '—') %}
-      | ⚡ Zonneplan Nexus | {{ '✅ Actief' if ok else ('🟡 Gevonden' if det else '❌') }} | {{ mode }} |
+      | ⚡ Zonneplan Nexus | {{ '✅ Actief' if ok else ('🟡 Gevonden' if det else '❌') }} | {{ mode }} | {{ int_label }} | {{ lag_label }} |
       {%- endif %}
       {%- for p in providers if p.get('provider_id') != 'zonneplan' %}
-      | {{ p.get('provider_label', p.get('provider_id')) }} | {{ '✅' if p.get('available') else ('🟡' if p.get('detected') else '❌') }} | — |
+      | {{ p.get('provider_label', p.get('provider_id')) }} | {{ '✅' if p.get('available') else ('🟡' if p.get('detected') else '❌') }} | — | {{ int_label }} | {{ lag_label }} |
       {%- endfor %}
       {%- endif %}
       {%- if warnings | length > 0 %}
@@ -3683,9 +3700,15 @@ views:
       {%- set soc    = state_attr('sensor.cloudems_batterij_epex_schema', 'soc_pct') -%}
       {%- if bats | length == 0 -%}
       {%- set soc_icon = '🟢' if soc and soc >= 60 else ('🟡' if soc and soc >= 20 else ('🔴' if soc else '⚫')) -%}
+      {%- if action == 'unknown' or (not soc and not action) -%}
+      ⏳ *Batterijdata wordt geladen na herstart...*
+      - CloudEMS leest de batterijsensoren op — dit duurt meestal 10–30 seconden.
+      - Als dit langer aanhoudt: controleer of de batterijsensor entity beschikbaar is in HA.
+      {%- else -%}
       **Batterij 1** &nbsp;·&nbsp; {{ soc_icon }} {{ soc | round(0) | int if soc else '—' }}% SOC
       - Actie: {{ action or '—' }}
       - Reden: {{ reason or '—' }}
+      {%- endif -%}
       {%- else -%}
       | Batterij | SOC | Status | Vermogen | Actie |
       |---|---|---|---|---|
@@ -4140,7 +4163,7 @@ views:
       {% set s = states('sensor.cloudems_nilm_review_current') %}
       {% set count = state_attr('sensor.cloudems_nilm_review_current', 'pending_count') | int(0) %}
       {% if s == 'none' %}Geen onbesliste apparaten.
-      {% else %}{% set dtype = state_attr('sensor.cloudems_nilm_review_current', 'device_type') or '?' %}{% set pw = state_attr('sensor.cloudems_nilm_review_current', 'power_w') | int(0) %}{% set conf = state_attr('sensor.cloudems_nilm_review_current', 'confidence') | int(0) %}{% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or 'L1' %}{% set ev = state_attr('sensor.cloudems_nilm_review_current', 'on_events') | int(0) %}{{ dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen{% endif %}
+      {% else %}{% set dtype = state_attr('sensor.cloudems_nilm_review_current', 'device_type') or '?' %}{% set pw = state_attr('sensor.cloudems_nilm_review_current', 'power_w') | int(0) %}{% set conf = state_attr('sensor.cloudems_nilm_review_current', 'confidence') | int(0) %}{% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or '?' %}{% set ev = state_attr('sensor.cloudems_nilm_review_current', 'on_events') | int(0) %}{{ dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen{% endif %}
     icon: >-
       {% if states('sensor.cloudems_nilm_review_current') == 'none' %}mdi:check-all{% else %}mdi:help-circle-outline{% endif %}
     icon_color: >-
@@ -4177,6 +4200,19 @@ views:
       card_mod:
         style: |
           ha-card { background: rgba(220,50,50,0.12) !important; border: 1px solid rgba(220,50,50,0.35) !important; border-radius: 14px !important; --primary-text-color: rgb(240,100,100); --paper-item-icon-color: rgb(240,100,100); --card-background-color: transparent; }
+    - type: button
+      name: Weet ik niet
+      icon: mdi:help-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        data:
+          entity_id: button.cloudems_nilm_review_maybe
+      card_mod:
+        style: |
+          ha-card { background: rgba(250,190,40,0.12) !important; border: 1px solid rgba(250,190,40,0.35) !important; border-radius: 14px !important; --primary-text-color: rgb(250,210,80); --paper-item-icon-color: rgb(250,210,80); --card-background-color: transparent; }
     - type: button
       name: Vorige
       icon: mdi:skip-previous-circle
@@ -4383,7 +4419,7 @@ views:
       | Apparaat | W | Fase | Bron | % |
       |----------|---|------|------|---|
       {% for d in active | sort(attribute='power_w', reverse=true) -%}
-      | {{ d.name or d.type }} | {{ d.power_w | int }} | {{ '🔵' if (d.phase or 'L1') == 'L1' else '🟡' if (d.phase or 'L1') == 'L2' else '🟢' if (d.phase or 'L1') == 'L3' else '⚪' }} {{ d.phase or 'L1' }} | {{ '🔌' if (d.source_type or 'nilm') == 'smart_plug' else '🔍' }} | {{ '✅' if (d.source_type or 'nilm') == 'smart_plug' else ('🟢' if d.confidence | int(0) >= 70 else '🟡' if d.confidence | int(0) >= 50 else '🔴') }}{% if (d.source_type or 'nilm') != 'smart_plug' %} {{ d.confidence | int(0) }}%{% endif %} |
+      | {{ d.name or d.type }} | {{ d.power_w | int }} | {{ '🔵' if d.phase == 'L1' else '🟡' if d.phase == 'L2' else '🟢' if d.phase == 'L3' else '⚫' }} {{ d.phase or '?' }} | {{ '🔌' if (d.source_type or 'nilm') == 'smart_plug' else '🔍' }} | {{ '✅' if (d.source_type or 'nilm') == 'smart_plug' else ('🟢' if d.confidence | int(0) >= 70 else '🟡' if d.confidence | int(0) >= 50 else '🔴') }}{% if (d.source_type or 'nilm') != 'smart_plug' %} {{ d.confidence | int(0) }}%{% endif %} |
       {% endfor %}
       {% endif %}
     card_mod:
@@ -4452,13 +4488,10 @@ views:
     name: 📈 Top verbruikers (2u)
     entities:
     - entity: sensor.cloudems_nilm_top_1_device
-      name: 'Nr 1'
       color: 'rgb(231,76,60)'
     - entity: sensor.cloudems_nilm_top_2_device
-      name: 'Nr 2'
       color: 'rgb(243,156,18)'
     - entity: sensor.cloudems_nilm_top_3_device
-      name: 'Nr 3'
       color: 'rgb(52,152,219)'
     hours_to_show: 2
     points_per_hour: 4
@@ -4490,7 +4523,7 @@ views:
       {%- set w = states(entity) | float(0) -%}
       {%- set nm = state_attr(entity, 'name') -%}
       {%- set conf = state_attr(entity, 'confidence') | float(0) -%}
-      {%- set phase = state_attr(entity, 'phase') or 'L1' -%}
+      {%- set phase = state_attr(entity, 'phase') or '?' -%}
       {%- set src = state_attr(entity, 'source') or 'database' -%}
       {%- if states(entity) not in ('unknown','unavailable','none','') and nm and conf >= min_conf and 'atterij' not in nm and top.rows | length < 10 -%}
       {%- set top.rows = top.rows + [{'rank': top.rows | length + 1, 'name': nm, 'w': w, 'conf': conf | round(0) | int, 'phase': phase, 'source': src}] -%}
@@ -4502,7 +4535,7 @@ views:
       | Nr | Apparaat | W | Fase | Bron | % |
       |---|----------|---|------|------|---|
       {% for r in top.rows -%}
-      | **{{ r.rank }}** | {{ r.name }} | {{ r.w | int }} | {{ '🔵' if r.phase == 'L1' else '🟡' if r.phase == 'L2' else '🟢' if r.phase == 'L3' else '⚪' }} {{ r.phase }} | {{ '🔌' if r.source == 'smart_plug' else '🔍' }} | {{ '✅' if r.source == 'smart_plug' else ('🟢' if r.conf >= 70 else '🟡' if r.conf >= 50 else '🔴') }}{% if r.source != 'smart_plug' %} {{ r.conf }}%{% endif %} |
+      | **{{ r.rank }}** | {{ r.name }} | {{ r.w | int }} | {{ '🔵' if r.phase == 'L1' else '🟡' if r.phase == 'L2' else '🟢' if r.phase == 'L3' else '⚫' }} {{ r.phase or '?' }} | {{ '🔌' if r.source == 'smart_plug' else '🔍' }} | {{ '✅' if r.source == 'smart_plug' else ('🟢' if r.conf >= 70 else '🟡' if r.conf >= 50 else '🔴') }}{% if r.source != 'smart_plug' %} {{ r.conf }}%{% endif %} |
       {% endfor %}
       {% endif %}
     card_mod:
@@ -5347,7 +5380,7 @@ views:
       {% set dtype = state_attr('sensor.cloudems_nilm_review_current', 'device_type') or '?' %}
       {% set pw = state_attr('sensor.cloudems_nilm_review_current', 'power_w') | int(0) %}
       {% set conf = state_attr('sensor.cloudems_nilm_review_current', 'confidence') | int(0) %}
-      {% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or 'L1' %}
+      {% set ph = state_attr('sensor.cloudems_nilm_review_current', 'phase') or '?' %}
       {% set ev = state_attr('sensor.cloudems_nilm_review_current', 'on_events') | int(0) %}
       {{ dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen
       {% endif %}
@@ -5408,6 +5441,26 @@ views:
             border-radius: 14px !important;
             --primary-text-color: rgb(240,100,100);
             --paper-item-icon-color: rgb(240,100,100);
+            --card-background-color: transparent;
+          }
+    - type: button
+      name: Weet ik niet
+      icon: mdi:help-circle
+      icon_height: 28px
+      show_state: false
+      tap_action:
+        action: perform-action
+        perform_action: button.press
+        data:
+          entity_id: button.cloudems_nilm_review_maybe
+      card_mod:
+        style: |
+          ha-card {
+            background: rgba(250,190,40,0.12) !important;
+            border: 1px solid rgba(250,190,40,0.35) !important;
+            border-radius: 14px !important;
+            --primary-text-color: rgb(250,210,80);
+            --paper-item-icon-color: rgb(250,210,80);
             --card-background-color: transparent;
           }
     - type: button
@@ -6116,13 +6169,48 @@ views:
           padding: 14px 16px 12px !important;
         }
 
+  - type: thermostat
+    entity: climate.airston_boiler
+    name: "🌡️ Airston Boiler"
+    card_mod:
+      style: |
+        ha-card {
+          background: rgb(34,34,34) !important;
+          border: 1px solid rgba(255,255,255,0.06) !important;
+          border-radius: 16px !important;
+          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
+          --primary-text-color: rgb(255,255,255);
+          --secondary-text-color: rgb(163,163,163);
+          --state-active-color: rgb(255,160,0);
+          --primary-color: rgb(255,160,0);
+          --accent-color: rgb(255,160,0);
+          --card-background-color: transparent;
+          --ha-card-border-color: transparent;
+        }
+        ha-card:hover {
+          border-color: rgba(255,160,0,0.4) !important;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(255,160,0,0.12) !important;
+          transform: translateY(-1px) !important;
+        }
+
   - type: markdown
     title: "📋 Beslissingslog"
     content: |
       {%- set log = state_attr('sensor.cloudems_boiler_status', 'log') or [] -%}
       {%- if log %}
       {%- for entry in log %}
-      `{{ entry[0] }}` — {{ entry[1] }}
+      {%- set ts = entry[0][11:19] %}
+      {%- set msg = entry[1] %}
+      {%- set parts = msg.split(' — ') %}
+      {%- set header = parts[0] if parts|length > 0 else msg %}
+      {%- set reason = parts[1:] | join(' — ') if parts|length > 1 else '' %}
+      {%- set action = 'hold_on' if 'hold_on' in msg else ('turn_on' if 'turn_on' in msg else ('hold_off' if 'hold_off' in msg else '')) %}
+      {%- set icon = '🟢' if action in ['hold_on','turn_on'] else '⚫' %}
+      {{ icon }} **{{ ts }}** &nbsp;·&nbsp; {{ header }}
+      {%- if reason %}
+      <small style="color:var(--secondary-text-color)">↳ {{ reason }}</small>
+      {%- endif %}
+      ---
       {%- endfor %}
       {%- else %}
       _Nog geen beslissingen gelogd._

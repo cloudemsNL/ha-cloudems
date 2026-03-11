@@ -89,8 +89,9 @@ class EnergyPriceFetcher:
         return self._source
 
     @property
-    def current_price(self) -> float:
-        return self._get_current_price() or 0.0
+    def current_price(self) -> Optional[float]:
+        """Huidige spotprijs, of None als geen slot beschikbaar (API fout / overgang)."""
+        return self._get_current_price()
 
     @property
     def min_price_today(self) -> float:

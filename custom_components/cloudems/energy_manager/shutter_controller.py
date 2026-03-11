@@ -395,6 +395,20 @@ class ShutterController:
     ) -> list[ShutterDecision]:
         """Evalueer alle rolluiken en geef beslissingen terug."""
         self._last_evaluation = dt_util.now()
+
+        # v4.5.12: log ontbrekende inputs als waarschuwing zodat ze in de logs zichtbaar zijn.
+        if solar_elevation_deg is None:
+            _LOGGER.warning(
+                "ShutterController: solar_elevation_deg is None — "
+                "koppel sun.sun in de CloudEMS configuratie voor thermische sturing op basis van zonnestand. "
+                "Rolluiken vallen terug op tijdschema."
+            )
+        if outdoor_temp_c is None:
+            _LOGGER.warning(
+                "ShutterController: outdoor_temp_c is None — "
+                "koppel een buitentemperatuursensor in de CloudEMS configuratie. "
+                "Thermisch comfort-sturing is beperkt zonder buitentemperatuur."
+            )
         # Periodiek opslaan (elke 5 minuten) als backup bij crash of harde reboot
         if self._last_timer_save is None or (dt_util.now() - self._last_timer_save).total_seconds() >= 300:
             self._last_timer_save = dt_util.now()

@@ -865,7 +865,10 @@ class NotificationEngine:
                 continue
             hours = [datetime.fromtimestamp(t, tz=timezone.utc).hour for t in history]
             from collections import Counter
-            most_common_h, count = Counter(hours).most_common(1)[0]
+            _most_common = Counter(hours).most_common(1)
+            if not _most_common:
+                continue
+            most_common_h, count = _most_common[0]
             result.append({
                 "key":          key,
                 "trigger_count": len(history),

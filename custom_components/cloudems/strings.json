@@ -59,7 +59,7 @@
       },
       "grid_sensors": {
         "title": "🔌 Grid sensors",
-        "description": "CloudEMS detected **{detected}** sensor(s) automatically.\n\n**Net sensor:** Use a single sensor reporting net grid power (positive = import).\n**Separate import / export:** Use this if your integration reports them as two sensors.\n\nThe fallback voltage ({mains_voltage} V) is used to calculate power from current (P = V × I) when no direct power sensor is available.\n\n![]({diagram_url})",
+        "description": "CloudEMS automatically found **{detected}** sensor(s) in your HA installation.\n\n**Grid sensor (required):** One sensor measuring total grid power in W or kW. Positive = importing power, negative = exporting.\n\n**Separate import/export:** Some integrations deliver import and export as two separate positive sensors. Choose this if your meter doesn't show negative values during export.\n\n💡 **Tip:** Using a P1 reader (P1 Dongle, Homewizard, SLIMMELEZER)? Look for a sensor named something like `sensor.p1_power` or `sensor.net_power`.\n\n![]({diagram_url})",
         "data": {
           "use_separate_import_export": "Use separate import and export sensors",
           "grid_sensor": "Net power sensor (W or kW)",
@@ -581,7 +581,7 @@
       },
       "batteries_opts": {
         "title": "🔋 Step 1: How many batteries?",
-        "description": "How many batteries do you want CloudEMS to manage?\n\nIn the next step you choose the type per battery: ⚡ **Zonneplan Nexus** (managed automatically) or 🔧 **Manual** (own SOC sensor + switch).",
+        "description": "Current battery count: **{current_count}**. {battery_names}\n\nIn the next step, choose the type per battery: ⚡ **Zonneplan Nexus** (automatically managed) or 🔧 **Manual** (own SOC sensor + switch).",
         "data": {
           "battery_count": "Number of batteries"
         },
@@ -596,7 +596,7 @@
       },
       "battery_detail_opts": {
         "title": "🔧 Battery {battery_num} of {total} — Manual sensors",
-        "description": "Connect sensors for this battery. The power sensor is required; other fields are optional but improve control accuracy.",
+        "description": "Configure battery **{battery_num}**.\n\nLeave capacity and power at 0 — CloudEMS will self-learn them.",
         "data": {
           "bat_power_sensor": "Power sensor (W, positive=charging)",
           "bat_soc_sensor": "State of charge sensor (%, optional)",
@@ -615,7 +615,7 @@
       },
       "prices_opts": {
         "title": "💶 Prijzen — Land",
-        "description": "{info}",
+        "description": "Kies je land. De beschikbare leveranciers worden hierop aangepast.",
         "data": {
           "energy_prices_country": "Land"
         }
@@ -727,7 +727,7 @@
       },
       "cheap_switches_opts": {
         "title": "⚡ Cheap Hours Switches",
-        "description": "Link up to 4 switches to the cheapest electricity block. CloudEMS turns them ON when the cheap window starts. Leave a slot empty to skip it.",
+        "description": "![]({diagram_url})\n\nCloudEMS automatically turns each switch **ON** when the cheapest electricity block starts — never OFF (you control that yourself or via automation).\n\n**Examples:** boiler, tumble dryer, water pump, garden lights, EV charger without smart charging.\n\n---\n\nYou currently have **{current_count}** switch(es) configured.\n\nChoose how many switches you want to set up *(0 = disable)*.",
         "data": {
           "slot1_entity": "Slot 1 — switch",
           "slot1_window": "Slot 1 — window size",
@@ -802,7 +802,7 @@
       },
       "boiler_group_edit": {
         "title": "✏️ Groep bewerken: {group_name}",
-        "description": "Pas de naam of modus aan van deze cascade-groep.",
+        "description": "**Boilers in this group ({unit_count}):**\n{units_summary}\nChange name, mode or manage boilers.",
         "data": {
           "bg_name": "Naam van de groep",
           "bg_mode": "Cascade modus"
@@ -810,7 +810,7 @@
       },
       "boiler_group_unit": {
         "title": "🚿 Boiler {unit_num} van {total} — {group_name}",
-        "description": "Koppel een HA-entiteit aan deze boiler-positie. Ondersteunde types: switch, climate, water_heater, number.",
+        "description": "Link the HA entity for boiler {unit_num} of {total} in group '{group_name}'.\n\n**💡 Target temperature:** during PV surplus, CloudEMS automatically uses the maximum setpoint to store solar energy.\n\n**⚡ Power:** learned automatically from the energy sensor.",
         "data": {
           "bu_entity": "Boiler entiteit",
           "bu_temp_sensor": "Temperatuursensor (optioneel)",

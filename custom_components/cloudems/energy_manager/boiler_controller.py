@@ -759,6 +759,23 @@ class BoilerController:
     async def _evaluate_single(self, b, price_info, solar_surplus_w,
                                 phase_currents, surplus_threshold_w, export_threshold_a):
         now     = time.time()
+
+        # v4.5.12: controleer of entiteit beschikbaar is — unavailable = geen sturing, wel loggen.
+        _state = self._hass.states.get(b.entity_id)
+        if _state is None or _state.state in ("unavailable", "unknown"):
+            _LOGGER.warning(
+                "BoilerController [%s]: entiteit '%s' is %s — sturing overgeslagen. "
+                "Controleer of de entiteit correct geconfigureerd is in HA.",
+                b.label, b.entity_id,
+                "niet gevonden" if _state is None else _state.state,
+            )
+            return BoilerDecision(
+                entity_id=b.entity_id, label=b.label,
+                action="hold_off",
+                reason=f"entiteit {b.entity_id} {'niet gevonden' if _state is None else _state.state}",
+                current_state=False,
+            )
+
         is_on   = self._is_on(b.entity_id, b)
         want_on = False
         reason  = ""
@@ -882,7 +899,12 @@ class BoilerController:
             if active is None:
                 tag    = " [geleerd]" if delivery_eid else " [standaard]"
                 suffix = f" [levering{tag}]" if b.is_delivery else ""
-                reason = f"seq{suffix}: {b.temp_deficit_c:.1f}°C onder setpoint"
+                # v4.5.15: toon duidelijke reden als temperatuursensor ontbreekt
+                # (ook na climate + vermogensfallback — dan is er echt niets)
+                if b.current_temp_c is None:
+                    reason = f"seq{suffix}: geen temperatuursensor (ook geen climate/vermogen) — trigger actief"
+                else:
+                    reason = f"seq{suffix}: {b.temp_deficit_c:.1f}°C onder setpoint"
                 action = self._apply_timers(b, True, is_on, now, reason)
                 if action == "turn_on":
                     await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
@@ -962,6 +984,29 @@ class BoilerController:
                         b.current_temp_c = float(s.state)
                     except (ValueError, TypeError):
                         pass
+
+            # v4.5.15: als temp_sensor leeg of onleesbaar is, probeer temperatuur
+            # te lezen uit de boiler-entiteit zelf als het een climate.* is.
+            # Ariston (en andere) leveren current_temperature via het climate-platform.
+            if b.current_temp_c is None:
+                _boiler_state = self._hass.states.get(b.entity_id)
+                if _boiler_state:
+                    _cur_t = _boiler_state.attributes.get("current_temperature")
+                    if _cur_t is not None:
+                        try:
+                            b.current_temp_c = float(_cur_t)
+                        except (ValueError, TypeError):
+                            pass
+
+            # v4.5.15: als er nog steeds geen temperatuursensor is, gebruik het
+            # gemeten vermogen als proxy: als de boiler aan is maar <50W trekt,
+            # is hij waarschijnlijk al op temperatuur (thermostaat heeft afgesloten).
+            # Zet current_temp_c dan op setpoint zodat needs_heat = False.
+            if b.current_temp_c is None and b.current_power_w is not None:
+                _is_on = self._is_on(b.entity_id, b)
+                if _is_on and b.current_power_w < 50 and b.power_w > 100:
+                    # Boiler staat logisch aan maar trekt geen vermogen → al op temp
+                    b.current_temp_c = b.setpoint_c  # voorkomt onnodige trigger
 
             if b.energy_sensor:
                 s = self._hass.states.get(b.energy_sensor)

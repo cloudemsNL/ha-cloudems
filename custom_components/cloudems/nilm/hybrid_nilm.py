@@ -253,6 +253,12 @@ class HybridNILM:
                 "energiemeter", "energy meter", "uurprijs", "stroom tegen",
                 "connect energi", "elektriciteitsverbruik", "elektriciteitsproductie",
                 "elektriciteitsgemiddelde", "huidig verbruik", "kwh meter",
+                # v4.5.12: PV/productie-sensoren die als smart plug kunnen binnenkomen
+                "energieproductie", "energie productie", "geschatte productie",
+                "geschatte energieproductie", "pv productie", "pv-productie",
+                "solar productie", "solar production", "pv opbrengst",
+                "omvormer vermogen", "vermogen omvormer", "ac output", "dc output",
+                "solar yield", "pv yield",
             )
             stale_infra = [
                 eid for eid, anchor in self._anchors.items()
@@ -493,6 +499,28 @@ class HybridNILM:
 
     def get_anchored_devices(self) -> List[dict]:
         """Geeft actieve anker-apparaten terug als NILM-device-dicts (100% confidence)."""
+        # v4.5.12: infra-filter — omvormers/netmeters die als smart_plug binnenkomen
+        # mogen nooit in de NILM-apparatenlijst verschijnen.
+        _INFRA_KW = (
+            "energieproductie", "energieverbruik", "electricity meter",
+            "geschatte energieproductie", "geschatte productie",
+            "output power", "ac output", "dc output",
+            "pv opbrengst", "solar yield", "pv yield",
+        )
+        _INFRA_STARTS = (
+            "electricity", "growatt", "goodwe", "solaredge", "solarman",
+            "fronius", "enphase", "solis", "deye", "huawei solar",
+        )
+        def _is_infra(name: str) -> bool:
+            n = name.lower().strip()
+            if any(kw in n for kw in _INFRA_KW):
+                return True
+            if any(n.startswith(s) for s in _INFRA_STARTS):
+                return True
+            if "meter" in n and any(w in n for w in ("verbruik", "productie", "energy")):
+                return True
+            return False
+
         return [
             {
                 "device_id":     f"__hybrid_{a.plug_id}__",
@@ -513,7 +541,7 @@ class HybridNILM:
                 "source_entity_id": a.entity_id,   # v1.20: room meter area lookup
             }
             for a in self._anchors.values()
-            if not a.is_stale
+            if not a.is_stale and not _is_infra(a.name)
         ]
 
     def get_anchored_power_per_phase(self) -> Dict[str, float]:

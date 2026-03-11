@@ -304,6 +304,9 @@ class SignalPresenceLayer:
         self._overrides:  list[dict] = manual_overrides or []
         self._pir_last_on: dict[str, float] = {}   # entity_id → laatste activatie timestamp
         self._setup_done: bool = False
+        # v4.5.6: zelflerend drempel per afstandssensor
+        self._dist_samples:     dict[str, dict] = {}   # eid → {home:[float], away:[float]}
+        self._dist_ground_truth: dict[str, bool] = {}  # eid → bool (gevoed door tracker-verdict)
 
     async def async_setup(self, hass: "HomeAssistant") -> None:
         """Scan de HA registry en bouw de signaallijst op."""
@@ -467,9 +470,16 @@ class SignalPresenceLayer:
                 detail_parts.append(f"{naam}✅")
                 if sig.persoon:
                     personen_thuis.append(sig.persoon)
+                # v4.5.6: tracker/binary geeft ground-truth voor afstandssensoren
+                if sig.signaal_type in ("tracker", "binary_home"):
+                    for eid in self._dist_samples:
+                        self._dist_ground_truth[eid] = True
             else:
                 score_weg += eff_weight
                 detail_parts.append(f"{naam}❌")
+                if sig.signaal_type in ("tracker", "binary_home"):
+                    for eid in self._dist_samples:
+                        self._dist_ground_truth[eid] = False
 
         if total_weight < 0.1:
             return AanwezigheidAdvies(
@@ -555,14 +565,40 @@ class SignalPresenceLayer:
         if stype == "distance":
             try:
                 dist = float(state_str)
-                # Drempelwaarden worden niet hardcoded maar geleerd uit distributie
-                # Initieel: < 15m = thuis, > 30m = weg
-                # TODO: zelflerend drempel per apparaat
-                if dist <= 15.0:
+                # v4.5.6: zelflerend drempel per entiteit
+                # Bijhouden van home/away distributies via percentiel-schatting
+                eid = sig.entity_id
+                samples = self._dist_samples.setdefault(eid, {"home": [], "away": []})
+                # Gebruik gevalideerde tracker-status als label indien beschikbaar
+                label = self._dist_ground_truth.get(eid)
+                if label is True:
+                    samples["home"].append(dist)
+                    if len(samples["home"]) > 200:
+                        samples["home"] = samples["home"][-200:]
+                elif label is False:
+                    samples["away"].append(dist)
+                    if len(samples["away"]) > 200:
+                        samples["away"] = samples["away"][-200:]
+                # Bereken geleerde drempels als er genoeg data is
+                thuis_drempel = 15.0
+                weg_drempel   = 30.0
+                if len(samples["home"]) >= 10 and len(samples["away"]) >= 10:
+                    home_sorted  = sorted(samples["home"])
+                    away_sorted  = sorted(samples["away"])
+                    # Thuis-drempel: 90e percentiel van home-distributies
+                    thuis_drempel = home_sorted[int(len(home_sorted) * 0.90)]
+                    # Weg-drempel: 10e percentiel van away-distributies
+                    weg_drempel   = away_sorted[int(len(away_sorted) * 0.10)]
+                    # Zorg dat drempels logisch blijven
+                    if thuis_drempel >= weg_drempel:
+                        midden = (thuis_drempel + weg_drempel) / 2
+                        thuis_drempel = midden * 0.8
+                        weg_drempel   = midden * 1.2
+                if dist <= thuis_drempel:
                     return True
-                if dist >= 30.0:
+                if dist >= weg_drempel:
                     return False
-                return None   # tussenzone: geen oordeel
+                return None  # tussenzone
             except (ValueError, TypeError):
                 return None
 
@@ -821,16 +857,70 @@ class LearnedPresenceLayer:
         b["score"]   = self._ALPHA * (1.0 if is_thuis else 0.0) + (1 - self._ALPHA) * b["score"]
         b["samples"] = min(b["samples"] + 1, 9999)
 
+    def _nearest_score(self, weekday: int, hour: int) -> tuple[float, int, str]:
+        """Zoek de dichtstbijzijnde betrouwbare bucket als fallback voor lege buckets.
+
+        Prioriteit: zelfde weekdag (nabijgelegen uren) → zelfde uurtype (ma-vr/weekend) → globaal gemiddelde.
+        Geeft (score, samples, beschrijving) terug.
+        """
+        # 1. Zelfde weekdag, uitbreidend zoeken in uren (max ±3 uur)
+        for delta in range(1, 4):
+            for h_off in (delta, -delta):
+                nb_h = (hour + h_off) % 24
+                nb = self._buckets.get((weekday, nb_h))
+                if nb and nb["samples"] >= self._MIN_SAMPLES:
+                    dagen = ["ma","di","wo","do","vr","za","zo"]
+                    return nb["score"], nb["samples"], f"nabij {dagen[weekday]} {nb_h}:00"
+
+        # 2. Zelfde uurtype op andere dagen (werkdag/weekend)
+        is_weekend = weekday >= 5
+        same_type  = [5, 6] if is_weekend else [0, 1, 2, 3, 4]
+        scores = []
+        for wd in same_type:
+            b = self._buckets.get((wd, hour))
+            if b and b["samples"] >= self._MIN_SAMPLES:
+                scores.append(b["score"])
+        if scores:
+            avg = sum(scores) / len(scores)
+            label = "weekend" if is_weekend else "werkdagen"
+            return avg, len(scores) * self._MIN_SAMPLES, f"gemiddelde {label} {hour}:00"
+
+        # 3. Globaal gemiddelde over alle betrouwbare buckets
+        all_scores = [v["score"] for v in self._buckets.values() if v["samples"] >= self._MIN_SAMPLES]
+        if all_scores:
+            return sum(all_scores) / len(all_scores), len(all_scores), "globaal gemiddelde"
+
+        return 0.5, 0, "geen data"
+
     def evaluate(self, now: Optional[datetime] = None) -> AanwezigheidAdvies:
         if now is None:
             now = datetime.now(timezone.utc)
         key   = (now.weekday(), now.hour)
         b     = self._buckets.get(key)
 
+        # v4.5.6: als deze bucket onvoldoende data heeft, val terug op dichtstbijzijnde
+        # betrouwbare bucket in plaats van ONBEKEND te retourneren.
         if b is None or b["samples"] < self._MIN_SAMPLES:
+            fb_score, fb_n, fb_desc = self._nearest_score(now.weekday(), now.hour)
+            cur_n = b["samples"] if b else 0
+            if fb_n > 0:
+                # Geef lagere confidence omdat het een schatting is
+                fb_confidence = round(min(0.55, 0.2 + abs(fb_score - 0.5) * 0.7), 2)
+                if fb_score >= self._THUIS_DREMPEL:
+                    return AanwezigheidAdvies(
+                        Aanwezigheid.THUIS, "geleerd",
+                        f"Schatting op basis van {fb_desc} ({cur_n}/{self._MIN_SAMPLES} metingen dit uur)",
+                        confidence=fb_confidence,
+                    )
+                if fb_score <= self._WEG_DREMPEL:
+                    return AanwezigheidAdvies(
+                        Aanwezigheid.WEG, "geleerd",
+                        f"Schatting op basis van {fb_desc} ({cur_n}/{self._MIN_SAMPLES} metingen dit uur)",
+                        confidence=fb_confidence,
+                    )
             return AanwezigheidAdvies(
                 Aanwezigheid.ONBEKEND, "geleerd",
-                f"Nog te weinig data ({b['samples'] if b else 0}/{self._MIN_SAMPLES} metingen)",
+                f"Nog te weinig data ({cur_n}/{self._MIN_SAMPLES} metingen)",
             )
 
         score = b["score"]

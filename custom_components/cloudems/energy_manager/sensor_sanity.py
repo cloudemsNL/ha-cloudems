@@ -179,7 +179,9 @@ class SensorSanityGuard:
                         f"  template: '{{{{ states(\"{eid}\") | float * 1000 }}}}'",
                         val, "W (bijv. 1500, niet 1.5)"))
 
-        # 3. Spike vs own history
+        # 3. Spike vs own history — alleen voor sensoren zonder grote batterij-context
+        # Grid mag grote sprongen maken als batterij/EV ook een grote stap maakt
+        _batt_abs = abs(battery_w) if battery_w is not None else 0.0
         for name, eid, val in [("grid", grid_eid, grid_w), ("solar", solar_eid, solar_w)]:
             if val is None:
                 continue
@@ -197,11 +199,18 @@ class SensorSanityGuard:
                 self._learned_means[eid] = (0.05 * mean + 0.95 * prev) if prev else mean
                 self._dirty = True
                 if mean > 10 and abs(val) > mean * SPIKE_RATIO:
-                    checks.append((f"{name}_spike", "warning", eid, name,
-                        f"Uitschieter gedetecteerd op {eid!r}: {val:.0f} W terwijl gemiddelde {mean:.0f} W is.",
-                        f"Kan een cloud-sensor zijn die meerdere minuten niet geüpdateerd heeft. "
-                        f"Overweeg CloudEMS te herstarten als dit aanhoudt.",
-                        val, f"< {mean * SPIKE_RATIO:.0f} W"))
+                    # v4.5.6: geen spike-waarschuwing als de sprong verklaard wordt
+                    # door een gelijktijdige grote batterij- of EV-verandering
+                    spike_explained = (
+                        name == "grid"
+                        and _batt_abs > mean * 0.5  # batterij is significant actief
+                    )
+                    if not spike_explained:
+                        checks.append((f"{name}_spike", "warning", eid, name,
+                            f"Uitschieter gedetecteerd op {eid!r}: {val:.0f} W terwijl gemiddelde {mean:.0f} W is.",
+                            f"Kan een cloud-sensor zijn die meerdere minuten niet geüpdateerd heeft. "
+                            f"Overweeg CloudEMS te herstarten als dit aanhoudt.",
+                            val, f"< {mean * SPIKE_RATIO:.0f} W"))
 
         # 4. Energy conservation: large export but no sun and no battery
         if (grid_w is not None and grid_w < -1000

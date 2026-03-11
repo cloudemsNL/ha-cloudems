@@ -438,6 +438,15 @@ class SmartSensorDiscovery:
         "huidig verbruik", "huidig_verbruik",
         "net_power", "net power", "grid_power",
         "kwh_meter", "kwh meter",
+        # v4.5.12: PV / zonne-productie sensors — nooit als verbruiker registreren
+        "energieproductie", "energie productie",
+        "geschatte energieproductie", "geschatte productie",
+        "pv productie", "pv-productie", "pv_productie",
+        "solar productie", "solar production",
+        "estimated production", "geschatte opbrengst",
+        "ac output", "dc output", "ac_output", "dc_input",
+        "vermogen omvormer", "omvormer vermogen",
+        "solar yield", "pv yield", "pv opbrengst",
     )
 
     def _classify_plug(self, entity_id: str, attrs: dict) -> Optional[DiscoveredPlug]:

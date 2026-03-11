@@ -306,19 +306,58 @@ class SystemGuardian:
     def _check_sensors(self, data: dict, now: float) -> None:
         """Controleer kritieke sensoren op unavailable en stuck-waarden."""
 
+        # v4.5.11: onderscheid tussen "niet geconfigureerd" en "tijdelijk geen data"
+        # Voorheen stond er altijd "Controleer de sensor-configuratie" — maar als
+        # de sensor gewoon even unavailable is (bijv. na herstart of bij cloudstoring)
+        # is dat misleidend. We kijken nu of er een entity geconfigureerd is.
+        cfg = getattr(self, "_config", {})
         critical = {
-            "grid_power":    "Net-vermogen sensor",
-            "pv_power":      "PV-opbrengst sensor",
+            "grid_power": {
+                "label":       "Net-vermogen sensor",
+                "config_keys": ["grid_sensor", "p1_sensor"],
+            },
+            "pv_power": {
+                "label":       "PV-opbrengst sensor",
+                "config_keys": ["solar_sensor", "inverter_configs"],
+            },
         }
-        for key, label in critical.items():
+        for key, meta in critical.items():
+            label = meta["label"]
             val = data.get(key)
             if val is None:
+                # Bepaal of er überhaupt een sensor geconfigureerd is
+                _is_configured = any(
+                    cfg.get(ck) for ck in meta["config_keys"]
+                )
+                if not _is_configured:
+                    # Sensor staat helemaal niet ingesteld
+                    _msg = (
+                        f"Er is geen sensor ingesteld voor '{key}'. "
+                        f"Ga naar de CloudEMS configuratie en stel de juiste "
+                        f"sensor in onder Energiemeting."
+                    )
+                    _title = f"{label} — niet geconfigureerd"
+                else:
+                    # Geconfigureerd maar levert nu geen waarde
+                    # Kan tijdelijk zijn (herstart, integratie offline, cloudstoring)
+                    _uptime_s = data.get("uptime_s", 0) or 0
+                    if _uptime_s < 120:
+                        # Binnen 2 min na opstart: niet meteen alarmeren
+                        self._resolve(f"sensor:{key}:missing")
+                        continue
+                    _msg = (
+                        f"Sensor voor '{key}' is geconfigureerd maar levert "
+                        f"momenteel geen waarde. Dit kan tijdelijk zijn na een "
+                        f"herstart of bij een integratie-storing. "
+                        f"Als dit langer dan enkele minuten aanhoudt: "
+                        f"controleer of de sensor entiteit beschikbaar is in HA."
+                    )
+                    _title = f"{label} — tijdelijk geen data"
                 self._raise_issue(
                     key     = f"sensor:{key}:missing",
-                    level   = "error",
-                    title   = f"{label} — geen data",
-                    message = (f"Sensor '{key}' levert geen waarde. "
-                               f"Controleer de sensor-configuratie."),
+                    level   = "error" if not _is_configured else "warning",
+                    title   = _title,
+                    message = _msg,
                     action  = "notify",
                     source  = "sensor",
                 )

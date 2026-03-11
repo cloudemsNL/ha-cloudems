@@ -2,6 +2,214 @@
 
 Alle noemenswaardige wijzigingen per versie.
 
+## [4.5.14] — 2026-03-11
+
+### Opgelost — NILM: 3-fase thuisbatterij veroorzaakt geen duplicaten meer
+
+- **battery_overlap lus-bug** (`detector.py`):
+  Apparaten met ≥2 on-events worden niet meer verwijderd door de battery_overlap check.
+  Voorheen werd een echte warmtepomp (3300W op L2) elke 10 seconden verwijderd en
+  opnieuw aangemaakt omdat de batterij toevallig tegelijk van vermogen wisselde.
+  Overlap-ratio versmald van 30–170% naar 60–140% voor striktere matching.
+
+- **3-fase batterij edge-suppressie** (`detector.py`):
+  Bij grote batterij-transities (>2kW) worden NILM-edges die overeenkomen met
+  1/3 of 2/3 van het batterijvermogen nu ook geblokkeerd. Dit vangt de per-fase
+  distributie van een 3-fase thuisbatterij op (bijv. 7.4kW laden → ~2.5kW per fase).
+
+## [4.5.14] — 2026-03-11
+
+### Opgelost — NILM: 3-fase apparaten + warmtepomp duplicaten
+
+**3-fase herkenning (database.py, detector.py):**
+- Nieuw `three_phase=True` vlag op `ApplianceSignature` — apparaten die hun vermogen
+  over 3 fasen verdelen worden nu gematcht op het **totaalvermogen** (huis_w),
+  niet op de per-fase delta (die bij `total_split` slechts 1/3 van het werkelijke
+  vermogen is). Hierdoor werden een 7kW warmtepomp en 7kW batterijlading
+  ten onrechte als "Elektrische boiler 3kW" op L2 gelabeld.
+- Nieuwe 3-fase profielen toegevoegd:
+  - `heat_pump`: Lucht-WP 3-fase 6/9/12kW, Bodem-WP 3-fase 8/12kW
+  - `ev_charger`: EV 3-fase 11kW en 22kW voorzien van `three_phase=True`
+  - `home_battery`: Thuisbatterij laden 3/5/6/7/10kW (worden direct gefilterd
+    uit apparatenlijst — alleen voor correcte labeling intern)
+- `set_infra_powers()` leidt nu het totale huisvermogen af uit grid+solar+battery
+  en slaat dit op als `_last_house_power_w` voor gebruik bij classify().
+- `classify()` krijgt `total_power_w` parameter mee.
+
+**Warmtepomp duplicaten (detector.py):**
+- `_handle_match()`: bij een on-event wordt nu ook gezocht naar een bestaand
+  apparaat van hetzelfde type dat al `is_on=True` staat met vergelijkbaar
+  vermogen (±40%), ongeacht de fase. Bij `total_split` schommelt het per-fase
+  signaal waardoor steeds opnieuw een positieve delta zichtbaar was en een
+  nieuw apparaat werd aangemaakt (7 IDs in 3 minuten voor dezelfde warmtepomp).
+
+## [4.5.13] — 2026-03-11
+
+### Opgelost — NILM: omvormers en netmeters niet meer als verbruiker
+
+- **Smart plug bypass verwijderd** (`detector.py`, `hybrid_nilm.py`, `smart_sensor_discovery.py`):
+  apparaten met `source="smart_plug"` werden volledig vrijgesteld van de infra-naam-filter.
+  Hierdoor verschenen PV-omvormers ("Growatt Oost Output Power"), netmeters
+  ("Electricity Meter Energieverbruik") en geschatte productiesensoren
+  ("Thuis - West- PV1 Geschatte energieproductie") ten onrechte als verbruiker in NILM.
+
+  Drie lagen gefixed:
+  1. `get_anchored_devices()` in `hybrid_nilm.py` filtert nu infra-ankernamen vóór output.
+  2. `_is_infra_name()` in `detector.py` controleert smart_plug apparaten op de meest
+     ondubbelzinnige infra-termen (energieproductie, output power, electricity, growatt, etc.).
+  3. `_EXCLUDE_SUBSTRINGS` in `smart_sensor_discovery.py` uitgebreid met PV-productietermen
+     zodat ze ook bij ontdekking al worden tegengehouden.
+  4. `_INFRA_SUBS` in `hybrid_nilm.py` uitgebreid met dezelfde termen voor purge van
+     reeds geregistreerde infra-ankers.
+
+## [4.5.12] — 2026-03-11
+
+### Gewijzigd — NILM: bij twijfel niet detecteren, meer zelflerend
+
+- **Hogere confidence-drempels** (`const.py`): `NILM_MIN_CONFIDENCE` verhoogd van 0.55 → 0.75,
+  `NILM_HIGH_CONFIDENCE` van 0.80 → 0.92. Bij twijfel wordt een event nooit als nieuw apparaat
+  opgeslagen — de unsupervised clusterer verzamelt het event en vraagt de gebruiker om
+  bevestiging zodra er genoeg bewijs is.
+
+- **Database minimale match-drempel omhoog** (`database.py`): `confidence >= 0.45` verhoogd
+  naar `>= 0.60`. Zachte-zone partial matches die nét boven 0.45 uitkomen zijn te onzeker
+  om aan de detector terug te geven.
+
+- **Type `unknown` krijgt niche-cap** (`database.py`): loopband, stofzuiger, strijkijzer
+  en andere vage `unknown`-types worden nooit automatisch gedetecteerd (cap 0.55 < 0.75).
+  Ze landen in de clusterer en verschijnen pas na gebruikersbevestiging.
+
+- **Alle nieuwe apparaten starten als `pending`** (`detector.py`): was alleen `pending`
+  bij confidence < `NILM_HIGH_CONFIDENCE`, nu altijd. Een apparaat is pas zichtbaar
+  op het dashboard als het voldoende herhaalde detecties heeft én de steady-state
+  validatie doorstaat.
+
+- **Striktere steady-state validatie** (`detector.py`): delay terug naar 35 s (was 20 s),
+  minimale stijging van 40 % → 55 % van verwacht vermogen.
+
+- **Meer herhalingen vereist voor zichtbaarheid** (`detector.py`): `MIN_ON_EVENTS_DEFAULT`
+  verhoogd van 2 → 3, type `unknown` vereist 5 events (nieuw), `kitchen` 5, `garden` 6,
+  `power_tool` 8.
+
+- **Clusterer strenger** (`unsupervised_cluster.py`): suggestie pas na 8 events (was 5),
+  cluster-eps strikter (W: 150 → 120, duur: 180 s → 150 s).
+
+- **Auto-confirm vereist meer bewijs** (`power_learner.py`): minimale detecties 5 → 8,
+  confidence-drempel 0.90 → 0.92.
+
+### Opgelost
+
+- **Boiler: `is_on=null` bij unavailable entiteit** (`boiler_controller.py`): wanneer
+  `water_heater.boiler` (of andere boiler-entiteit) de status `unavailable` of `unknown`
+  heeft, wordt sturing nu overgeslagen met een duidelijke `WARNING` in de logs.
+  Voorheen veroorzaakte dit stille beslissingen met `is_on=None` die misleidend waren.
+
+- **Rolluiken: ontbrekende sensoren geven nu duidelijke waarschuwing** (`shutter_controller.py`):
+  als `solar_elevation_deg` of `outdoor_temp_c` niet beschikbaar is (geen `sun.sun` of
+  buitentemperatuursensor gekoppeld), wordt een `WARNING` gelogd met instructie hoe te
+  koppelen. Eerder was dit alleen zichtbaar als `null` in beslissings-payloads.
+
+- **Batterij: SoC=None geeft nu duidelijke waarschuwing** (`battery_decision_engine.py`):
+  als geen SoC-sensor gekoppeld is aan de batterijconfiguratie, wordt een `WARNING`
+  gelogd. Batterijsturing werkt dan zonder laadtoestand, wat suboptimaal is.
+
+
+
+### Opgelost
+
+- **Batterij providers tabel: vertraging niet zichtbaar** (`www/cloudems-dashboard.yaml`):
+  de geleerde grid→batterij vertraging (`battery_lag_s`) en het update-interval waren
+  beschikbaar in de sensordata maar ontbraken in de markdowntabel. Twee nieuwe kolommen
+  toegevoegd: **Interval** (updatefrequentie, oranje bij stale) en **Vertraging**
+  (geleerde lag in seconden met confidence-%, of leervoortgang als nog lerend).
+
+## [4.5.11] — 2026-03-11
+
+### Opgelost
+
+- **Batterijsensor altijd "stale" bij constante waarde** (`energy_balancer.py`): de
+  `_SensorTracker` markeerde een sensor als stale zodra de *waarde* gedurende >25 s niet
+  veranderde — ook al kwamen er gewoon elke 10 s updates binnen. Dit trad op wanneer de
+  batterij op een vast vermogen bleef (bijv. -590 W nacht-limiet). De balancer schatte de
+  batterij dan via Kirchhoff op ~+1100 W (onjuist teken!), wat leidde tot aanhoudende
+  `balancer_anomaly`-meldingen en een fout berekend huisverbruik. Opgelost door
+  `last_update_ts` (elke `update()`-aanroep) te scheiden van `last_change_ts` (alleen bij
+  waarde-wijziging); `is_stale()` gebruikt nu `last_update_ts`.
+
+- **Prijs-waarschuwing bij ontbrekende belasting/BTW-configuratie** (`coordinator.py`):
+  wanneer EPEX spotprijs actief is maar energiebelasting én BTW allebei **niet** zijn
+  aangevinkt in de wizard, wordt nu een `price_anomaly`-entry in het high-log geschreven
+  met de reden en de geschatte werkelijke prijs. Zo is direct zichtbaar wanneer CloudEMS
+  met enkel de EPEX-spotprijs rekent (€0.07/kWh) in plaats van de all-in prijs (~€0.24/kWh).
+
+- **Sensor-hints dubbel gelogd bij opstarten** (`coordinator.py`): wanneer de coordinator
+  snel na elkaar twee cycli uitvoerde bij het opstarten, werden actieve hints (bijv.
+  "spanningssensor ontbreekt") tot 4× gelogd. Opgelost door per hint_id bij te houden
+  wanneer hij voor het laatst gelogd werd; herlogs binnen 1 uur worden overgeslagen.
+
+## [4.5.11] — 2026-03-11
+
+### Opgelost
+
+- **`balancer_anomaly` spam elke 10s in high.log** (`coordinator.py`): Bij gebruik van de
+  legacy `battery_sensor` (enkelvoudig, zonder `battery_configs`) werd de reconcile-pre-read
+  overgeslagen. De `EnergyBalancer` ontving `battery_w=None` op de eerste cyclus, markeerde
+  de batterij-tracker als stale, en berekende via Kirchhoff een positieve batterijwaarde
+  (~+1100W) die een imbalans van >1500W veroorzaakte. Fix: de pre-read leest nu ook
+  `CONF_BATTERY_SENSOR` als `battery_configs` leeg is.
+- **Boiler reden "0.0°C onder setpoint" bij ontbrekende temperatuursensor**
+  (`boiler_controller.py`): Wanneer `current_temp_c is None` (sensor ontbreekt of entity
+  bestaat niet) gaf `temp_deficit_c` altijd `0.0` terug, wat de misleidende beslissingsreden
+  `"seq [...]: 0.0°C onder setpoint"` opleverde. Fix: duidelijke reden
+  `"seq [...]: geen temperatuursensor — trigger actief"`.
+
+## [4.5.11] — 2026-03-11
+
+### Opgelost
+
+- **Versie in elke logregel** (`learning_backup.py`): elke regel in `cloudems_normal.log`,
+  `cloudems_high.log` en `cloudems_decisions.log` bevat nu `"_v": "4.5.11"` zodat bij
+  troubleshooting direct duidelijk is welke versie de log produceerde.
+- **Startup-samenvatting met versie + actieve modules** (`coordinator.py`): bij elke start
+  verschijnt nu in de HA-log én in `cloudems_high.log` een regel als:
+  `CloudEMS v4.5.11 gestart — actieve modules: NILM, Boiler, GasAnalysis, PhaseBalancer`
+- **Uitgeschakelde modules niet meer als INFO loggen** (`coordinator.py`): NILM motor, 
+  HybridNILM, Bayesian, HMM toestand "UIT" gaat nu naar DEBUG in plaats van INFO,
+  zodat de logboeken niet vol staan met meldingen over modules die niet actief zijn.
+
+## [4.5.10] — 2026-03-11
+
+### Opgelost
+
+- **`dashboards_collection` waarschuwing bij opstarten** (`__init__.py`): niet-kritieke melding
+  dat het Lovelace-dashboard niet automatisch aangemaakt kon worden, gepromoveerd van WARNING
+  naar DEBUG. Verschijnt alleen bij expliciete debug-logging.
+- **PhaseBalancer imbalance als WARNING** (`phase_balancer.py`): fase-onbalans is normaal
+  gedrag dat de balancer zelf afhandelt — niveau verlaagd van WARNING naar INFO.
+- **Ontbrekende NILM-vertalingen niet zichtbaar** (`nilm/translations.py`): wanneer een
+  apparaatnaam geen vertaling heeft in de gevraagde taal, wordt nu éénmalig een WARNING
+  gelogd met de ontbrekende sleutel zodat die snel aangevuld kan worden.
+
+## [4.5.9] — 2026-03-11
+
+### Opgelost
+
+- **Backup logging niet zichtbaar** (`learning_backup.py`): schrijffouten voor logbestanden
+  werden stil genegeerd op DEBUG-niveau. Nu gepromoveerd naar WARNING + er wordt direct een
+  schrijftest uitgevoerd bij opstarten zodat permissieproblemen meteen als ERROR verschijnen.
+- **Gas verbruik altijd `—` na herstart** (`gas_analysis.py`): de periode-startwaarden
+  (vandaag / week / maand / jaar) werden nooit opgeslagen in de HA-store. Na elke herstart
+  waren ze `None`, waardoor het verbruik altijd 0 was. Alle vier de startpunten worden nu
+  persistent bewaard en hersteld.
+- **NILM rommel blijft staan na auto-confirm** (`nilm/detector.py`): apparaten met
+  `confirmed=True` werden door de infra-filter uit de output gehouden, maar bleven in
+  `self._devices` staan en doken elke cycle opnieuw op. Nu worden bevestigde infra-apparaten
+  definitief uit het interne model verwijderd. Ook uitgebreide `_INFRA_CLEANUP_KW` bij laden
+  met merk-namen (growatt, output power, etc.).
+- **Vertaling validatiefouten** (`translations/nl.json`, `translations/en.json`, `strings.json`):
+  ontbrekende stappen `price_provider`, `price_provider_credentials` en `price_provider_creds_opts`
+  toegevoegd; placeholder-mismatches tussen vertalingen en `strings.json` opgelost.
+
 ## [4.5.4] — 2026-03-11
 
 ### 🐛 Bugfixes

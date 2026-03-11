@@ -157,6 +157,19 @@ class GasAnalyzer:
         self._last_gas_m3      = float(saved.get("last_gas_m3", 0.0))
         self._isolation_date   = saved.get("isolation_date", "")
         self._pre_isolation_eff = float(saved.get("pre_isolation_eff", 0.0))
+        # v4.5.11: herstel periode-startpunten uit opslag zodat periodes na herstart correct zijn
+        self._today_date         = saved.get("today_date", "")
+        self._month_key          = saved.get("month_key", "")
+        self._week_key           = saved.get("week_key", "")
+        self._year_key           = saved.get("year_key", "")
+        _today_start = saved.get("today_gas_start_m3")
+        _month_start = saved.get("month_gas_start_m3")
+        _week_start  = saved.get("week_gas_start_m3")
+        _year_start  = saved.get("year_gas_start_m3")
+        self._today_gas_start_m3 = float(_today_start) if _today_start is not None else None
+        self._month_gas_start_m3 = float(_month_start) if _month_start is not None else None
+        self._week_gas_start_m3  = float(_week_start)  if _week_start  is not None else None
+        self._year_gas_start_m3  = float(_year_start)  if _year_start  is not None else None
         _LOGGER.info("GasAnalyzer: %d dagrecords geladen (isolatiedatum: %s)",
                      len(self._records), self._isolation_date or "geen")
 
@@ -389,6 +402,15 @@ class GasAnalyzer:
                 "last_gas_m3":       round(self._last_gas_m3, 3),
                 "isolation_date":    self._isolation_date,
                 "pre_isolation_eff": round(self._pre_isolation_eff, 6),
+                # v4.5.11: bewaar periode-startpunten zodat verbruik na herstart correct is
+                "today_date":          self._today_date,
+                "month_key":           self._month_key,
+                "week_key":            self._week_key,
+                "year_key":            self._year_key,
+                "today_gas_start_m3":  round(self._today_gas_start_m3, 3) if self._today_gas_start_m3 is not None else None,
+                "month_gas_start_m3":  round(self._month_gas_start_m3, 3) if self._month_gas_start_m3 is not None else None,
+                "week_gas_start_m3":   round(self._week_gas_start_m3, 3)  if self._week_gas_start_m3  is not None else None,
+                "year_gas_start_m3":   round(self._year_gas_start_m3, 3)  if self._year_gas_start_m3  is not None else None,
             })
             self._dirty     = False
             self._last_save = time.time()

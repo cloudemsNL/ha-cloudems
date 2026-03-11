@@ -42,6 +42,7 @@ async def async_setup_entry(
         # v2.4.14: vaste review-queue knoppen
         CloudEMSNILMReviewConfirmButton(coordinator, entry),
         CloudEMSNILMReviewDismissButton(coordinator, entry),
+        CloudEMSNILMReviewMaybeButton(coordinator, entry),   # v4.5.15: weet ik niet
         CloudEMSNILMReviewSkipButton(coordinator, entry),
         CloudEMSNILMReviewPreviousButton(coordinator, entry),
     ]
@@ -379,6 +380,23 @@ class CloudEMSNILMReviewDismissButton(_NILMReviewQueueBase):
         if did:
             _LOGGER.info("NILM review: afgewezen '%s'", did)
             await self.coordinator.async_request_refresh()
+
+
+class CloudEMSNILMReviewMaybeButton(_NILMReviewQueueBase):
+    """Markeer het huidige NILM-apparaat als 'weet ik niet' — blijft zichtbaar, wordt later opnieuw aangeboden."""
+    _attr_icon = "mdi:help-circle-outline"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.entry_id}_nilm_review_maybe"
+        self.entity_id       = "button.cloudems_nilm_review_maybe"
+        self._attr_name      = "❓ Weet ik niet"
+
+    async def async_press(self) -> None:
+        did = self.coordinator.review_maybe_current()
+        if did:
+            _LOGGER.info("NILM review: misschien '%s'", did)
+            self.async_write_ha_state()
 
 
 class CloudEMSNILMReviewSkipButton(_NILMReviewQueueBase):

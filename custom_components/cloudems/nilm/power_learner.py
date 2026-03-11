@@ -75,8 +75,8 @@ ENERGY_ANOMALY_FACTOR       = 5.0    # >5× expected → anomalie
 ENERGY_DEFICIT_FACTOR       = 0.10   # <10% expected → veel te weinig
 
 # Laag E — auto-confirm
-AUTO_CONFIRM_MIN_DETECTIONS = 5      # min. herhaalde detecties
-AUTO_CONFIRM_MIN_CONFIDENCE = 0.90   # min. confidence per detectie
+AUTO_CONFIRM_MIN_DETECTIONS = 8      # v4.5.12: verhoogd van 5 → 8 — meer herhalingen vereist
+AUTO_CONFIRM_MIN_CONFIDENCE = 0.92   # v4.5.12: verhoogd van 0.90 → 0.92
 AUTO_CONFIRM_ENERGY_OK      = True   # energie-validatie vereist voor auto-confirm
 
 # Laag F — Cycling / session-fingerprint dedup (nieuw v1.1)

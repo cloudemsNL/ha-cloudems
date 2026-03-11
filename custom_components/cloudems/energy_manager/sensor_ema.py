@@ -140,15 +140,19 @@ class SensorEMALayer:
             st.last_change_ts = now
             st.raw_prev = raw
 
-        # Spike guard (only after enough samples)
-        if (st.sample_count >= MIN_SAMPLES_FOR_SPIKE
+        # Spike guard — alleen voor TRAGE sensoren (cloud/Zonneplan, interval > 30s)
+        # Snelle sensoren (P1, lokaal, α=1.0) mogen ALTIJD grote sprongen maken:
+        # batterijlading, EV-start, warmtepomp zijn legitieme sprongen van 3-10 kW
+        _is_slow_sensor = st.interval_ema > 30.0
+        if (_is_slow_sensor
+                and st.sample_count >= MIN_SAMPLES_FOR_SPIKE
                 and st.ema != 0
                 and abs(raw) > abs(st.ema) * SPIKE_MULTIPLIER
                 and abs(raw) > 200):          # only for significant magnitudes
             st.spikes_blocked += 1
             _LOGGER.debug(
-                "EMA spike blocked for %s: raw=%.1f ema=%.1f (×%.1f)",
-                entity_id, raw, st.ema, abs(raw) / abs(st.ema)
+                "EMA spike blocked for %s: raw=%.1f ema=%.1f (×%.1f) interval=%.0fs",
+                entity_id, raw, st.ema, abs(raw) / abs(st.ema), st.interval_ema,
             )
             return st.ema  # return previous EMA, skip the spike
 

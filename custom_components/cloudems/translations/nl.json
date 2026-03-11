@@ -467,6 +467,23 @@
         "data_description": {
           "dsmr_source": "Kies hoe CloudEMS de netmeterdata ophaalt. Gebruik de DSMR/HomeWizard-integratie als je die al hebt ingesteld in HA, anders selecteer je handmatig sensoren of stel je een directe verbinding in."
         }
+      },
+      "price_provider": {
+        "title": "⚡ Prijsbron — directe leverancier koppeling",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Prijsbron"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Inloggegevens — {provider_label}",
+        "description": "Voer je inloggegevens in voor {provider_label}. CloudEMS slaat ze veilig op en gebruikt ze alleen om prijzen op te halen.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API-sleutel",
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
+        }
       }
     },
     "abort": {
@@ -691,7 +708,7 @@
       },
       "prices_opts": {
         "title": "💶 Prijzen — Land",
-        "description": "{info}",
+        "description": "Kies je land. De beschikbare leveranciers worden hierop aangepast.",
         "data": {
           "energy_prices_country": "Land"
         }
@@ -941,6 +958,16 @@
           "price_include_btw": "Inclusief BTW",
           "selected_supplier": "Energieleverancier (voor opslag)",
           "supplier_markup": "Eigen opslag (€/kWh) — als Aangepaste markup is geselecteerd"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "🔑 Inloggegevens — {provider_label}",
+        "description": "Voer je inloggegevens in voor {provider_label}.",
+        "data": {
+          "access_token": "API Token",
+          "api_key": "API-sleutel",
+          "username": "E-mailadres",
+          "password": "Wachtwoord"
         }
       }
     },

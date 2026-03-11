@@ -139,7 +139,12 @@ class SensorHintEngine:
         has_current_l1:     bool,
         has_voltage_l1:     bool,
         has_power_l1:       bool,
+        battery_type:       str  = "none",
+        is_dsmr4:           bool = False,
     ) -> list[HintState]:
+        # v4.5.18: store context for use in hint messages
+        self._battery_type = battery_type
+        self._is_dsmr4     = is_dsmr4
         """
         Feed current readings; return list of active (non-dismissed, non-throttled) hints.
         Safe to call every coordinator cycle (~10 s).
@@ -240,6 +245,21 @@ class SensorHintEngine:
 
         confidence = min(1.0, self._batt_events_today / BATT_MIN_EVENTS)
         if confidence >= 0.8:
+            # v4.5.18: enrich message with battery_type and DSMR4 context
+            _btype  = getattr(self, "_battery_type", "none")
+            _dsmr4  = getattr(self, "_is_dsmr4", False)
+            _suffix = ""
+            if _btype.startswith("provider:"):
+                _provider = _btype.split(":")[1]
+                _suffix = (
+                    f" [provider-batterij '{_provider}' is gekoppeld — "
+                    "stap-patronen zijn normaal bij provider-dispatch]"
+                )
+            elif _dsmr4:
+                _suffix = (
+                    " [DSMR 4 P1-meter — stap-patronen zijn een bekend artefact "
+                    "van DSMR 4 zonder spanningsdata, geen ontbrekende batterij]"
+                )
             self._emit_hint(
                 hint_id    = HINT_IDS["battery_missing"],
                 title      = "Batterij niet gekoppeld?",
@@ -247,7 +267,7 @@ class SensorHintEngine:
                     f"Je netstroom vertoont snelle stap-patronen ({self._batt_events_today} vandaag) "
                     "die typisch zijn voor een batterij die laadt/ontlaadt. "
                     "Koppel je batterij-vermogenssensor zodat CloudEMS de SoH kan bijhouden "
-                    "en de batterij slim kan inplannen."
+                    f"en de batterij slim kan inplannen.{_suffix}"
                 ),
                 action     = "configure_battery",
                 confidence = confidence,
@@ -274,16 +294,28 @@ class SensorHintEngine:
 
         # If user has current but no voltage → suggest voltage sensor
         if has_current and not has_voltage:
-            self._emit_hint(
-                hint_id    = HINT_IDS["add_voltage"],
-                title      = "Spanningssensor toevoegen voor hogere nauwkeurigheid",
-                message    = (
+            # v4.5.18: DSMR4 P1 meters do not expose voltage — this is a known
+            # hardware limitation, not a missing config. Adjust message accordingly.
+            _dsmr4 = getattr(self, "_is_dsmr4", False)
+            if _dsmr4:
+                _volt_msg = (
+                    "Je gebruikt een DSMR 4 P1-meter die geen spanningsdata levert. "
+                    "CloudEMS gebruikt 230 V als vaste aanname — dit is normaal voor DSMR 4. "
+                    "DSMR 5+ of een aparte spanningssensor geeft hogere nauwkeurigheid."
+                )
+            else:
+                _volt_msg = (
                     "Je hebt een stroomsensor maar geen spanningssensor. "
                     "CloudEMS gebruikt nu 230 V als aanname voor P = U × I. "
                     "Voeg een spanningssensor toe voor exactere vermogensberekening."
-                ),
+                )
+            self._emit_hint(
+                hint_id    = HINT_IDS["add_voltage"],
+                title      = "Spanningssensor toevoegen voor hogere nauwkeurigheid"
+                             if not _dsmr4 else "DSMR 4 — geen spanningsdata (normaal)",
+                message    = _volt_msg,
                 action     = "configure_phase",
-                confidence = 0.8,
+                confidence = 0.5 if _dsmr4 else 0.8,
             )
 
     # ── Emit helper ───────────────────────────────────────────────────────────

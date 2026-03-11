@@ -394,7 +394,7 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
         # dashboards_collection is een DashboardsCollection — opgeslagen door lovelace/async_setup
         dash_col = ll_data.get("dashboards_collection") if hasattr(ll_data, "get") else getattr(ll_data, "dashboards_collection", None)
         if dash_col is None:
-            _LOGGER.warning("CloudEMS: dashboards_collection niet gevonden in hass.data[lovelace]")
+            _LOGGER.debug("CloudEMS: dashboards_collection niet gevonden in hass.data[lovelace] — dashboard aanmaken overgeslagen")
             return
 
         # Controleer of het dashboard al bestaat (dashboards is een dict url_path -> object)
@@ -1966,35 +1966,186 @@ async def async_migrate_entry(hass, config_entry) -> bool:
 # ── Rapport HTML helper ────────────────────────────────────────────────────────
 
 def _md_to_html(md: str, title: str) -> str:
-    """Converteer Markdown rapport naar standalone HTML met CloudEMS styling."""
+    """Converteer Markdown rapport naar standalone HTML met CloudEMS styling.
+
+    Ondersteunde elementen:
+      ## / ### koppen, -, numbered lists, **bold**, `code`, > blockquote,
+      Markdown-tabellen (| col | col |), horizontale lijnen, lege regels.
+
+    Render-logging: onbekende of mislukte patronen worden gelogd als WARNING
+    zodat toekomstige versies automatisch verbeterd kunnen worden.
+    """
     import re, html as _html
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
 
     lines = md.split("\n")
     body_parts: list[str] = []
 
+    # ── Render-statistieken (automatisch leren) ───────────────────────────────
+    render_stats: dict = {
+        "total_lines": len(lines),
+        "tables": 0,
+        "table_rows_ok": 0,
+        "table_rows_malformed": 0,
+        "headings": 0,
+        "lists": 0,
+        "blockquotes": 0,
+        "code_inline": 0,
+        "unrecognised": [],
+    }
+
+    # ── Helper: cel opmaken ───────────────────────────────────────────────────
+    def _fmt(text: str) -> str:
+        """Pas inline markdown toe: bold, code, italic."""
+        t = _html.escape(text.strip())
+        t = re.sub(r"`([^`]+)`", r"<code>\1</code>", t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+        t = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", t)
+        return t
+
+    # ── Tabel-buffer ──────────────────────────────────────────────────────────
+    table_buffer: list[str] = []
+
+    def _flush_table() -> None:
+        """Zet gebufferde tabelregels om naar een <table>."""
+        nonlocal table_buffer
+        if not table_buffer:
+            return
+
+        # Filter separator-regels (|---|---|)
+        rows = [r for r in table_buffer if not re.match(r"^\|[-| :]+\|?$", r.strip())]
+
+        if not rows:
+            _log.warning(
+                "CloudEMS _md_to_html: tabel bevat alleen separator-regels, overgeslagen. "
+                "Raw: %s", table_buffer
+            )
+            table_buffer = []
+            return
+
+        html_rows: list[str] = []
+        for i, row in enumerate(rows):
+            # Splits op | en verwijder lege eerste/laatste cel door strip
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if not cells:
+                render_stats["table_rows_malformed"] += 1
+                _log.warning(
+                    "CloudEMS _md_to_html: lege tabelrij overgeslagen. Raw: %r", row
+                )
+                continue
+
+            tag = "th" if i == 0 else "td"
+            cell_html = "".join(f"<{tag}>{_fmt(c)}</{tag}>" for c in cells)
+            html_rows.append(f"<tr>{cell_html}</tr>")
+            render_stats["table_rows_ok"] += 1
+
+        if html_rows:
+            body_parts.append(
+                "<table><thead>" + html_rows[0] + "</thead>"
+                "<tbody>" + "".join(html_rows[1:]) + "</tbody></table>"
+            )
+            render_stats["tables"] += 1
+            _log.debug(
+                "CloudEMS _md_to_html: tabel gerenderd (%d rijen, %d kolommen).",
+                len(html_rows),
+                len(rows[0].strip().strip("|").split("|")) if rows else 0,
+            )
+        else:
+            _log.warning(
+                "CloudEMS _md_to_html: tabel had geen geldige rijen. Buffer: %s",
+                table_buffer,
+            )
+
+        table_buffer = []
+
+    # ── Verwerk regels ────────────────────────────────────────────────────────
     for line in lines:
         raw = line.rstrip()
+
+        # Tabel-rij (begint of eindigt met |)
+        is_table_row = raw.startswith("|") or ("|" in raw and raw.endswith("|"))
+        is_separator  = re.match(r"^\|[-| :]+\|?$", raw.strip()) is not None
+
+        if is_table_row or is_separator:
+            table_buffer.append(raw)
+            continue
+
+        # Geen tabelrij → flush eventuele tabel-buffer
+        _flush_table()
+
         if raw.startswith("## "):
-            body_parts.append(f"<h2>{_html.escape(raw[3:])}</h2>")
+            body_parts.append(f"<h2>{_fmt(raw[3:])}</h2>")
+            render_stats["headings"] += 1
+
         elif raw.startswith("### "):
-            body_parts.append(f"<h3>{_html.escape(raw[4:])}</h3>")
-        elif raw.startswith("---"):
+            body_parts.append(f"<h3>{_fmt(raw[4:])}</h3>")
+            render_stats["headings"] += 1
+
+        elif raw.startswith("#### "):
+            body_parts.append(f"<h4>{_fmt(raw[5:])}</h4>")
+            render_stats["headings"] += 1
+
+        elif raw.startswith("---") and raw.strip("-") == "":
             body_parts.append("<hr>")
-        elif raw.startswith("- "):
-            content = raw[2:]
-            # Bold: **tekst**
-            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+
+        elif raw.startswith("- ") or raw.startswith("* "):
+            content = _fmt(raw[2:])
             body_parts.append(f"<li>{content}</li>")
-        elif raw.startswith("*") and raw.endswith("*"):
-            body_parts.append(f"<p class='footer'>{raw.strip('*')}</p>")
+            render_stats["lists"] += 1
+
+        elif raw.startswith("> "):
+            content = _fmt(raw[2:])
+            body_parts.append(f"<blockquote>{content}</blockquote>")
+            render_stats["blockquotes"] += 1
+
+        elif raw.startswith("```"):
+            body_parts.append("<pre><code>")  # open code block
+
+        elif raw == "```":
+            body_parts.append("</code></pre>")
+
         elif re.match(r"^\d+\.", raw):
-            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", raw)
+            content = _fmt(raw)
             body_parts.append(f"<li class='numbered'>{content}</li>")
+            render_stats["lists"] += 1
+
         elif raw == "":
             body_parts.append("<br>")
+
         else:
-            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", _html.escape(raw))
+            # Controleer op patroon dat onbekend is maar wél tabel-achtig (diagnostiek)
+            if raw.count("|") >= 2:
+                render_stats["table_rows_malformed"] += 1
+                _log.warning(
+                    "CloudEMS _md_to_html: mogelijke tabelrij niet herkend "
+                    "(begint niet met '|'): %r — voeg dit patroon toe aan de renderer.",
+                    raw[:120],
+                )
+            content = _fmt(raw)
             body_parts.append(f"<p>{content}</p>")
+
+    # Flush eventuele resterende tabel aan het einde
+    _flush_table()
+
+    # ── Render-rapport loggen ─────────────────────────────────────────────────
+    _log.info(
+        "CloudEMS _md_to_html render voltooid: %d regels, %d tabellen (%d rijen ok / %d malformed), "
+        "%d koppen, %d lijstitems, %d blockquotes.",
+        render_stats["total_lines"],
+        render_stats["tables"],
+        render_stats["table_rows_ok"],
+        render_stats["table_rows_malformed"],
+        render_stats["headings"],
+        render_stats["lists"],
+        render_stats["blockquotes"],
+    )
+    if render_stats["table_rows_malformed"] > 0:
+        _log.warning(
+            "CloudEMS _md_to_html: %d tabelrij(en) konden niet worden geparsed. "
+            "Bekijk de WARNING-regels hierboven voor de exacte patronen.",
+            render_stats["table_rows_malformed"],
+        )
 
     body = "\n".join(body_parts)
 
@@ -2021,6 +2172,17 @@ def _md_to_html(md: str, title: str) -> str:
     hr {{ border: none; border-top: 1px solid #374151; margin: 1.5rem 0; }}
     p.footer {{ color: #6b7280; font-size: .85rem; font-style: italic; margin-top: 1rem; }}
     br {{ display: block; content: ''; margin: .3rem 0; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .9rem; }}
+    th {{ background: #1f2937; color: #00d44e; text-align: left; padding: .5rem .75rem;
+          border-bottom: 2px solid #00b140; }}
+    td {{ padding: .4rem .75rem; border-bottom: 1px solid #374151; color: #d1d5db; }}
+    tr:hover td {{ background: #1f2937; }}
+    code {{ background: #1f2937; color: #86efac; padding: .1rem .35rem;
+            border-radius: 3px; font-size: .85em; }}
+    pre code {{ display: block; padding: .75rem 1rem; white-space: pre-wrap;
+                background: #1f2937; border-radius: 6px; margin: .75rem 0; }}
+    blockquote {{ border-left: 3px solid #374151; margin: .5rem 0;
+                  padding: .2rem .75rem; color: #9ca3af; font-style: italic; }}
     .print-btn {{
       display: inline-block; margin-bottom: 1.5rem;
       padding: .5rem 1.2rem; background: #00b140; color: #fff;

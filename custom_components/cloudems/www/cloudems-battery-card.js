@@ -275,9 +275,9 @@ const BATT_STYLES = `
   /* ── Providers ── */
   .provider-row {
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto 1fr auto auto auto;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 7px 0;
     border-bottom: 1px solid rgba(255,255,255,.04);
     font-size: 12px;
@@ -288,6 +288,14 @@ const BATT_STYLES = `
   .prov-status-ok  { color: var(--b-green); }
   .prov-status-warn{ color: var(--b-amber); }
   .prov-status-err { color: var(--b-red); }
+  .prov-meta {
+    font-size: 10px;
+    color: var(--b-muted);
+    text-align: right;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .prov-meta-stale { color: var(--b-amber); }
   .mode-pill {
     font-size: 10px;
     font-weight: 600;
@@ -540,6 +548,25 @@ class CloudemsBatteryCard extends HTMLElement {
     // ── Providers ──
     const providersHtml = cfg.show_providers ? (() => {
       const allProviders = [];
+      const balancer = bp.balancer ?? {};
+      const bIntS  = balancer.battery_interval_s;
+      const bStale = balancer.battery_stale ?? false;
+      const bLagS  = balancer.battery_lag_s;
+      const bLagN  = balancer.battery_lag_samples ?? 0;
+      const bLagC  = balancer.battery_lag_conf;
+
+      // Interval-label: groen=vers, oranje=stale, grijs=onbekend
+      const intLabel = bIntS != null
+        ? `<span class="${bStale ? 'prov-meta-stale' : ''}" title="Gemeten update-interval (adaptief)">${bStale ? '⚠ ' : ''}${bIntS < 10 ? bIntS.toFixed(1) : Math.round(bIntS)}s</span>`
+        : `<span style="opacity:.4">—</span>`;
+
+      // Lag-label: toont geleerde vertraging of leervoortgang
+      const lagLabel = bLagS != null
+        ? `<span title="Geleerde vertraging grid→batterij (${bLagN} obs, ${bLagC != null ? Math.round(bLagC*100)+'%' : '?'} conf)">⏱ ${bLagS.toFixed(1)}s</span>`
+        : bLagN > 0
+          ? `<span style="opacity:.5" title="Nog lerend (${bLagN}/5 observaties)">⏱ ${bLagN}/5</span>`
+          : `<span style="opacity:.3" title="Vertraging wordt geleerd">⏱ —</span>`;
+
       if (zpRaw != null) {
         const ok  = zpRaw.available;
         const det = zpRaw.detected;
@@ -552,6 +579,7 @@ class CloudemsBatteryCard extends HTMLElement {
           <span class="prov-name">Zonneplan Nexus</span>
           <span class="${statusCls}">${statusLbl}</span>
           <span class="mode-pill">${esc(mode)}</span>
+          <span class="prov-meta">${intLabel}<br>${lagLabel}</span>
         </div>`);
       }
       providers.filter(p => p.provider_id !== "zonneplan").forEach(p => {
@@ -563,6 +591,7 @@ class CloudemsBatteryCard extends HTMLElement {
           <span class="prov-name">${esc(p.provider_label ?? p.provider_id)}</span>
           <span class="${statusCls}">${statusLbl}</span>
           <span></span>
+          <span class="prov-meta">${intLabel}<br>${lagLabel}</span>
         </div>`);
       });
       if (!allProviders.length) return "";

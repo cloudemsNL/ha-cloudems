@@ -1225,6 +1225,13 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
 # fmt: on
 
 
+import logging as _logging
+_LOGGER_TRANS = _logging.getLogger(__name__)
+
+# v4.5.11: bijhoud welke vertalingen al gelogd zijn zodat we niet spammen
+_missing_logged: set = set()
+
+
 def localized_device_name(english_name: str, language: str = "en") -> str:
     """
     Return the localised device name for *language*.
@@ -1233,11 +1240,28 @@ def localized_device_name(english_name: str, language: str = "en") -> str:
     Language codes follow ISO 639-1 (e.g. "nl", "de", "fr", "es", "pl").
 
     The HA instance language is available as ``hass.config.language``.
+
+    v4.5.11: logt éénmalig een WARNING als een vertaling ontbreekt zodat
+    ontbrekende vertalingen snel gevonden en aangevuld kunnen worden.
     """
     if language == "en":
         return english_name
-    lang_map = _TRANSLATIONS.get(language, {})
-    return lang_map.get(english_name, english_name)
+    lang_map = _TRANSLATIONS.get(language)
+    if lang_map is None:
+        # Onbekende taalcode — stil terugvallen op Engels
+        return english_name
+    result = lang_map.get(english_name)
+    if result is None:
+        _key = (language, english_name)
+        if _key not in _missing_logged:
+            _missing_logged.add(_key)
+            _LOGGER_TRANS.warning(
+                "CloudEMS NILM: ontbrekende vertaling [%s] '%s' — "
+                "voeg toe aan nilm/translations.py",
+                language, english_name,
+            )
+        return english_name
+    return result
 
 
 # Back-compat alias used by the old nl_device_name() calls already in database.py

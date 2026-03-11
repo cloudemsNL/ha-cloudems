@@ -330,6 +330,9 @@ body.sim-on{padding-top:28px}
   </div>
 </main>
 
+<div id="bal-diag" style="display:none;gap:.6rem;flex-wrap:wrap;padding:.3rem .8rem;
+  font-size:.72rem;background:var(--card);border-top:1px solid var(--border);
+  color:var(--muted);align-items:center;"></div>
 <footer>
   <span id="ft-update">Geen data</span>
   <span>CloudEMS &middot; <span id="ft-ver">—</span></span>
@@ -355,6 +358,7 @@ const E={
   watchdog:'sensor.cloudems_watchdog',
   test:'binary_sensor.cloudems_testmodus',
   nilmDevices:'sensor.cloudems_nilm_db',
+  balancer:'sensor.cloudems_energy_balancer',
 };
 
 let token=null, ws=null, wsId=1, states={}, hist={};
@@ -766,6 +770,41 @@ function renderAll(){
   // Footer
   setEl('ft-ver','v'+(att(E.watchdog,'cloudems_version')||'3.7'));
   setEl('ft-update','Update: '+new Date().toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit',second:'2-digit'}));
+
+  // ── EnergyBalancer diagnostics ──────────────────────────────────
+  const bal = states[E.balancer]?.attributes || {};
+  const balEl = document.getElementById('bal-diag');
+  if(balEl){
+    const stale = bal.stale_sensors || [];
+    const imbal = bal.imbalance_w ?? null;
+    const lagS  = bal.battery_lag_learned_s;
+    const lagN  = bal.battery_lag_samples ?? 0;
+    const lagConf = bal.battery_lag_confidence;
+    const gInt  = bal.grid_interval_s;
+    const sInt  = bal.solar_interval_s;
+    const bInt  = bal.battery_interval_s;
+
+    const fmtInt = (v,staleKey) => {
+      if(v==null) return '<span style="opacity:.5">—</span>';
+      const isStale = bal[staleKey+'_stale'];
+      const clr = isStale ? 'var(--amber)' : 'var(--green)';
+      return `<span style="color:${clr}">${v<10?v.toFixed(1):Math.round(v)}s${isStale?' ⚠':''}`;
+    };
+    const lagStr = lagS!=null
+      ? `${lagS.toFixed(1)}s${lagConf!=null?' <span style="opacity:.6">'+Math.round(lagConf*100)+'%</span>':''} <span style="opacity:.6">(n=${lagN})</span>`
+      : `<span style="opacity:.5">lerend…${lagN>0?' '+lagN+'/5':''}</span>`;
+    const imbalStr = imbal!=null
+      ? `<span style="color:${Math.abs(imbal)>100?'var(--amber)':'var(--green)'}">${Math.round(imbal)}W</span>`
+      : '—';
+
+    balEl.innerHTML =
+      `<span title="Grid update-interval">⚡ ${fmtInt(gInt,'grid')}</span>` +
+      `<span title="Solar update-interval">☀️ ${fmtInt(sInt,'solar')}</span>` +
+      `<span title="Batterij update-interval (adaptief)">🔋 ${fmtInt(bInt,'battery')}</span>` +
+      `<span title="Geleerde battery-vertraging">⏱ lag: ${lagStr}</span>` +
+      `<span title="Kirchhoff-imbalans">∑ ${imbalStr}</span>`;
+    balEl.style.display = 'flex';
+  }
 }
 
 // ── CHEAP HOURS BAR CHART ──────────────────────────────────────────

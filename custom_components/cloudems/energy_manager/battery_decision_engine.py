@@ -114,6 +114,14 @@ class BatteryDecisionEngine:
         tg  = (ctx.tariff_group or "normal").lower().strip()
         ceil = self._charge_ceiling(ctx.soh_pct)
 
+        # v4.5.12: log waarschuwing als SoC niet beschikbaar is — batterijsturing is dan blind.
+        if soc is None:
+            _LOGGER.warning(
+                "BatteryDecisionEngine: soc_pct is None — "
+                "koppel een SoC-sensor (entity_id) aan de batterijconfiguratie in CloudEMS. "
+                "Optimalisatie op basis van laadtoestand is uitgeschakeld."
+            )
+
         available_kwh = (
             max(0.0, (soc - MIN_SOC_DISCHARGE) / 100.0 * ctx.battery_capacity_kwh)
             if soc is not None else 0.0

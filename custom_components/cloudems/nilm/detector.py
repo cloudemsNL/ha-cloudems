@@ -90,8 +90,8 @@ MULTI_INSTANCE_TYPES: frozenset = frozenset({
 })
 
 # ── Steady-state validatie ────────────────────────────────────────────────────
-STEADY_STATE_DELAY_S   = 20.0   # seconden na on-event → validatiemoment (was 35s, sneller false positive removal)
-STEADY_STATE_MIN_RATIO = 0.40   # baseline moet minstens 40% van verwacht vermogen gestegen zijn (was 50%)
+STEADY_STATE_DELAY_S   = 35.0   # v4.5.12: terug naar 35s — meer tijd voor stabiele meting
+STEADY_STATE_MIN_RATIO = 0.55   # v4.5.12: verhoogd van 0.40 → 0.55 — baseline moet duidelijk gestegen zijn
 
 
 
@@ -104,13 +104,6 @@ PV_DELTA_MASK_THRESHOLD_W = 80.0   # W/tick (10s) → maskeer NILM
 PV_MASK_WINDOW_S          = 25.0   # seconden na PV-sprong maskeren
 
 # ── Batterij-ramp maskering ───────────────────────────────────────────────────
-# Batterij-omvormers rampen op in stappen. Die stappen zijn echte power-edges
-# die NILM als "zware boiler" of "warmtepomp" leest. Als de batterij in de
-# laatste BATT_RAMP_WINDOW_S seconden meer dan BATT_RAMP_TOTAL_W veranderd is,
-# blokkeren we nieuwe NILM-events.
-BATT_RAMP_WINDOW_S    = 30.0   # seconden waarbinnen we naar ramp zoeken
-BATT_RAMP_TOTAL_W     = 300.0  # W totale verandering = ramp gedetecteerd
-BATT_RAMP_MASK_S      = 20.0   # extra maskeervenster na ramp-detectie
 
 class AdaptiveNILMThreshold:
     """
@@ -317,6 +310,12 @@ class DetectedDevice:
     # dag=06-18u, avond=18-23u, nacht=23-06u
     time_profile: dict = field(default_factory=dict)
 
+    # v4.5.6 — zelflerend fase-stemregistratie: {\"L1\": n, \"L2\": n, \"L3\": n}
+    # Elke keer dat een on-event op een bepaalde fase gematch wordt aan dit apparaat,
+    # wordt een stem toegevoegd. Na PHASE_RELEARN_MIN_VOTES stemmen wordt de fase
+    # herzien als de meerderheid naar een andere fase wijst.
+    phase_votes: dict = field(default_factory=lambda: {"L1": 0, "L2": 0, "L3": 0})
+
     # v1.4 — energy tracking (runtime; persisted separately)
     energy: DeviceEnergy = field(default_factory=lambda: DeviceEnergy(device_id=""))
     _on_start_ts: float  = field(default=0.0, repr=False, compare=False)
@@ -377,6 +376,7 @@ class DetectedDevice:
             "source_entity_id": self.source_entity_id,
             "suggested_name": self.suggested_name,
             "time_profile":   self.time_profile,
+            "phase_votes":    self.phase_votes,
             "energy":         self.energy.to_dict(),
             # v4.1: ondersteuning voor overduration detectie
             "current_on_duration_s": round(current_on_s, 1),
@@ -418,6 +418,11 @@ class NILMDetector:
 
         self._on_device_found  = on_device_found
         self._on_device_update = on_device_update
+        # v4.5.11: optionele high-log callback — coordinator injecteert dit
+        # zodat de detector bijzondere events naar cloudems_high.log kan sturen
+        # zonder een directe afhankelijkheid op LearningBackup.
+        # Signatuur: _high_log_cb(category: str, payload: dict) -> None (fire-and-forget)
+        self._high_log_cb: Optional[Any] = None
 
         # v2.4.17: warmup periode — hogere drempel in eerste 24 uur na start
         self._started_at: float = time.time()
@@ -447,6 +452,9 @@ class NILMDetector:
 
         # v1.8: track which sensor inputs are feeding NILM
         self._sensor_input_log: Dict[str, str] = {}   # phase → source description
+        # v4.5.11: track of fase-data echt per-fase is of een gesplitste/geschatte waarde.
+        # "per_phase" / "p1_direct" / "p1_i*u" → zeker; "total_split" / "total_l1" → onzeker.
+        self._phase_source_certain: Dict[str, bool] = {"L1": True, "L2": True, "L3": True}
 
         # v1.7: diagnostics
         self._diag_events_total: int = 0
@@ -473,12 +481,21 @@ class NILMDetector:
 
         # v1.16: known battery power — used to skip false NILM edges
         self._battery_power_w: float = 0.0
+        # v4.5.19: rolling battery power window (last 30s) for provider batteries
+        # whose dispatch power changes every cycle. Using max of window prevents
+        # false positives when battery just changed power level.
+        self._battery_power_history: list = []  # list of (timestamp, abs_w)
 
-        # v1.24: known infrastructure sensor power values (W).
+        # v4.5.19: dedup new-device spam — track recently created pending devices
+        # key = (device_type, phase), value = timestamp of last creation
+        self._recent_pending_devices: dict = {}
         # Updated every cycle from coordinator. Used to suppress NILM events whose
         # delta closely matches a configured sensor (grid, PV, EV charger, heat pump).
         # key = sensor label, value = abs power in W
         self._infra_powers: dict = {}
+
+        # v4.5.13: totaal huisvermogen — nodig voor 3-fase apparaatmatching
+        self._last_house_power_w: float = 0.0
 
         # v1.24: battery transition cooldown — timestamp and delta of last large
         # battery power change. NILM events similar in magnitude are suppressed
@@ -492,12 +509,6 @@ class NILMDetector:
         # _pv_mask_until: timestamp tot wanneer NILM-events geblokkeerd zijn door PV-sprong
         self._pv_power_prev: float = 0.0
         self._pv_mask_until: float = 0.0
-
-        # v1.24: Batterij-ramp buffer
-        # Sla de laatste N batterijmetingen op (ts, power_w) zodat we de
-        # totale vermogensverandering over BATT_RAMP_WINDOW_S kunnen berekenen.
-        self._batt_ramp_buffer: list = []   # [(ts, power_w), ...]
-        self._batt_ramp_mask_until: float = 0.0
 
         # v1.17: Hybride NILM verrijkingslaag (optioneel — wordt gezet door coordinator)
         self._hybrid: Optional[Any] = None
@@ -592,7 +603,7 @@ class NILMDetector:
     def set_config_sensor_eids(self, entity_ids: set) -> None:
         """Register entity_ids of CloudEMS-configured sensors (grid, PV, P1, gas, etc.)."""
         self._config_sensor_eids = {e for e in entity_ids if e}
-        # Purge any devices already learned from these sensors
+        # Purge any devices learned from these sensors — incl. confirmed ones (v4.5.11)
         to_remove = [
             did for did, dev in self._devices.items()
             if getattr(dev, "source_entity_id", "") in self._config_sensor_eids
@@ -617,6 +628,20 @@ class NILMDetector:
         overrides: {device_type: {min_events: int, ...}}
         """
         self._adaptive_overrides = overrides or {}
+
+    def set_high_log_callback(self, cb) -> None:
+        """Registreer de high-log callback (coordinator injecteert LearningBackup.async_log_high)."""
+        self._high_log_cb = cb
+
+    def _high_log(self, category: str, payload: dict) -> None:
+        """Fire-and-forget: stuur een high-log entry via de callback als die beschikbaar is."""
+        if self._high_log_cb is None:
+            return
+        try:
+            import asyncio as _aio
+            _aio.ensure_future(self._high_log_cb(category, payload))
+        except Exception:
+            pass
 
     def set_blocked_friendly_names(self, names: set) -> None:
         """Registreer friendly names van geblokkeerde infra-entiteiten.
@@ -715,6 +740,15 @@ class NILMDetector:
            geleerd. Smart-plug ankerapparaten worden nooit ge-purged.
         """
         self._infra_powers = {k: abs(v) for k, v in powers.items() if abs(v) > 20}
+        # v4.5.13: extraheer totaal huisvermogen voor 3-fase matching
+        if "house" in powers:
+            self._last_house_power_w = abs(powers["house"])
+        elif "grid" in powers and "solar" in powers:
+            grid = powers.get("grid", 0)
+            solar = powers.get("solar", 0)
+            batt = powers.get("battery", 0)
+            house = solar + grid - batt if batt != 0 else solar + grid
+            self._last_house_power_w = max(0.0, house)
 
         # v1.31: grootverbruikers doorgeven aan MacroLoadTracker
         self._macro_tracker.update_from_infra(self._infra_powers)
@@ -784,6 +818,12 @@ class NILMDetector:
             )
         self._battery_prev_power_w = power_w
         self._battery_power_w = abs(power_w)
+        # v4.5.19: maintain rolling 30s window for provider batteries
+        now = _t.time()
+        self._battery_power_history.append((now, abs(power_w)))
+        self._battery_power_history = [
+            (t, w) for t, w in self._battery_power_history if now - t <= 30
+        ]
 
     async def async_load(self) -> None:
         await self._fp_memory.async_load()
@@ -815,6 +855,7 @@ class NILMDetector:
                     source_entity_id = dev_data.get("source_entity_id", ""),
                     suggested_name   = dev_data.get("suggested_name", ""),
                     time_profile     = dev_data.get("time_profile", {}),
+                    phase_votes      = dev_data.get("phase_votes", {"L1": 0, "L2": 0, "L3": 0}),
                 )
                 dev.energy.device_id = dev.device_id
                 self._devices[dev.device_id] = dev
@@ -847,6 +888,42 @@ class NILMDetector:
         await self._clusterer.async_setup()
 
         _LOGGER.info("CloudEMS NILM: loaded %d devices", len(self._devices))
+        # v4.5.11: verwijder opgeslagen infra-apparaten die vroeger door de filter heen glipten.
+        _INFRA_TYPES_CLEANUP = {
+            "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+            "smart_meter", "p1_meter", "dsmr", "net_meter",
+            "solar_inverter", "pv_inverter", "pv", "inverter",
+            "battery", "opslag", "home_battery",
+            "grid", "grid_export", "grid_import", "net_power",
+        }
+        _INFRA_CLEANUP_KW = (
+            "electricity meter", "energieverbruik", "energieproductie",
+            "energiemeter", "slimme meter", "p1 meter", "dsmr",
+            "net import", "net export", "grid import", "grid export",
+            # v4.5.11: merk/omvormer-namen die nooit huishoudapparaten zijn
+            "growatt", "goodwe", "solarman", "deye", "sofar", "zendure",
+            "victron", "pylontech", "foxess", "solis", "sungrow",
+            "solaredge", "enphase", "huawei", "fronius", "kostal",
+            "nexus", "zonneplan", "manager power", "vermogen inverter",
+            "hub power", "solarflow", "output power",
+        )
+        _infra_ids = [
+            did for did, dev in self._devices.items()
+            if dev.device_type.lower() in _INFRA_TYPES_CLEANUP
+            or any(kw in (dev.name or "").lower() for kw in _INFRA_CLEANUP_KW)
+            or (dev.name or "").lower().startswith("electricity")
+        ]
+        for did in _infra_ids:
+            _LOGGER.warning(
+                "NILM: verwijder opgeslagen infra-apparaat '%s' (%s) bij laden — v4.5.11",
+                self._devices[did].name, self._devices[did].device_type,
+            )
+            del self._devices[did]
+        if _infra_ids:
+            _LOGGER.info("NILM: %d infra-apparaten verwijderd uit opslag", len(_infra_ids))
+            # v4.5.11: infra-verwijdering bij laden → high log (kan pas na setup van coordinator)
+            # Sla op als pending zodat coordinator het na init kan loggen
+            self._infra_removed_on_load = _infra_ids
         self._storage_loaded = True
 
     async def async_save(self) -> None:
@@ -893,6 +970,9 @@ class NILMDetector:
             timestamp = time.time()
         # v1.8: record sensor source for diagnostics
         self._sensor_input_log[phase] = source
+        # v4.5.11: mark whether this phase reading is truly per-phase or an estimate
+        _UNCERTAIN_SOURCES = ("total_split", "total_l1")
+        self._phase_source_certain[phase] = source not in _UNCERTAIN_SOURCES
 
         # v1.8: feed adaptive threshold
         self._adaptive.update(phase, power_watt)
@@ -1014,6 +1094,15 @@ class NILMDetector:
                             "(verwacht +%.0fW, gemeten +%.0fW)",
                             dev.name, expected, actual_rise,
                         )
+                        # v4.5.11: false positive → high log
+                        self._high_log("nilm_false_positive", {
+                            "name":        dev.name,
+                            "type":        dev.device_type,
+                            "phase":       val["phase"],
+                            "expected_w":  round(expected, 1),
+                            "measured_w":  round(actual_rise, 1),
+                            "reason":      "steady_state_no_rise",
+                        })
                         # v1.32: auto-leer: sla de afgewezen signature op
                         # zodat hetzelfde vermogen de volgende keer geblokkeerd wordt.
                         self._fp_memory.record_rejection(
@@ -1064,18 +1153,10 @@ class NILMDetector:
         abs_delta = abs(event.delta_power)
         now = _t.time()
 
-        # ── v1.24: batterij-ramp masker — EERST checken ───────────────────────
-        # inject_battery() zet _batt_ramp_mask_until als de batterij snel van
-        # vermogen wisselt. Tijdens het maskervenster worden ALLE NILM-events
-        # geblokkeerd — de batterij domineert het signaal toch.
-        if now < self._batt_ramp_mask_until:
-            _LOGGER.debug(
-                "NILM: event %.0fW geblokkeerd — batterij-ramp masker actief "
-                "(nog %.0fs)",
-                event.delta_power,
-                self._batt_ramp_mask_until - now,
-            )
-            return
+        # ── Batterij-masker via BatteryUncertaintyTracker (incl. geleerde lag) ──
+        # Vervangt de oude _batt_ramp_mask_until / ramp-buffer logica (v1.24).
+        # De BatteryUncertaintyTracker kent nu de gemeten lag van de balancer
+        # en zet het masker automatisch op de juiste duur.
 
         # ── v1.31: BatteryUncertaintyTracker — stale/traag gemeten batterijen ───
         if event.delta_power > 0:
@@ -1150,14 +1231,29 @@ class NILMDetector:
 
         # ── v1.16: skip events during active battery charge/discharge ─────────
         # Ratio-based check: event delta ≈ battery power → battery-caused edge
-        if self._battery_power_w > 300:
-            ratio = abs_delta / self._battery_power_w
+        # v4.5.19: use max of rolling 30s window so provider batteries with
+        # variable dispatch don't slip through between coordinator cycles.
+        _batt_check_w = max(
+            [w for _, w in self._battery_power_history] or [self._battery_power_w]
+        )
+        if _batt_check_w > 300:
+            ratio = abs_delta / _batt_check_w
             if 0.55 <= ratio <= 1.55:
                 _LOGGER.debug(
                     "NILM: event %.0fW overgeslagen — lijkt op batterijovergang (batterij %.0fW)",
                     event.delta_power, self._battery_power_w,
                 )
                 return
+            # v4.5.13: 3-fase thuisbatterij detectie
+            if _batt_check_w > 2000:
+                for frac in (0.33, 0.67):
+                    frac_w = _batt_check_w * frac
+                    if frac_w > 200 and 0.7 <= abs_delta / frac_w <= 1.3:
+                        _LOGGER.debug(
+                            "NILM: event %.0fW overgeslagen — 3-fase batterij fractie (%.0fW × %.0f%%)",
+                            event.delta_power, self._battery_power_w, frac * 100,
+                        )
+                        return
 
         # ── v1.25: Laag B — off-event short-circuit via power-stack ─────────────
         # Bij negatieve deltas (off-events) zoeken we EERST in de power-stack naar
@@ -1261,6 +1357,8 @@ class NILMDetector:
             inrush_peak_a=event.inrush_peak_a,
             reactive_power_var=event.reactive_power_var,
             thd_pct=event.thd_pct,
+            # v4.5.13: totaalvermogen voor 3-fase signature matching
+            total_power_w=self._last_house_power_w if self._last_house_power_w > 100 else None,
         )
         self._diag_log_event(event, matches)
         if self._local_ai.is_available:
@@ -1542,6 +1640,46 @@ class NILMDetector:
         is_on      = event.delta_power > 0
         abs_delta  = abs(event.delta_power)
 
+        # v4.5.11: blokkeer infrastructure device-types bij aanmaken.
+        # De output-filter in get_devices_for_ha() pakt ze achteraf, maar beter
+        # is ze nooit te creëren zodat ze ook niet in het interne model leven.
+        _INFRA_TYPES_BLOCK = {
+            "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+            "smart_meter", "p1_meter", "dsmr", "net_meter",
+            "solar_inverter", "pv_inverter", "pv", "inverter",
+            "battery", "opslag", "home_battery",
+            "grid", "grid_export", "grid_import", "net_power",
+        }
+        # v4.5.11: accumerken en omvormer-namen die als infra gelden
+        # Toegevoegd n.a.v. issue #18 (Zendure dubbele entiteiten in Top 10)
+        _INFRA_BRAND_KW = (
+            # Accumerken
+            "zendure", "growatt", "goodwe", "solarman", "deye", "sofar",
+            "victron", "pylontech", "byd", "foxess", "solis", "sungrow",
+            "solaredge", "enphase", "huawei", "fronius", "kostal",
+            "nexus", "zonneplan",
+            # Generieke omvormer-labels
+            "manager power", "vermogen invertet", "vermogen inverter",
+            "hub power", "solarflow", "ace power", "smartplug hub",
+        )
+        _best_type = (best.get("device_type") or "").lower()
+        _best_name = (best.get("name") or "").lower()
+        _INFRA_NAME_BLOCK_KW = (
+            "electricity meter", "energieverbruik", "energieproductie",
+            "energiemeter", "slimme meter", "p1 meter", "dsmr",
+            "net import", "net export", "grid import", "grid export",
+        )
+        if (
+            _best_type in _INFRA_TYPES_BLOCK
+            or any(kw in _best_name for kw in _INFRA_NAME_BLOCK_KW)
+            or any(kw in _best_name for kw in _INFRA_BRAND_KW)
+        ):
+            _LOGGER.debug(
+                "NILM _handle_match: infra-apparaat geblokkeerd '%s' (%s) — v4.5.11",
+                best.get("name"), best.get("device_type"),
+            )
+            return
+
         existing_id: Optional[str] = None
 
         # ── OFF-event: match op vermogen, niet op type ────────────────────────
@@ -1586,6 +1724,21 @@ class NILMDetector:
                 existing_id = dev_id
                 break
 
+            # v4.5.13: als apparaat al is_on en geen match gevonden op exacte fase,
+            # probeer ook op fase "?" (onzekere fase bij total_split) — voorkomt
+            # duplicaten bij warmtepomp/batterij die snel schommelen.
+            if existing_id is None and not allow_multi:
+                for dev_id, dev in self._devices.items():
+                    if dev.device_type != dt:
+                        continue
+                    # Match ook als fase onzeker was (?) of apparaat al aan staat
+                    # met vergelijkbaar vermogen op willekeurige fase
+                    ref_pw = dev.current_power if dev.current_power > 0 else abs_delta
+                    rel_diff = abs(ref_pw - abs_delta) / max(ref_pw, 1.0)
+                    if rel_diff <= 0.40 and dev.is_on:
+                        existing_id = dev_id
+                        break
+
         # ── Update of nieuw apparaat aanmaken ────────────────────────────────
         if existing_id:
             dev = self._devices[existing_id]
@@ -1602,6 +1755,60 @@ class NILMDetector:
                 _hour = int((event.timestamp % 86400) / 3600)  # UTC uur, goed genoeg voor profiel
                 _slot = "night" if _hour < 6 or _hour >= 23 else ("day" if _hour < 18 else "evening")
                 dev.time_profile[_slot] = dev.time_profile.get(_slot, 0) + 1
+                # v4.5.6: fase-stem registreren voor zelflerend fase-herdetectie
+                # Alleen stemmen als het apparaat niet door de gebruiker handmatig gekoppeld is
+                # v4.5.11: alleen stemmen als de bron echt per-fase is (niet total_split/total_l1)
+                if not dev.source_entity_id:
+                    ph = event.phase
+                    _source_certain = self._phase_source_certain.get(ph, True)
+                    if ph in ("L1", "L2", "L3") and _source_certain:
+                        # v4.5.11: als fase "?" was (onzeker bij aanmaken), update direct
+                        # bij het eerste betrouwbare per-fase event.
+                        if dev.phase == "?":
+                            _LOGGER.info(
+                                "NILM fase-resolutie '%s': ? → %s (eerste betrouwbaar per-fase event, v4.5.11)",
+                                dev.display_name, ph,
+                            )
+                            dev.phase = ph
+                            dev.phase_votes = {"L1": 0, "L2": 0, "L3": 0}
+                            dev.phase_votes[ph] = 1
+                            self._dirty = True
+                            # v4.5.11: high log
+                            self._high_log("nilm_phase_resolved", {
+                                "name":      dev.display_name,
+                                "type":      dev.device_type,
+                                "phase_old": "?",
+                                "phase_new": ph,
+                                "power_w":   round(dev.current_power, 1),
+                            })
+                        else:
+                            if not isinstance(dev.phase_votes, dict):
+                                dev.phase_votes = {"L1": 0, "L2": 0, "L3": 0}
+                            dev.phase_votes[ph] = dev.phase_votes.get(ph, 0) + 1
+                            total_votes = sum(dev.phase_votes.values())
+                            _PHASE_RELEARN_MIN_VOTES = 20
+                            if total_votes >= _PHASE_RELEARN_MIN_VOTES and total_votes % 5 == 0:
+                                best_ph  = max(dev.phase_votes, key=dev.phase_votes.get)
+                                best_pct = dev.phase_votes[best_ph] / total_votes
+                                if best_pct >= 0.75 and best_ph != dev.phase:
+                                    _LOGGER.info(
+                                        "NILM fase-herdetectie '%s': %s → %s "
+                                        "(%.0f%% van %d on-events, v4.5.6)",
+                                        dev.display_name, dev.phase, best_ph,
+                                        best_pct * 100, total_votes,
+                                    )
+                                    # v4.5.11: high log
+                                    self._high_log("nilm_phase_changed", {
+                                        "name":      dev.display_name,
+                                        "type":      dev.device_type,
+                                        "phase_old": dev.phase,
+                                        "phase_new": best_ph,
+                                        "pct":       round(best_pct * 100, 1),
+                                        "votes":     total_votes,
+                                        "votes_detail": dev.phase_votes,
+                                    })
+                                    dev.phase = best_ph
+                                    self._dirty = True
                 # Registreer voor steady-state validatie
                 self._pending_validations.append({
                     "device_id":      existing_id,
@@ -1637,7 +1844,35 @@ class NILMDetector:
                     pass
         else:
             dev_id = str(uuid.uuid4())[:8]
-            dev = DetectedDevice(
+            # v4.5.11: als de fase-data geschat is (total_split/total_l1), markeer fase als onzeker.
+            _phase_certain = self._phase_source_certain.get(event.phase, True)
+            _initial_phase = event.phase if _phase_certain else "?"
+
+            # v4.5.19: dedup — suppress new-device spam when the same type+phase
+            # was already created as a pending device within the last 120s.
+            # This happens with ramping loads (heat pumps starting up) where each
+            # 10s tick has a slightly different power, causing repeated detections.
+            import time as _tdedup
+            _dedup_key = (best.get("device_type", "unknown"), _initial_phase)
+            _dedup_ts  = self._recent_pending_devices.get(_dedup_key, 0)
+            if _tdedup.time() - _dedup_ts < 120:
+                # Already created this type+phase recently — update power on existing
+                # pending device instead of creating a new one
+                for _existing in self._devices.values():
+                    if (
+                        _existing.device_type == best.get("device_type")
+                        and _existing.phase == _initial_phase
+                        and getattr(_existing, "pending_confirmation", False)
+                        and _existing.is_on
+                    ):
+                        _existing.current_power = abs_delta
+                        _existing.last_seen     = event.timestamp
+                        _LOGGER.debug(
+                            "NILM: dedup — update bestaand pending apparaat '%s' naar %.0fW",
+                            _existing.name, abs_delta,
+                        )
+                        return
+
                 device_id      = dev_id,
                 device_type    = best["device_type"],
                 name           = best.get("name", (best.get("device_type") or "unknown").replace("_"," ").title()),
@@ -1645,9 +1880,12 @@ class NILMDetector:
                 current_power  = abs_delta if is_on else 0.0,
                 is_on          = is_on,
                 source         = best.get("source","database"),
-                phase          = event.phase,
-                pending_confirmation = best["confidence"] < NILM_HIGH_CONFIDENCE,
+                phase          = _initial_phase,
+                pending_confirmation = True,
             )
+            # v4.5.19: register dedup timestamp so same type+phase won't spam new events
+            import time as _treg
+            self._recent_pending_devices[_dedup_key] = _treg.time()
             dev.energy = DeviceEnergy(device_id=dev_id)
             if is_on:
                 dev.on_events    = 1
@@ -1669,6 +1907,17 @@ class NILMDetector:
                 "CloudEMS NILM: NEW device %s (%.0f%% confidence) on %s",
                 dev.name, dev.confidence * 100, dev.phase
             )
+            # v4.5.11: nieuw apparaat → high log
+            self._high_log("nilm_new_device", {
+                "id":         dev_id,
+                "name":       dev.name,
+                "type":       dev.device_type,
+                "phase":      dev.phase,
+                "power_w":    round(abs_delta, 1),
+                "confidence": round(dev.confidence * 100, 1),
+                "source":     dev.source,
+                "pending":    dev.pending_confirmation,
+            })
             if self._on_device_found:
                 self._on_device_found(dev, all_matches)
             # v1.22: HMM sessietracking voor nieuw apparaat
@@ -2080,8 +2329,6 @@ class NILMDetector:
             # v1.24: mask status
             "pv_mask_active":      self._pv_mask_until > __import__("time").time(),
             "pv_mask_remaining_s": max(0.0, round(self._pv_mask_until - __import__("time").time(), 1)),
-            "batt_ramp_mask_active":  self._batt_ramp_mask_until > __import__("time").time(),
-            "batt_ramp_mask_remaining_s": max(0.0, round(self._batt_ramp_mask_until - __import__("time").time(), 1)),
             "recent_events":       self._diag_log[:20],
             # v1.25: PowerLearner diagnostics
             "power_learner":       self._power_learner.get_diagnostics(),
@@ -2218,32 +2465,22 @@ class NILMDetector:
         This avoids battery charge/discharge transitions triggering false NILM events.
         Battery is shown with 100% confidence and a dynamic power range.
         v1.16: also removes any heat_pump/boiler device that was caused by battery edges.
-        v1.24: ramp-buffer bijhouden zodat geleidelijke rampen ook worden gefilterd.
+        v4.5.7: ramp-buffer vervangen door BatteryUncertaintyTracker + EnergyBalancer lag-learner.
         """
         import time as _t
         device_id = "__battery_injected__"
         ts = _t.time()
 
-        # v1.24: ramp-buffer bijwerken
-        self._batt_ramp_buffer.append((ts, abs(power_w)))
-        # Houd buffer schoon: alleen metingen binnen BATT_RAMP_WINDOW_S bewaren
-        cutoff = ts - BATT_RAMP_WINDOW_S
-        self._batt_ramp_buffer = [e for e in self._batt_ramp_buffer if e[0] >= cutoff]
-
-        # Ramp-detectie: wat is de totale vermogensverandering in het venster?
-        if len(self._batt_ramp_buffer) >= 2:
-            powers_in_window = [e[1] for e in self._batt_ramp_buffer]
-            ramp_total = max(powers_in_window) - min(powers_in_window)
-            if ramp_total >= BATT_RAMP_TOTAL_W:
-                self._batt_ramp_mask_until = ts + BATT_RAMP_MASK_S
-                _LOGGER.debug(
-                    "NILM batterij-ramp gedetecteerd: %.0fW verandering in %.0fs "
-                    "→ NILM geblokkeerd %.0fs",
-                    ramp_total, BATT_RAMP_WINDOW_S, BATT_RAMP_MASK_S,
-                )
-
         # v1.16: store battery power so _async_process_event can ignore matching edges
         self._battery_power_w = abs(power_w)
+        # v4.5.19: update rolling window
+        import time as _tinj
+        self._battery_power_history.append((_tinj.time(), abs(power_w)))
+        self._battery_power_history = [
+            (t, w) for t, w in self._battery_power_history if _tinj.time() - t <= 30
+        ]
+        # effective battery power = max of rolling window
+        _eff_batt_w = max([w for _, w in self._battery_power_history] or [abs(power_w)])
 
         # v1.16: if battery is significantly active, remove any heating/boiler NILM device
         # whose power is within 30% of the battery power — those were false positives from
@@ -2265,16 +2502,37 @@ class NILMDetector:
                 # (b) het vermogen plausibel door de batterij veroorzaakt is
                 if dev.confirmed or dev.user_feedback == "correct":
                     continue
-                batt_w = abs(power_w)
+                # v4.5.15: drempel verlaagd van 2 → 1 on-event als bescherming —
+                # Een apparaat dat al 1× gezien is, is waarschijnlijk echt en mag niet
+                # door een toevallige batterij-transitie worden weggegooid.
+                if getattr(dev, "on_events", 0) >= 1:
+                    continue
+                # v4.5.19: use rolling window max so provider dispatch variation
+                # doesn't prevent removal of just-created false positives
+                batt_w = _eff_batt_w
                 dev_w  = dev.current_power if dev.current_power > 0 else dev.confidence * batt_w
                 ratio  = dev_w / batt_w if batt_w > 0 else 0
-                # Breeder raam: 30–170% van batterijvermogen — vangt ook deelstappen op
-                if 0.3 <= ratio <= 1.7:
+                # v4.5.13: smaller overlap window voor 3-fase batterij:
+                # Een 3-fase batterij laadt/ontlaadt per fase ~1/3 van het totaal.
+                # Ratio 30-170% was te breed en pakte echte apparaten mee.
+                # Nieuw: 60-140% voor striktere match (echte batterij-artefacten
+                # hebben ratio dicht bij 1.0; echte apparaten zitten er ver naast).
+                if 0.6 <= ratio <= 1.4:
                     to_remove.append(did)
                     _LOGGER.debug(
                         "NILM: verwijder vals positief '%s' (%.0fW) — batterij (%.0fW, ratio=%.2f)",
                         dev.name, dev_w, batt_w, ratio,
                     )
+                    # v4.5.11: battery false positive → high log
+                    self._high_log("nilm_false_positive", {
+                        "name":    dev.name,
+                        "type":    dev.device_type,
+                        "phase":   dev.phase,
+                        "dev_w":   round(dev_w, 1),
+                        "batt_w":  round(batt_w, 1),
+                        "ratio":   round(ratio, 2),
+                        "reason":  "battery_overlap",
+                    })
             for did in to_remove:
                 del self._devices[did]
 
@@ -2424,6 +2682,13 @@ class NILMDetector:
                 "(conf=%d, dupl=%d, sessie=%d)",
                 total, len(pruned_conf), len(pruned_dupl), len(pruned_ghost),
             )
+            # v4.5.11: auto-prune → high log
+            self._high_log("nilm_auto_prune", {
+                "total":        total,
+                "low_conf":     pruned_conf,
+                "duplicates":   pruned_dupl,
+                "session_ghosts": pruned_ghost,
+            })
         return {
             "pruned_total":   total,
             "pruned_conf":    pruned_conf,
@@ -2445,20 +2710,23 @@ class NILMDetector:
         Smart plug anchors (source="smart_plug") are always shown.
         """
         # Zeldzame apparaattypes vereisen meer herhaalde detecties voor ze worden
-        # getoond — dit voorkomt dat een eenmalige vermogenstap al een "cirkelzaag"
-        # op het dashboard plaatst.
+        # getoond — dit voorkomt dat een eenmalige vermogenstap al een apparaat
+        # op het dashboard plaatst. v4.5.12: alle drempels omhoog, liever minder maar zeker.
         RARE_TYPES_MIN_EVENTS = {
-            "power_tool":  5,   # moet 5× gezien zijn vóór zichtbaar
-            "garden":      4,
-            "medical":     4,
-            "kitchen":     3,
+            "power_tool":  8,   # moet 8× gezien zijn vóór zichtbaar
+            "garden":      6,
+            "medical":     6,
+            "kitchen":     5,
+            "unknown":     5,   # v4.5.12: "unknown" type vereist meer bewijs
         }
-        MIN_ON_EVENTS_DEFAULT = 2   # voor alle andere types
+        MIN_ON_EVENTS_DEFAULT = 2   # v4.5.15: terug naar 2 — 3 zorgde voor te trage detectie
 
-        # v2.4.17: warmup periode — eerste 24 uur na start zijn drempels 2× hoger
+        # v2.4.17: warmup periode — eerste 24 uur na start zijn drempels hoger
         # zodat vroege false positives niet direct op het dashboard verschijnen.
+        # v4.5.15: factor verlaagd van 2.0 → 1.5 — factor 2 blokkeerde detecties
+        # te lang na herstart (bijv. na update), zeker voor zeldzame apparaten.
         _uptime_h = (time.time() - self._started_at) / 3600
-        _warmup_factor = 2 if _uptime_h < 24 else 1
+        _warmup_factor = 1.5 if _uptime_h < 24 else 1
 
         raw = [d.to_dict() for d in self._devices.values()]
 
@@ -2474,15 +2742,39 @@ class NILMDetector:
             "solar production", "pv productie",
             # v4.5.3: extra termen
             "energieproductie", "energieverbruik", "electricity meter",
-            # v4.5.6: standalone "electricity meter" zonder suffix ook blokkeren
-            "electricity meter",
+            # v4.5.12: PV productie-sensoren en omvormer-outputs — ook bij smart_plug bron
+            "geschatte energieproductie", "geschatte productie",
+            "pv-productie", "pv_productie", "solar yield", "pv yield",
+            "pv opbrengst", "omvormer vermogen", "output power",
+            "ac output", "dc output", "ac_output",
+        )
+        # v4.5.12: termen die ALTIJD infra zijn, ook als source == "smart_plug"
+        _INFRA_ALWAYS = (
+            "energieproductie", "energieverbruik", "electricity meter",
+            "geschatte energieproductie", "output power", "ac output",
+            "pv opbrengst", "solar yield", "pv yield",
         )
         def _is_infra_name(dev_dict: dict) -> bool:
-            if dev_dict.get("source") == "smart_plug":
-                return False
-            # Check zowel name als user_name
             raw_name = dev_dict.get("user_name") or dev_dict.get("name") or ""
             name = raw_name.lower().strip()
+            is_smart_plug = dev_dict.get("source") == "smart_plug"
+
+            # v4.5.12: smart_plug bypast de naam-check NIET meer voor PV/infra namen.
+            # Een omvormer of netmeter die als smart_plug binnenkomt is nog steeds infra.
+            if is_smart_plug:
+                # Alleen blokkeren op de meest ondubbelzinnige infra-termen
+                if any(kw in name for kw in _INFRA_ALWAYS):
+                    return True
+                # PV/omvormer patroon: "output power", "geschatte", of bekende merk + vermogen
+                if "output power" in name or "geschatte" in name:
+                    return True
+                # Electricity meter varianten
+                if name.startswith("electricity") or name.startswith("growatt") \
+                        or name.startswith("goodwe") or name.startswith("solaredge"):
+                    return True
+                return False
+
+            # Niet-smart_plug: volledige check
             if any(kw in name for kw in _INFRA_NAME_KEYWORDS_EARLY):
                 return True
             # Extra patroon: "meter" + energie-term
@@ -2567,6 +2859,13 @@ class NILMDetector:
             # Merknamen die typisch infra zijn
             "connect energiemeter", "stroom tegen uurprijzen",
             "p1 telegram",
+            # v4.5.11: accumerken en omvormer-labels (issue #18 Zendure)
+            "zendure", "growatt", "goodwe", "solarman", "deye", "sofar",
+            "victron", "pylontech", "byd ", "foxess", "solis ", "sungrow",
+            "solaredge", "enphase", "huawei", "fronius", "kostal",
+            "nexus", "zonneplan",
+            "manager power", "vermogen invertet", "vermogen inverter",
+            "hub power", "solarflow", "ace power", "smartplug hub",
         }
         def _has_infra_keyword(name: str) -> bool:
             n = (name or "").lower().strip()
@@ -2596,6 +2895,36 @@ class NILMDetector:
                 }
             )
         ]
+        # v4.5.11: infra-apparaten die via auto-confirm toch confirmed=True hebben gekregen
+        # moeten ook uit _devices verwijderd worden zodat ze niet steeds opnieuw opduiken.
+        # Doe dit hier na alle filters — apparaten die gefilterd zijn maar nog in _devices
+        # zitten worden nu definitief verwijderd (ook als confirmed=True).
+        _output_ids = {d.get("id") for d in raw if d.get("id")}
+        _to_purge_confirmed_infra = [
+            did for did, dev in list(self._devices.items())
+            if did not in _output_ids
+            and dev.confirmed
+            and not did.startswith("__")
+            and dev.source != "smart_plug"
+            and (
+                dev.device_type.lower() in {
+                    "electricity_meter", "energy_meter", "main_meter", "grid_meter",
+                    "smart_meter", "p1_meter", "dsmr", "net_meter",
+                    "solar_inverter", "pv_inverter", "pv", "inverter",
+                    "battery", "opslag", "home_battery",
+                    "grid", "grid_export", "grid_import", "net_power",
+                }
+                or _is_infra_name(dev.to_dict())
+                or _has_infra_keyword(dev.name or "")
+            )
+        ]
+        for _did in _to_purge_confirmed_infra:
+            _dev = self._devices.get(_did)
+            _LOGGER.info(
+                "NILM: bevestigd infra-apparaat '%s' (%s) definitief verwijderd — v4.5.11",
+                getattr(_dev, "name", _did), getattr(_dev, "device_type", "?"),
+            )
+            self._devices.pop(_did, None)
 
         # v2.5: runtime vermogensfilter op basis van _infra_powers.
         #
