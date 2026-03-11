@@ -1,6 +1,8 @@
 !!!! BETA BETA BETA !!!!
 
 
+!!!!!!Dasbhoard code zelf even WWW folder kopieeren, auto update werkt nog niet!!!!!!
+
 <div align="center">
 
 # ⚡ CloudEMS
