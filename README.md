@@ -1,7 +1,7 @@
 !!!! BETA BETA BETA !!!!
 
 
-!!!!!!Dasbhoard code zelf even WWW folder kopieeren, auto update werkt nog niet!!!!!!
+!!!!!!Dasbhoard code zelf even WWW folder kopieeren, auto update werkt nog niet stabiel!!!!!!
 
 <div align="center">
 
