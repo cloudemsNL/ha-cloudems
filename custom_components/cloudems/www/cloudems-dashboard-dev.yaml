@@ -150,7 +150,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -594,7 +594,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -849,7 +849,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1003,7 +1003,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1677,7 +1677,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1769,7 +1769,7 @@ views:
     content: |
       {%- set bats = state_attr('sensor.cloudems_batterij_epex_schema', 'batteries') or [] -%}
       {%- set action = states('sensor.cloudems_batterij_epex_schema') -%}
-      {%- set reason = state_attr('sensor.cloudems_batterij_epex_schema', 'reason') -%}
+      {%- set reason = state_attr('sensor.cloudems_batterij_epex_schema', 'human_reason') or state_attr('sensor.cloudems_batterij_epex_schema', 'reason') -%}
       {%- set soc    = state_attr('sensor.cloudems_batterij_epex_schema', 'soc_pct') -%}
       {%- if bats | length == 0 -%}
       {%- set soc_icon = '🟢' if soc and soc >= 60 else ('🟡' if soc and soc >= 20 else ('🔴' if soc else '⚫')) -%}
@@ -1871,7 +1871,7 @@ views:
       - entity: sensor.cloudems_batterij_epex_schema
         name: Huidige actie
         icon: mdi:battery-clock
-      - attribute: reason
+      - attribute: human_reason
         entity: sensor.cloudems_batterij_epex_schema
         name: Reden
         icon: mdi:information-outline
@@ -1894,7 +1894,7 @@ views:
       - entity: sensor.cloudems_batterij_epex_schema
         name: Huidige actie
         icon: mdi:flash
-      - attribute: reason
+      - attribute: human_reason
         entity: sensor.cloudems_batterij_epex_schema
         name: Reden
         icon: mdi:comment-outline
@@ -1934,6 +1934,7 @@ views:
         {%- set pwr_val = states(eid_pwr) | float(0) if eid_pwr else 0 -%}
         {%- set soc_icon = '🟢' if soc_val >= 60 else ('🟡' if soc_val >= 20 else '🔴') -%}
         {%- set fc = zp.get('forecast') or {} -%}
+        {%- set human_reason = state_attr('sensor.cloudems_batterij_epex_schema', 'human_reason') or fc.get('action_human_reason', '') -%}
         {%- set reasons = fc.get('action_reasons', []) -%}
         {%- set forecast8 = fc.get('forecast_8h', []) -%}
         {%- set pwr_str = (pwr_val | int | string ~ ' W ⬆️') if pwr_val > 50 else ((pwr_val | abs | int | string ~ ' W ⬇️') if pwr_val < -50 else 'idle') -%}
@@ -1954,6 +1955,22 @@ views:
         | **Auto-sturing** | {{ '✅ Actief' if auto_on else '⚠️ Uit — schakel in via Configuratie' }} |
         | **Beslissing** | {{ action_lbl }}{% if conf_pct %} · {{ conf_pct }}%{% endif %}{% if decision_time %} · 🕐 {{ decision_time }}{% endif %} |
         | **Reden** | {{ all_reasons | join(' · ') if all_reasons else '—' }} |
+        {%- if human_reason %}
+        | **Toelichting** | {{ human_reason }} |
+        {%- endif %}
+        {%- set all_in = fc.get('current_price_all_in_eur') %}
+        {%- set raw_p = fc.get('current_price_eur') %}
+        {%- set tax_p = fc.get('price_tax_eur', 0) %}
+        {%- set vat_p = fc.get('price_vat_rate', 0) %}
+        {%- set cycle_c = fc.get('cycle_cost_eur_kwh', 0) %}
+        {%- if all_in %}
+        | **Prijs (all-in)** | €{{ (all_in * 100) | round(1) }} ct/kWh{% if tax_p %} · EB: {{ (tax_p * 100) | round(1) }} ct{% endif %}{% if vat_p %} · BTW: {{ (vat_p * 100) | round(0) | int }}%{% endif %} |
+        {%- elif raw_p %}
+        | **Prijs (EPEX)** | €{{ (raw_p * 100) | round(1) }} ct/kWh |
+        {%- endif %}
+        {%- if cycle_c and cycle_c > 0 %}
+        | **Slijtagekosten** | {{ (cycle_c * 100) | round(2) }} ct/kWh |
+        {%- endif %}
         {%- if fc.get('soc_target', 0) > 0 %}
         | **SoC doel** | {{ fc.get('soc_target') }}% (bereikbaar: {{ fc.get('soc_reachable', 0) }}%) |
         {%- endif %}
@@ -1964,6 +1981,22 @@ views:
         | **Sliders** | ✅ Pad A |
         {%- endif %}
         | **Entiteiten** | {{ zp.get('entities_mapped', []) | length }} gekoppeld |
+        {%- set lmd = zp.get('learned_max_deliver_w') %}
+        {%- set lms = zp.get('learned_max_solar_w') %}
+        {%- if lmd and lmd < 9999 %}
+        | **Max leveren** | {{ lmd | int }} W *(geleerd)* |
+        {%- endif %}
+        {%- if lms and lms < 9999 %}
+        | **Max zonneladen** | {{ lms | int }} W *(geleerd)* |
+        {%- endif %}
+        {%- if zp.get('probe_active') %}
+        {%- set probe_w = zp.get('probe_current_w', 0) | int %}
+        {%- set confirmed_w = zp.get('probe_confirmed_w', 0) | int %}
+        {%- set est_max = 12000 %}
+        {%- set filled = [((confirmed_w / est_max) * 10) | int, 10] | min %}
+        {%- set bar = '█' * filled + '░' * (10 - filled) %}
+        | **Max leren** | 🔍 `{{ bar }}` {{ confirmed_w }} W / test {{ probe_w }} W |
+        {%- endif %}
         {%- if zp.get('last_slider_write_min') is not none %}
         | **Laatste sturing** | ⏱ {{ zp.get('last_slider_write_min') | round(0) | int }} min geleden |
         {%- endif %}
@@ -2022,49 +2055,9 @@ views:
         | **Totaal verdiend** | **€ {{ zp.get('revenue_total_eur') | round(2) }}** |
         {%- endif %}
         {%- endif %}
-  # ── Zonneplan modus knoppen ───────────────────────────────────────────────
-  - type: conditional
-    conditions:
-      - condition: state
-        entity: sensor.cloudems_batterij_epex_schema
-        state_not: unavailable
-    card:
-      type: grid
-      columns: 4
-      square: false
-      cards:
-        - type: button
-          name: Thuis opt.
-          icon: mdi:home-battery
-          tap_action:
-            action: perform-action
-            perform_action: cloudems.zonneplan_set_mode
-            data:
-              mode: home_optimization
-        - type: button
-          name: Zelfverbruik
-          icon: mdi:solar-power
-          tap_action:
-            action: perform-action
-            perform_action: cloudems.zonneplan_set_mode
-            data:
-              mode: self_consumption
-        - type: button
-          name: Powerplay
-          icon: mdi:lightning-bolt
-          tap_action:
-            action: perform-action
-            perform_action: cloudems.zonneplan_set_mode
-            data:
-              mode: powerplay
-        - type: button
-          name: Auto herstel
-          icon: mdi:restart
-          tap_action:
-            action: perform-action
-            perform_action: cloudems.zonneplan_battery_auto
-            data: {}
-  # ── Zonneplan sliders (alleen als Pad A beschikbaar) ──────────────────────
+  # ── Zonneplan modus knoppen: verwijderd — CloudEMS beslist automatisch ────
+
+  # ── Nexus vermogenssliders (huidige waarden, alleen lezen) ───────────────
   - type: conditional
     conditions:
       - condition: state
@@ -2089,7 +2082,16 @@ views:
         {%- if e_mch %}
         | ⚡ **Max. laadvermogen** | {{ states(e_mch) }} W |
         {%- endif %}
-  # ── Slider kalibratie knop ─────────────────────────────────────────────────
+      card_mod:
+        style: |
+          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(0,177,64,0.3) !important; border-radius: 16px !important; --primary-text-color: rgb(255,255,255); --card-background-color: transparent; }
+          .card-header { background: transparent !important; border-bottom: 1px solid rgba(0,177,64,0.15) !important; color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+          ha-markdown-element th { background: rgba(0,177,64,0.1) !important; color: rgb(0,212,78) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+          ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
+          ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 700 !important; }
+
+  # ── Nexus nu instellen (geforceerde sync naar provider) ──────────────────
   - type: conditional
     conditions:
       - condition: state
@@ -2098,15 +2100,138 @@ views:
     card:
       type: button
       entity: button.cloudems_slider_kalibratie
-      name: "🎯 Slider kalibratie"
+      name: "🔄 Nexus nu instellen"
       show_name: true
       show_icon: true
-      icon: mdi:tune-variant
+      icon: mdi:refresh-circle
       tap_action:
         action: call-service
         service: button.press
         service_data:
           entity_id: button.cloudems_slider_kalibratie
+      card_mod:
+        style: |
+          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(0,177,64,0.3) !important; border-radius: 16px !important; --primary-text-color: rgb(255,255,255); }
+
+  # ── Nexus max vermogen (uitgelezen uit omvormer) ──────────────────────────
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: sensor.cloudems_batterij_epex_schema
+        state_not: unavailable
+    card:
+      type: markdown
+      title: "⚡ Nexus — Max vermogen omvormer"
+      content: |
+        {%- set zp = state_attr('sensor.cloudems_batterij_epex_schema', 'zonneplan') or {} -%}
+        {%- set lmd = zp.get('learned_max_deliver_w') -%}
+        {%- set lms = zp.get('learned_max_solar_w') -%}
+        {%- set probe_active = zp.get('probe_active', false) -%}
+        {%- set probe_w = zp.get('probe_current_w', 0) | int -%}
+        {%- set confirmed_w = zp.get('probe_confirmed_w', 0) | int -%}
+        {%- if probe_active %}
+        🔍 **CloudEMS is het maximale vermogen aan het meten...**
+
+        | Parameter | Waarde |
+        |---|---|
+        | **Gemeten tot nu** | {{ confirmed_w }} W |
+        | **Test op** | {{ probe_w }} W |
+        {%- set filled = [((confirmed_w / 12000) * 10) | int, 10] | min -%}
+        {%- set bar = '█' * filled + '░' * (10 - filled) -%}
+        | **Voortgang** | `{{ bar }}` |
+
+        *CloudEMS doet dit automatisch op de achtergrond — geen actie nodig.*
+        {%- elif lmd is not none and lms is not none and lmd < 9999 and lms < 9999 %}
+        ✅ **Maximale vermogens uitgelezen**
+
+        | Richting | Max vermogen |
+        |---|---|
+        | ⬇️ **Leveren aan huis** | **{{ lmd | int }} W** |
+        | ☀️ **Zonneladen** | **{{ lms | int }} W** |
+
+        *CloudEMS gebruikt deze waarden automatisch als bovengrens bij sturing.*
+        {%- elif lmd is not none and lmd < 9999 %}
+        | ⬇️ **Max leveren aan huis** | **{{ lmd | int }} W** *(geleerd)* |
+        {%- elif lms is not none and lms < 9999 %}
+        | ☀️ **Max zonneladen** | **{{ lms | int }} W** *(geleerd)* |
+        {%- else %}
+        ⏳ *CloudEMS leert het maximale vermogen van je omvormer automatisch — dit gebeurt tijdens de eerste laadcycli.*
+        {%- endif %}
+      card_mod:
+        style: |
+          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(0,177,64,0.3) !important; border-radius: 16px !important; --primary-text-color: rgb(255,255,255); --card-background-color: transparent; }
+          .card-header { background: transparent !important; border-bottom: 1px solid rgba(0,177,64,0.15) !important; color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+          ha-markdown-element th { background: rgba(0,177,64,0.1) !important; color: rgb(0,212,78) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+          ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
+          ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 700 !important; }
+          ha-markdown-element code { color: rgb(100,180,100) !important; font-size: 10px !important; }
+          ha-markdown-element em { color: rgb(100,100,100) !important; font-size: 11px !important; }
+
+  # ── Batterij vermogen- en kWh-grafieken ─────────────────────────────────
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: switch.cloudems_module_batterij
+        state: "on"
+    card:
+      type: custom:cloudems-graph-card
+      name: "🔋 Laad- & ontlaadvermogen alle batterijen (24u)"
+      hours_to_show: 24
+      points_per_hour: 6
+      line_width: 2
+      show:
+        extrema: true
+        average: false
+      entities:
+        - entity: sensor.cloudems_battery_power
+          name: "Vermogen (W)"
+          color: "rgb(34,211,238)"
+
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: switch.cloudems_module_batterij
+        state: "on"
+    card:
+      type: markdown
+      title: "⚡ Batterij energie vandaag"
+      content: |
+        {%- set charge_kwh = state_attr('sensor.cloudems_battery_power', 'charge_kwh_today') | float(0) -%}
+        {%- set discharge_kwh = state_attr('sensor.cloudems_battery_power', 'discharge_kwh_today') | float(0) -%}
+        {%- set bats = state_attr('sensor.cloudems_battery_power', 'batteries') or [] -%}
+        {%- set total_w = states('sensor.cloudems_battery_power') | float(0) -%}
+        {%- set action_icon = '⚡ Laden' if total_w > 50 else ('🔋 Ontladen' if total_w < -50 else '💤 Idle') -%}
+        {%- set power_str = (total_w | int | string ~ ' W') if total_w | abs > 50 else '—' -%}
+
+        {{ action_icon }} &nbsp;·&nbsp; **{{ power_str }}** nu
+
+        | Richting | Vandaag |
+        |---|---|
+        | ⚡ Geladen | **{{ charge_kwh | round(2) }} kWh** |
+        | 🔋 Ontladen | **{{ discharge_kwh | round(2) }} kWh** |
+        | ♻️ Rendement | {{ ((discharge_kwh / charge_kwh * 100) | round(0) | int | string ~ '%') if charge_kwh > 0.1 else '—' }} |
+
+        {%- if bats | length > 1 %}
+
+        | Batterij | SOC | Vermogen |
+        |---|---|---|
+        {%- for b in bats %}
+        {%- set si = '🟢' if b.soc_pct and b.soc_pct >= 60 else ('🟡' if b.soc_pct and b.soc_pct >= 20 else '🔴') -%}
+        {%- set pw = b.power_w | int(0) -%}
+        {%- set ps = ('⚡ ' ~ pw | string ~ ' W') if pw > 50 else (('🔋 ' ~ pw | abs | string ~ ' W') if pw < -50 else '💤') -%}
+        | {{ b.label or ('Batterij ' ~ loop.index) }} | {{ si }} {{ b.soc_pct | round(0) | int if b.soc_pct else '—' }}% | {{ ps }} |
+        {%- endfor %}
+        {%- endif %}
+      card_mod:
+        style: |
+          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(34,211,238,0.25) !important; border-radius: 16px !important; --primary-text-color: rgb(255,255,255); --card-background-color: transparent; }
+          .card-header { background: transparent !important; border-bottom: 1px solid rgba(34,211,238,0.12) !important; color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+          ha-markdown-element th { background: rgba(34,211,238,0.08) !important; color: rgb(34,211,238) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+          ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
+          ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 700 !important; }
+
   # ── Handmatig laden / ontladen: verwijderd (Zonneplan Nexus stuurt niet direct via charge/discharge) ──
 
   - type: markdown
@@ -2116,7 +2241,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -2451,7 +2576,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -2744,7 +2869,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -2861,7 +2986,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3133,7 +3258,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3275,7 +3400,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3452,7 +3577,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3735,7 +3860,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3860,7 +3985,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -3973,7 +4098,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -4080,7 +4205,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -4666,7 +4791,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -4880,7 +5005,7 @@ views:
           <span style="font-size:20px;">⚡</span>
           <div>
             <div style="color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;">CloudEMS v{{ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>
-            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · MIT License</div>
+            <div style="color:rgb(102,102,102);font-size:11px;">cloudems.eu · Proprietary License</div>
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">

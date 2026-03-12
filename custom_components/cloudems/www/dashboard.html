@@ -313,6 +313,7 @@ body.sim-on{padding-top:28px}
       <div id="zp-sliders" style="display:none;font-size:.58rem;color:var(--muted);margin-top:.15rem;line-height:1.6"></div>
     </div>
     <span class="card-sub" id="sub-bat-reason" style="font-size:.52rem;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span>
+    <span class="card-sub" id="sub-bat-human-reason" style="display:none;font-size:.50rem;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.75;font-style:italic"></span>
   </div>
 
   <!-- PRICE -->
@@ -613,6 +614,7 @@ function renderAll(){
   // Battery gauge + Zonneplan info
   const batAct=(att(E.batSch,'action')||'idle').toLowerCase();
   const batReason=att(E.batSch,'reason')||'';
+  const batHumanReason=att(E.batSch,'human_reason')||'';
   const batClr=batPct===null?'var(--muted)':batPct<15?'var(--red)':batPct<30?'var(--amber)':'var(--blue)';
   gBat.set(batPct!==null?batPct/100:0, batClr);
   const batPctStr=batPct!==null?fmt(batPct,0)+'%':'—';
@@ -624,6 +626,8 @@ function renderAll(){
   const batActStr=Object.entries(batActLabel).find(([k])=>batAct.includes(k))?.[1]||batAct;
   setEl('sub-bat-action', (batActStr+(batPwrStr?' · '+batPwrStr:'')).trim()||'Geen batterij');
   setEl('sub-bat-reason', batReason.length>50?batReason.substring(0,50)+'…':batReason);
+  const batHrEl=document.getElementById('sub-bat-human-reason');
+  if(batHrEl){batHrEl.style.display=batHumanReason?'block':'none';batHrEl.textContent=batHumanReason.length>80?batHumanReason.substring(0,80)+'…':batHumanReason;}
   // Zonneplan integratie
   const zp=att(E.batSch,'zonneplan');
   const zpEl=document.getElementById('zp-info');

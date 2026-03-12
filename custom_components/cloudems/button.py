@@ -34,6 +34,7 @@ async def async_setup_entry(
         CloudEMSDiagnosticsButton(coordinator, entry),
         CloudEMSBuyMeCoffeeButton(coordinator),
         CloudEMSSliderCalibrateButton(coordinator),
+        CloudEMSSliderMaxProbeButton(coordinator),
         # v1.22: NILM cleanup knoppen
         CloudEMSNILMCleanupFullButton(coordinator),
         CloudEMSNILMCleanup7DaysButton(coordinator),
@@ -517,7 +518,7 @@ class CloudEMSShutterButton(CoordinatorEntity, ButtonEntity):
 
 
 class CloudEMSSliderCalibrateButton(CoordinatorEntity, ButtonEntity):
-    """Kalibreert Zonneplan vermogenssliders direct op basis van huidige situatie."""
+    """Forceert direct een slider-beslissing op basis van huidige situatie."""
 
     _attr_name       = "CloudEMS Slider kalibratie"
     _attr_icon       = "mdi:tune-variant"
@@ -543,19 +544,64 @@ class CloudEMSSliderCalibrateButton(CoordinatorEntity, ButtonEntity):
             return
         result = await zb.async_force_slider_calibrate()
         _LOGGER.info("CloudEMS SliderKalibratie resultaat: %s", result)
-        persistent_notification.async_create(
-            self.coordinator.hass,
-            (
-                f"**Slider kalibratie uitgevoerd**\n\n"
+        if result.get("error"):
+            msg = f"⚠️ Kalibratie mislukt: {result['error']}"
+        else:
+            msg = (
+                f"**⚡ Slider kalibratie uitgevoerd**\n\n"
                 f"| Slider | Waarde | Reden |\n"
                 f"|---|---|---|\n"
-                + (f"| ⬇️ Leveren aan huis | **{result['deliver_to_home_w']} W** | {result['deliver_reason']} |\n"
-                   if result.get("has_deliver") else "")
-                + (f"| ☀️ Zonneladen | **{result['solar_charge_w']} W** | {result['solar_reason']} |\n"
-                   if result.get("has_solar") else "")
+                + (f"| ⬇️ Leveren aan huis | **{result['deliver_to_home_w']} W** "
+                   f"| {result['deliver_reason']} |\n" if result.get("has_deliver") else "")
+                + (f"| ☀️ Zonneladen | **{result['solar_charge_w']} W** "
+                   f"| {result['solar_reason']} |\n" if result.get("has_solar") else "")
                 + f"\nSoC: {result['soc_pct']:.0f}% · PV surplus: {result['surplus_w']:.0f}W"
-            ),
+            )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            msg,
             title="CloudEMS — Slider kalibratie",
             notification_id="cloudems_slider_calibrate",
+        )
+        self.coordinator.async_update_listeners()
+
+
+class CloudEMSSliderMaxProbeButton(CoordinatorEntity, ButtonEntity):
+    """Herleest de slider-maxima uit de HA entiteit-attributen (max-attribuut van number entity)."""
+
+    _attr_name      = "CloudEMS Slider max vernieuwen"
+    _attr_icon      = "mdi:refresh"
+    _attr_unique_id = f"{DOMAIN}_slider_max_probe"
+    entity_id       = "button.cloudems_slider_max_probe"
+
+    def __init__(self, coordinator: CloudEMSCoordinator) -> None:
+        super().__init__(coordinator)
+
+    @property
+    def device_info(self):
+        return _device_info(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        zb = getattr(self.coordinator, "_zonneplan_bridge", None)
+        return zb is not None and getattr(zb, "is_available", False)
+
+    async def async_press(self) -> None:
+        zb = getattr(self.coordinator, "_zonneplan_bridge", None)
+        if zb is None:
+            return
+        zb._read_slider_maxima()
+        msg = (
+            f"**✅ Slider maxima bijgewerkt**\n\n"
+            f"| | |\n|---|---|\n"
+            f"| **Leveren aan huis** | {zb._slider_max_deliver_w:.0f} W |\n"
+            f"| **Zonnestroom opslaan** | {zb._slider_max_solar_w:.0f} W |\n\n"
+            f"*Uitgelezen uit HA entiteit-attributen.*"
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            msg,
+            title="CloudEMS — Slider maxima",
+            notification_id="cloudems_slider_max_probe",
         )
         self.coordinator.async_update_listeners()

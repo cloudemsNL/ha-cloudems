@@ -43,6 +43,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+try:
+    import aiohttp as _aiohttp  # type: ignore[import]
+    _AIOHTTP_AVAILABLE = True
+except ImportError:
+    _AIOHTTP_AVAILABLE = False
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
@@ -53,6 +59,18 @@ MODE_CHEAP_HOURS    = "cheap_hours"
 MODE_NEGATIVE_PRICE = "negative_price"
 MODE_PV_SURPLUS     = "pv_surplus"
 MODE_EXPORT_REDUCE  = "export_reduce"
+
+# ─── ACRouter (RobotDyn DimmerLink hardware) ──────────────────────────────────
+# REST API modus-codes voor ACRouter firmware v1.2.0+
+# POST /api/mode  {"mode": N}
+ACROUTER_MODE_OFF     = 0   # Uit
+ACROUTER_MODE_AUTO    = 1   # Autonoom grid-balancering (niet gebruikt door CloudEMS)
+ACROUTER_MODE_ECO     = 2   # Voorkomt export, laat import toe
+ACROUTER_MODE_OFFGRID = 3   # Alleen zonne-overschot (niet gebruikt)
+ACROUTER_MODE_MANUAL  = 4   # Handmatig dimmer-niveau (CloudEMS stuurt dit)
+ACROUTER_MODE_BOOST   = 5   # 100% vermogen (goedkope uren)
+ACROUTER_HTTP_TIMEOUT = 3   # seconden timeout per REST-call
+ACROUTER_UPDATE_S     = 10  # minimale tijd tussen dimmer-updates (voorkom flicker)
 MODE_HEAT_DEMAND    = "heat_demand"
 MODE_CONGESTION_OFF = "congestion_off"
 
@@ -247,6 +265,15 @@ class BoilerState:
     _energy_ts_last:     Optional[float] = field(default=None, repr=False)
     _dimmer_last_pct:    float = field(default=0.0, repr=False)
     _dimmer_last_ts:     float = field(default=0.0, repr=False)
+
+    # ── v4.5.125: ACRouter (RobotDyn DimmerLink) hardware-integratie ──────────
+    # Configuratie: stel control_mode="acrouter" + acrouter_host="192.168.x.x" in.
+    # power_w blijft het nominale vermogen van het weerstandselement (bijv. 2000).
+    acrouter_host:       str   = ""     # IP-adres van het ACRouter device
+    # Interne state (niet in config):
+    _acrouter_last_mode: int   = field(default=-1,  repr=False)  # -1 = onbekend
+    _acrouter_last_pct:  float = field(default=0.0, repr=False)
+    _acrouter_last_ts:   float = field(default=0.0, repr=False)
 
     @property
     def needs_heat(self) -> bool:
@@ -914,6 +941,7 @@ class BoilerController:
             anode_threshold_kwh = float(cfg.get("anode_threshold_kwh", ANODE_DEFAULT_KWH)),
             limescale_detect    = bool(cfg.get("limescale_detect", True)),
             cop_curve_override  = cfg.get("cop_curve_override", None),
+            acrouter_host       = cfg.get("acrouter_host", ""),
         )
 
     def _build_group(self, cfg: dict) -> CascadeGroup:
@@ -1539,35 +1567,53 @@ class BoilerController:
     async def _read_sensors(self) -> None:
         now = time.time()
         for b in list(self._boilers) + [b for g in self._groups for b in g.boilers]:
+            # Lees altijd eerst de temperatuur uit de boiler-entiteit zelf
+            # (water_heater / climate leveren current_temperature als attribuut)
+            _entity_temp_c: float | None = None
+            _boiler_state = self._hass.states.get(b.entity_id)
+            if _boiler_state:
+                _cur_t = _boiler_state.attributes.get("current_temperature")
+                if _cur_t is not None:
+                    try:
+                        _entity_temp_c = float(_cur_t)
+                    except (ValueError, TypeError):
+                        pass
+
+            # Lees geconfigureerde temp_sensor
+            _sensor_temp_c: float | None = None
             if b.temp_sensor:
                 s = self._hass.states.get(b.temp_sensor)
                 if s and s.state not in ("unavailable", "unknown", ""):
                     try:
-                        b.current_temp_c = float(s.state)
+                        _sensor_temp_c = float(s.state)
                     except (ValueError, TypeError):
                         pass
 
-            # v4.5.15: als temp_sensor leeg of onleesbaar is, probeer temperatuur
-            # te lezen uit de boiler-entiteit zelf als het een climate.* is.
-            # Ariston (en andere) leveren current_temperature via het climate-platform.
-            if b.current_temp_c is None:
-                _boiler_state = self._hass.states.get(b.entity_id)
-                if _boiler_state:
-                    _cur_t = _boiler_state.attributes.get("current_temperature")
-                    if _cur_t is not None:
-                        try:
-                            b.current_temp_c = float(_cur_t)
-                        except (ValueError, TypeError):
-                            pass
+            # Kies de beste temperatuursbron:
+            # Als de geconfigureerde sensor >15°C afwijkt van de boiler-entiteit,
+            # is de sensor waarschijnlijk verkeerd geconfigureerd (bijv. koud-inlaat).
+            # Geef dan voorrang aan de boiler-entiteit zelf.
+            if _sensor_temp_c is not None and _entity_temp_c is not None:
+                if abs(_sensor_temp_c - _entity_temp_c) > 15.0:
+                    _LOGGER.warning(
+                        "BoilerController [%s]: temp_sensor '%s' geeft %.1f°C maar "
+                        "boiler-entiteit rapporteert %.1f°C (verschil >15°C). "
+                        "Gebruik boiler-entiteit temperatuur. "
+                        "Controleer bu_temp_sensor configuratie.",
+                        b.entity_id, b.temp_sensor, _sensor_temp_c, _entity_temp_c,
+                    )
+                    b.current_temp_c = _entity_temp_c
+                else:
+                    b.current_temp_c = _sensor_temp_c
+            elif _sensor_temp_c is not None:
+                b.current_temp_c = _sensor_temp_c
+            elif _entity_temp_c is not None:
+                b.current_temp_c = _entity_temp_c
 
-            # v4.5.15: als er nog steeds geen temperatuursensor is, gebruik het
-            # gemeten vermogen als proxy: als de boiler aan is maar <50W trekt,
-            # is hij waarschijnlijk al op temperatuur (thermostaat heeft afgesloten).
-            # Zet current_temp_c dan op setpoint zodat needs_heat = False.
+            # Laatste fallback: boiler aan maar trekt geen vermogen → al op temperatuur
             if b.current_temp_c is None and b.current_power_w is not None:
                 _is_on = self._is_on(b.entity_id, b)
                 if _is_on and b.current_power_w < 50 and b.power_w > 100:
-                    # Boiler staat logisch aan maar trekt geen vermogen → al op temp
                     b.current_temp_c = b.setpoint_c  # voorkomt onnodige trigger
 
             if b.energy_sensor:
@@ -1701,6 +1747,10 @@ class BoilerController:
                 return op == preset_on
             return s.attributes.get("preset_mode", s.state) == preset_on
 
+        if ctrl == "acrouter":
+            # ACRouter heeft geen HA-entity — gebruik interne mode-tracking
+            return (boiler._acrouter_last_mode if boiler else -1) > 0
+
         if ctrl == "dimmer":
             off_pct = boiler.dimmer_off_pct if boiler else 0.0
             if domain == "light":
@@ -1731,6 +1781,9 @@ class BoilerController:
     async def _switch_smart(self, entity_id: str, on: bool,
                              boiler: Optional[BoilerState] = None,
                              solar_surplus_w: float = 0.0) -> None:
+        if boiler and boiler.control_mode == "acrouter":
+            await self._acrouter_set(boiler, on, solar_surplus_w)
+            return
         if on and boiler and boiler.control_mode == "dimmer" and boiler.dimmer_proportional:
             await self._switch_dimmer_prop(entity_id, boiler, solar_surplus_w)
             return
@@ -1756,6 +1809,93 @@ class BoilerController:
             await self._hass.services.async_call("number", "set_value",
                 {"entity_id": entity_id, "value": pct}, blocking=False)
         _LOGGER.debug("Dimmer prop %s → %.0f%% (surplus %.0fW)", entity_id, pct, solar_surplus_w)
+
+    async def _acrouter_set(self, boiler: BoilerState, on: bool,
+                             solar_surplus_w: float) -> None:
+        """Stuur ACRouter device aan via REST API.
+
+        Modi die CloudEMS gebruikt:
+          - on=True,  surplus > 0  → MANUAL mode, dimmer = surplus_w / power_w * 100%
+          - on=True,  surplus = 0  → BOOST mode (goedkoop uur, volgas)
+          - on=False              → OFF mode
+
+        REST API (ACRouter firmware v1.2.0+):
+          POST /api/mode   {"mode": N}   — stel modus in
+          POST /api/dimmer {"level": N}  — dimmer 0-100% (alleen in MANUAL mode)
+        """
+        if not boiler.acrouter_host:
+            _LOGGER.warning("ACRouter: acrouter_host niet geconfigureerd voor boiler '%s'",
+                            boiler.label)
+            return
+
+        if not _AIOHTTP_AVAILABLE:
+            _LOGGER.error("ACRouter: aiohttp niet beschikbaar — kan device niet aansturen")
+            return
+
+        now = time.time()
+
+        # Bepaal gewenste modus en dimmer-percentage
+        if not on:
+            target_mode = ACROUTER_MODE_OFF
+            target_pct  = 0.0
+        elif solar_surplus_w > 0:
+            target_mode = ACROUTER_MODE_MANUAL
+            raw_pct     = (solar_surplus_w / boiler.power_w * 100.0) if boiler.power_w > 0 else 100.0
+            target_pct  = max(5.0, min(100.0, round(raw_pct / 5) * 5))  # stap 5%, min 5%
+        else:
+            # on=True maar geen surplus → goedkoop uur, boost
+            target_mode = ACROUTER_MODE_BOOST
+            target_pct  = 100.0
+
+        # Debounce: stuur alleen als mode of pct significant veranderd is
+        mode_changed = (target_mode != boiler._acrouter_last_mode)
+        pct_changed  = (target_mode == ACROUTER_MODE_MANUAL and
+                        abs(target_pct - boiler._acrouter_last_pct) >= 5.0)
+        throttled    = (now - boiler._acrouter_last_ts < ACROUTER_UPDATE_S)
+
+        if not mode_changed and not pct_changed:
+            return
+        if pct_changed and not mode_changed and throttled:
+            return  # kleine surplus-variatie, wacht op throttle-interval
+
+        base_url = f"http://{boiler.acrouter_host}"
+        try:
+            timeout = _aiohttp.ClientTimeout(total=ACROUTER_HTTP_TIMEOUT)
+            async with _aiohttp.ClientSession(timeout=timeout) as session:
+
+                # Stuur modus
+                async with session.post(
+                    f"{base_url}/api/mode",
+                    json={"mode": target_mode},
+                ) as resp:
+                    if resp.status != 200:
+                        _LOGGER.warning("ACRouter: /api/mode → HTTP %d", resp.status)
+                        return
+
+                # In MANUAL mode: stuur ook dimmer-percentage
+                if target_mode == ACROUTER_MODE_MANUAL:
+                    async with session.post(
+                        f"{base_url}/api/dimmer",
+                        json={"level": int(target_pct)},
+                    ) as resp:
+                        if resp.status != 200:
+                            _LOGGER.warning("ACRouter: /api/dimmer → HTTP %d", resp.status)
+                            return
+
+            # Sla succesvolle state op
+            boiler._acrouter_last_mode = target_mode
+            boiler._acrouter_last_pct  = target_pct
+            boiler._acrouter_last_ts   = now
+
+            mode_name = {0: "OFF", 4: "MANUAL", 5: "BOOST"}.get(target_mode, str(target_mode))
+            if target_mode == ACROUTER_MODE_MANUAL:
+                _LOGGER.debug("ACRouter [%s] → %s %.0f%% (surplus %.0fW)",
+                              boiler.label, mode_name, target_pct, solar_surplus_w)
+            else:
+                _LOGGER.debug("ACRouter [%s] → %s", boiler.label, mode_name)
+
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("ACRouter [%s]: communicatiefout — %s", boiler.label, err)
 
     async def _switch(self, entity_id: str, on: bool,
                       boiler: Optional[BoilerState] = None) -> None:

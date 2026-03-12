@@ -5,7 +5,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/cloudemsNL/ha-cloudems.svg?style=for-the-badge)](https://github.com/cloudemsNL/ha-cloudems/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
 [![HA Version](https://img.shields.io/badge/Home%20Assistant-2024.8%2B-blue.svg?style=for-the-badge)](https://www.home-assistant.io/)
 
 **Fully local · Privacy-first · No subscription · No extra hardware**
@@ -389,7 +389,7 @@ You can also support by starring this repository, [reporting bugs](https://githu
 
 ## License
 
-MIT © 2026 CloudEMS · [cloudems.eu](https://cloudems.eu)
+© 2026 CloudEMS · [cloudems.eu](https://cloudems.eu)
 
 ---
 

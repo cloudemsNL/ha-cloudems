@@ -729,7 +729,7 @@ configure_zone:
       description: Has Wood Stove
       required: false
       selector:
-        text: {}
+        boolean: {}
     heating_type:
       description: Heating Type
       required: false
@@ -739,7 +739,7 @@ configure_zone:
       description: Presence Sensor
       required: false
       selector:
-        text: {}
+        entity: {}
     schedule:
       description: Schedule
       required: false
@@ -749,12 +749,12 @@ configure_zone:
       description: Stove Sensor
       required: false
       selector:
-        text: {}
+        entity: {}
     window_sensor:
       description: Window Sensor
       required: false
       selector:
-        text: {}
+        entity: {}
     zone_name:
       description: Zone Name
       required: true
@@ -786,12 +786,12 @@ generate_blueprints:
       description: Area Id
       required: true
       selector:
-        text: {}
+        area: {}
     hours:
       description: Hours
       required: false
       selector:
-        text: {}
+        number: {}
     preset:
       description: Preset
       required: true
@@ -841,12 +841,12 @@ reset_phase_detection:
       description: Force Three Phase
       required: false
       selector:
-        text: {}
+        boolean: {}
     inverter_entity_id:
       description: Inverter Entity Id
       required: false
       selector:
-        text: {}
+        entity: {}
   name: Reset Phase Detection
 send_test_mail:
   description: Stuur een testmail om SMTP-configuratie te verifieren.
@@ -864,7 +864,7 @@ set_module_state:
       description: Enabled
       required: false
       selector:
-        text: {}
+        boolean: {}
     module:
       description: Module
       required: true
@@ -878,7 +878,7 @@ set_sleep_detector:
       description: Enabled
       required: true
       selector:
-        text: {}
+        boolean: {}
   name: Set Sleep Detector
 set_zone_preset:
   description: Stel handmatig een preset in voor een zone.
@@ -887,12 +887,12 @@ set_zone_preset:
       description: Area Id
       required: true
       selector:
-        text: {}
+        area: {}
     hours:
       description: Hours
       required: false
       selector:
-        text: {}
+        number: {}
     preset:
       description: Preset
       required: true
@@ -906,7 +906,7 @@ set_zone_schedule:
       description: Area Id
       required: true
       selector:
-        text: {}
+        area: {}
     schedule:
       description: Schedule
       required: true
@@ -920,7 +920,7 @@ set_zone_temperature:
       description: Area Id
       required: true
       selector:
-        text: {}
+        area: {}
     preset:
       description: Preset
       required: true
@@ -930,7 +930,7 @@ set_zone_temperature:
       description: Temp
       required: true
       selector:
-        text: {}
+        number: {}
   name: Set Zone Temperature
 suppress_nilm_device:
   description: 'v1.20: Decline/suppress a NILM device — never show again.'
@@ -948,7 +948,7 @@ upload_diagnostic_report:
       description: Enabled
       required: true
       selector:
-        text: {}
+        boolean: {}
   name: Upload Diagnostic Report
 vtherm_set_central_mode:
   description: Stuur alle VTherm-thermostaten via Central Mode.
@@ -997,12 +997,12 @@ meter_topology_approve:
       name: Upstream meter entity_id
       required: true
       selector:
-        text: {}
+        entity: {}
     downstream_id:
       name: Downstream meter entity_id
       required: true
       selector:
-        text: {}
+        entity: {}
 
 meter_topology_decline:
   name: Meter topologie afwijzen
@@ -1012,12 +1012,12 @@ meter_topology_decline:
       name: Upstream meter entity_id
       required: true
       selector:
-        text: {}
+        entity: {}
     downstream_id:
       name: Downstream meter entity_id
       required: true
       selector:
-        text: {}
+        entity: {}
 
 meter_topology_set_root:
   name: Meter als root instellen
@@ -1034,42 +1034,10 @@ meter_topology_set_root:
       selector:
         boolean: {}
 
-meter_topology_approve:
-  name: Meter topologie bevestigen
-  description: Bevestig dat een meter upstream is van een andere meter.
-  fields:
-    upstream_id:
-      name: Upstream entity ID
-      required: true
-      selector:
-        entity:
-    downstream_id:
-      name: Downstream entity ID
-      required: true
-      selector:
-        entity:
-
-meter_topology_decline:
-  name: Meter topologie afwijzen
-  description: Wijs een upstream→downstream relatie af (nooit opnieuw suggereren).
-  fields:
-    upstream_id:
-      name: Upstream entity ID
-      required: true
-      selector:
-        entity:
-    downstream_id:
-      name: Downstream entity ID
-      required: true
-      selector:
-        entity:
-
-meter_topology_set_root:
-  name: Root meter instellen
-  description: Markeer een entity als root/P1 meter (bovenste knoop in de boom).
-  fields:
-    entity_id:
-      name: Entity ID
-      required: true
-      selector:
-        entity:
+dump_probe_log:
+  name: Dump probe diagnostieklog
+  description: >
+    Exporteert de Zonneplan slider-kalibratie diagnostieklog naar een bestand
+    (/config/cloudems_probe_log.txt) én als persistent notificatie in HA.
+    Gebruik dit om problemen met de slider max-leren te debuggen.
+  fields: {}

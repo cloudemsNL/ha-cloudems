@@ -38,8 +38,10 @@ from enum import Enum
 from typing import Optional
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
+from .battery_cycle_economics import BatteryCycleEconomics
 from .battery_provider import (
     BatteryProvider,
     BatteryProviderState,
@@ -87,6 +89,7 @@ class DecisionResult:
     reasons:           list  = field(default_factory=list)
     soc_target:        float = 0.0
     soc_reachable:     float = 0.0
+    human_reason:      str   = ""              # begrijpelijke omschrijving voor UI
 
 
 class ZPControlMode(str, Enum):
@@ -266,6 +269,19 @@ class ZonneplanProvider(BatteryProvider):
         self._last_sent_mode:      Optional[str]   = None
         self._last_sent_deliver_w: Optional[float] = None
         self._last_sent_solar_w:   Optional[float] = None
+        # Slider maxima direct uit HA entiteit-attributen ('max' attribuut van number entity)
+        self._slider_max_deliver_w: float = 10000.0  # wordt bijgewerkt via _read_slider_maxima()
+        self._slider_max_solar_w:   float = 10000.0
+        self._slider_max_dirty:     bool  = False
+        # Prijsinformatie (all-in incl. belastingen) vanuit coordinator
+        self._price_info:        dict  = {}
+        # Cycle economics (slijtagekosten) — initialiseer met config
+        self._cycle_economics:   Optional[BatteryCycleEconomics] = None
+        # Externe context vanuit coordinator (ML-verbruik, congestie, export-limiet, EV)
+        self._ctx_house_load_next_h_w: float = 0.0   # ML-voorspelling huisverbruik komend uur (W)
+        self._ctx_congestion_active:   bool  = False  # netcongestie actief
+        self._ctx_export_limit_w:      float = 0.0   # max teruglevering (W), 0 = geen limiet
+        self._ctx_ev_charging_w:       float = 0.0   # EV laadvermogen nu (W)
         self._last_decision_ts:    Optional[float] = None   # time.time() van laatste decide_action_v3
         self._last_decision_result: Optional[object] = None  # laatste DecisionResult
         # Hysterese voor surplus-slider: voorkomt heen-en-weer schakelen bij schommelend surplus
@@ -285,9 +301,13 @@ class ZonneplanProvider(BatteryProvider):
         self._override_since = float(saved.get("override_since", 0.0))
         self._saved_mode     = saved.get("saved_mode")
         self._last_sent_mode = saved.get("last_sent_mode")
+        # slider maxima komen uit entiteit-attributen, niet uit opslag
+        # Lees slider maxima uit entiteit-attributen
+        self._read_slider_maxima()
         _LOGGER.info(
-            "ZonneplanProvider v2.1: detected=%s enabled=%s entities=%s",
+            "ZonneplanProvider v2.1: detected=%s enabled=%s entities=%s slider_deliver=%.0fW slider_solar=%.0fW",
             self._detected, self._enabled, list(self._entities.keys()),
+            self._slider_max_deliver_w, self._slider_max_solar_w,
         )
 
     def update_config(self, config: dict) -> None:
@@ -304,6 +324,68 @@ class ZonneplanProvider(BatteryProvider):
         self._house_sensor    = config.get("zonneplan_house_sensor", self._house_sensor)
         self._soc_reserve_high= float(config.get("zonneplan_soc_reserve_high", self._soc_reserve_high))
         self._price_floor     = float(config.get("zonneplan_price_floor_eur",  self._price_floor))
+        # Herinitialiseer cycle economics bij config-wijziging
+        self._cycle_economics = BatteryCycleEconomics(config)
+
+    def update_price_info(self, price_info: dict) -> None:
+        """Ontvang all-in prijsinformatie vanuit coordinator (incl. belastingen/BTW/opslag)."""
+        if price_info:
+            self._price_info = price_info
+
+    def update_context(
+        self,
+        house_load_next_h_w: float = 0.0,
+        congestion_active:   bool  = False,
+        export_limit_w:      float = 0.0,
+        ev_charging_w:       float = 0.0,
+    ) -> None:
+        """Ontvang externe context vanuit coordinator.
+
+        house_load_next_h_w: ML-voorspelling van huisverbruik komend uur (W).
+                             Gebruikt om netto ontlaadwinst te schatten (eigenverbruik vs. export).
+        congestion_active:   Als True: beperk ontlaadvermogen (netcongestie = import verminderen
+                             is prioriteit, maar extra export maakt het erger voor buren).
+        export_limit_w:      Maximale teruglevering in W (bijv. netbeheerder-beperking).
+                             0 = geen beperking.
+        ev_charging_w:       Huidig EV-laadvermogen in W. Als EV laadt tijdens HIGH tarief
+                             en batterij wil ontladen, blokkeer extra import (EV loopt op batterij).
+        """
+        self._ctx_house_load_next_h_w = max(0.0, house_load_next_h_w)
+        self._ctx_congestion_active   = congestion_active
+        self._ctx_export_limit_w      = max(0.0, export_limit_w)
+        self._ctx_ev_charging_w       = max(0.0, ev_charging_w)
+
+    def _get_effective_price(self) -> float:
+        """All-in prijs in €/kWh (incl. energiebelasting, BTW, leveranciersopslag).
+
+        Valt terug op kale Zonneplan-tariefprijs als coordinator geen price_info heeft.
+        De all-in prijs is de werkelijke kosten voor de consument — essentieel voor
+        correcte rentabiliteitsberekeningen van laden/ontladen.
+        """
+        all_in = self._price_info.get("current_all_in")
+        if all_in is not None:
+            return float(all_in)
+        # Fallback: kale EPEX + geconfigureerde belasting
+        raw_price = self._last_state.raw.get("electricity_tariff_eur") or 0.0
+        tax       = self._price_info.get("tax_per_kwh", 0.0)
+        markup    = self._price_info.get("supplier_markup_kwh", 0.0)
+        vat       = self._price_info.get("vat_rate", 0.0)
+        subtotal  = raw_price + tax + markup
+        return round(subtotal * (1 + vat) if vat > 0 else subtotal, 5)
+
+    @property
+    def _effective_charge_w(self) -> float:
+        """Laadvermogen: geconfigureerde waarde begrensd op geleerd slider maximum.
+
+        Als de probe nog niet gelopen heeft is het geleerde max 10.000W,
+        dus heeft dit geen effect totdat het max echt geleerd is.
+        """
+        return min(self._charge_w, self._slider_max_solar_w)
+
+    @property
+    def _effective_discharge_w(self) -> float:
+        """Ontlaadvermogen: geconfigureerde waarde begrensd op geleerd slider maximum."""
+        return min(self._discharge_w, self._slider_max_deliver_w)
 
     # ── Detectie ───────────────────────────────────────────────────────────────
 
@@ -527,7 +609,7 @@ class ZonneplanProvider(BatteryProvider):
         """
         hourly    = pv_forecast_hourly or []
         now_h     = datetime.now(timezone.utc).hour
-        max_ch_w  = self._charge_w
+        max_ch_w  = self._effective_charge_w
 
         # Dedupliceer op (inverter_id, hour) en sommeer forecast_w per uur
         hour_totals: dict[int, float] = {}
@@ -568,6 +650,7 @@ class ZonneplanProvider(BatteryProvider):
         pv: Optional[PVContext] = None,
         battery_capacity_kwh: float = 10.0,
         soh_pct: float = 100.0,
+        net_metering_pct: float = 1.0,
     ) -> DecisionResult:
         """
         Optimale batterijbeslissing v3 — combineert alle beschikbare signalen:
@@ -609,8 +692,13 @@ class ZonneplanProvider(BatteryProvider):
         soc      = self._last_state.soc_pct or 50.0
         tg       = raw.get("tariff_group", "normal") or "normal"
         forecast = raw.get("forecast_tariff_groups", [])   # uur +1..+8
-        price    = raw.get("electricity_tariff_eur") or 0.0
+        # Gebruik all-in prijs (incl. energiebelasting, BTW, opslag) voor correcte berekeningen
+        price    = self._get_effective_price()
+        raw_price = raw.get("electricity_tariff_eur") or 0.0  # kale prijs voor logging
         cap_kwh  = battery_capacity_kwh
+
+        # Cycle economics: zijn de slijtagekosten de winst waard?
+        eco = self._cycle_economics or BatteryCycleEconomics({})
 
         # ── SoH-gecorrigeerde SoC-grenzen ─────────────────────────────────────
         max_soc = self._max_soc
@@ -685,15 +773,17 @@ class ZonneplanProvider(BatteryProvider):
                 reasons.append(f"Negatief tarief {price:.4f} €/kWh → maximaal laden")
                 return DecisionResult(
                     action=ZPAction.CHARGE,
-                    charge_power_w=self._charge_w,
+                    charge_power_w=self._effective_charge_w,
                     confidence=1.0,
                     reasons=reasons,
                     soc_target=max_soc,
                     soc_reachable=reachable_at_high,
+                    human_reason=f"Stroom kost nu niets (of je wordt betaald). Batterij wordt maximaal geladen naar {max_soc:.0f}%."
                 )
             reasons.append(f"Negatief tarief maar SoC {soc:.0f}% al op max {max_soc:.0f}%")
             return DecisionResult(action=ZPAction.HOLD, confidence=1.0, reasons=reasons,
-                                  soc_target=max_soc, soc_reachable=soc)
+                                  soc_target=max_soc, soc_reachable=soc,
+                                  human_reason=f"Stroom is gratis/negatief maar batterij staat al vol op {soc:.0f}%. Niets te doen.")
 
         # ══════════════════════════════════════════════════════════════════════
         # PRIORITEIT 2 — PRIJS ONDER FLOOR (niet HIGH)
@@ -703,7 +793,8 @@ class ZonneplanProvider(BatteryProvider):
                 f"Prijs {price:.4f} €/kWh < drempel {self._price_floor:.4f} → hold"
             )
             return DecisionResult(action=ZPAction.HOLD, confidence=0.8, reasons=reasons,
-                                  soc_target=soc_target, soc_reachable=soc)
+                                  soc_target=soc_target, soc_reachable=soc,
+                                  human_reason=f"Stroomprijs is erg laag (€{price:.4f}/kWh). Te goedkoop om rendabel actie te ondernemen — batterij vasthouden.")
 
         # ══════════════════════════════════════════════════════════════════════
         # PRIORITEIT 3 — SOC-GRENSBESCHERMING
@@ -711,7 +802,30 @@ class ZonneplanProvider(BatteryProvider):
         if tg == "low" and soc >= max_soc:
             reasons.append(f"SoC {soc:.0f}% ≥ max {max_soc:.0f}% → hold")
             return DecisionResult(action=ZPAction.HOLD, confidence=1.0, reasons=reasons,
-                                  soc_target=max_soc, soc_reachable=soc)
+                                  soc_target=max_soc, soc_reachable=soc,
+                                  human_reason=f"Batterij is volledig geladen ({soc:.0f}%). Niets te laden.")
+
+        # ── Externe context: pas effectief ontlaadvermogen aan ────────────────
+        # 1. Export-limiet: max teruglevering beperkt nuttig ontlaadvermogen
+        #    (leverbaar = huislast + export_limiet, niet meer)
+        _ctx_house = self._ctx_house_load_next_h_w
+        _ctx_export_limit = self._ctx_export_limit_w
+        _ctx_ev_w   = self._ctx_ev_charging_w
+        _ctx_cong   = self._ctx_congestion_active
+
+        # Schat netto huis-eigenverbruik (als ML forecast beschikbaar, anders 800W default)
+        _house_load_est = _ctx_house if _ctx_house > 50 else 800.0
+
+        # Export-limiet: beperk ontlaadvermogen tot wat het huis + limiet samen aankunnen
+        _max_discharge_ctx = self._effective_discharge_w
+        if _ctx_export_limit > 0 and _ctx_export_limit < self._effective_discharge_w:
+            # Wat het huis eigenverbruikt hoeft niet geëxporteerd te worden
+            _max_discharge_ctx = min(self._effective_discharge_w,
+                                     _house_load_est + _ctx_export_limit)
+
+        # Netcongestie: exporteer niet tijdens congestie (verhoogt netbelasting)
+        if _ctx_cong:
+            _max_discharge_ctx = min(_max_discharge_ctx, _house_load_est * 1.1)
 
         # ══════════════════════════════════════════════════════════════════════
         # TARIEFGROEP HIGH
@@ -722,7 +836,8 @@ class ZonneplanProvider(BatteryProvider):
                     f"HIGH maar SoC {soc:.0f}% ≤ min {min_soc:.0f}% → hold (bescherming)"
                 )
                 return DecisionResult(action=ZPAction.HOLD, confidence=1.0, reasons=reasons,
-                                      soc_target=soc_target, soc_reachable=soc)
+                                      soc_target=soc_target, soc_reachable=soc,
+                                      human_reason=f"Tarief is hoog maar batterij staat al op minimum ({min_soc:.0f}%) — ontladen is niet veilig.")
 
             # ── Saldering-check voor HIGH ontladen ────────────────────────────
             # Als HIGH-tarief onder de minimale winstgevende prijs valt, is
@@ -736,11 +851,53 @@ class ZonneplanProvider(BatteryProvider):
                     f"bij {sal_ctx.saldering_pct:.0%} saldering + PV surplus → hold"
                 )
                 return DecisionResult(action=ZPAction.HOLD, confidence=0.8, reasons=reasons,
-                                      soc_target=soc_target, soc_reachable=soc)
+                                      soc_target=soc_target, soc_reachable=soc,
+                                      human_reason=(
+                                          f"Tarief is hoog maar de zon levert al energie aan het huis. "
+                                          f"Ontladen naar het net levert bij {int(sal_ctx.saldering_pct*100)}% saldering "
+                                          f"te weinig op om de batterijslijtage te rechtvaardigen."
+                                      ))
 
             # PV surplus vermindert gewenst ontlaadvermogen
             # (PV dekt al een deel van het huis, batterij hoeft minder te doen)
-            net_discharge_w = max(500.0, self._discharge_w - pv.solar_surplus_w * 0.5)
+            net_discharge_w = max(500.0, self._effective_discharge_w - pv.solar_surplus_w * 0.5)
+
+            # Context-limieten toepassen (export-limiet, netcongestie)
+            net_discharge_w = min(net_discharge_w, _max_discharge_ctx)
+
+            # EV-conflict check: als EV laadt op net tijdens HIGH tarief,
+            # kan batterij-ontlading voor EV zorgen (eigenverbruik) — dat is gewenst.
+            # Maar als ontlaadvermogen < EV-verbruik, is het beter te melden.
+            _ev_note = ""
+            if _ctx_ev_w > 200 and net_discharge_w < _ctx_ev_w * 0.8:
+                _ev_note = f" (EV laadt {_ctx_ev_w:.0f}W — deels gedekt)"
+                reasons.append(f"EV laadt {_ctx_ev_w:.0f}W tijdens HIGH — batterij dekt gedeeltelijk{_ev_note}")
+
+            # Dynamisch vermogen schalen op all-in prijs:
+            # Hoe hoger de prijs, hoe harder ontladen loont (max bij ≥ 0.40 €/kWh)
+            _price_scale = min(1.0, max(0.4, (price - 0.15) / (0.40 - 0.15)))
+            net_discharge_w = round(net_discharge_w * _price_scale)
+            net_discharge_w = max(500.0, net_discharge_w)
+
+            # Cycle economics check: is ontladen de slijtage waard?
+            # Gebruiken huidig prijs als discharge_price, prijs_floor als proxy charge_price
+            _eco_check = eco.evaluate_slot_pair(
+                charge_price    = self._price_floor,
+                discharge_price = price,
+                soc_at_discharge= soc,
+            )
+            if not _eco_check.worth_it and tg == "high" and n_future_high == 0:
+                reasons.append(
+                    f"HIGH maar netto spread na slijtage negatief ({_eco_check.reason}) → hold"
+                )
+                return DecisionResult(
+                    action=ZPAction.HOLD, confidence=0.7,
+                    reasons=reasons, soc_target=soc_target, soc_reachable=soc,
+                    human_reason=(
+                        f"Tarief is hoog (€{price:.3f}/kWh) maar na aftrek van batterijslijtage "
+                        f"({_eco_check.cycle_cost*100:.1f} ct/kWh) is ontladen niet winstgevend. "
+                        f"Batterij vasthouden."
+                    ))
 
             # Saldering-annotatie voor logboek
             sal_note = (
@@ -765,13 +922,18 @@ class ZonneplanProvider(BatteryProvider):
                     reasons=reasons,
                     soc_target=eff_min,
                     soc_reachable=soc,
+                    human_reason=(
+                        f"Duur stroomtarief nu, geen duur uur meer verwacht later. "
+                        f"Batterij wordt ontladen naar {eff_min:.0f}% om maximaal te profiteren "
+                        f"van het hoge tarief."
+                    ),
                 )
             else:
                 # Toekomstige HIGH-uren → proportionele reserve
                 if soc > soc_target:
                     # Ontlaadvermogen evenredig met overschot boven target
                     fraction = min(1.0, (soc - soc_target) / 20.0)
-                    disch_w  = max(500.0, round(self._discharge_w * fraction))
+                    disch_w  = max(500.0, round(self._effective_discharge_w * fraction))
                     reasons.append(
                         f"HIGH, {n_future_high} toekomstige HIGH-uren, "
                         f"reserve {soc_target:.0f}%, SoC {soc:.0f}% > target → "
@@ -785,6 +947,11 @@ class ZonneplanProvider(BatteryProvider):
                         reasons=reasons,
                         soc_target=soc_target,
                         soc_reachable=soc,
+                        human_reason=(
+                            f"Duur tarief nu én nog {n_future_high} duur uur verwacht. "
+                            f"Batterij wordt gedeeltelijk ontladen ({disch_w:.0f}W) — "
+                            f"reserve van {soc_target:.0f}% wordt aangehouden voor later."
+                        ),
                     )
                 else:
                     reasons.append(
@@ -793,28 +960,57 @@ class ZonneplanProvider(BatteryProvider):
                     )
                     return DecisionResult(action=ZPAction.HOLD, confidence=0.9,
                                           reasons=reasons, soc_target=soc_target,
-                                          soc_reachable=soc)
+                                          soc_reachable=soc,
+                                          human_reason=(
+                                              f"Duur tarief maar batterij is al op reserveniveau ({soc:.0f}%). "
+                                              f"Nog {n_future_high} duur uur verwacht — capaciteit bewaren."
+                                          ))
 
         # ══════════════════════════════════════════════════════════════════════
         # TARIEFGROEP LOW
         # ══════════════════════════════════════════════════════════════════════
         elif tg == "low":
+            # Saldering-bewuste PV-drempel:
+            #   100% saldering → 0.50 kWh,  36% → 0.18 kWh,  0% → 0.10 kWh
+            _pv_hold_threshold = max(0.10, 0.50 * net_metering_pct)
+            _sal_label = f"{int(net_metering_pct * 100)}% saldering"
+
             if first_high_h is None:
                 # Geen HIGH in forecast
-                if pv.pv_kwh_next_8h > 0.5:
+                if pv.pv_kwh_next_8h > _pv_hold_threshold:
+                    _sal_note = (
+                        f" ({_sal_label} actief)"
+                        if net_metering_pct < 1.0 else ""
+                    )
                     reasons.append(
                         f"LOW, geen HIGH in forecast, {pv.pv_kwh_next_8h:.1f} kWh PV "
-                        f"verwacht → bewaar ruimte voor gratis PV"
+                        f"verwacht{_sal_note} → bewaar ruimte voor gratis PV"
                     )
-                    return DecisionResult(action=ZPAction.HOLD, confidence=0.85,
-                                          reasons=reasons, soc_target=soc_target,
-                                          soc_reachable=soc)
-                reasons.append("LOW, geen HIGH in forecast, geen PV verwacht → hold")
-                return DecisionResult(action=ZPAction.HOLD, confidence=0.7,
-                                      reasons=reasons, soc_target=soc_target,
-                                      soc_reachable=soc)
+                    return DecisionResult(
+                        action=ZPAction.HOLD, confidence=0.85,
+                        reasons=reasons, soc_target=soc_target, soc_reachable=soc,
+                        human_reason=(
+                            f"Goedkoop tarief, geen duur uur verwacht. "
+                            f"Komende uren is er nog {pv.pv_kwh_next_8h:.1f} kWh zon verwacht — "
+                            f"batterij wordt vrijgehouden om die op te vangen "
+                            f"(bij {_sal_label} is zelfverbruik financieel het beste)."
+                        ),
+                    )
 
-            # HIGH komt eraan — laad naar charge_target (PV-gecorrigeerde max SoC)
+                reasons.append(
+                    f"LOW, geen HIGH in forecast, geen PV verwacht ({_sal_label}) → hold"
+                )
+                return DecisionResult(
+                    action=ZPAction.HOLD, confidence=0.7,
+                    reasons=reasons, soc_target=soc_target, soc_reachable=soc,
+                    human_reason=(
+                        f"Goedkoop tarief, geen duur uur verwacht en geen zon meer vandaag — "
+                        f"batterij vasthouden op {soc_target:.0f}%. "
+                        f"Er is geen financieel voordeel om nu actie te ondernemen."
+                    ),
+                )
+
+            # HIGH komt eraan — laad batterij naar charge_target
 
             # PV dekt laden al dit uur → netladen overbodig
             if pv.pv_covers_charge:
@@ -822,9 +1018,16 @@ class ZonneplanProvider(BatteryProvider):
                     f"LOW, HIGH in {first_high_h}u, maar PV dekt laden al "
                     f"(piek {pv.pv_peak_next_8h_w:.0f}W dit uur) → wacht op gratis PV"
                 )
-                return DecisionResult(action=ZPAction.HOLD, confidence=0.9,
-                                      reasons=reasons, soc_target=charge_target,
-                                      soc_reachable=reachable_at_high)
+                return DecisionResult(
+                    action=ZPAction.HOLD, confidence=0.9,
+                    reasons=reasons, soc_target=charge_target,
+                    soc_reachable=reachable_at_high,
+                    human_reason=(
+                        f"Duur uur verwacht over {first_high_h} uur. "
+                        f"De zon levert nu al voldoende om de batterij te laden — "
+                        f"gratis zonne-energie is goedkoper dan stroom van het net."
+                    ),
+                )
 
             gap = charge_target - soc
 
@@ -832,18 +1035,51 @@ class ZonneplanProvider(BatteryProvider):
                 reasons.append(
                     f"LOW, SoC {soc:.0f}% ≈ laaddoel {charge_target:.0f}% → hold"
                 )
-                return DecisionResult(action=ZPAction.HOLD, confidence=0.85,
-                                      reasons=reasons, soc_target=charge_target,
-                                      soc_reachable=soc)
+                return DecisionResult(
+                    action=ZPAction.HOLD, confidence=0.85,
+                    reasons=reasons, soc_target=charge_target, soc_reachable=soc,
+                    human_reason=(
+                        f"Batterij staat al op {soc:.0f}% — dat is genoeg voor het "
+                        f"verwachte dure uur over {first_high_h} uur. Niets te doen."
+                    ),
+                )
 
             # Laadvermogen schalen naar urgentie
             urgency  = max(0.3, 1.0 - (first_high_h - 1) / 6.0)
-            charge_w = max(500.0, round(self._charge_w * urgency))
+            charge_w = max(500.0, round(self._effective_charge_w * urgency))
+
+            # Cycle economics check: is laden + later ontladen de slijtage waard?
+            # Schat discharge prijs als 2× huidige LOW prijs (HIGH is typisch 2-3× LOW)
+            _est_discharge_price = max(price * 2.0, price + 0.08)
+            _eco_charge = eco.evaluate_slot_pair(
+                charge_price    = price,
+                discharge_price = _est_discharge_price,
+                soc_at_charge   = soc,
+            )
+            if not _eco_charge.worth_it:
+                reasons.append(
+                    f"LOW, HIGH verwacht maar spread na slijtage te klein ({_eco_charge.reason}) → hold"
+                )
+                return DecisionResult(
+                    action=ZPAction.HOLD, confidence=0.65,
+                    reasons=reasons, soc_target=soc_target, soc_reachable=soc,
+                    human_reason=(
+                        f"Goedkoop tarief (€{price:.3f}/kWh), maar het verschil met het verwachte "
+                        f"dure uur is na aftrek van batterijslijtage "
+                        f"({_eco_charge.cycle_cost*100:.1f} ct/kWh) niet groot genoeg om te laden."
+                    ),
+                )
 
             note = ""
+            _human_pv_note = ""
             if pv.forecast_tomorrow_kwh > cap_kwh * 0.3:
                 note = (f", PV morgen {pv.forecast_tomorrow_kwh:.1f} kWh → "
                         f"max SoC beperkt tot {charge_target:.0f}%")
+                _human_pv_note = (
+                    f" Morgen wordt {pv.forecast_tomorrow_kwh:.1f} kWh zon verwacht, "
+                    f"dus de batterij wordt niet verder dan {charge_target:.0f}% geladen "
+                    f"zodat er ruimte blijft voor zonne-energie."
+                )
 
             reasons.append(
                 f"LOW, HIGH in {first_high_h}u, gap {gap:.0f}% → "
@@ -857,6 +1093,11 @@ class ZonneplanProvider(BatteryProvider):
                 reasons=reasons,
                 soc_target=charge_target,
                 soc_reachable=reachable_at_high,
+                human_reason=(
+                    f"Duur uur verwacht over {first_high_h} uur, batterij staat op {soc:.0f}% "
+                    f"en moet naar {charge_target:.0f}%. Nu laden met {charge_w:.0f}W "
+                    f"via goedkope stroom ({_sal_label}).{_human_pv_note}"
+                ),
             )
 
         # ══════════════════════════════════════════════════════════════════════
@@ -870,7 +1111,7 @@ class ZonneplanProvider(BatteryProvider):
                 # Threshold: 10% (niet 15%) zodat ook lage SoC's worden opgepikt
                 if gap > 10 and not pv.pv_covers_charge:
                     urgency  = max(0.4, 1.0 - (first_high_h - 1) / 3.0)
-                    charge_w = max(500.0, round(self._charge_w * urgency))
+                    charge_w = max(500.0, round(self._effective_charge_w * urgency))
                     reasons.append(
                         f"NORMAL, HIGH in {first_high_h}u, SoC {soc:.0f}% < "
                         f"reserve {soc_target:.0f}% (gap {gap:.0f}%) → "
@@ -883,6 +1124,11 @@ class ZonneplanProvider(BatteryProvider):
                         reasons=reasons,
                         soc_target=soc_target,
                         soc_reachable=reachable_at_high,
+                        human_reason=(
+                            f"Normaal tarief maar duur uur over {first_high_h} uur. "
+                            f"Batterij staat op {soc:.0f}% terwijl {soc_target:.0f}% "
+                            f"minimaal nodig is — snel bijladen met {charge_w:.0f}W."
+                        ),
                     )
 
             # LOW nadert en ruimte bijna vol → ontlaad om ruimte te maken
@@ -895,12 +1141,17 @@ class ZonneplanProvider(BatteryProvider):
                     )
                     return DecisionResult(
                         action=ZPAction.DISCHARGE,
-                        discharge_power_w=round(self._discharge_w * 0.5),
+                        discharge_power_w=round(self._effective_discharge_w * 0.5),
                         bypass_antiround=False,
                         confidence=0.7,
                         reasons=reasons,
                         soc_target=max_soc - 20.0,
                         soc_reachable=soc,
+                        human_reason=(
+                            f"Over {first_low_h} uur wordt stroom goedkoop. "
+                            f"Batterij nu gedeeltelijk ontladen zodat er ruimte is "
+                            f"om goedkope stroom op te laden."
+                        ),
                     )
 
             # PV surplus nu → hold, PV doet het werk
@@ -911,7 +1162,12 @@ class ZonneplanProvider(BatteryProvider):
                 )
                 return DecisionResult(action=ZPAction.HOLD, confidence=0.8,
                                       reasons=reasons, soc_target=soc_target,
-                                      soc_reachable=soc)
+                                      soc_reachable=soc,
+                                      human_reason=(
+                                          f"De zon levert nu {pv.solar_surplus_w:.0f}W "
+                                          f"meer dan het huis verbruikt — gratis zonne-energie "
+                                          f"laadt de batterij op. Geen actie nodig."
+                                      ))
 
             # ── Anticiperend ontladen: ruimte maken voor verwachte PV ─────────
             # Als de batterij (bijna) vol is EN er zijn morgen/komende uren veel PV
@@ -943,7 +1199,7 @@ class ZonneplanProvider(BatteryProvider):
 
                 if _gap > 5.0:
                     # Ontlaad langzaam (50% vermogen) om ruimte te maken
-                    _anticipate_w = round(self._discharge_w * 0.50)
+                    _anticipate_w = round(self._effective_discharge_w * 0.50)
                     reasons.append(
                         f"NORMAL, batterij {soc:.0f}% + PV {pv.pv_kwh_next_8h:.1f}kWh "
                         f"verwacht → anticiperend ontladen naar {_target_soc:.0f}% "
@@ -957,18 +1213,26 @@ class ZonneplanProvider(BatteryProvider):
                         reasons=reasons,
                         soc_target=_target_soc,
                         soc_reachable=soc,
+                        human_reason=(
+                            f"Batterij staat bijna vol ({soc:.0f}%) en er komt "
+                            f"{pv.pv_kwh_next_8h:.1f} kWh zon aan. "
+                            f"Alvast gedeeltelijk ontladen naar {_target_soc:.0f}% "
+                            f"zodat de zonne-energie straks niet wordt verspild."
+                        ),
                     )
 
             reasons.append("NORMAL, geen duidelijke kans → Powerplay")
             return DecisionResult(action=ZPAction.POWERPLAY, confidence=0.6,
                                   reasons=reasons, soc_target=soc_target,
-                                  soc_reachable=soc)
+                                  soc_reachable=soc,
+                                  human_reason="Normaal tarief, geen duidelijk voordeel — Zonneplan bepaalt zelf.")
 
         # Fallback
         reasons.append(f"Onbekende tariefgroep '{tg}' → Powerplay")
         return DecisionResult(action=ZPAction.POWERPLAY, confidence=0.5,
                               reasons=reasons, soc_target=soc_target,
-                              soc_reachable=soc)
+                              soc_reachable=soc,
+                              human_reason="Onbekende situatie — Zonneplan bepaalt zelf.")
 
     # ── Backwards-compat alias ─────────────────────────────────────────────────
 
@@ -998,6 +1262,16 @@ class ZonneplanProvider(BatteryProvider):
         return {
             "current_tariff":    raw.get("tariff_group", "unknown"),
             "current_price_eur": raw.get("electricity_tariff_eur"),
+            "current_price_all_in_eur": self._get_effective_price(),
+            "price_tax_eur": self._price_info.get("tax_per_kwh", 0.0),
+            "price_vat_rate": self._price_info.get("vat_rate", 0.0),
+            "cycle_cost_eur_kwh": round(
+                (self._cycle_economics or BatteryCycleEconomics({}))._base_cycle_cost, 5
+            ),
+            "ctx_house_load_w":    round(self._ctx_house_load_next_h_w),
+            "ctx_congestion":      self._ctx_congestion_active,
+            "ctx_export_limit_w":  round(self._ctx_export_limit_w),
+            "ctx_ev_charging_w":   round(self._ctx_ev_charging_w),
             "forecast_8h":       forecast,
             "high_hours":        forecast.count("high"),
             "low_hours":         forecast.count("low"),
@@ -1006,6 +1280,7 @@ class ZonneplanProvider(BatteryProvider):
             "action_confidence": round(result.confidence, 2),
             "action_reasons":    all_reasons,
             "action_reasons_all": all_reasons,
+            "action_human_reason": result.human_reason,
             "decision_time":     _ts_str,
             "soc_target":        round(result.soc_target, 1),
             "soc_reachable":     round(result.soc_reachable, 1),
@@ -1072,7 +1347,7 @@ class ZonneplanProvider(BatteryProvider):
             _LOGGER.debug("ZonneplanProvider: laden overgeslagen (SoC %.0f%% >= max %.0f%%)",
                           soc, self._max_soc)
             return False
-        w = power_w or self._charge_w
+        w = power_w or self._effective_charge_w
         if self._entities.get("control_mode"):
             return await self._set_home_optimization(solar_w=w)
         return await self._legacy_set(ZPManualState.CHARGE)
@@ -1097,7 +1372,7 @@ class ZonneplanProvider(BatteryProvider):
         if not bypass_antiround and not self._house_load_ok():
             _LOGGER.info("ZonneplanProvider: ontladen geblokkeerd door anti-rondpomp")
             return False
-        w = power_w or self._discharge_w
+        w = power_w or self._effective_discharge_w
         if self._entities.get("control_mode"):
             return await self._set_home_optimization(deliver_w=w)
         return await self._legacy_set(ZPManualState.DISCHARGE)
@@ -1143,6 +1418,7 @@ class ZonneplanProvider(BatteryProvider):
         pv_forecast_hourly:      list  = None,
         battery_capacity_kwh:    float = 10.0,
         soh_pct:                 float = 100.0,
+        net_metering_pct:        float = 1.0,
     ) -> DecisionResult:
         """
         Voer decide_action_v3() uit met volledige PV-context en stuur de batterij aan.
@@ -1158,6 +1434,7 @@ class ZonneplanProvider(BatteryProvider):
                 reasons=["Provider niet beschikbaar of uitgeschakeld"],
             )
 
+
         pv = self._build_pv_context(
             solar_now_w             = solar_now_w,
             solar_surplus_w         = solar_surplus_w,
@@ -1168,7 +1445,7 @@ class ZonneplanProvider(BatteryProvider):
         )
 
         result = self.decide_action_v3(pv=pv, battery_capacity_kwh=battery_capacity_kwh,
-                                       soh_pct=soh_pct)
+                                       soh_pct=soh_pct, net_metering_pct=net_metering_pct)
 
         _LOGGER.info(
             "ZonneplanProvider v3: %s (SoC=%.0f%%, tarief=%s, PV-nu=%.0fW, "
@@ -1221,7 +1498,7 @@ class ZonneplanProvider(BatteryProvider):
                 if (not self._surplus_slider_high and
                         _is_home_opt and
                         (_now_ts - self._surplus_high_since) >= 60.0):
-                    _optimal_deliver_w = max(800.0, min(self._discharge_w, _surplus * 0.85))
+                    _optimal_deliver_w = max(800.0, min(self._effective_discharge_w, _surplus * 0.85))
                     _LOGGER.info(
                         "ZonneplanProvider surplus-modus: deliver_to_home → %.0fW "
                         "(surplus %.0fW, SoC %.0f%%, 60s bevestigd)",
@@ -1274,51 +1551,53 @@ class ZonneplanProvider(BatteryProvider):
             await self.async_set_auto()
 
     async def async_force_slider_calibrate(self) -> dict:
-        """Bereken en schrijf optimale sliderwaarden op basis van huidige situatie.
+        """Forceer een beslissing en schrijf sliders direct — negeert hysterese/debounce.
 
-        Negeert hysterese en debounce — bedoeld voor handmatige kalibratie/test.
-        Retourneert een dict met de gekozen waarden en de reden.
+        Gebruikt de ongeclampte _charge_w / _discharge_w zodat deze actie ook correct
+        werkt als het geleerde max nog op default staat of juist lager is dan geconfigureerd.
+        Mag niet starten tijdens een actieve max-probe.
         """
-        soc      = self._last_state.soc_pct or 0.0
-        pv       = self._build_pv_context()
-        surplus  = pv.solar_surplus_w if pv else 0.0
-        max_soc  = self._max_soc
+        if self._probe_active:
+            return {"error": "Max-probe is actief — wacht tot die klaar is"}
+
+        soc     = self._last_state.soc_pct or 0.0
+        pv      = self._build_pv_context()
+        surplus = pv.solar_surplus_w if pv else 0.0
+        max_soc = self._max_soc
+
+        # Gebruik geconfigureerde waarden (niet begrensd op geleerd max)
+        raw_discharge_w = self._discharge_w
+        raw_charge_w    = self._charge_w
 
         # ── deliver_to_home ────────────────────────────────────────────────────
         if surplus > 700 and soc >= max_soc - 5.0:
-            # Batterij bijna vol + veel surplus → verhoog levering aan huis
-            deliver_w = max(800.0, min(self._discharge_w, surplus * 0.85))
+            deliver_w      = max(800.0, min(raw_discharge_w, surplus * 0.85))
             deliver_reason = f"surplus {surplus:.0f}W, SoC {soc:.0f}% ≥ {max_soc-5:.0f}%"
         elif surplus > 300:
-            # Matig surplus → proportieel
-            deliver_w = max(600.0, surplus * 0.6)
+            deliver_w      = max(600.0, surplus * 0.6)
             deliver_reason = f"matig surplus {surplus:.0f}W"
         else:
-            # Weinig/geen surplus → conservatief
-            deliver_w = 600.0
+            deliver_w      = 600.0
             deliver_reason = f"laag surplus {surplus:.0f}W → standaard"
 
         # ── solar_charge ───────────────────────────────────────────────────────
         if soc >= max_soc - 2.0:
-            # Bijna vol → stop zonneladen
-            solar_w = 0.0
+            solar_w      = 0.0
             solar_reason = f"SoC {soc:.0f}% bijna vol ({max_soc:.0f}%)"
         elif surplus > 500:
-            # Veel surplus → laad maximaal
-            solar_w = min(surplus * 0.9, self._discharge_w)
+            solar_w      = min(surplus * 0.9, raw_charge_w)
             solar_reason = f"surplus {surplus:.0f}W → maximaal laden"
         elif surplus > 100:
-            # Beetje surplus → laad proportioneel
-            solar_w = surplus * 0.7
+            solar_w      = surplus * 0.7
             solar_reason = f"klein surplus {surplus:.0f}W"
         else:
-            solar_w = 400.0
+            solar_w      = 400.0
             solar_reason = "geen surplus → minimaal zonneladen"
 
         deliver_w = round(deliver_w)
         solar_w   = round(solar_w)
 
-        # Schrijf direct — negeer idempotent-check door last_sent op None te zetten
+        # Schrijf direct — negeer idempotent-check
         self._last_sent_deliver_w = None
         self._last_sent_solar_w   = None
 
@@ -1332,7 +1611,6 @@ class ZonneplanProvider(BatteryProvider):
             await self._set_slider_idempotent("solar_charge", solar_w, None)
             self._last_sent_solar_w = float(solar_w)
 
-        # Reset hysterese-flags zodat normale logica daarna weer correct werkt
         self._surplus_slider_high = (surplus > 700 and soc >= max_soc - 5.0)
 
         result = {
@@ -1351,6 +1629,29 @@ class ZonneplanProvider(BatteryProvider):
             solar_w   if has_solar   else "n/a", solar_reason,
         )
         return result
+
+    def _read_slider_maxima(self) -> None:
+        """Leest de slider-maxima direct uit het 'max' attribuut van de number-entiteiten."""
+        for key, attr in (
+            ("deliver_to_home", "_slider_max_deliver_w"),
+            ("solar_charge",    "_slider_max_solar_w"),
+        ):
+            eid = self._entities.get(key)
+            if not eid:
+                continue
+            st = self._hass.states.get(eid)
+            if not st:
+                continue
+            try:
+                max_w = float(st.attributes.get("max", 10000))
+                if max_w > 0:
+                    setattr(self, attr, max_w)
+                    _LOGGER.debug(
+                        "ZonneplanProvider: slider max '%s' = %.0fW (uit HA attribuut)",
+                        key, max_w,
+                    )
+            except (ValueError, TypeError):
+                pass
 
     def get_available_modes(self) -> list[dict]:
         return _AVAILABLE_MODES
@@ -1552,6 +1853,9 @@ class ZonneplanProvider(BatteryProvider):
             "auto_forecast_enabled": getattr(self, "_auto_forecast_enabled", False),
             "last_slider_write_min": round((time.time() - self._last_slider_write) / 60, 1)
                                      if self._last_slider_write > 0 else None,
+            # slider maxima niet opslaan — komen uit entiteit-attributen
+            "slider_max_deliver_w":   self._slider_max_deliver_w,
+            "slider_max_solar_w":      self._slider_max_solar_w,
             "pv_integration": {
                 "soc_per_hour":          getattr(self, "_soc_per_hour", 20.0),
                 "battery_capacity_kwh":  getattr(self, "_battery_capacity_kwh", 10.0),
@@ -1620,23 +1924,83 @@ class ZonneplanProvider(BatteryProvider):
 
     async def _set_slider_idempotent(self, key: str, value_w: float,
                                       last_sent: Optional[float]) -> None:
-        """Stel slider in — sla over als waarde al gelijk is (idempotent)."""
+        """Stel slider in — sla over als waarde al gelijk is (idempotent).
+
+        Begrenst op het geleerde maximum. Na 30s wordt de werkelijke staat
+        teruggelezen: is de waarde afgeknepen dan slaan we dat op als nieuw max.
+        """
         eid = self._entities.get(key)
-        if not eid: return
-        # Check huidige staat
-        current_raw = self._last_state.raw.get(f"{key.replace('_', '_')}_w") or                       self._last_state.raw.get(key)
-        if last_sent == round(value_w, 0):
-            _LOGGER.debug("ZonneplanProvider: slider %s al %.0fW, geen call", key, value_w)
+        if not eid:
             return
+
+        # Begrens op geleerd maximum
+        learned_max = (self._slider_max_deliver_w if key == "deliver_to_home"
+                       else self._slider_max_solar_w)
+        clamped_w = min(round(value_w, 0), learned_max)
+
+        if last_sent == clamped_w:
+            _LOGGER.debug("ZonneplanProvider: slider %s al %.0fW, geen call", key, clamped_w)
+            return
+
         try:
             await self._hass.services.async_call(
                 "number", "set_value",
-                {"entity_id": eid, "value": round(value_w, 0)},
+                {"entity_id": eid, "value": clamped_w},
                 blocking=False,
             )
             self._last_slider_write = time.time()
+            _LOGGER.debug(
+                "ZonneplanProvider: slider %s → %.0fW (geleerd max: %.0fW)",
+                key, clamped_w, learned_max,
+            )
         except Exception as exc:
             _LOGGER.debug("ZonneplanProvider slider %s fout: %s", key, exc)
+            return
+
+        # Lees na 30s de werkelijke staat terug — geen extra cloud-call,
+        # HA heeft de Zonneplan-entiteit al geupdated via polling.
+        sent_w = clamped_w
+
+        def _readback(_now) -> None:
+            # Nooit learned_max aanpassen tijdens een actieve probe — probe doet dit zelf
+            if self._probe_active:
+                return
+            st = self._hass.states.get(eid)
+            if not st or st.state in ("unavailable", "unknown"):
+                return
+            try:
+                actual_w = round(float(st.state), 0)
+            except (ValueError, TypeError):
+                return
+
+            old_max = (self._slider_max_deliver_w if key == "deliver_to_home"
+                       else self._slider_max_solar_w)
+
+            if actual_w < sent_w - 50:
+                # Nexus heeft afgeknepen → dit IS het plafond
+                new_max = actual_w
+                _LOGGER.info(
+                    "ZonneplanProvider: slider %s afgeknepen %.0fW→%.0fW — "
+                    "nieuw geleerd max: %.0fW",
+                    key, sent_w, actual_w, new_max,
+                )
+            else:
+                # Geaccepteerd → stapje omhoog (max 100W per keer)
+                new_max = min(old_max + 100.0, sent_w + 100.0)
+                _LOGGER.debug(
+                    "ZonneplanProvider: slider %s geaccepteerd %.0fW — max: %.0fW→%.0fW",
+                    key, sent_w, old_max, new_max,
+                )
+
+            if new_max != old_max:
+                if key == "deliver_to_home":
+                    self._slider_max_deliver_w = new_max
+                else:
+                    self._slider_max_solar_w = new_max
+                self._slider_max_dirty = True
+                self._hass.async_create_task(self._async_save())
+
+        async_call_later(self._hass, 30, _readback)
 
     async def _legacy_set(self, state: ZPManualState) -> bool:
         mc_eid  = self._entities.get("manual_control")
@@ -1668,10 +2032,19 @@ class ZonneplanProvider(BatteryProvider):
 
     async def _async_save(self) -> None:
         await self._store.async_save({
-            "override_since": self._override_since,
-            "saved_mode":     self._saved_mode,
-            "last_sent_mode": self._last_sent_mode,
+            "override_since":         self._override_since,
+            "saved_mode":             self._saved_mode,
+            "last_sent_mode":         self._last_sent_mode,
+            # slider maxima niet opslaan — komen uit entiteit-attributen
+            "probe_last_run":         self._probe_last_run,
+            # Probe-state: herstel voortgang na HA herstart
+            "probe_active":           self._probe_active,
+            "probe_key":              self._probe_key,
+            "probe_current_w":        self._probe_current_w,
+            "probe_confirmed_w":      self._probe_confirmed_w,
+            "probe_step_w":           self._probe_step_w,
         })
+        self._slider_max_dirty = False
 
 
 # ── Registreer bij import ─────────────────────────────────────────────────────

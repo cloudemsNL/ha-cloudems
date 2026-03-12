@@ -429,7 +429,8 @@ class CloudemsBatteryCard extends HTMLElement {
     const batteries= attrs.batteries ?? [];
     const soc      = attrs.soc_pct;
     const action   = schema?.state ?? "idle";
-    const reason   = attrs.reason ?? "—";
+    const reason        = attrs.reason || "—";
+    const humanReason  = attrs.human_reason || "";
     const bd       = attrs.battery_decision ?? {};
     const bp       = attrs.battery_providers ?? {};
     const zpRaw    = attrs.zonneplan;
@@ -467,7 +468,7 @@ class CloudemsBatteryCard extends HTMLElement {
       <div class="action-banner ${ai.cls}">
         <span class="icon">${ai.icon}</span>
         <span class="label">${ai.label}</span>
-        <span class="reason">${esc(reason)}</span>
+        <span class="reason">${esc(reason)}</span>${humanReason ? `<span class="reason" style="opacity:.7;font-style:italic">${esc(humanReason)}</span>` : ""}
       </div>`;
 
     // ── SOC ring + stats ──
@@ -578,12 +579,25 @@ class CloudemsBatteryCard extends HTMLElement {
         const mode = MODE_MAP[modeRaw] ?? (modeRaw ? modeRaw.replace(/_/g," ") : "—");
         const statusCls = ok ? "prov-status-ok" : (det ? "prov-status-warn" : "prov-status-err");
         const statusLbl = ok ? "✅ Actief" : (det ? "🟡 Gevonden" : "❌ Offline");
+        const lmd = zpRaw.learned_max_deliver_w;
+        const lms = zpRaw.learned_max_solar_w;
+        const probeActive = zpRaw.probe_active;
+        const probeW = zpRaw.probe_current_w;
+        const probeConfirmed = zpRaw.probe_confirmed_w || 0;
+        let learnedHtml = "";
+        if (probeActive) {
+          const filled = Math.min(10, Math.round((probeConfirmed / 12000) * 10));
+          const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+          learnedHtml = `<span style="font-size:10px;color:rgb(52,152,219)">🔍 <code>${bar}</code> ${Math.round(probeConfirmed)}W / test ${probeW != null ? Math.round(probeW) : "…"}W</span>`;
+        } else if (lmd && lmd < 9999) {
+          learnedHtml = `<span style="font-size:10px;color:var(--b-muted)">max ⬇️${Math.round(lmd)}W / ☀️${lms && lms < 9999 ? Math.round(lms) : "?"}W</span>`;
+        }
         allProviders.push(`<div class="provider-row">
           <span>⚡</span>
           <span class="prov-name">Zonneplan Nexus</span>
           <span class="${statusCls}">${statusLbl}</span>
           <span class="mode-pill">${esc(mode)}</span>
-          <span class="prov-meta">${intLabel}<br>${lagLabel}</span>
+          <span class="prov-meta">${intLabel}<br>${lagLabel}${learnedHtml ? "<br>"+learnedHtml : ""}</span>
         </div>`);
       }
       providers.filter(p => p.provider_id !== "zonneplan").forEach(p => {

@@ -33,16 +33,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-_LOGGER = logging.getLogger(__name__)
+# Hergebruik centrale definitie — niet dupliceren
+try:
+    from ..const import NET_METERING_PHASES as _NMP
+    SALDERING_PHASES: list[tuple[int, float]] = _NMP.get("NL", [])
+except ImportError:
+    # Fallback bij standalone tests
+    SALDERING_PHASES = [
+        (2023, 1.00),
+        (2024, 1.00),
+        (2025, 0.64),
+        (2026, 0.36),
+        (2027, 0.00),
+    ]
 
-# Salderingspercentages per jaar (NL WEK)
-SALDERING_PHASES: list[tuple[int, float]] = [
-    (2023, 1.00),
-    (2024, 1.00),
-    (2025, 0.64),
-    (2026, 0.36),
-    (2027, 0.00),
-]
+_LOGGER = logging.getLogger(__name__)
 
 # Batterijgroottes om te simuleren (kWh)
 BATTERY_SIZES_KWH = [0, 5, 10, 15]

@@ -42,14 +42,15 @@ LEARN_MAX_PAIRS = 500
 
 # ── Fallback EB per jaar per land (excl. BTW, eerste schijf) ─────────────────
 # Bronnen: Belastingdienst.nl tarieven energiebelasting
-# Wordt ALLEEN gebruikt als CBS API en leren beide falen.
+# Formule: incl_BTW / 1.21 = excl_BTW
+# Wordt ALLEEN gebruikt als CloudEMS JSON, CBS API en leren alle drie falen.
 _EB_FALLBACK: dict[str, dict[int, float]] = {
     "NL": {
-        2022: 0.09217,
-        2023: 0.12599,
-        2024: 0.12599,
-        2025: 0.11281,   # verlaging per 1-1-2025
-        2026: 0.11281,   # zelfde schijf, update indien gewijzigd
+        2022: 0.09217,   # 0.1115 incl. BTW / 1.21
+        2023: 0.12599,   # 0.1525 incl. BTW / 1.21
+        2024: 0.12599,   # 0.1525 incl. BTW / 1.21
+        2025: 0.10153,   # 0.1229 incl. BTW / 1.21 (verlaging per 1-1-2025)
+        2026: 0.09157,   # 0.1108 incl. BTW / 1.21 (verlaging per 1-1-2026)
     },
     "BE": {
         2024: 0.0,       # BE heeft geen directe EB vergelijkbaar
@@ -67,6 +68,13 @@ _EB_FALLBACK: dict[str, dict[int, float]] = {
         2026: 0.05000,
     },
 }
+
+# CloudEMS hosted tariff JSON — primaire bron voor automatische updates
+# Jullie hoeven alleen dit bestand op GitHub te updaten elk jaar januari
+CLOUDEMS_TARIFF_URL = (
+    "https://raw.githubusercontent.com/cloudemsNL/ha-cloudems/main/tariffs.json"
+)
+CLOUDEMS_TARIFF_TTL = 7 * 86400   # 7 dagen cache
 
 # BTW per land — dit wijzigt zelden
 _VAT: dict[str, float] = {
@@ -133,6 +141,7 @@ class TariffFetcher:
         # CBS cache
         self._cbs_eb: dict[str, float]  = {}   # country → EB €/kWh
         self._cbs_fetched_at: float     = 0.0
+        self._json_markup: dict[str, dict[str, float]] = {}  # uit tariffs.json / GitHub
 
         # Leren uit (epex, paid) paren — persistente lijst
         # Structuur: {"NL:zonneplan": {"pairs": [(epex, paid), ...], "result": float|None}}
@@ -149,6 +158,7 @@ class TariffFetcher:
             self._cbs_eb           = saved.get("cbs_eb", {})
             self._cbs_fetched_at   = float(saved.get("cbs_fetched_at", 0))
             self._learn_data       = saved.get("learn_data", {})
+            self._json_markup      = saved.get("json_markup", {})
             _LOGGER.debug("TariffFetcher: geladen uit storage (%d leer-keys)", len(self._learn_data))
         except Exception as exc:
             _LOGGER.warning("TariffFetcher: storage laden mislukt: %s", exc)
@@ -163,6 +173,7 @@ class TariffFetcher:
                 "cbs_eb":         self._cbs_eb,
                 "cbs_fetched_at": self._cbs_fetched_at,
                 "learn_data":     self._learn_data,
+                "json_markup":    self._json_markup,
             })
         except Exception as exc:
             _LOGGER.warning("TariffFetcher: opslaan mislukt: %s", exc)
@@ -263,11 +274,13 @@ class TariffFetcher:
             year = datetime.now().year
             eb = self._get_fallback_eb(country, year)
 
-        # Markup uit fallback tabel
+        # Markup: JSON (GitHub/lokaal) heeft voorrang op hardcoded tabel
         if supplier_key == "custom":
             markup = custom_markup
         else:
-            markup = _MARKUP_DEFAULT.get(country, {}).get(supplier_key, 0.0)
+            json_markups = self._json_markup.get(country, {})
+            markup = json_markups.get(supplier_key,
+                     _MARKUP_DEFAULT.get(country, {}).get(supplier_key, 0.0))
 
         source = "cbs" if cbs_ok else "fallback"
         return eb, markup, source
@@ -341,26 +354,143 @@ class TariffFetcher:
             key, eb_learned, markup_learned, median_op, len(implied_opslagen),
         )
 
-    # ── CBS Statline API ──────────────────────────────────────────────────────
+    # ── Tarieven ophalen: CloudEMS JSON → CBS Statline → fallback tabel ──────
 
     async def _maybe_refresh_cbs(self) -> None:
-        """Ververs CBS data als cache verlopen is."""
+        """Ververs tariefdata als cache verlopen is.
+
+        Volgorde:
+          1. CloudEMS hosted JSON op GitHub — jullie updaten dit elk jaar januari
+          2. CBS Statline OData API — officiële NL backup
+          3. Hardcoded fallback tabel — noodgeval, nooit stale
+        """
         age = time.time() - self._cbs_fetched_at
-        if age < CBS_CACHE_TTL and self._cbs_eb.get("NL") is not None:
-            _LOGGER.debug("TariffFetcher: CBS cache nog geldig (%.0f s oud)", age)
+        if age < CLOUDEMS_TARIFF_TTL and self._cbs_eb.get("NL") is not None:
+            _LOGGER.debug("TariffFetcher: cache nog geldig (%.0f s oud)", age)
+            return
+        if await self._fetch_cloudems_json():
             return
         await self._fetch_cbs_nl()
+        # Als CBS ook faalt, probeer het lokale tariffs.json uit de installatie
+        if not self._cbs_eb.get("NL"):
+            await self._fetch_local_json()
+
+    async def _fetch_local_json(self) -> None:
+        """
+        Lees tarieven uit het meegeleverde tariffs.json in de installatiemap.
+
+        Dit bestand zit in de root van de zip naast custom_components/.
+        Gebruikt als GitHub én CBS beide niet bereikbaar zijn.
+        HA geeft de integratiemap via __file__ van dit module.
+        """
+        import json
+        import os
+        try:
+            # tariffs.json zit twee niveaus omhoog: cloudems/ → custom_components/ → root
+            integration_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            local_path = os.path.join(integration_dir, "tariffs.json")
+            if not os.path.isfile(local_path):
+                _LOGGER.debug("TariffFetcher lokaal: %s niet gevonden", local_path)
+                return
+            with open(local_path, encoding="utf-8") as f:
+                data = json.load(f)
+            year = str(datetime.now().year)
+            tax_data = data.get("energy_tax", {})
+            updated = False
+            for country, years in tax_data.items():
+                if year in years:
+                    eb_eur = float(years[year])
+                else:
+                    candidates = {int(y): v for y, v in years.items() if int(y) <= int(year)}
+                    if not candidates:
+                        continue
+                    eb_eur = float(candidates[max(candidates)])
+                if 0.0 <= eb_eur <= 0.25:
+                    self._cbs_eb[country] = eb_eur
+                    updated = True
+                    _LOGGER.info(
+                        "TariffFetcher lokaal: %s EB %.5f €/kWh (jaar %s, bestand: %s)",
+                        country, eb_eur, year, data.get("updated", "?"),
+                    )
+            # Laad ook supplier_markup uit lokale JSON
+            markup_data = data.get("supplier_markup", {})
+            if markup_data and not self._json_markup:
+                self._json_markup = markup_data
+                _LOGGER.debug("TariffFetcher lokaal: markups geladen voor %s", list(markup_data.keys()))
+                updated = True
+
+            if updated:
+                self._cbs_fetched_at = time.time()
+                await self.async_save()
+        except Exception as exc:
+            _LOGGER.debug("TariffFetcher lokaal: lezen mislukt: %s", exc)
+
+    async def _fetch_cloudems_json(self) -> bool:
+        """
+        Haal tarieven op uit CloudEMS hosted JSON op GitHub.
+
+        tariffs.json formaat:
+        {
+          "energy_tax": {
+            "NL": {"2025": 0.10153, "2026": 0.09157, "2027": 0.09500},
+            "BE": {"2025": 0.0},
+            "DE": {"2025": 0.02050}
+          },
+          "updated": "2026-01-01"
+        }
+
+        Elk jaar januari alleen tariffs.json updaten op GitHub —
+        geen code-aanpassing, geen nieuwe release nodig.
+        """
+        try:
+            session = self._session_getter()
+            async with session.get(CLOUDEMS_TARIFF_URL, timeout=8) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug("TariffFetcher CloudEMS JSON: HTTP %d", resp.status)
+                    return False
+                data = await resp.json(content_type=None)
+                year = str(datetime.now().year)
+                tax_data = data.get("energy_tax", {})
+                updated = False
+                for country, years in tax_data.items():
+                    if year in years:
+                        eb_eur = float(years[year])
+                    else:
+                        candidates = {int(y): v for y, v in years.items() if int(y) <= int(year)}
+                        if not candidates:
+                            continue
+                        eb_eur = float(candidates[max(candidates)])
+                    if 0.0 <= eb_eur <= 0.25:  # sanity: 0–25 ct/kWh excl. BTW
+                        self._cbs_eb[country] = eb_eur
+                        updated = True
+                        _LOGGER.info(
+                            "TariffFetcher CloudEMS JSON: %s EB %.5f €/kWh (jaar %s, bestand: %s)",
+                            country, eb_eur, year, data.get("updated", "?"),
+                        )
+                # Laad ook supplier_markup uit JSON
+                markup_data = data.get("supplier_markup", {})
+                if markup_data:
+                    self._json_markup = markup_data
+                    updated = True
+                    _LOGGER.debug("TariffFetcher CloudEMS JSON: markups geladen voor %s", list(markup_data.keys()))
+
+                if updated:
+                    self._cbs_fetched_at = time.time()
+                    await self.async_save()
+                    return True
+                _LOGGER.debug("TariffFetcher CloudEMS JSON: geen bruikbare waarden")
+                return False
+        except Exception as exc:
+            _LOGGER.debug("TariffFetcher CloudEMS JSON: ophalen mislukt: %s", exc)
+            return False
 
     async def _fetch_cbs_nl(self) -> None:
         """
-        Haal actuele NL energiebelasting op via CBS Statline OData API.
+        Haal actuele NL EB op via CBS Statline OData API (backup).
 
-        Tabel: 'Energiebelasting op elektriciteit, tarief eerste schijf'
-        URL:   https://opendata.cbs.nl/ODataApi/odata/70052NED/TypedDataSet
-        Filter op 'Elektriciteit' + meest recente periode.
+        Tabel 70052NED: Belasting op leidingwater en energiebelasting
+        Elektriciteit_2 = tarief eerste schijf in ct/kWh incl. BTW
         """
-        # CBS OData endpoint voor energieheffingen
-        # Tabel 70052NED: Belasting op leidingwater en energiebelasting
         url = (
             "https://opendata.cbs.nl/ODataApi/odata/70052NED/TypedDataSet"
             "?$filter=startswith(Perioden,'2025') or startswith(Perioden,'2026')"
@@ -380,29 +510,24 @@ class TariffFetcher:
                 if not rows:
                     _LOGGER.debug("TariffFetcher CBS: geen rijen ontvangen")
                     return
-
-                # Eerste rij = meest recente periode
-                # Elektriciteit_2 = tarief eerste schijf in ct/kWh (CBS gebruikt euro-cents)
+                vat_nl = _VAT.get("NL", 0.21)
                 for row in rows:
                     raw = row.get("Elektriciteit_2")
                     periode = row.get("Perioden", "")
                     if raw is None:
                         continue
-                    # CBS rapporteert in euro-cents per kWh
-                    eb_ct = float(raw)
-                    if 1.0 <= eb_ct <= 25.0:   # sanity: 1-25 ct/kWh
-                        eb_eur = eb_ct / 100.0
-                        self._cbs_eb["NL"] = eb_eur
+                    # CBS rapporteert in ct/kWh incl. BTW — omrekenen naar excl. BTW
+                    eb_ct_incl = float(raw)
+                    if 1.0 <= eb_ct_incl <= 25.0:
+                        eb_eur_excl = round((eb_ct_incl / 100.0) / (1 + vat_nl), 5)
+                        self._cbs_eb["NL"] = eb_eur_excl
                         self._cbs_fetched_at = time.time()
                         _LOGGER.info(
-                            "TariffFetcher CBS: NL energiebelasting %.5f €/kWh (periode: %s)",
-                            eb_eur, periode,
+                            "TariffFetcher CBS: NL EB %.5f €/kWh excl. BTW (%.2f ct incl., periode: %s)",
+                            eb_eur_excl, eb_ct_incl, periode,
                         )
                         await self.async_save()
                         return
-
                 _LOGGER.debug("TariffFetcher CBS: geen bruikbare EB waarde in respons")
-
         except Exception as exc:
             _LOGGER.debug("TariffFetcher CBS: ophalen mislukt: %s", exc)
-            # Geen fout — we vallen gewoon terug op cache of fallback tabel

@@ -511,9 +511,65 @@ CONF_PRICE_INCLUDE_BTW     = "price_include_btw"     # bool: add VAT
 CONF_SUPPLIER_MARKUP       = "supplier_markup"        # float: €/kWh markup
 CONF_SELECTED_SUPPLIER     = "selected_supplier"      # str: supplier key
 
+# ── Net metering (saldering) afbouw per land ──────────────────────────────────
+# Format: { country: [ (jaar, pct), ... ] }  — pct = fractie van export die
+# verrekend mag worden met import (1.0 = 100% saldering, 0.0 = afgeschaft).
+# Sortering: oplopend op jaar. Laatste rij geldt voor alle latere jaren.
+#
+# NL: Wet Elektriciteitsproductie Kleinschalig (WEK), Staatsblad 2023
+#     2023-2024: 100%, 2025: 64%, 2026: 36%, 2027+: 0%
+# BE: Geen wettelijke saldering — feedin-compensatie via nettarief (≈0%)
+# DE: Einspeisevergütung (EEG) — geen saldering, vaste terugleverprijs
+# FR: Geen saldering — contrat de vente (surplus verkoop)
+# Overige landen: standaard 0% (geen saldering — puur feedin)
+NET_METERING_PHASES: dict[str, list[tuple[int, float]]] = {
+    "NL": [
+        (2023, 1.00),
+        (2024, 1.00),
+        (2025, 0.64),
+        (2026, 0.36),
+        (2027, 0.00),
+    ],
+    "BE": [(2020, 0.00)],   # geen saldering
+    "DE": [(2020, 0.00)],   # EEG: vaste terugleverprijs, geen saldering
+    "FR": [(2020, 0.00)],
+    "AT": [(2020, 0.00)],
+    "CH": [(2020, 0.00)],
+    "DK": [(2020, 0.00)],
+    "NO": [(2020, 0.00)],
+    "SE": [(2020, 0.00)],
+    "FI": [(2020, 0.00)],
+}
+
+
+def get_net_metering_pct(country: str, year: int | None = None) -> float:
+    """
+    Geeft het actieve salderings-percentage (0.0–1.0) voor een land en jaar.
+
+    Voorbeeld:
+        get_net_metering_pct("NL", 2026)  →  0.36
+        get_net_metering_pct("NL", 2027)  →  0.00
+        get_net_metering_pct("DE", 2026)  →  0.00
+
+    Onbekend land → 0.0 (veilige standaard: geen saldering aannemen).
+    """
+    import datetime as _dt
+    if year is None:
+        year = _dt.date.today().year
+    phases = NET_METERING_PHASES.get(str(country).upper(), [])
+    if not phases:
+        return 0.0
+    # Laatste fase waarvan jaar <= gevraagd jaar
+    pct = phases[0][1]
+    for phase_year, phase_pct in phases:
+        if year >= phase_year:
+            pct = phase_pct
+    return pct
+
+
 # Energy tax (energiebelasting) per country in €/kWh (2025 values, excl. BTW)
 ENERGY_TAX_PER_COUNTRY = {
-    "NL": 0.11281,   # €/kWh excl. BTW (2025, eerste schijf t/m 2900 kWh)
+    "NL": 0.09157,   # €/kWh excl. BTW (2026: 0,1108 incl. BTW ÷ 1,21 — eerste schijf t/m 2900 kWh)
     "BE": 0.0445,
     "DE": 0.02050,   # reduced since 2023
     "FR": 0.0225,

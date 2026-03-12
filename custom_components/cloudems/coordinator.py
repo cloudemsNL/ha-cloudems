@@ -123,6 +123,7 @@ from .const import (
     CONF_PRICE_INCLUDE_TAX, CONF_PRICE_INCLUDE_BTW, CONF_SUPPLIER_MARKUP, CONF_SELECTED_SUPPLIER,
     ENERGY_TAX_PER_COUNTRY, VAT_RATE_PER_COUNTRY, SUPPLIER_MARKUPS,
     CONF_ENERGY_PRICES_COUNTRY,
+    get_net_metering_pct,
     CONF_SHUTTER_COUNT, CONF_SHUTTER_CONFIGS, CONF_SHUTTER_GROUPS,
     CONF_SHUTTER_TEMP_SENSOR, SHUTTER_STORAGE_KEY,
     DSMR_SOURCE_ESPHOME, CONF_DSMR_SOURCE,
@@ -3205,11 +3206,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             ev_pid_state = {}
             if self._ev_pid and self._ev_pid._enabled:
                 grid_w  = data.get("grid_power", 0.0)
-                new_a   = self._ev_pid.compute(grid_w)
-                if new_a is not None:
-                    await self._set_ev_current(new_a)
+                # v4.5.118: Stop EV-laden bij netcongestie
+                _ev_cong = locals().get("congestion_data", {}) or {}
+                if _ev_cong.get("active"):
+                    await self._set_ev_current(0)
                     self._log_decision("ev_pid",
-                        f"🔋 EV PID: {new_a:.1f}A (netto {grid_w:.0f}W)")
+                        f"🚫 EV PID gestopt: netcongestie actief ({_ev_cong.get('utilisation_pct', 0):.0f}% benutting)")
+                else:
+                    new_a   = self._ev_pid.compute(grid_w)
+                    if new_a is not None:
+                        await self._set_ev_current(new_a)
+                        self._log_decision("ev_pid",
+                            f"🔋 EV PID: {new_a:.1f}A (netto {grid_w:.0f}W)")
                 ev_pid_state = self._ev_pid.pid_state
 
             # Phase balancer
@@ -3435,6 +3443,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             if self._solar_learner and getattr(self, "_solar_learner_enabled", True):
                 await self._solar_learner.async_update(phase_currents=self._limiter.phase_currents)
+
+                # Vul ontbrekende pv_forecast uren aan vanuit solar_learner data
+                # (lost het probleem op waarbij forecast leeg is na herstart)
+                if self._pv_forecast:
+                    for sl_prof in self._solar_learner.get_all_profiles():
+                        _sl_eid = sl_prof.inverter_id if hasattr(sl_prof, "inverter_id") else None
+                        if _sl_eid and hasattr(sl_prof, "hourly_peak_w") and sl_prof.peak_power_w:
+                            self._pv_forecast.seed_from_learner(
+                                inverter_id   = _sl_eid,
+                                hourly_peak_w = sl_prof.hourly_peak_w,
+                                peak_wp       = sl_prof.peak_power_w,
+                            )
 
                 # Build inverter data: peak, clipping, utilisation — for sensors/diagnostics
                 # Merge pv_forecast orientation data
@@ -4156,7 +4176,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _ml_err:
                     _LOGGER.debug("MLForecast fout: %s", _ml_err)
 
-            # v4.5.7: EnergyBalancer lag-leren periodiek opslaan
+                # v4.5.118: ML-verbruiksforecast opslaan in _data voor gebruik door zones en bridge
+                if ml_forecast_data:
+                    self._data["ml_consumption_forecast"] = ml_forecast_data
             if self._energy_balancer:
                 try:
                     await self._store_balancer.async_save(
@@ -5082,6 +5104,25 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("SmartDelay error: %s", _sd_err)
             battery_schedule = {}
             cfg = self._config  # nodig voor battery_scheduler en zonneplan blokken hieronder
+
+            # Effectieve batterijcapaciteit: geconfigureerd heeft voorrang, anders geleerde waarde
+            # Wordt gebruikt door alle sub-modules zodat slijtagekosten altijd kloppen
+            _eff_bat_cap: float = float(cfg.get("battery_capacity_kwh", 0) or 0)
+            if _eff_bat_cap <= 0:
+                try:
+                    _bsl_ref_early = getattr(self, "_battery_soc_learner", None)
+                    _bat_eid_early = None
+                    for _b in (cfg.get("batteries") or []):
+                        _bat_eid_early = _b.get("battery_soc_entity") or _b.get("soc_entity")
+                        if _bat_eid_early:
+                            break
+                    if _bsl_ref_early and _bat_eid_early:
+                        _diag_early = _bsl_ref_early.get_diagnostics(_bat_eid_early)
+                        _eff_bat_cap = float(_diag_early.get("est_capacity_kwh") or 10.0)
+                except Exception:
+                    pass
+            if _eff_bat_cap <= 0:
+                _eff_bat_cap = 10.0
             if self._battery_scheduler:
                 # v1.18.1: pass soh_pct voor slijtage-bewust laden
                 _soh = (
@@ -5109,7 +5150,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     pv_avg_14d_w          = _pv_avg_14d_w,
                     pv_peak_w             = _pv_peak_w,
                     pv_forecast_today_kwh = pv_forecast_kwh,
-                    battery_capacity_kwh  = float(cfg.get("battery_capacity_kwh", 10.0)),
+                    battery_capacity_kwh  = _eff_bat_cap,
                     battery_max_charge_w  = float(cfg.get("battery_max_charge_w", 3000.0)),
                     pv_forecast_hourly    = pv_forecast_hourly,
                     override              = _season_override,
@@ -5357,8 +5398,23 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 and cfg.get("zonneplan_auto_forecast", False)
             ):
                 _zp_soh = _soh_pct if self._battery_scheduler else None
-                _zp_cap = float(cfg.get("battery_capacity_kwh", 10.0))
+                _zp_cap = _eff_bat_cap
+                _zp_net_metering = get_net_metering_pct(cfg.get(CONF_ENERGY_PRICES_COUNTRY, "NL"))
                 try:
+                    # Geef all-in prijsinfo door (incl. energiebelasting, BTW, opslag)
+                    if price_info:
+                        _zp_provider.update_price_info(price_info)
+                    # Geef externe context door: ML-huisverbruik, congestie, export-limiet, EV
+                    _ctx_ml_w   = ml_forecast_data.get("next_hour_kwh", 0.0) * 1000 if ml_forecast_data else 0.0
+                    _ctx_cong   = congestion_data.get("active", False) if locals().get("congestion_data") else False
+                    _ctx_exp_lim= export_limit_data.get("limit_w", 0.0) if locals().get("export_limit_data") else 0.0
+                    _ctx_ev_w   = abs(data.get("ev_power", 0.0) or 0.0)
+                    _zp_provider.update_context(
+                        house_load_next_h_w = _ctx_ml_w,
+                        congestion_active   = _ctx_cong,
+                        export_limit_w      = _ctx_exp_lim,
+                        ev_charging_w       = _ctx_ev_w,
+                    )
                     _zp_result = await _zp_provider.async_apply_forecast_decision_v3(
                         solar_now_w             = data.get("solar_power", 0.0) or 0.0,
                         solar_surplus_w         = solar_surplus,
@@ -5367,6 +5423,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         pv_forecast_hourly      = pv_forecast_hourly,
                         battery_capacity_kwh    = _zp_cap,
                         soh_pct                 = _zp_soh or 100.0,
+                        net_metering_pct        = _zp_net_metering,
                     )
                     self._log_decision(
                         "zonneplan_auto",
@@ -5377,6 +5434,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "action":              _zp_result.action.value if hasattr(_zp_result.action, "value") else str(_zp_result.action),
                             "confidence":          round(_zp_result.confidence, 3),
                             "reasons":             _zp_result.reasons,
+                            "human_reason":        getattr(_zp_result, "human_reason", ""),
+                            "net_metering_pct":    round(_zp_net_metering * 100),
                             "executed":            getattr(_zp_result, "executed", None),
                             "charge_w":            getattr(_zp_result, "charge_w", None),
                             "discharge_w":         getattr(_zp_result, "discharge_w", None),
@@ -5384,10 +5443,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "pv_forecast_tomorrow_kwh": round(pv_forecast_tomorrow_kwh or 0, 2),
                             "soc_pct":             batt_soc,
                             "solar_surplus_w":     round(solar_surplus, 1),
-                            "battery_capacity_kwh": float(cfg.get("battery_capacity_kwh", 10.0)),
+                            "battery_capacity_kwh": _eff_bat_cap,
                             "via": "with_scheduler",
                         }
                     )
+                    # Schrijf human_reason terug naar battery_schedule zodat sensor het toont
+                    _hr = getattr(_zp_result, "human_reason", "")
+                    if _hr:
+                        battery_schedule["human_reason"] = _hr
                 except Exception as _zp_err:
                     _LOGGER.warning("ZonneplanProvider auto-forecast fout: %s", _zp_err)
 
@@ -5400,8 +5463,27 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 and getattr(self._zonneplan_bridge, "is_available", False)
                 and cfg.get("zonneplan_auto_forecast", False)
             ):
-                _zp_cap = float(cfg.get("battery_capacity_kwh", 10.0))
+                _zp_cap = _eff_bat_cap
+                _zp_net_metering = get_net_metering_pct(cfg.get(CONF_ENERGY_PRICES_COUNTRY, "NL"))
                 try:
+                    if price_info:
+                        self._zonneplan_bridge.update_price_info(price_info)
+                    # Injecteer geleerde capaciteit zodat BatteryCycleEconomics altijd klopt
+                    if _eff_bat_cap != float(cfg.get("battery_capacity_kwh", 0) or 0):
+                        self._zonneplan_bridge.update_config({
+                            **cfg,
+                            "battery_capacity_kwh": _eff_bat_cap,
+                        })
+                    _ctx_ml_w   = ml_forecast_data.get("next_hour_kwh", 0.0) * 1000 if ml_forecast_data else 0.0
+                    _ctx_cong   = congestion_data.get("active", False) if locals().get("congestion_data") else False
+                    _ctx_exp_lim= export_limit_data.get("limit_w", 0.0) if locals().get("export_limit_data") else 0.0
+                    _ctx_ev_w   = abs(data.get("ev_power", 0.0) or 0.0)
+                    self._zonneplan_bridge.update_context(
+                        house_load_next_h_w = _ctx_ml_w,
+                        congestion_active   = _ctx_cong,
+                        export_limit_w      = _ctx_exp_lim,
+                        ev_charging_w       = _ctx_ev_w,
+                    )
                     _zp_result = await self._zonneplan_bridge.async_apply_forecast_decision_v3(
                         solar_now_w             = data.get("solar_power", 0.0) or 0.0,
                         solar_surplus_w         = solar_surplus,
@@ -5410,6 +5492,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         pv_forecast_hourly      = pv_forecast_hourly,
                         battery_capacity_kwh    = _zp_cap,
                         soh_pct                 = 100.0,
+                        net_metering_pct        = _zp_net_metering,
                     )
                     self._log_decision(
                         "zonneplan_auto",
@@ -5419,6 +5502,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "action":              _zp_result.action.value if hasattr(_zp_result.action, "value") else str(_zp_result.action),
                             "confidence":          round(_zp_result.confidence, 3),
                             "reasons":             _zp_result.reasons,
+                            "human_reason":        getattr(_zp_result, "human_reason", ""),
+                            "net_metering_pct":    round(_zp_net_metering * 100),
                             "executed":            getattr(_zp_result, "executed", None),
                             "charge_w":            getattr(_zp_result, "charge_w", None),
                             "discharge_w":         getattr(_zp_result, "discharge_w", None),
@@ -5426,10 +5511,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "pv_forecast_tomorrow_kwh": round(pv_forecast_tomorrow_kwh or 0, 2),
                             "soc_pct":             batt_soc,
                             "solar_surplus_w":     round(solar_surplus, 1),
-                            "battery_capacity_kwh": float(cfg.get("battery_capacity_kwh", 10.0)),
+                            "battery_capacity_kwh": _eff_bat_cap,
                             "via": "standalone",
                         }
                     )
+                    # Schrijf human_reason terug naar battery_schedule zodat sensor het toont
+                    _hr = getattr(_zp_result, "human_reason", "")
+                    if _hr:
+                        battery_schedule["human_reason"] = _hr
                 except Exception as _zp_err:
                     _LOGGER.warning("ZonneplanProvider standalone auto-forecast fout: %s", _zp_err)
 
@@ -5778,6 +5867,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "w_per_k":            adv.w_per_k,
                     "reliable":           adv.reliable,
                 }
+                # v4.5.118: Preheat advies doorgeven aan SmartClimateManager
+                if self._smart_climate and adv.mode != "normal":
+                    self._smart_climate.apply_preheat_advice(
+                        offset_c = adv.setpoint_offset_c,
+                        mode     = adv.mode,
+                    )
 
             # v1.15.0: PV forecast accuracy tracker
             pv_accuracy_data: dict = {}

@@ -1,0 +1,88 @@
+{
+  "_comment": "CloudEMS tarieven \u2014 jaarlijks updaten, excl. BTW",
+  "_formule_eb": "incl_BTW / (1 + BTW_rate) = excl_BTW",
+  "_formule_markup": "opslag incl. BTW / BTW_factor = excl. BTW",
+  "_bronnen": {
+    "NL": "dynamischeprijs.nl, maart 2026",
+    "DE": "flyx.energy + zendure.de, januari 2026 \u2014 Tibber 2.15ct incl. MwSt (bron: flyx.energy)",
+    "BE": "daretocompare.be + switchr.be, schattingen o.b.v. marktpositie",
+    "FR": "fournisseurs-electricite.com + engie.fr, schattingen \u2014 FR heeft beperkt EPEX-dynamisch aanbod"
+  },
+  "updated": "2026-03-12",
+  "energy_tax": {
+    "NL": {
+      "2022": 0.09217,
+      "2023": 0.12599,
+      "2024": 0.12599,
+      "2025": 0.10153,
+      "2026": 0.09157
+    },
+    "BE": {
+      "2025": 0.0,
+      "2026": 0.0
+    },
+    "DE": {
+      "2025": 0.0205,
+      "2026": 0.0205
+    },
+    "FR": {
+      "2025": 0.05,
+      "2026": 0.05
+    }
+  },
+  "supplier_markup": {
+    "NL": {
+      "frank": 0.01504,
+      "frank_energie": 0.01504,
+      "zonneplan": 0.01653,
+      "pure": 0.01645,
+      "pure_energie": 0.01645,
+      "anwb": 0.01653,
+      "coolblue": 0.01653,
+      "budget": 0.01736,
+      "easyenergy": 0.01802,
+      "nextenergy": 0.0181,
+      "tibber": 0.0205,
+      "vandebron": 0.02124,
+      "vattenfall": 0.02149,
+      "eneco": 0.01893,
+      "essent": 0.02008,
+      "greenchoice": 0.01752,
+      "octopus": 0.01554,
+      "none": 0.0,
+      "custom": 0.0
+    },
+    "BE": {
+      "energie_be": 0.0124,
+      "bolt": 0.01612,
+      "eneco": 0.01653,
+      "mega": 0.01694,
+      "octa": 0.01818,
+      "luminus": 0.01901,
+      "engie": 0.02066,
+      "none": 0.0,
+      "custom": 0.0
+    },
+    "DE": {
+      "awattar": 0.00252,
+      "ostrom": 0.00992,
+      "rabot": 0.01261,
+      "octopus": 0.01513,
+      "tibber": 0.01807,
+      "lichtblick": 0.02101,
+      "eon": 0.02521,
+      "rwe": 0.02353,
+      "vattenfall": 0.02185,
+      "none": 0.0,
+      "custom": 0.0
+    },
+    "FR": {
+      "octopus_fr": 0.01292,
+      "engie_fr": 0.0175,
+      "edf": 0.01617,
+      "totalenergies_fr": 0.01667,
+      "none": 0.0,
+      "custom": 0.0
+    }
+  }
+}

@@ -582,6 +582,15 @@ class ZoneController:
             target_temp= self._temps[Preset.BOOST]
             reason    += " + gasten (kalender)"
 
+        # v4.5.118: Preheat/reduce offset op basis van stroomprijs
+        _preheat_off = float(data.get("preheat_offset_c", 0.0))
+        _preheat_mode= data.get("preheat_mode", "normal")
+        if _preheat_off != 0.0 and preset in (Preset.COMFORT, Preset.BOOST, Preset.SOLAR, Preset.ACTIVITY):
+            _boost_max = self._temps.get(Preset.BOOST, 22.0)
+            _away_min  = self._temps.get(Preset.AWAY, 14.0)
+            target_temp = round(max(_away_min, min(_boost_max, target_temp + _preheat_off)), 1)
+            reason += f" + {'voorverwarmen' if _preheat_off > 0 else 'besparen'} {_preheat_off:+.1f}°C (prijs)"
+
         # PID verfijning bij bewoonbare presets
         pid_output = 0.0
         if (preset in (Preset.COMFORT, Preset.ECO, Preset.BOOST,
@@ -951,6 +960,18 @@ class SmartClimateManager:
         self._config     = config
         # VTherm Bridge — één per manager, gedeeld door alle zones
         self._vtherm_bridge = VThermBridge(hass, config)
+        # Preheat offset vanuit ClimatePreHeatAdvisor (°C, + = warmer, - = koeler)
+        self._preheat_offset_c: float = 0.0
+        self._preheat_mode:     str   = "normal"
+
+    def apply_preheat_advice(self, offset_c: float, mode: str) -> None:
+        """Ontvang preheat-advies vanuit ClimatePreHeatAdvisor.
+
+        Wordt opgepakt bij de eerstvolgende async_update() zodat zones
+        hun setpoints aanpassen op basis van de huidige stroomprijs.
+        """
+        self._preheat_offset_c = max(-3.0, min(3.0, offset_c))
+        self._preheat_mode     = mode
 
     async def async_setup(self) -> None:
         self._vtherm_bridge.setup()
@@ -983,6 +1004,12 @@ class SmartClimateManager:
     async def async_update(self, data: dict) -> dict:
         if not self._enabled or not self._zones:
             return {"enabled": False}
+
+        # Injecteer preheat-offset in data zodat zones het kunnen gebruiken
+        if self._preheat_offset_c != 0.0:
+            data = dict(data)
+            data["preheat_offset_c"] = self._preheat_offset_c
+            data["preheat_mode"]     = self._preheat_mode
 
         outside_temp = data.get("outside_temp_c")
         zone_statuses = []

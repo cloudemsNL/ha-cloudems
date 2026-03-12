@@ -1020,6 +1020,38 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         reset_delivery_learning,
         schema=vol.Schema({vol.Optional("group_id", default=""): str}))
 
+    # v4.5.126: dump probe diagnostieklog naar bestand + notificatie
+    async def dump_probe_log(call):
+        import os as _os
+        zb = getattr(coordinator, "_zonneplan_bridge", None)
+        if not zb:
+            await hass.services.async_call("persistent_notification", "create",
+                {"title": "CloudEMS — Probe log",
+                 "message": "Geen Zonneplan bridge actief.",
+                 "notification_id": "cloudems_probe_log"}, blocking=False)
+            return
+        log_entries = []  # probe verwijderd — slider maxima uit HA attribuut
+        if not log_entries:
+            msg = "Probe log is leeg — start eerst 'Slider max leren' via de CloudEMS knoppen."
+        else:
+            lines = [f"[{e['ts']}] {e['level']:7s} {e['msg']}" for e in log_entries]
+            msg = "\n".join(lines)
+        # Schrijf naar /config
+        try:
+            log_path = _os.path.join(hass.config.config_dir, "cloudems_probe_log.txt")
+            with open(log_path, "w", encoding="utf-8") as fh:
+                fh.write(f"CloudEMS Probe Diagnostieklog\n{'='*60}\n{msg}\n")
+            file_msg = f"\n\n✅ Ook opgeslagen in: `{log_path}`"
+        except Exception as exc:
+            file_msg = f"\n\n⚠️ Bestand schrijven mislukt: {exc}"
+        await hass.services.async_call("persistent_notification", "create",
+            {"title": "CloudEMS — Probe diagnostieklog",
+             "message": f"```\n{msg[-3000:]}\n```{file_msg}",
+             "notification_id": "cloudems_probe_log"}, blocking=False)
+        _LOGGER.info("CloudEMS probe log gedumpt (%d regels)", len(log_entries))
+
+    hass.services.async_register(DOMAIN, "dump_probe_log", dump_probe_log)
+
     # v3.1: handmatig diagnostisch rapport uploaden naar GitHub
     async def upload_diagnostic_report(call):
         guardian = getattr(coordinator, "_guardian", None)

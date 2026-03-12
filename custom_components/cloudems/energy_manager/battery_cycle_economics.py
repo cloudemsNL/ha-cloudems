@@ -16,8 +16,8 @@ Formule:
   ↳ schedule alleen als netto_spread > MIN_NET_SPREAD_EUR
 
 Degradatiekosten:
-  cycle_cost = (battery_price_eur / capacity_kwh) * chemistry_factor_per_kwh
-  Voorbeeld: 8000 € / 10 kWh * 0.0045 = 0.0036 €/kWh per cyclus (NMC)
+  cycle_cost = battery_price_eur / (capacity_kwh × total_cycles)
+  Voorbeeld: 5000 € / (10 kWh × 6000 cycli) = 0.083 €/kWh = 8.3 ct/kWh (LFP)
 
 Integratie:
   BatteryCycleEconomics.evaluate_slot_pair(charge_price, discharge_price,
@@ -38,18 +38,49 @@ _LOGGER = logging.getLogger(__name__)
 MIN_NET_SPREAD_EUR    = 0.02
 
 # Defaultwaarden als batterijprijs niet geconfigureerd is
-DEFAULT_BATTERY_PRICE_EUR  = 8_000.0    # €
+DEFAULT_BATTERY_PRICE_EUR  = 4_190.0    # € (Zonneplan Nexus 10 kWh fallback)
 DEFAULT_CAPACITY_KWH       = 10.0
 DEFAULT_ROUND_TRIP_EFF     = 0.92       # 92% round-trip efficiency
 
-# Gekopieerd van battery_degradation.py — chemie-factoren
-CHEMISTRY_FACTORS = {
-    "LFP":  0.0025,
-    "NMC":  0.0045,
-    "NCA":  0.0050,
-    "LTO":  0.0010,
+# Zonneplan Nexus prijstabel (incl. installatie, na btw-teruggave, prijspeil 2026)
+# Wordt automatisch gebruikt als battery_price_eur = 0 of niet ingesteld.
+NEXUS_PRICE_TABLE = {
+    10.0: 4_190.0,
+    15.0: 5_190.0,
+    20.0: 6_640.0,   # midden van €5990–€7290 range
+    30.0: 9_500.0,   # geschatte extrapolatie
 }
-DEFAULT_CHEMISTRY = "NMC"
+
+
+def _nexus_price_for_capacity(capacity_kwh: float) -> float:
+    """Geeft de Nexus-prijs voor de opgegeven capaciteit via interpolatie."""
+    if capacity_kwh <= 0:
+        return DEFAULT_BATTERY_PRICE_EUR
+    sizes = sorted(NEXUS_PRICE_TABLE.keys())
+    if capacity_kwh <= sizes[0]:
+        return NEXUS_PRICE_TABLE[sizes[0]]
+    if capacity_kwh >= sizes[-1]:
+        k1, k2 = sizes[-2], sizes[-1]
+        slope = (NEXUS_PRICE_TABLE[k2] - NEXUS_PRICE_TABLE[k1]) / (k2 - k1)
+        return NEXUS_PRICE_TABLE[k2] + slope * (capacity_kwh - k2)
+    for i in range(len(sizes) - 1):
+        k1, k2 = sizes[i], sizes[i + 1]
+        if k1 <= capacity_kwh <= k2:
+            t = (capacity_kwh - k1) / (k2 - k1)
+            return NEXUS_PRICE_TABLE[k1] + t * (NEXUS_PRICE_TABLE[k2] - NEXUS_PRICE_TABLE[k1])
+    return DEFAULT_BATTERY_PRICE_EUR
+
+
+# Aantal verwachte volledige laadcycli per chemie over de levensduur
+# cycle_cost (€/kWh) = battery_price / (capacity_kwh × total_cycles)
+# Voorbeeld: 5000 € / (10 kWh × 6000 cycli) = 0.083 €/kWh = 8.3 ct/kWh (LFP)
+CHEMISTRY_CYCLES = {
+    "LFP":  6_000,   # Lithium-ijzerfosfaat — meest gebruikt in thuisopslag
+    "NMC":  3_000,   # Lithium-nikkel-mangaan-kobalt
+    "NCA":  2_500,   # Lithium-nikkel-kobalt-aluminium
+    "LTO":  15_000,  # Lithium-titaniaat — extreem hoge levensduur
+}
+DEFAULT_CHEMISTRY = "LFP"  # Zonneplan Nexus gebruikt LFP-chemie
 
 # SoC stress-boete (degradatie neemt toe bij extremen)
 SOC_PENALTY_DEEP     = 0.30    # +30% degradatiekosten als SoC < 15% bij ontladen
@@ -79,15 +110,21 @@ class BatteryCycleEconomics:
     """
 
     def __init__(self, config: dict) -> None:
-        battery_price = float(config.get("battery_price_eur", DEFAULT_BATTERY_PRICE_EUR))
         capacity_kwh  = float(config.get("battery_capacity_kwh", DEFAULT_CAPACITY_KWH))
         chemistry     = config.get("battery_chemistry", DEFAULT_CHEMISTRY)
         rt_eff        = float(config.get("battery_round_trip_efficiency", DEFAULT_ROUND_TRIP_EFF))
 
-        chem_factor = CHEMISTRY_FACTORS.get(chemistry, CHEMISTRY_FACTORS[DEFAULT_CHEMISTRY])
+        # Gebruik handmatig ingestelde prijs; anders automatisch Nexus-prijstabel op basis van capaciteit
+        configured_price = float(config.get("battery_price_eur", 0) or 0)
+        battery_price = configured_price if configured_price > 0 else _nexus_price_for_capacity(capacity_kwh)
+
+        total_cycles = CHEMISTRY_CYCLES.get(chemistry, CHEMISTRY_CYCLES[DEFAULT_CHEMISTRY])
 
         # Basiskosten per kWh per cyclus (€/kWh)
-        self._base_cycle_cost = (battery_price / max(capacity_kwh, 0.1)) * chem_factor
+        # Formule: battery_price / (capacity_kwh × total_cycles)
+        # Voorbeeld: 4190€ / (10kWh × 6000) = 0.070 €/kWh = 7.0 ct/kWh (Nexus 10 kWh LFP)
+        self._base_cycle_cost = battery_price / max(capacity_kwh * total_cycles, 1.0)
+        self._battery_price   = battery_price  # voor rapportage
         self._rt_eff          = max(rt_eff, 0.5)
         self._min_spread      = float(config.get("battery_min_net_spread", MIN_NET_SPREAD_EUR))
 
@@ -192,6 +229,8 @@ class BatteryCycleEconomics:
         """Sensor-attributen voor diagnose."""
         return {
             "cycle_cost_eur_per_kwh": round(self._base_cycle_cost, 5),
+            "cycle_cost_ct_per_kwh":  round(self._base_cycle_cost * 100, 2),
+            "battery_price_eur":      round(self._battery_price, 0),
             "min_net_spread_eur":     self._min_spread,
             "round_trip_eff_pct":     round(self._rt_eff * 100, 1),
         }

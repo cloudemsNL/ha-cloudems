@@ -227,6 +227,10 @@ async def async_setup_entry(
         CloudEMSStatusSensor(coordinator, entry),
         CloudEMSGuardianSensor(coordinator, entry),
         CloudEMSBatterySavingsSensor(coordinator, entry),
+        # v4.5.131: batterij totaal vermogen + kWh accumulatie
+        CloudEMSBatteryPowerSensor(coordinator, entry),
+        # v4.5.121: losse Zonneplan slider kalibratie sensor
+        CloudEMSZonneplanKalibratieSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -1291,6 +1295,102 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
                 for bx in batteries
             ]
         return attrs
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v4.5.131: Batterij totaal vermogen + kWh accumulatie (alle batterijen t/m 9)
+# sensor.cloudems_battery_power  →  W  (positief=laden, negatief=ontladen)
+# Attributes: charge_kwh_today, discharge_kwh_today, batteries[]
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
+    """Totaal laad-/ontlaadvermogen van alle geconfigureerde batterijen (max 9).
+
+    State:
+        Positief (W)  → laden
+        Negatief (W)  → ontladen
+
+    Attributes:
+        charge_w            — positief laadvermogen (0 als ontladen)
+        discharge_w         — positief ontlaadvermogen (0 als laden)
+        charge_kwh_today    — gecumuleerd geladen kWh vandaag
+        discharge_kwh_today — gecumuleerd ontladen kWh vandaag
+        batteries           — lijst per batterij met label, power_w, soc_pct, action
+        battery_count       — aantal actieve batterijen
+    """
+    _attr_name       = "CloudEMS Battery · Totaal vermogen"
+    _attr_icon       = "mdi:battery-charging"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+
+    # kWh accumulatie — bijgehouden in geheugen, reset bij middernacht
+    _DT_S = 10.0   # coordinator interval
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry             = entry
+        self._attr_unique_id    = f"{entry.entry_id}_battery_power_total"
+        self.entity_id          = "sensor.cloudems_battery_power"
+        self._charge_kwh        = 0.0
+        self._discharge_kwh     = 0.0
+        self._last_day: int | None = None
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _accumulate(self, total_w: float) -> None:
+        """Accumuleer kWh op basis van 10s-interval. Reset om middernacht."""
+        from homeassistant.util import dt as dt_util
+        today = dt_util.now().day
+        if self._last_day is not None and self._last_day != today:
+            self._charge_kwh    = 0.0
+            self._discharge_kwh = 0.0
+        self._last_day = today
+        kwh = abs(total_w) * (self._DT_S / 3600.0) / 1000.0
+        if total_w > 50:
+            self._charge_kwh    += kwh
+        elif total_w < -50:
+            self._discharge_kwh += kwh
+
+    @property
+    def native_value(self):
+        data     = self.coordinator.data or {}
+        bats     = data.get("batteries", [])
+        total_w  = sum(float(b.get("power_w") or 0) for b in bats)
+        # Fallback: battery_providers.total_power_w
+        if not bats:
+            total_w = float(data.get("battery_providers", {}).get("total_power_w") or 0)
+        self._accumulate(total_w)
+        return round(total_w, 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data    = self.coordinator.data or {}
+        bats    = data.get("batteries", [])
+        total_w = sum(float(b.get("power_w") or 0) for b in bats)
+        if not bats:
+            total_w = float(data.get("battery_providers", {}).get("total_power_w") or 0)
+        charge_w    = round(total_w, 0) if total_w > 0 else 0
+        discharge_w = round(abs(total_w), 0) if total_w < 0 else 0
+        return {
+            "charge_w":            charge_w,
+            "discharge_w":         discharge_w,
+            "charge_kwh_today":    round(self._charge_kwh, 3),
+            "discharge_kwh_today": round(self._discharge_kwh, 3),
+            "battery_count":       len(bats),
+            "batteries": [
+                {
+                    "label":    b.get("label", f"Batterij {i+1}"),
+                    "power_w":  b.get("power_w"),
+                    "soc_pct":  b.get("soc_pct"),
+                    "action":   b.get("action"),
+                    "charging": bool(b.get("power_w") and float(b.get("power_w") or 0) > 50),
+                    "discharging": bool(b.get("power_w") and float(b.get("power_w") or 0) < -50),
+                }
+                for i, b in enumerate(bats)
+            ],
+        }
+
 
 class CloudEMSMonthlyPeakSensor(CoordinatorEntity, SensorEntity):
     """Peak grid import power this month — relevant for capacity tariffs (Belgium / NL 2025)."""
@@ -3196,6 +3296,7 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             or bool(zp_entities)
             or int(bp.get("detected_count", 0)) > 0
         )
+        _forecast_data: dict = {}
         zonneplan_info: dict | None = None
         if _zp_detected:
             # Lees has_sliders en entities_mapped direct van provider (meest betrouwbaar)
@@ -3247,6 +3348,14 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
                 "saved_mode":          zp.get("saved_mode"),
                 "last_slider_write_min": zp.get("last_slider_write_min"),
                 "entities_mapped":     _entities_mapped,
+                # Slider kalibratie / max leren — nodig voor progress bar in dashboard
+                "learned_max_deliver_w": zp.get("learned_max_deliver_w"),
+                "learned_max_solar_w":   zp.get("learned_max_solar_w"),
+                "probe_active":          zp.get("probe_active", False),
+                "probe_current_w":       zp.get("probe_current_w"),
+                "probe_confirmed_w":     zp.get("probe_confirmed_w"),
+                "probe_step_w":          zp.get("probe_step_w"),
+                "probe_key":             zp.get("probe_key"),
                 # Forecast + laatste beslissing (altijd aanwezig, ook zonder auto-sturing)
                 "forecast":            _forecast_data,
                 # Directe entity_ids voor dashboard sliders
@@ -3263,6 +3372,7 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
         return {
             "action":           bs.get("action"),
             "reason":           bs.get("reason"),
+            "human_reason":     bs.get("human_reason", "") or _forecast_data.get("action_human_reason", ""),
             "soc_pct":          soc_pct,
             "schedule_date":    bs.get("schedule_date"),
             "schedule":         bs.get("schedule", []),
@@ -6263,4 +6373,91 @@ class CloudEMSMeterTopologySensor(CoordinatorEntity, SensorEntity):
             "tree":        topo.get_tree(name_resolver=_name),
             "stats":       topo.get_stats(),
             "suggestions": topo.get_tentative_relations(),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v4.5.121: ZonneplanKalibratie — losse sensor voor slider max-leren voortgang
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSZonneplanKalibratieSensor(CoordinatorEntity, SensorEntity):
+    """Toont de voortgang van het Zonneplan slider max-leren als losse sensor.
+
+    State:
+        • "niet_gestart"   — max nooit geleerd (nog op default)
+        • "bezig"          — probe actief
+        • "klaar"          — beide sliders geleerd
+    Attributen bevatten voortgang, geleerde maxima en fase (grof/fijn).
+    """
+    _attr_name            = "CloudEMS Zonneplan · Slider Kalibratie"
+    _attr_icon            = "mdi:tune-variant"
+    _attr_has_entity_name = False
+    _attr_state_class     = None
+    _attr_device_class    = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_zonneplan_kalibratie"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _zp(self) -> dict:
+        bs = (self.coordinator.data or {}).get("battery_schedule", {})
+        return bs.get("zonneplan") or {}
+
+    @property
+    def native_value(self) -> str:
+        zp = self._zp()
+        if not zp.get("detected"):
+            return "niet_gedetecteerd"
+        if zp.get("probe_active"):
+            return "bezig"
+        lmd = zp.get("learned_max_deliver_w") or 10000
+        lms = zp.get("learned_max_solar_w") or 10000
+        if lmd >= 9999 or lms >= 9999:
+            return "niet_gestart"
+        return "klaar"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        zp = self._zp()
+        lmd = zp.get("learned_max_deliver_w")
+        lms = zp.get("learned_max_solar_w")
+        probe_active    = zp.get("probe_active", False)
+        confirmed_w     = zp.get("probe_confirmed_w") or 0
+        current_w       = zp.get("probe_current_w") or 0
+        step_w          = zp.get("probe_step_w") or 1000
+        probe_key       = zp.get("probe_key", "")
+        est_max         = 12000
+
+        # Progress percentage: gebaseerd op confirmed_w t.o.v. verwacht maximum
+        progress_pct = round(min(100, (confirmed_w / est_max) * 100), 1) if probe_active else (
+            100.0 if (lmd and lmd < 9999 and lms and lms < 9999) else 0.0
+        )
+
+        fase = None
+        if probe_active:
+            fase = "Fase 1 — grove stappen (1000 W)" if step_w >= 1000 else "Fase 2 — verfijning (100 W)"
+
+        key_label = None
+        if probe_key == "deliver_to_home":
+            key_label = "Leveren aan huis"
+        elif probe_key == "solar_charge":
+            key_label = "Zonneladen"
+
+        return {
+            "state":                self.native_value,
+            "probe_active":         probe_active,
+            "probe_key":            probe_key,
+            "probe_key_label":      key_label,
+            "probe_fase":           fase,
+            "probe_current_w":      current_w if probe_active else None,
+            "probe_confirmed_w":    confirmed_w if probe_active else None,
+            "progress_pct":         progress_pct,
+            "learned_max_deliver_w": lmd if lmd and lmd < 9999 else None,
+            "learned_max_solar_w":   lms if lms and lms < 9999 else None,
+            "has_sliders":           zp.get("has_sliders", False),
         }

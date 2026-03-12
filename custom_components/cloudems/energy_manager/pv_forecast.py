@@ -717,7 +717,49 @@ class PVForecast:
     def get_all_profiles(self) -> list[dict]:
         return [self.get_profile_summary(eid) for eid in self._profiles]
 
-    # ── Weather calibration ───────────────────────────────────────────────────
+    def seed_from_learner(
+        self,
+        inverter_id: str,
+        hourly_peak_w: dict,
+        peak_wp: float,
+    ) -> None:
+        """
+        Vul *ontbrekende* uren in hourly_yield_fraction vanuit solar_learner data.
+
+        Wordt aangeroepen na elke solar_learner update, zodat de pv_forecast niet
+        leeg blijft na een herstart wanneer het systeem nog niet alle uren van
+        vandaag heeft kunnen leren.
+
+        Regels:
+        - Overschrijft NOOIT reeds geleerde fracties (die zijn nauwkeuriger).
+        - Gebruikt hourly_peak_w uit solar_learner als zwak prior.
+        - Normaliseert op peak_wp zodat de fractie consistent is.
+        - Slaat alleen fracties op als ze plausibel zijn (> 0 en peak_wp > 10).
+        """
+        p = self._profiles.get(inverter_id)
+        if p is None or peak_wp < 10 or not hourly_peak_w:
+            return
+
+        seeded = 0
+        for hour_str, peak_w in hourly_peak_w.items():
+            hk = str(int(hour_str))          # normaliseer key (geen leading zero's)
+            if hk in p.hourly_yield_fraction:
+                continue                     # al geleerd — niet overschrijven
+            frac = max(0.0, float(peak_w) / peak_wp)
+            if frac <= 0.0:
+                continue
+            # Zwak prior: lagere alpha dan leerroute (0.15) — wordt snel vervangen
+            p.hourly_yield_fraction[hk] = round(min(frac, 1.0), 4)
+            seeded += 1
+
+        if seeded:
+            import logging as _log
+            _log.getLogger(__name__).debug(
+                "CloudEMS PVForecast: seed_from_learner %s — %d uren gevuld als prior",
+                inverter_id, seeded,
+            )
+
+
 
     def update_weather_calibration(self, inverter_id: str, actual_w: float) -> None:
         """

@@ -1,3 +1,85 @@
+## v4.5.130
+- Fix: Crash bij opstarten — `async_set_discharge`, `async_set_auto` en `get_wizard_hint` waren per ongeluk verwijderd tijdens de probe-cleanup in v4.5.128/129. Hersteld.
+
+## v4.5.130
+- Fix: Alle verwijzingen naar MIT License vervangen door CloudEMS Proprietary License (zie LICENSE bestand). Betreft: dashboard YAML footers, README badge en footer, docs/CLOUDEMS_SAAS_ROADMAP.md, Python bestandsheaders.
+
+## v4.5.129
+- Fix: CLAUDE_INSTRUCTIONS.md gecorrigeerd — dashboard-yaml root sync verwijderd (root dashboard bestaat niet meer)
+- Refactor: Zonneplan slider max-probe systeem volledig verwijderd. Slider maxima worden nu direct uitgelezen uit het `max` attribuut van de HA number-entiteit (bijv. `max: 10000`). Geen stapsgewijze kalibratie meer nodig.
+- Knop "Slider max leren" hernoemd naar "Slider max vernieuwen" — leest attributen opnieuw uit en toont de waarden.
+
+## v4.5.128
+- Fix: Slijtagekosten batterij toonden 360 ct/kWh door foutieve formule (chemistry_factor vermenigvuldigd in plaats van gedeeld door levensduurcycli). Correcte formule: `battery_price / (capacity_kwh × total_cycles)`.
+- Fix: Standaard batterijprijs gecorrigeerd naar €4.190 (Zonneplan Nexus 10 kWh, incl. installatie, na btw-teruggave, prijspeil 2026).
+- Nieuw: Nexus-prijstabel toegevoegd voor alle capaciteiten (10/15/20/30 kWh) met automatische interpolatie. Slijtagekosten kloppen nu altijd zonder handmatige prijsinvoer.
+- Nieuw: Geleerde batterijcapaciteit (`BatterySocLearner`) wordt nu doorgegeven aan `BatteryCycleEconomics` in zowel `battery_scheduler` als `zonneplan_bridge`, zodat slijtagekosten ook kloppen als capaciteit niet handmatig is geconfigureerd.
+- Fix: Boiler temperatuursensor-selectie: als de geconfigureerde `bu_temp_sensor` meer dan 15°C afwijkt van de `current_temperature` van de boiler-entiteit zelf (bijv. koud-inlaat sensor), gebruikt CloudEMS automatisch de boiler-entiteit temperatuur. Setpoints (normaal/boost/surplus) worden niet aangepast.
+- Fix: Zonneplan slider max-leer test hing op eerste stap: readback kon niet onderscheiden tussen cloud-sync vertraging en een geclipte sliderwaarde. Geclipte waarden (slider springt terug naar `confirmed_w`) worden nu direct herkend zonder 3× 60s wachttijd.
+
+## v4.5.126
+- Fix: Probe readback vergeleek de gestuurde waarde met de HA-entity state zonder te controleren of de cloud de write al verwerkt had. Als de Zonneplan cloud traag is (poll-interval > 60s) of als de slider handmatig op 10000W was gezet, las de readback de verkeerde oude waarde en maakte verkeerde beslissingen.
+  - Nieuw: `_probe_state_before_w` — entity-waarde wordt opgeslagen vóór elke write
+  - Readback detecteert nu "state ongewijzigd" (actual ≈ before ≠ sent) → wacht tot 3× 60s extra (max 3 min) zodat de cloud-sync afloopt
+  - Na 3 retries: waarschuwing in probelog en doorgaan met beschikbare waarde
+- Feature: Probe diagnostieklog (`_probe_log`, max 100 regels):
+  - Elke probe-stap (STUUR / READBACK / GEACCEPTEERD / FASE2 / KLAAR) wordt gelogd met timestamp
+  - Zichtbaar in `get_status()` als `probe_log` veld
+  - Nieuwe service `cloudems.dump_probe_log`: schrijft log naar `/config/cloudems_probe_log.txt` én toont als HA persistent notificatie
+  - Gebruik dit om probe-problemen te debuggen
+
+## v4.5.125
+- Feature: ACRouter (RobotDyn DimmerLink hardware) integratie voor variable boiler sturing.
+  - Nieuw `control_mode: "acrouter"` in boiler-configuratie
+  - Nieuw veld `acrouter_host: "192.168.x.x"` — IP-adres van het ACRouter device
+  - CloudEMS stuurt via REST API: surplus → MANUAL mode + dimmer%, goedkoop uur → BOOST (100%), uit → OFF
+  - Debounce: minimale 10s tussen dimmer-updates, alleen sturen bij ≥5% wijziging
+  - Geen HA-entity vereist — controle gaat volledig via HTTP naar het ESP32 device
+  - `_is_on` detectie via interne mode-tracking (geen HA state polling nodig)
+  - Graceful fallback bij ontbrekende host of aiohttp-fout (WARNING log, geen crash)
+  - Firmware vereist: ACRouter v1.2.0+ (MQTT + HA support release, dec 2025)
+
+## v4.5.124
+- Fix: `_start_probe_for_key` resettte `probe_last_run` niet — inconsistentie met handmatige start. Nu ook gereset naar 0.0 zodat de 30-dagen reprobe-timer correct herstart.
+- Fix: Probe startte op `current_max + 1000W` ook als current_max nog op default (10000W) stond → eerste testwaarde was 11000W, buiten slider-range. Nu geldt: als max nog op default staat begint de probe bij 1000W en `probe_confirmed_w` bij 0W. Bij herprobe (max al geleerd) blijft het `current_max + 1000W` gedrag behouden.
+
+## v4.5.123
+- Fix: `async_force_slider_calibrate` (knop "Slider kalibratie") gebruikte `self._effective_discharge_w` / `self._effective_charge_w` — die worden begrensd op het geleerde maximum. Daardoor stuurde de knop nooit meer dan 400/600W. Nu worden de ongeclampte `_charge_w` / `_discharge_w` gebruikt.
+- Fix: `async_force_slider_calibrate` mag niet starten tijdens een actieve max-probe — retourneert nu direct een foutmelding zodat de twee processen elkaar niet in de weg zitten.
+- Fix: `_set_slider_idempotent` readback-callback paste `learned_max` aan terwijl een probe actief was — dit vervuilde de probe-resultaten. Guard toegevoegd: readback slaat learned_max update over als `_probe_active = True`.
+- Fix: `probe_last_run` werd niet gereset bij handmatige herstart via "Slider max leren" knop — hierdoor dacht het systeem de reprobe-timer al te hebben lopen. Nu gereset naar 0.0 bij handmatige start.
+- Feature: Dashboard toont nu Fase (grof 1000W / verfijning 100W) en slider-naam (Leveren aan huis / Zonneladen) tijdens actieve probe.
+- Feature: `sensor.cloudems_zonneplan_kalibratie` — losse sensor met state `niet_gestart` / `bezig` / `klaar` en attributen `progress_pct`, `probe_fase`, `probe_key_label`, `learned_max_deliver_w`, `learned_max_solar_w`.
+- Fix: `services.yaml` — entity-velden krijgen `entity: {}` selector, boolean-velden `boolean: {}`, area-velden `area: {}`.
+
+## v4.5.122
+- Fix: Probe werd elke 10 seconden overschreven door de normale coordinator-cyclus (400/600W). Guards toegevoegd in `async_apply_forecast_decision_v3`, `async_set_charge` en `async_set_discharge`: als `_probe_active = True` wordt alle slider-sturing overgeslagen.
+- Fix: `probe_confirmed_w`, `probe_step_w` en `probe_key` worden nu geëxporteerd in `get_status()` en doorgegeven via `sensor.py` naar het dashboard.
+- Feature: Probe-state (`probe_active`, `probe_key`, `probe_current_w`, `probe_confirmed_w`, `probe_step_w`) wordt nu gepersisteerd in HA Storage en hersteld na herstart. Probe hervat automatisch na 30s.
+
+## v4.5.121
+- Fix: `zonneplan_info` in `sensor.py` miste `learned_max_deliver_w`, `learned_max_solar_w`, `probe_active`, `probe_current_w`, `probe_confirmed_w` — dashboard kon geen progress bar tonen.
+- Fix: `probe_confirmed_w` ontbrak in `get_status()` export van `ZonneplanProvider`.
+
+## v4.5.120
+- Fix: `BatteryProviderRegistry: property '_effective_charge_w' of 'ZonneplanProvider' object has no setter` — `__init__` en `update_config` schreven naar `self._effective_charge_w` terwijl dat een `@property` zonder setter is. Backing variabelen hernoemd naar `_charge_w` en `_discharge_w`.
+- Fix: `services.yaml` duplicate key `meter_topology_approve` op regels 991 en 1036 — tweede blok verwijderd, selectors verbeterd van `text: {}` naar `entity: {}`.
+
+## v4.5.113
+- Fix: `human_reason` wordt nu getoond als extra rij **Toelichting** naast de bestaande **Reden** (niet als vervanging). Reden toont technische `all_reasons`, Toelichting toont leesbare `human_reason` — alleen zichtbaar als gevuld.
+
+## v4.5.112
+- Fix: `human_reason` werd nooit in de sensor-attributen geschreven — alleen in het beslissingslog. Nu wordt `battery_schedule["human_reason"]` gevuld vanuit het Zonneplan-resultaat (beide paden: with_scheduler en standalone), en `sensor.py` exposeert het als attribuut. Dashboard toont nu daadwerkelijk de leesbare reden.
+
+## v4.5.111
+- Fix: Dashboard toont nu `human_reason` (leesbare beslissingsreden) in alle weergaven — prod dashboard, dev dashboard, battery card en dashboard.html. Fallback naar technische `reason` als `human_reason` leeg is.
+
+## v4.5.110
+- Feature: PV forecast seeding vanuit `solar_learner` — na herstart worden ontbrekende uren gevuld met leerdata zodat `pv_kwh_next_8h` niet onterecht op 0 staat.
+- Feature: Saldering-bewuste batterijbeslissingen — PV-hold drempel schaalt mee met het actuele salderingspercentage (`net_metering_pct`).
+- Feature: `human_reason` veld in `DecisionResult` — alle beslissingstakken geven nu een leesbare Nederlandstalige reden terug.
+- Feature: `NET_METERING_PHASES` per land in `const.py` met helper `get_net_metering_pct()` — NL 2025: 64%, 2026: 36%, 2027: 0%.
+
 ## v4.5.85
 - Fix: content: > vervangen door content: | zodat newlines behouden blijven in markdown tabellen
 
