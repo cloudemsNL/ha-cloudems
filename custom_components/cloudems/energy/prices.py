@@ -216,40 +216,69 @@ class EnergyPriceFetcher:
 
     async def update(self) -> None:
         if not self._session:
+            _LOGGER.warning("CloudEMS prijzen [%s]: geen HTTP-sessie beschikbaar, fetch overgeslagen", self._country)
             return
         prices = []
+
+        now_utc = datetime.now(timezone.utc)
+        _LOGGER.info(
+            "CloudEMS prijzen [%s]: fetch gestart om %s UTC (reeds %d slots in cache, bron=%s)",
+            self._country, now_utc.strftime("%H:%M:%S"), len(self._prices), self._source or "geen",
+        )
 
         # 1. Free country-specific source
         if self._country == "NL":
             prices = await self._fetch_energyzero()
             if prices:
                 self._source = "energyzero.nl"
+            else:
+                _LOGGER.warning("CloudEMS prijzen [NL]: EnergyZero fetch mislukt of leeg — probeer ENTSO-E fallback")
         elif self._country == "DE":
             prices = await self._fetch_awattar(AWATTAR_DE_BASE)
             if prices:
                 self._source = "awattar.de"
+            else:
+                _LOGGER.warning("CloudEMS prijzen [DE]: aWATTar fetch mislukt — probeer ENTSO-E fallback")
         elif self._country == "AT":
             prices = await self._fetch_awattar(AWATTAR_AT_BASE)
             if prices:
                 self._source = "awattar.at"
+            else:
+                _LOGGER.warning("CloudEMS prijzen [AT]: aWATTar fetch mislukt — probeer ENTSO-E fallback")
 
         # 2. ENTSO-E fallback if free source failed or country not supported
         if not prices and self._api_key:
+            _LOGGER.info("CloudEMS prijzen [%s]: ENTSO-E fallback geactiveerd", self._country)
             prices = await self._fetch_entsoe()
             if prices:
                 self._source = "ENTSO-E"
 
         if prices:
             self._prices = prices
-            _LOGGER.debug(
-                "CloudEMS prices: %d slots voor %s via %s",
-                len(prices), self._country, self._source,
+            # Log eerste en laatste slot + actueel uur als referentie
+            first = prices[0]
+            last  = prices[-1]
+            cur   = self._get_current_price()
+            local_tz = self._local_tz
+            first_local = self._aware(first["start"]).astimezone(local_tz)
+            last_local  = self._aware(last["start"]).astimezone(local_tz)
+            _LOGGER.info(
+                "CloudEMS prijzen [%s]: %d slots geladen via %s | "
+                "eerste=%s (%.4f €/kWh) | laatste=%s (%.4f €/kWh) | huidig=%.4f €/kWh",
+                self._country, len(prices), self._source,
+                first_local.strftime("%d-%m %H:%M"), first["price"],
+                last_local.strftime("%d-%m %H:%M"),  last["price"],
+                cur if cur is not None else 0.0,
             )
             # Rolling 30-daags daggemiddelde bijhouden voor ROI-berekening
             today_p = [s["price"] for s in self._today_slots()]
             if today_p:
                 from statistics import mean as _mean
                 day_avg = _mean(today_p)
+                _LOGGER.debug(
+                    "CloudEMS prijzen [%s]: daggemiddelde vandaag %.4f €/kWh (%d slots vandaag)",
+                    self._country, day_avg, len(today_p),
+                )
                 # Voeg toe als het afwijkt van vorige (vermijd duplicaten bij meerdere fetches/dag)
                 if not self._daily_avg_history or abs(self._daily_avg_history[-1] - day_avg) > 0.001:
                     self._daily_avg_history.append(day_avg)
@@ -263,6 +292,11 @@ class EnergyPriceFetcher:
                 "in via transparency.entsoe.eu",
                 self._country,
             )
+        else:
+            _LOGGER.warning(
+                "CloudEMS prijzen [%s]: fetch mislukt maar %d gecachede slots nog beschikbaar (bron=%s)",
+                self._country, len(self._prices), self._source or "onbekend",
+            )
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -270,7 +304,18 @@ class EnergyPriceFetcher:
         now = datetime.now(timezone.utc)
         for slot in self._prices:
             if self._aware(slot["start"]) <= now < self._aware(slot["end"]):
-                return float(slot["price"])
+                price = float(slot["price"])
+                _LOGGER.debug(
+                    "CloudEMS EPEX huidig [%s]: %.5f €/kWh (slot %s-%s UTC)",
+                    self._country, price,
+                    self._aware(slot["start"]).strftime("%H:%M"),
+                    self._aware(slot["end"]).strftime("%H:%M"),
+                )
+                return price
+        _LOGGER.warning(
+            "CloudEMS EPEX [%s]: geen actief slot gevonden op %s UTC (%d slots totaal)",
+            self._country, now.strftime("%Y-%m-%d %H:%M:%S"), len(self._prices),
+        )
         return None
 
     def _today_slots(self) -> list:
@@ -314,29 +359,57 @@ class EnergyPriceFetcher:
                 "usageType": "1",
                 "inclBtw":   "false",
             }
+            _LOGGER.info(
+                "CloudEMS EnergyZero: ophalen %s t/m %s (inclBtw=false, excl. BTW)",
+                params["fromDate"], params["tillDate"],
+            )
             async with self._session.get(
                 ENERGYZERO_BASE, params=params,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status != 200:
-                    _LOGGER.debug("EnergyZero HTTP %d", resp.status)
+                    _LOGGER.warning("CloudEMS EnergyZero: HTTP %d — geen prijsdata ontvangen", resp.status)
                     return []
                 data = await resp.json()
+            raw_count = len(data.get("Prices", []))
+            _LOGGER.info("CloudEMS EnergyZero: %d ruwe prijspunten ontvangen van API", raw_count)
             prices = []
+            parse_errors = 0
             for item in data.get("Prices", []):
                 try:
                     start = datetime.fromisoformat(
                         item["readingDate"].replace("Z", "+00:00")
                     )
-                    # EnergyZero returns EUR/kWh directly
+                    # EnergyZero returns EUR/kWh directly (excl. BTW)
                     prices.append({
                         "start": start,
                         "end":   start + timedelta(hours=1),
                         "price": float(item["price"]),
                     })
-                except (KeyError, ValueError):
+                except (KeyError, ValueError) as parse_err:
+                    parse_errors += 1
+                    _LOGGER.debug("CloudEMS EnergyZero: parse-fout item %s: %s", item, parse_err)
                     continue
-            return sorted(prices, key=lambda x: x["start"])
+            if parse_errors:
+                _LOGGER.warning("CloudEMS EnergyZero: %d items konden niet worden geparsed", parse_errors)
+            sorted_prices = sorted(prices, key=lambda x: x["start"])
+            if sorted_prices:
+                first_local = sorted_prices[0]["start"].astimezone(self._local_tz)
+                last_local  = sorted_prices[-1]["start"].astimezone(self._local_tz)
+                # Zoek huidig slot voor log
+                cur_slot = next(
+                    (s for s in sorted_prices if s["start"] <= now < s["end"]), None
+                )
+                _LOGGER.info(
+                    "CloudEMS EnergyZero: %d slots geparsed | bereik %s – %s lokaal | "
+                    "huidig slot: %s (%.5f €/kWh)",
+                    len(sorted_prices),
+                    first_local.strftime("%d-%m %H:%M"),
+                    last_local.strftime("%d-%m %H:%M"),
+                    cur_slot["start"].astimezone(self._local_tz).strftime("%H:%M") if cur_slot else "NIET GEVONDEN",
+                    cur_slot["price"] if cur_slot else 0.0,
+                )
+            return sorted_prices
         except Exception as err:
             _LOGGER.debug("EnergyZero fetch mislukt: %s", err)
             return []

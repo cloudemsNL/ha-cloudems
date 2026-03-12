@@ -1231,6 +1231,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Totale opslag voor diagnostics: (tax + markup) * (1 + vat)
         diag_opslag = round((_tax + _markup) * (1 + _vat), 5) if wants_all_in else 0.0
 
+        cur_all_in = _enrich(cur)
+        _LOGGER.info(
+            "CloudEMS prijs [%s/%s]: EPEX=%.5f + EB=%.5f + markup=%.5f x (1+BTW %.0f%%) = all-in %.5f eurokWh (%.2f ct/kWh) | wants_all_in=%s",
+            country, supplier_key,
+            cur if cur is not None else 0.0,
+            _tax, _markup, _vat * 100,
+            cur_all_in if cur_all_in is not None else 0.0,
+            (cur_all_in * 100) if cur_all_in is not None else 0.0,
+            wants_all_in,
+        )
+
         return {
             **price_info,
             "tax_per_kwh":            round(_tax, 5),
@@ -1241,8 +1252,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "price_include_btw":      wants_all_in and include_btw,
             "country":                country,
             # all-in (incl. EB + BTW + markup)
-            "current_all_in":         _enrich(cur),
-            "current_display":        _enrich(cur) if wants_all_in else cur,
+            "current_all_in":         cur_all_in,
+            "current_display":        cur_all_in if wants_all_in else cur,
             # zonder belasting (kale EPEX, excl. EB + BTW + markup)
             "current_excl_tax":       round(cur, 5) if cur is not None else None,
             # min/max/gem in beide varianten
