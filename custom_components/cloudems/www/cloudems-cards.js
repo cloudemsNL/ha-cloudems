@@ -389,7 +389,7 @@
 
     static getConfigElement() { return document.createElement('cloudems-graph-card-editor'); }
     static getStubConfig() {
-      return { name: 'Grafiek', hours_to_show: 24, entities: [{ entity: 'sensor.cloudems_home_power', color: '#00b140', name: 'Thuis' }] };
+      return { name: 'Grafiek', hours_to_show: 24, entities: [{ entity: 'sensor.cloudems_home_rest', color: '#00b140', name: 'Thuis' }] };
     }
   }
 
@@ -596,6 +596,127 @@
       return nodes;
     }
 
+    // ── Extra flow helpers ────────────────────────────────────────────────────
+
+    _getBoilerPower() {
+      if (!this._hass) return 0;
+      const e = this._config.entities || {};
+      if (e.boiler) return Math.max(0, this._getVal(e.boiler));
+      // Lees uit cloudems_boiler_status — som van alle boilers (max 9), current_power_w is al 0 als uit
+      const st = this._hass.states['sensor.cloudems_boiler_status'];
+      if (st) {
+        const boilers = st.attributes?.boilers || [];
+        return boilers.reduce((s, b) => s + (b.power_w || 0), 0);
+      }
+      return 0;
+    }
+
+    _getEvPower() {
+      if (!this._hass) return 0;
+      const e = this._config.entities || {};
+      if (e.ev) return Math.max(0, this._getVal(e.ev));
+      // Lees uit cloudems_ev_sessie_leermodel → session_current_a * 230V
+      const st = this._hass.states['sensor.cloudems_ev_sessie_leermodel'];
+      if (st && st.attributes?.session_active) {
+        const a = parseFloat(st.attributes.session_current_a) || 0;
+        return a * 230;
+      }
+      return 0;
+    }
+
+    _getEbikePower() {
+      if (!this._hass) return 0;
+      const e = this._config.entities || {};
+      if (e.ebike) return Math.max(0, this._getVal(e.ebike));
+      // Lees uit cloudems_micro_mobiliteit → active_sessions[].power_w
+      const st = this._hass.states['sensor.cloudems_micro_mobiliteit'];
+      if (!st) return 0;
+      return (st.attributes?.active_sessions || []).reduce((s, x) => s + (x.power_w || 0), 0);
+    }
+
+    _getPoolPower() {
+      if (!this._hass) return 0;
+      const e = this._config.entities || {};
+      if (e.pool) return Math.max(0, this._getVal(e.pool));
+      // Lees uit cloudems_zwembad_status → filter_entity + heat_entity vermogen
+      const st = this._hass.states['sensor.cloudems_zwembad_status'];
+      if (!st) return 0;
+      let pw = 0;
+      const filterEid = st.attributes?.filter_entity_id;
+      const heatEid   = st.attributes?.heat_entity_id;
+      if (filterEid && st.attributes?.filter_is_on) {
+        const fst = this._hass.states[filterEid];
+        pw += fst ? (parseFloat(fst.attributes?.current_power_w || fst.attributes?.power || 0)) : 150;
+      }
+      if (heatEid && st.attributes?.heat_is_on) {
+        const hst = this._hass.states[heatEid];
+        pw += hst ? (parseFloat(hst.attributes?.current_power_w || hst.attributes?.power || 0)) : 2000;
+      }
+      return pw;
+    }
+
+    // Device types die eigen nodes hebben — NOOIT in NILM laag tonen
+    _isDedicatedNode(label, deviceType) {
+      const dt = (deviceType || '').toLowerCase();
+      const lb = (label || '').toLowerCase();
+      const dedicated = ['boiler','water_heater','heat_pump','ev_charger','ev_lader',
+                         'pool','zwembad','ebike','e-bike','micro_mobility','micro_mobiliteit'];
+      return dedicated.some(k => dt.includes(k) || lb.includes(k));
+    }
+
+    // Layer2: max 5 nodes — topology meters (purple, with children) + direct NILM
+    _getFlowLayer2() {
+      if (!this._hass) return [];
+      const topoSt = this._hass.states['sensor.cloudems_meter_topology'];
+      const tree = topoSt?.attributes?.tree || [];
+      const nodes = [];
+      for (const node of tree) {
+        if (nodes.length >= 5) break;
+        if (!node.is_topology_meter) continue;
+        // Filter dedicated-node apparaten ook uit children
+        const children = (node.children || [])
+          .filter(c => !this._isDedicatedNode(c.name, c.device_type))
+          .slice(0, 2)
+          .map(c => ({ label: c.name || 'Apparaat', power_w: c.power_w || 0, color: '#a78bfa' }));
+        nodes.push({
+          label: node.name || 'Meter',
+          power_w: node.power_w || 0,
+          color: '#a78bfa', isSub: true,
+          children,
+        });
+      }
+      for (let rank = 1; rank <= 5 && nodes.length < 5; rank++) {
+        const st = this._hass.states[`sensor.cloudems_nilm_top_${rank}_device`];
+        if (!st || st.state === 'unknown' || st.state === 'unavailable') continue;
+        const pw = parseFloat(st.state) || 0;
+        const attr = st.attributes || {};
+        // Sla over als dit een dedicated node is
+        if (this._isDedicatedNode(attr.name, attr.device_type)) continue;
+        nodes.push({
+          label: attr.name || `Verbruiker ${rank}`,
+          power_w: pw, color: attr.color || '#94a3b8',
+          isSub: false, children: [],
+        });
+      }
+      return nodes.slice(0, 5);
+    }
+
+    // Sparkline history tracking (60 samples per key)
+    _histPush(key, val) {
+      if (!this._hist) this._hist = {};
+      if (!this._hist[key]) this._hist[key] = Array.from({length: 60}, () => Math.abs(val));
+      this._hist[key].push(Math.abs(val));
+      if (this._hist[key].length > 60) this._hist[key].shift();
+    }
+    _sparkSvg(key, x, y, w, h, color) {
+      const d = this._hist?.[key]; if (!d || d.length < 2) return '';
+      const mx = Math.max(...d, 1);
+      const pts = d.map((v, i) =>
+        `${(x + i/(d.length-1)*w).toFixed(1)},${(y + h - (v/mx)*h).toFixed(1)}`
+      ).join(' ');
+      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="0.9" opacity="0.28" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+
     // ── Animation loop ────────────────────────────────────────────────────────
 
     _initDots(pipeKeys) {
@@ -654,176 +775,241 @@
       const home       = this._getVal(e.home);
       const solarNodes = this._getSolarNodes();
       const battNodes  = this._getBatteryNodes();
-      const nilmNodes  = this._getNilmNodes();
-      const totalSolar = solarNodes.reduce((s, n) => s + n.w, 0);
       const cloudCover = this._getCloudCover();
+      const boiler     = this._getBoilerPower();
+      const ev         = this._getEvPower();
+      const ebike      = this._getEbikePower();
+      const pool       = this._getPoolPower();
+      const layer2     = this._getFlowLayer2();
+      const subs       = layer2.filter(n => n.isSub && n.children.length > 0);
+      const totalSolar = solarNodes.reduce((s, n) => s + n.w, 0);
 
-      // v4.5.50: bij nacht 1 maan-node tonen (alle inverters samengevat)
-      const hour = new Date().getHours();
+      // Nacht: 1 maan-node, dag: max 3 inverters
+      const hour    = new Date().getHours();
       const isNight = hour < 6 || hour > 21;
-      // Bij nacht: altijd precies 1 node met label = eerste inverter label of "Zon"
       const solarTop3 = isNight
         ? [{ label: solarNodes[0]?.label || 'Zon', w: 0 }]
         : solarNodes.slice(0, 3);
-      const nSolar = solarTop3.length;  // na slice/night, max 3 (of 1 bij nacht)
-      const nBatt  = battNodes.length;
-      const nNilm  = nilmNodes.length;  // max 4 NILM
+      const nSolar = solarTop3.length;
 
-      // ── Layout schema ─────────────────────────────────────────────────────
+      // Update sparkline history
+      this._histPush('solar',  totalSolar);
+      this._histPush('grid',   Math.abs(grid));
+      this._histPush('home',   home);
+      this._histPush('boiler', boiler);
+      this._histPush('batt',   battNodes[0]?.power_w || 0);
+      this._histPush('ev',     ev);
+      this._histPush('ebike',  ebike);
+      this._histPush('pool',   pool);
+      layer2.forEach((n, i) => this._histPush(`l2_${i}`, n.power_w));
+
+      // ── Layout ─────────────────────────────────────────────────────────────
+      //  [NET ]    [ZON]       [BOILER]
+      //  [EV  ] -- [HUB]  --  [BATT  ]
+      //  [BIKE]
+      //  [POOL]    [THUIS]
+      //        [L2 row: tussenmeter/NILM mix, max 5]
+      //            [L3 row: NILM children, max 2 per sub]
       //
-      //   [ZON1]  [ZON2]  [ZON3]     (boven hub)
-      //       \     |     /
-      //  [NET]--  [HUB]  --[BATT1][BATT2]   (midden, batt rechts)
-      //             |
-      //           [THUIS]              (onder hub)
-      //       [N1][N2][N3][N4]         (onder thuis)
-      //
-      const W = 360;
+      const W = 500;
+      const COL_LEFT = 78, COL_HUB = 250, COL_R = 430;
+      const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 70;
+      const R_EV    = 122, R_HUB   = 172, R_BOI  = 180;
+      const R_EBIKE = 232, R_POOL  = 302;
+      const R_HOME  = 400, R_L2    = 480, R_L3   = 556;
+      const hasL3 = subs.some(s => s.children.length > 0);
+      const H = hasL3 ? R_L3 + 46 : layer2.length > 0 ? R_L2 + 46 : R_HOME + 40;
 
-      // Vaste Y-niveaus
-      const solarY = 22;
-      const midY   = nSolar > 0 ? 88 : 54;
-      const homeY  = midY + 64;
-      const nilmY  = homeY + 60;
+      const hub_l = COL_HUB - 25, hub_r = COL_HUB + 25;
+      const hub_t = R_HUB - 25,   hub_b = R_HUB + 25;
 
-      const H = nilmY + (nNilm > 0 ? 40 : 0) + 12;
+      // Batt pipe direction
+      const batt0   = battNodes[0];
+      const batt_pw = batt0?.power_w || 0;
+      const batt_ch = batt_pw < -10;
+      const bp1x = hub_r, bp1y = R_HUB, bp2x = COL_R - 38, bp2y = R_BATT;
+      const [bfx1, bfy1, bfx2, bfy2] = batt_ch ? [bp1x,bp1y,bp2x,bp2y] : [bp2x,bp2y,bp1x,bp1y];
 
-      // X-posities — hub in midden van canvas
-      // Grid uiterst links, Hub midden, Batterij rechts van hub
-      const HX  = Math.round(W / 2);   // hub altijd in midden
-      const GX  = 36;                   // grid links
-      const HmX = HX;                   // thuis onder hub
-      const BX  = HX + 90;              // eerste batterij rechts van hub
+      // Boiler pipe: diagonal hub top-right → boiler bottom-left
+      const bol1x = hub_r - 4, bol1y = hub_t + 4;
+      const bol2x = COL_R - 34, bol2y = R_BOI + 17;
 
-      // Batterijen naast elkaar rechts van hub
-      const battXs = Array.from({length: nBatt}, (_, i) => BX + i * 82);
-      const battYs = Array.from({length: nBatt}, () => midY);
+      // Solar X positions centered above hub
+      const solarXs = nSolar === 1 ? [COL_HUB]
+                     : nSolar === 2 ? [COL_HUB - 62, COL_HUB + 62]
+                     :                [COL_HUB - 76, COL_HUB, COL_HUB + 76];
 
-      // Solar: altijd gespreid boven hub (hub=midden)
-      const solarXs = nSolar === 1 ? [HX]
-                    : nSolar === 2 ? [HX - 62, HX + 62]
-                    :                [HX - 76, HX, HX + 76];
+      // L2 spread across full width
+      const spreadXs = (n, w, margin) => {
+        if (n === 1) return [w / 2];
+        const step = (w - 2 * margin) / (n - 1);
+        return Array.from({length: n}, (_, i) => margin + i * step);
+      };
+      const L2_XS = layer2.length > 0 ? spreadXs(layer2.length, W, 50) : [];
 
-      // NILM: gecentreerd onder thuis
-      const nilmCount = Math.min(nNilm, 4);
-      const nilmW = 72, nilmGap = 80;
-      const nilmTotalW = nilmCount * nilmW + (nilmCount - 1) * (nilmGap - nilmW);
-      const nilmXs = Array.from({length: nilmCount}, (_, i) =>
-        W/2 - nilmTotalW/2 + i * nilmGap + nilmW/2
-      );
-
-      // batt2Y niet meer nodig maar voor dots compat
-      const batt2Y = midY;
-
-      const pipeKeys = ['grid', 'home',
+      // Init dots
+      const pipeKeys = [
+        'grid', 'home', 'batt', 'boiler', 'ev', 'ebike', 'pool',
         ...solarTop3.map((_, i) => `solar${i}`),
-        ...battNodes.slice(0, 3).map((_, i) => `batt${i}line`),  // moet overeenkomen met _renderDots
-        ...nilmNodes.slice(0, 4).map((_, i) => `nilm${i}`),
+        ...layer2.map((_, i) => `l2_${i}`),
+        ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
       ];
       this._initDots(pipeKeys);
 
       // Colors
       const C = {
         solar:   '#f5c518',
-        grid_in: '#e74c3c',
-        grid_ex: '#2ecc71',
+        grid_in: '#e74c3c', grid_ex: '#2ecc71',
+        bc:      '#2ecc71', bd: '#e74c3c',      // batt charge/discharge
         batt:    '#5dade2',
-        home:    '#27ae60',
-        dim:     'rgba(255,255,255,0.06)',
-        text:    '#ffffff',
-        sub:     'rgba(255,255,255,0.45)',
+        home:    '#27ae60', boiler: '#e67e22',
+        ev:      '#3bba4c', ebike:  '#06b6d4', pool: '#38bdf8',
+        sub:     '#a78bfa',
+        text:    '#e2e8f0',
       };
 
-      const thresh     = 10;
-      const gridColor  = grid > thresh ? C.grid_in : grid < -thresh ? C.grid_ex : C.sub;
-      const gridActive = Math.abs(grid) > thresh;
-      const homeActive = home > thresh;
-      const gridSub    = grid > thresh ? 'import' : grid < -thresh ? 'export' : '';
-      const gridName   = (e.grid || {}).name || 'Net';
-      const homeName   = (e.home || {}).name || 'Thuis';
+      const T          = 10;
+      const gc         = grid > T ? C.grid_in : C.grid_ex;
+      const bfc        = batt_ch ? C.bc : C.bd;
+      const gridActive = Math.abs(grid) > T;
+      const homeActive = home > T;
+      const boilerActive = boiler > T;
+      const battActive = Math.abs(batt_pw) > T;
 
       // ── SVG helpers ───────────────────────────────────────────────────────
 
-      const pipeLine = (x1, y1, x2, y2, color, active, id) => {
-        const stroke = active ? color : C.dim;
-        const sw     = active ? 2.5 : 1.5;
-        return `<line id="${id}-bg" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" opacity="${active ? 0.35 : 1}"/>`;
+      const pipe = (x1, y1, x2, y2, color, on) =>
+        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+          stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="${on ? .32 : .09}"/>`;
+
+      const arw = (x1, y1, x2, y2, color, on) => {
+        if (!on) return '';
+        const dx = x2-x1, dy = y2-y1, len = Math.hypot(dx, dy);
+        if (len < 1) return '';
+        const ux = dx/len, uy = dy/len;
+        const mx = (x1+x2)/2, my = (y1+y2)/2;
+        const ax = mx-ux*5, ay = my-uy*5, bx = mx+ux*5, by = my+uy*5;
+        const px = -uy*3.5, py = ux*3.5;
+        return `<polygon points="${bx.toFixed(1)},${by.toFixed(1)} ${(ax+px).toFixed(1)},${(ay+py).toFixed(1)} ${(ax-px).toFixed(1)},${(ay-py).toFixed(1)}"
+          fill="${color}" opacity="0.8"/>`;
       };
 
-      const nodeBox = (cx, cy, w, h, color, active, label, val, sub2) => {
-        const x = cx - w/2, y = cy - h/2;
-        const glow    = active ? `filter:drop-shadow(0 0 10px ${color}55)` : '';
-        const borderC = active ? color : 'rgba(255,255,255,0.1)';
-        return `
-          <g style="${glow}">
-            <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10"
-              fill="#111827" stroke="${borderC}" stroke-width="${active ? 1.5 : 1}"/>
-            <text x="${cx}" y="${cy - (sub2 ? 7 : 4)}" text-anchor="middle"
-              font-size="12" font-weight="700" fill="${active ? C.text : 'rgba(255,255,255,0.3)'}">${val}</text>
-            <text x="${cx}" y="${cy + 9}" text-anchor="middle"
-              font-size="9" font-weight="600" letter-spacing="0.08em"
-              fill="${active ? color : 'rgba(255,255,255,0.2)'}">${label.toUpperCase()}</text>
-            ${sub2 ? `<text x="${cx}" y="${cy + 21}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.35)">${sub2}</text>` : ''}
-          </g>`;
+      const nodeBox = (cx, cy, bw, bh, color, on, label, val, sub2, sk) => {
+        const x = cx-bw/2, y = cy-bh/2;
+        const glow = on ? `filter:drop-shadow(0 0 8px ${color}50)` : '';
+        const sp = sk ? this._sparkSvg(sk, x+5, y+bh-14, bw-10, 10, color) : '';
+        return `<g style="${glow}">
+          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
+            fill="#111827" stroke="${on?color:'rgba(255,255,255,0.09)'}" stroke-width="${on?1.5:1}"/>
+          <text x="${cx}" y="${cy-(sub2?8:3)}" text-anchor="middle" font-size="12" font-weight="700"
+            fill="${on?C.text:'rgba(255,255,255,0.25)'}">${val}</text>
+          <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="8" font-weight="600"
+            letter-spacing="0.07em" fill="${on?color:'rgba(255,255,255,0.16)'}">${label}</text>
+          ${sub2?`<text x="${cx}" y="${cy+22}" text-anchor="middle" font-size="7.5"
+            fill="rgba(255,255,255,0.25)">${sub2}</text>`:''}
+          ${sp}
+        </g>`;
+      };
+
+      const battBox = (cx, cy, batt) => {
+        const pw  = batt?.power_w || 0;
+        const soc = batt?.soc_pct;
+        const on  = Math.abs(pw) > T, ch = pw < -T;
+        const fc  = ch ? C.bc : C.bd;
+        const sc  = !soc ? C.batt : soc > 60 ? '#2ecc71' : soc > 25 ? '#f39c12' : '#e74c3c';
+        const bw  = 76, bh = soc != null ? 60 : 44, x = cx-bw/2, y = cy-bh/2;
+        const fw  = ((soc||0)/100*52).toFixed(1);
+        const sp  = this._sparkSvg('batt', x+5, y+bh-14, bw-10, 10, fc);
+        const glow = on ? `filter:drop-shadow(0 0 10px ${fc}55)` : '';
+        return `<g style="${glow}">
+          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
+            fill="#111827" stroke="${on?fc:'rgba(255,255,255,0.09)'}" stroke-width="${on?1.5:1}"/>
+          <text x="${cx}" y="${cy-(soc!=null?13:3)}" text-anchor="middle" font-size="12" font-weight="700"
+            fill="${on?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(Math.abs(pw))}</text>
+          <text x="${cx}" y="${cy+(soc!=null?1:10)}" text-anchor="middle" font-size="7.5" font-weight="600"
+            letter-spacing="0.07em" fill="${on?fc:'rgba(255,255,255,0.16)'}">${ch?'▽ LADEN':'△ ONTLADEN'}</text>
+          ${soc!=null?`
+            <rect x="${cx-26}" y="${cy+9}" width="52" height="4" rx="2" fill="rgba(255,255,255,0.07)"/>
+            <rect x="${cx-26}" y="${cy+9}" width="${fw}" height="4" rx="2" fill="${sc}"/>
+            <text x="${cx}" y="${cy+23}" text-anchor="middle" font-size="7.5" fill="rgba(255,255,255,0.28)">${(soc||0).toFixed(0)}% SoC</text>
+          `:''}
+          ${sp}
+        </g>`;
+      };
+
+      const subBox = (cx, cy, node, idx) => {
+        const on = node.power_w > T;
+        const bw = 86, bh = 46, x = cx-bw/2, y = cy-bh/2;
+        const sp = this._sparkSvg(`l2_${idx}`, x+5, y+bh-14, bw-10, 10, C.sub);
+        const glow = on ? `filter:drop-shadow(0 0 8px #a78bfa44)` : '';
+        return `<g style="${glow}">
+          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
+            fill="#160f2a" stroke="${on?C.sub:'rgba(167,139,250,0.18)'}" stroke-width="${on?1.8:1}"/>
+          <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="12" font-weight="700"
+            fill="${on?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(node.power_w)}</text>
+          <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="8" font-weight="600"
+            letter-spacing="0.07em" fill="${on?C.sub:'rgba(167,139,250,0.28)'}">${node.label.toUpperCase()}</text>
+          ${sp}
+        </g>`;
+      };
+
+      const nilmBox = (cx, cy, node) => {
+        const on = node.power_w > T;
+        const color = node.color || '#94a3b8';
+        const short = node.label.length > 9 ? node.label.slice(0,8)+'…' : node.label;
+        const bw = 74, bh = 44, x = cx-bw/2, y = cy-bh/2;
+        const glow = on ? `filter:drop-shadow(0 0 7px ${color}44)` : '';
+        return `<g style="${glow}">
+          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
+            fill="#0d1117" stroke="${on?color:'rgba(255,255,255,0.08)'}" stroke-width="${on?1.5:1}"/>
+          <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="11" font-weight="700"
+            fill="${on?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(node.power_w)}</text>
+          <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="7.5" font-weight="600"
+            letter-spacing="0.07em" fill="${on?color:'rgba(255,255,255,0.2)'}">${short.toUpperCase()}</text>
+        </g>`;
       };
 
       const solarNode = (cx, cy, label, w, active) => {
-        const hour = new Date().getHours();
-        const isNight = hour < 6 || hour > 21;
-
-        // ── Nacht: maan-icoon (altijd 1 node, bij nacht alle inverters = 1 maan) ──
         if (isNight) {
-          const moonR = 9;
-          const moonColor = '#b0c8e8';
-          const moonGlow = 'filter:drop-shadow(0 0 6px rgba(176,200,232,0.4))';
-          // Halvemaan via clip (grotere cirkel overdekt de linkerhelft)
-          const moonSvg = `
-            <defs>
-              <clipPath id="moon-clip-${cx}">
-                <rect x="${cx}" y="${cy - moonR - 2}" width="${moonR + 4}" height="${(moonR + 2)*2}"/>
-              </clipPath>
-            </defs>
-            <g style="${moonGlow}">
+          const moonR = 9, moonColor = '#b0c8e8';
+          const sp = this._sparkSvg('solar', cx-30, cy+18, 60, 10, moonColor);
+          return `<g>
+            <defs><clipPath id="moon-clip-${cx}">
+              <rect x="${cx}" y="${cy-moonR-2}" width="${moonR+4}" height="${(moonR+2)*2}"/>
+            </clipPath></defs>
+            <g style="filter:drop-shadow(0 0 6px rgba(176,200,232,0.4))">
               <circle cx="${cx}" cy="${cy}" r="${moonR}" fill="${moonColor}" clip-path="url(#moon-clip-${cx})"/>
-              <circle cx="${cx + moonR * 0.55}" cy="${cy - moonR * 0.1}" r="${moonR * 0.75}" fill="#0f172a"/>
-            </g>`;
-          return `
-            <g>
-              ${moonSvg}
-              <text x="${cx}" y="${cy+27}" text-anchor="middle"
-                font-size="11" font-weight="700" fill="rgba(255,255,255,0.2)">0 W</text>
-              <text x="${cx}" y="${cy+38}" text-anchor="middle"
-                font-size="8" font-weight="600" letter-spacing="0.06em"
-                fill="${moonColor}">${label.toUpperCase()}</text>
-            </g>`;
+              <circle cx="${cx+moonR*.55}" cy="${cy-moonR*.1}" r="${moonR*.75}" fill="#0f172a"/>
+            </g>
+            <text x="${cx}" y="${cy+27}" text-anchor="middle" font-size="11" font-weight="700"
+              fill="rgba(255,255,255,0.2)">0 W</text>
+            <text x="${cx}" y="${cy+38}" text-anchor="middle" font-size="8" font-weight="600"
+              letter-spacing="0.06em" fill="${moonColor}">${label.toUpperCase()}</text>
+            ${sp}
+          </g>`;
         }
-
-        // ── Dag: zon met bewolking ─────────────────────────────────────────────
-        const cover  = cloudCover != null ? cloudCover : (active ? 0.1 : 0.9);
+        const cover = cloudCover != null ? cloudCover : (active ? 0.1 : 0.9);
         const bright = Math.pow(1 - cover, 0.6);
-        const r = Math.round(245 * bright + 140 * (1 - bright));
-        const g = Math.round(197 * bright + 140 * (1 - bright));
-        const b = Math.round(24  * bright + 140 * (1 - bright));
+        const r = Math.round(245*bright + 140*(1-bright));
+        const g = Math.round(197*bright + 140*(1-bright));
+        const b = Math.round(24 *bright + 140*(1-bright));
         const sunColor = `rgb(${r},${g},${b})`;
-        const sunR = active ? Math.round(9 + bright * 4) : 7;
-        const nRays  = active ? (cover < 0.3 ? 12 : cover < 0.6 ? 8 : 6) : 0;
-        const rayIn  = sunR + 2.5;
-        const rayOut = sunR + (cover < 0.3 ? 8 : cover < 0.6 ? 5 : 3);
-        const rays = active ? Array.from({length: nRays}, (_, i) => {
-          const a = (i * 360 / nRays) * Math.PI / 180;
-          const x1 = cx + Math.cos(a)*rayIn,  y1 = cy + Math.sin(a)*rayIn;
-          const x2 = cx + Math.cos(a)*rayOut, y2 = cy + Math.sin(a)*rayOut;
-          return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
-            stroke="${sunColor}" stroke-width="${cover < 0.3 ? 1.8 : 1.4}" stroke-linecap="round" opacity="${(bright*0.9).toFixed(2)}"/>`;
+        const sunR = active ? Math.round(9 + bright*4) : 7;
+        const nRays = active ? (cover<0.3 ? 12 : cover<0.6 ? 8 : 6) : 0;
+        const rayIn = sunR+2.5, rayOut = sunR+(cover<0.3?8:cover<0.6?5:3);
+        const rays = active ? Array.from({length:nRays},(_,i)=>{
+          const a=(i*360/nRays)*Math.PI/180;
+          return `<line x1="${(cx+Math.cos(a)*rayIn).toFixed(1)}" y1="${(cy+Math.sin(a)*rayIn).toFixed(1)}"
+            x2="${(cx+Math.cos(a)*rayOut).toFixed(1)}" y2="${(cy+Math.sin(a)*rayOut).toFixed(1)}"
+            stroke="${sunColor}" stroke-width="${cover<0.3?1.8:1.4}" stroke-linecap="round" opacity="${(bright*.9).toFixed(2)}"/>`;
         }).join('') : '';
-        const glowSize = Math.round(3 + bright * 10);
-        const glow = active ? `filter:drop-shadow(0 0 ${glowSize}px ${sunColor})` : '';
+        const glowSz = Math.round(3+bright*10);
+        const glow = active ? `filter:drop-shadow(0 0 ${glowSz}px ${sunColor})` : '';
         const showCloud = cover > 0.25 && active;
-        const cloudOp = Math.min(1, (cover - 0.25) / 0.6).toFixed(2);
-        const cOffX = Math.round((cover - 0.25) * 18);
-        const cOffY = Math.round((cover - 0.25) * 6);
+        const cloudOp = Math.min(1,(cover-0.25)/0.6).toFixed(2);
+        const cOX = Math.round((cover-0.25)*18), cOY = Math.round((cover-0.25)*6);
         const cloud = showCloud ? (() => {
-          const ox = cx + cOffX - 8, oy = cy + cOffY - 4;
+          const ox=cx+cOX-8, oy=cy+cOY-4;
           return `<g opacity="${cloudOp}">
             <ellipse cx="${ox+10}" cy="${oy+6}" rx="9"  ry="6" fill="#b0bec5"/>
             <ellipse cx="${ox+18}" cy="${oy+4}" rx="7"  ry="5" fill="#cfd8dc"/>
@@ -831,76 +1017,118 @@
             <ellipse cx="${ox+17}" cy="${oy+9}" rx="13" ry="5" fill="#cfd8dc"/>
           </g>`;
         })() : '';
-        return `
-          <g style="${glow}">
-            ${active && bright > 0.3 ? `<circle cx="${cx}" cy="${cy}" r="${sunR+12}" fill="${sunColor}" opacity="${(bright*0.10).toFixed(2)}"/>` : ''}
-            <circle cx="${cx}" cy="${cy}" r="${sunR}" fill="${active ? sunColor : 'rgba(255,255,255,0.07)'}"/>
-            ${rays}${cloud}
-            <text x="${cx}" y="${cy+27}" text-anchor="middle"
-              font-size="11" font-weight="700" fill="${active ? C.text : 'rgba(255,255,255,0.25)'}">${this._fmt(w)}</text>
-            <text x="${cx}" y="${cy+38}" text-anchor="middle"
-              font-size="8" font-weight="600" letter-spacing="0.06em"
-              fill="${active ? sunColor : 'rgba(255,255,255,0.2)'}">${label.toUpperCase()}</text>
-          </g>`;
+        const sp = this._sparkSvg('solar', cx-30, cy+18, 60, 10, sunColor);
+        return `<g style="${glow}">
+          ${active&&bright>0.3?`<circle cx="${cx}" cy="${cy}" r="${sunR+12}" fill="${sunColor}" opacity="${(bright*.10).toFixed(2)}"/>`:''}
+          <circle cx="${cx}" cy="${cy}" r="${sunR}" fill="${active?sunColor:'rgba(255,255,255,0.07)'}"/>
+          ${rays}${cloud}
+          <text x="${cx}" y="${cy+27}" text-anchor="middle" font-size="11" font-weight="700"
+            fill="${active?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(w)}</text>
+          <text x="${cx}" y="${cy+38}" text-anchor="middle" font-size="8" font-weight="600"
+            letter-spacing="0.06em" fill="${active?sunColor:'rgba(255,255,255,0.2)'}">${label.toUpperCase()}</text>
+          ${sp}
+        </g>`;
       };
 
-      const hubNode = () => {
-        const active = totalSolar > 5 || homeActive || gridActive || battNodes.some(b => Math.abs(b.power_w) > thresh);
-        return `
-          <g style="${active ? 'filter:drop-shadow(0 0 14px rgba(255,255,255,0.12))' : ''}">
-            <circle cx="${HX}" cy="${midY}" r="26" fill="#0d1117" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
-            <circle cx="${HX}" cy="${midY}" r="20" fill="#111827" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-            <text x="${HX}" y="${midY+4}" text-anchor="middle"
-              font-size="9" font-weight="700" letter-spacing="0.1em" fill="rgba(255,255,255,0.4)">HUB</text>
-          </g>`;
+      const hubSvg = () => {
+        const active = gridActive||homeActive||battActive||solarTop3.some(s=>s.w>T)||boilerActive;
+        return `<g style="${active?'filter:drop-shadow(0 0 14px rgba(255,255,255,0.12))':''}">
+          <circle cx="${COL_HUB}" cy="${R_HUB}" r="26" fill="#0d1117" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+          <circle cx="${COL_HUB}" cy="${R_HUB}" r="20" fill="#111827" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <text x="${COL_HUB}" y="${R_HUB+4}" text-anchor="middle" font-size="9" font-weight="700"
+            letter-spacing="0.1em" fill="rgba(255,255,255,0.4)">HUB</text>
+        </g>`;
       };
 
-      const battNode = (batt, cx, cy) => {
-        const pw  = batt.power_w || 0;
-        const soc = batt.soc_pct;
-        const active      = Math.abs(pw) > thresh;
-        const charging    = pw < -thresh;   // negatief = laden bij CloudEMS
-        const discharging = pw > thresh;    // positief = ontladen
-        const dir = charging ? '▽ ' : discharging ? '△ ' : '';
-        const battColor = soc == null ? C.batt : soc > 60 ? '#2ecc71' : soc > 25 ? '#f39c12' : '#e74c3c';
-        const glow    = active ? `filter:drop-shadow(0 0 10px ${C.batt}55)` : '';
-        const showSoc = soc != null;
-        const bh = showSoc ? 48 : 36;
-        const bx = cx - 36, by = cy - bh/2;
-        const fillW = ((soc || 0) / 100 * 48).toFixed(1);
-        return `
-          <g style="${glow}">
-            <rect x="${bx}" y="${by}" width="72" height="${bh}" rx="10"
-              fill="#111827" stroke="${active ? C.batt : 'rgba(255,255,255,0.1)'}" stroke-width="${active ? 1.5 : 1}"/>
-            <text x="${cx}" y="${by+14}" text-anchor="middle"
-              font-size="12" font-weight="700" fill="${active ? C.text : 'rgba(255,255,255,0.3)'}">${this._fmt(Math.abs(pw))}</text>
-            <text x="${cx}" y="${by+26}" text-anchor="middle"
-              font-size="9" font-weight="600" letter-spacing="0.08em"
-              fill="${active ? C.batt : 'rgba(255,255,255,0.2)'}">${dir}${batt.label.toUpperCase()}</text>
-            ${showSoc ? `
-              <rect x="${cx-24}" y="${by+31}" width="48" height="5" rx="2.5" fill="rgba(255,255,255,0.06)"/>
-              <rect x="${cx-24}" y="${by+31}" width="${fillW}" height="5" rx="2.5" fill="${battColor}"/>
-              <text x="${cx}" y="${by+46}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.35)">${(soc||0).toFixed(0)}% SoC</text>
-            ` : ''}
-          </g>`;
-      };
+      // ── Build SVG ─────────────────────────────────────────────────────────
+      let h = '';
 
-      const nilmBubble = (cx, cy, label, pw, color) => {
-        const active = pw > 5;
-        const glow = active ? `filter:drop-shadow(0 0 8px ${color}66)` : '';
-        const shortLabel = label.length > 8 ? label.slice(0, 7) + '…' : label;
-        return `
-          <g style="${glow}">
-            <rect x="${cx-34}" y="${cy-22}" width="68" height="44" rx="8"
-              fill="#0d1117" stroke="${active ? color : 'rgba(255,255,255,0.08)'}" stroke-width="${active ? 1.5 : 1}"/>
-            <text x="${cx}" y="${cy-6}" text-anchor="middle"
-              font-size="11" font-weight="700" fill="${active ? C.text : 'rgba(255,255,255,0.25)'}">${this._fmt(pw)}</text>
-            <text x="${cx}" y="${cy+8}" text-anchor="middle"
-              font-size="8" font-weight="600" letter-spacing="0.05em"
-              fill="${active ? color : 'rgba(255,255,255,0.2)'}">${shortLabel.toUpperCase()}</text>
-          </g>`;
-      };
+      // Pipes
+      h += pipe(COL_LEFT+44, R_GRID, COL_HUB-25, R_HUB, gc, gridActive);
+      solarTop3.forEach((s, i) => h += pipe(solarXs[i], R_SUN+46, COL_HUB, hub_t, C.solar, s.w>T));
+      h += pipe(bp1x, bp1y, bp2x, bp2y, bfc, battActive);
+      h += pipe(bol1x, bol1y, bol2x, bol2y, C.boiler, boilerActive);
+      h += pipe(COL_HUB, hub_b, COL_HUB, R_HOME-17, C.home, homeActive);
+      h += pipe(COL_LEFT+44, R_EV,    hub_l, R_HUB-10, C.ev,    ev>T);
+      h += pipe(COL_LEFT+44, R_EBIKE, hub_l, R_HUB+4,  C.ebike, ebike>T);
+      h += pipe(COL_LEFT+44, R_POOL,  hub_l, R_HUB+16, C.pool,  pool>T);
+      layer2.forEach((node, i) =>
+        h += pipe(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
+      subs.forEach((s, si) => {
+        const sx = L2_XS[layer2.indexOf(s)];
+        const cxs = s.children.length===1 ? [sx] : [sx-40, sx+40];
+        s._cxs = cxs;
+        s.children.forEach((c, ci) => h += pipe(sx, R_L2+22, cxs[ci], R_L3-18, C.sub, c.power_w>T));
+      });
 
+      // Arrows
+      h += grid>T
+        ? arw(COL_LEFT+44, R_GRID, COL_HUB-25, R_HUB, gc, true)
+        : arw(COL_HUB-25, R_HUB, COL_LEFT+44, R_GRID, gc, gridActive);
+      solarTop3.forEach((s, i) => h += arw(solarXs[i], R_SUN+46, COL_HUB, hub_t, C.solar, s.w>T));
+      h += arw(bfx1, bfy1, bfx2, bfy2, bfc, battActive);
+      h += arw(bol1x, bol1y, bol2x, bol2y, C.boiler, boilerActive);
+      h += arw(COL_HUB, hub_b, COL_HUB, R_HOME-17, C.home, homeActive);
+      h += arw(hub_l, R_HUB-10, COL_LEFT+44, R_EV,    C.ev,    ev>T);
+      h += arw(hub_l, R_HUB+4,  COL_LEFT+44, R_EBIKE, C.ebike, ebike>T);
+      h += arw(hub_l, R_HUB+16, COL_LEFT+44, R_POOL,  C.pool,  pool>T);
+      layer2.forEach((node, i) =>
+        h += arw(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
+      subs.forEach(s => {
+        const sx = L2_XS[layer2.indexOf(s)];
+        (s._cxs||[]).forEach((cx, ci) =>
+          h += arw(sx, R_L2+22, cx, R_L3-18, C.sub, s.children[ci].power_w>T));
+      });
+
+      h += `<g id="dots-layer"></g>`;
+
+      // Nodes
+      solarTop3.forEach((s, i) => h += solarNode(solarXs[i], R_SUN, s.label, s.w, s.w>T));
+      h += hubSvg();
+      const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
+      const gridSub2  = grid > T ? 'import' : 'export';
+      h += nodeBox(COL_LEFT, R_GRID, 88, 38, gc, gridActive, gridLabel, this._fmt(Math.abs(grid)), gridSub2, 'grid');
+      h += nodeBox(COL_LEFT, R_EV,    88, 38, C.ev,    ev>T,    '🚗 EV LADER', this._fmt(ev),    null, 'ev');
+      h += nodeBox(COL_LEFT, R_EBIKE, 88, 38, C.ebike, ebike>T, '🚲 E-BIKE',   this._fmt(ebike), null, 'ebike');
+      h += nodeBox(COL_LEFT, R_POOL,  88, 38, C.pool,  pool>T,  '🏊 ZWEMBAD',  this._fmt(pool),  null, 'pool');
+      h += nodeBox(COL_R, R_BOI, 72, 38, C.boiler, boilerActive, '🚿 BOILER', this._fmt(boiler), null, 'boiler');
+      h += battBox(COL_R, R_BATT, batt0);
+      const homeName = (e.home||{}).name || 'Thuis';
+      h += nodeBox(COL_HUB, R_HOME, 64, 38, C.home, homeActive, homeName.toUpperCase(), this._fmt(home), null, 'home');
+      layer2.forEach((node, i) => {
+        if (node.isSub) h += subBox(L2_XS[i], R_L2, node, i);
+        else            h += nilmBox(L2_XS[i], R_L2, node);
+      });
+      subs.forEach(s => (s._cxs||[]).forEach((cx, ci) => h += nilmBox(cx, R_L3, s.children[ci])));
+
+      // Store pipe definitions for dot animation
+      this._pipeDefs = [
+        { key:'grid',   color:gc,      on:gridActive,   pw:Math.abs(grid),
+          x1:grid>T?COL_LEFT+44:COL_HUB-25, y1:grid>T?R_GRID:R_HUB,
+          x2:grid>T?COL_HUB-25:COL_LEFT+44, y2:grid>T?R_HUB:R_GRID },
+        ...solarTop3.map((s, i) => ({
+          key:`solar${i}`, color:C.solar, on:s.w>T, pw:s.w,
+          x1:solarXs[i], y1:R_SUN+46, x2:COL_HUB, y2:hub_t })),
+        { key:'home',   color:C.home,   on:homeActive,   pw:home,   x1:COL_HUB, y1:hub_b, x2:COL_HUB, y2:R_HOME-17 },
+        { key:'batt',   color:bfc,      on:battActive,   pw:Math.abs(batt_pw), x1:bfx1, y1:bfy1, x2:bfx2, y2:bfy2 },
+        { key:'boiler', color:C.boiler, on:boilerActive, pw:boiler,  x1:bol1x, y1:bol1y, x2:bol2x, y2:bol2y },
+        { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:hub_l, y1:R_HUB-10, x2:COL_LEFT+44, y2:R_EV },
+        { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:hub_l, y1:R_HUB+4,  x2:COL_LEFT+44, y2:R_EBIKE },
+        { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:hub_l, y1:R_HUB+16, x2:COL_LEFT+44, y2:R_POOL },
+        ...layer2.map((node, i) => ({
+          key:`l2_${i}`, color:node.isSub?C.sub:node.color,
+          on:node.power_w>T, pw:node.power_w,
+          x1:COL_HUB, y1:R_HOME+17, x2:L2_XS[i], y2:R_L2-22 })),
+        ...subs.flatMap((s, si) => {
+          const sx = L2_XS[layer2.indexOf(s)];
+          return (s._cxs||[]).map((cx, ci) => ({
+            key:`l3_${si}_${ci}`, color:C.sub,
+            on:s.children[ci].power_w>T, pw:s.children[ci].power_w,
+            x1:sx, y1:R_L2+22, x2:cx, y2:R_L3-18 }));
+        }),
+      ];
+
+      // Write to shadow DOM
       this.shadowRoot.innerHTML = `
         <style>
           :host { display: block; }
@@ -923,136 +1151,33 @@
           <div class="wrap">
             ${this._config.title ? `<div class="title">${this._config.title}</div>` : ''}
             <svg id="flow-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <filter id="glow-s" x="-60%" y="-60%" width="220%" height="220%">
-                  <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
-                  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-                </filter>
-              </defs>
-
-              <!-- ── Pipes ── -->
-              ${pipeLine(GX+28, midY, HX-26, midY, gridColor, gridActive, 'grid')}
-              ${battNodes.slice(0, 3).map((b, i) => {
-                const x1 = i === 0 ? HX+26 : battXs[i-1]+36;
-                const x2 = battXs[i]-36;
-                return pipeLine(x1, midY, x2, midY, C.batt, Math.abs(b.power_w) > thresh, `batt${i}line`);
-              }).join('')}
-              ${pipeLine(HX, midY+26, HmX, homeY-20, C.home, homeActive, 'home')}
-              ${solarTop3.map((s, i) =>
-                pipeLine(solarXs[i], solarY+14, HX, midY-26, C.solar, s.w > 5, `solar${i}`)
-              ).join('')}
-              ${nilmNodes.slice(0,4).map((n, i) =>
-                pipeLine(HmX, homeY+20, nilmXs[i], nilmY-22, n.color, n.power_w > 5, `nilm${i}`)
-              ).join('')}
-
-              <!-- ── Animated dots ── -->
-              <g id="dots-layer"></g>
-
-              <!-- ── Solar nodes ── -->
-              ${solarTop3.map((s, i) => solarNode(solarXs[i], solarY, s.label, s.w, s.w > 5)).join('')}
-
-              <!-- ── Hub ── -->
-              ${hubNode()}
-
-              <!-- ── Grid ── -->
-              ${nodeBox(GX, midY, 54, 40, gridColor, gridActive, gridName, this._fmt(grid), gridSub)}
-
-              <!-- ── Batterij nodes ── -->
-              ${battNodes.slice(0,4).map((b, i) => battNode(b, battXs[i], battYs[i])).join('')}
-
-              <!-- ── Thuis ── -->
-              ${nodeBox(HmX, homeY, 58, 40, C.home, homeActive, homeName, this._fmt(home), '')}
-
-              <!-- ── NILM top 4 ── -->
-              ${nilmNodes.slice(0,4).map((n, i) => nilmBubble(nilmXs[i], nilmY, n.label, n.power_w, n.color)).join('')}
+              ${h}
             </svg>
           </div>
         </ha-card>`;
-
-      // Store geometry for dot rendering
-      this._geo = {
-        HX, midY, GX, BX, HmX, homeY,
-        solarXs, solarY,
-        battXs, battYs, batt2Y,
-        nilmXs, nilmY,
-        solarNodes: solarTop3, battNodes, nilmNodes,
-        grid, home,
-        gridActive, homeActive,
-        nBatt, thresh, C,
-      };
-
-      // Animatie loop loopt door — _renderDots pikt nieuwe dots-layer op na DOM rebuild
     }
 
     // ── Dot animation render ─────────────────────────────────────────────────
 
     _renderDots() {
-      if (!this.shadowRoot || !this._geo) return;
+      if (!this.shadowRoot || !this._pipeDefs) return;
       const layer = this.shadowRoot.getElementById('dots-layer');
       if (!layer) return;
 
-      const { HX, midY, GX, BX, HmX, homeY,
-              solarXs, solarY, battXs, battYs, batt2Y,
-              nilmXs, nilmY,
-              solarNodes, battNodes, nilmNodes,
-              grid, home, gridActive, homeActive,
-              nBatt, thresh, C } = this._geo;
-
-      // Snelheid schalen op vermogen: 500W=langzaam, 5000W=snel
-      const speedFor = w => 0.003 + Math.min(Math.abs(w) / 5000, 1) * 0.012;
-
-      const pipes = [
-        // Grid: import → hub, export ← hub
-        {
-          key: 'grid', color: grid > 0 ? C.grid_in : C.grid_ex, active: gridActive,
-          power: Math.abs(grid),
-          x1: grid > 0 ? GX+28 : HX-26, y1: midY,
-          x2: grid > 0 ? HX-26 : GX+28, y2: midY,
-        },
-        // Batterijen: laden → hub→batt, ontladen → batt→hub
-        ...battNodes.slice(0,3).map((b, i) => {
-          const pw = b.power_w || 0;
-          const fromX = i === 0 ? HX+26 : battXs[i-1]+36;
-          const toX   = battXs[i]-36;
-          const charging = pw < -thresh;  // negatief = laden
-          return { key: `batt${i}line`, color: C.batt, power: Math.abs(pw),
-            active: Math.abs(pw) > thresh,
-            x1: charging ? fromX : toX,  // laden: hub→batt, ontladen: batt→hub
-            y1: midY,
-            x2: charging ? toX : fromX,
-            y2: midY };
-        }),
-        // Hub → Thuis
-        { key: 'home', color: C.home, active: homeActive, power: home,
-          x1: HX, y1: midY+26, x2: HmX, y2: homeY-20 },
-        // Zon → Hub
-        ...solarNodes.map((s, i) => ({
-          key: `solar${i}`, color: C.solar, active: s.w > 5, power: s.w,
-          x1: solarXs[i], y1: solarY+14, x2: HX, y2: midY-26,
-        })),
-        // Thuis → NILM
-        ...nilmNodes.slice(0,4).map((n, i) => ({
-          key: `nilm${i}`, color: n.color, active: n.power_w > 5, power: n.power_w,
-          x1: HmX, y1: homeY+20, x2: nilmXs[i], y2: nilmY-22,
-        })),
-      ];
-
+      const spd = w => 0.003 + Math.min(Math.abs(w) / 5000, 1) * 0.013;
       let html = '';
-      pipes.forEach(pipe => {
-        if (!pipe.active) return;
-        const dots = this._dots[pipe.key];
-        if (!dots) return;
-        // Pas snelheid aan op vermogen
-        const speed = speedFor(pipe.power || 1000);
-        dots.forEach(dot => { dot.speed = speed; });
-        const dx = pipe.x2 - pipe.x1, dy = pipe.y2 - pipe.y1;
-        dots.forEach(dot => {
-          const t = dot.pos;
-          const x = (pipe.x1 + dx * t).toFixed(1);
-          const y = (pipe.y1 + dy * t).toFixed(1);
-          const fade = Math.sin(t * Math.PI);
-          html += `<circle cx="${x}" cy="${y}" r="3.5"
-            fill="${pipe.color}" opacity="${(fade * 0.9).toFixed(2)}"/>`;
+
+      this._pipeDefs.forEach(p => {
+        if (!p.on) return;
+        const d = this._dots[p.key]; if (!d) return;
+        const s = spd(p.pw), dx = p.x2-p.x1, dy = p.y2-p.y1;
+        d.forEach(dot => {
+          dot.speed = s;
+          const t = dot.pos, fade = Math.sin(t * Math.PI);
+          const x = (p.x1 + dx*t).toFixed(1), y = (p.y1 + dy*t).toFixed(1);
+          // Glow halo + solid core
+          html += `<circle cx="${x}" cy="${y}" r="5.5" fill="${p.color}" opacity="${(fade*.15).toFixed(2)}"/>`;
+          html += `<circle cx="${x}" cy="${y}" r="2.8" fill="${p.color}" opacity="${(fade*.92).toFixed(2)}"/>`;
         });
       });
 
@@ -1071,8 +1196,13 @@
         entities: {
           solar_system: { entity: 'sensor.cloudems_solar_system' },
           grid:    { entity: 'sensor.cloudems_grid_net_power',   name: 'Net' },
-          home:    { entity: 'sensor.cloudems_home_power',       name: 'Thuis' },
+          home:    { entity: 'sensor.cloudems_home_rest',       name: 'Thuis' },
           weather: { entity: 'weather.forecast_thuis' },
+          // Optioneel — worden anders auto-detected via CloudEMS sensors:
+          // boiler: { entity: 'sensor.cloudems_boiler_power' },
+          // ev:     { entity: 'sensor.cloudems_ev_lader_power' },
+          // ebike:  { entity: 'sensor.cloudems_micro_mobiliteit_power' },
+          // pool:   { entity: 'sensor.cloudems_zwembad_power' },
         }
       };
     }
@@ -1506,7 +1636,7 @@
 
           ${entityRow('grid', '⚡ Net', 'sensor.cloudems_grid_net_power')}
 
-          ${entityRow('home', '🏠 Thuis', 'sensor.cloudems_home_power')}
+          ${entityRow('home', '🏠 Thuis', 'sensor.cloudems_home_rest')}
 
           ${entityRow('battery', '🔋 Batterij', 'sensor.cloudems_battery_power')}
 

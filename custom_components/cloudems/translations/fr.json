@@ -505,6 +505,23 @@
           "heat_pump_power_entity": "Heat pump electrical power sensor (W)",
           "heat_pump_thermal_entity": "Heat pump thermal power sensor (W, optional)"
         }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Modifier chaudière: {unit_label} — {group_name}",
+        "description": "Modifier les paramètres du chauffe-eau **{unit_label}** dans le groupe **{group_name}**.\n\n**💡 Température cible:** en cas de surplus PV, CloudEMS utilise automatiquement la consigne maximale.\n**⚡ Puissance:** apprise automatiquement depuis le capteur d'énergie.",
+        "data": {
+          "bu_entity": "Entité chaudière",
+          "bu_temp_sensor": "Capteur de température (optionnel)",
+          "bu_energy_sensor": "Capteur d'énergie (optionnel)",
+          "bu_label": "Nom de cette chaudière",
+          "bu_setpoint": "Température cible (°C)",
+          "bu_control_mode": "Mode de contrôle",
+          "bu_surplus_setpoint": "Consigne surplus PV (°C)",
+          "bu_preset_on": "Preset ON",
+          "bu_preset_off": "Preset OFF",
+          "bu_dimmer_on_pct": "Variateur ON (%)",
+          "bu_dimmer_off_pct": "Variateur OFF (%)"
+        }
       }
     },
     "abort": {

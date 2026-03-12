@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,22 +101,26 @@ class PoolController:
     def __init__(
         self,
         hass: HomeAssistant,
-        filter_entity:  str = "",
-        heat_entity:    str = "",
-        temp_entity:    str = "",
-        uv_entity:      str = "",
-        robot_entity:   str = "",
-        heat_setpoint:  float = HEAT_DEFAULT_SETPOINT_C,
-        filter_modes:   Optional[list] = None,
-        heat_modes:     Optional[list] = None,
+        filter_entity:        str = "",
+        heat_entity:          str = "",
+        temp_entity:          str = "",
+        uv_entity:            str = "",
+        robot_entity:         str = "",
+        heat_setpoint:        float = HEAT_DEFAULT_SETPOINT_C,
+        filter_modes:         Optional[list] = None,
+        heat_modes:           Optional[list] = None,
+        filter_power_entity:  str = "",
+        heat_power_entity:    str = "",
     ) -> None:
-        self._hass            = hass
-        self._filter_eid      = filter_entity
-        self._heat_eid        = heat_entity
-        self._temp_eid        = temp_entity
-        self._uv_eid          = uv_entity
-        self._robot_eid       = robot_entity
-        self._heat_setpoint   = heat_setpoint
+        self._hass                = hass
+        self._filter_eid          = filter_entity
+        self._heat_eid            = heat_entity
+        self._temp_eid            = temp_entity
+        self._uv_eid              = uv_entity
+        self._robot_eid           = robot_entity
+        self._heat_setpoint       = heat_setpoint
+        self._filter_power_eid    = filter_power_entity
+        self._heat_power_eid      = heat_power_entity
         self._filter_modes    = filter_modes or [MODE_PV_SURPLUS, MODE_CHEAP_HOURS, MODE_SCHEDULE]
         self._heat_modes      = heat_modes   or [MODE_PV_SURPLUS, MODE_CHEAP_HOURS, MODE_TEMP_DEMAND]
 
@@ -123,6 +128,14 @@ class PoolController:
         self._filter_last_on_ts:  float = 0.0
         self._filter_last_off_ts: float = 0.0
         self._heat_last_on_ts:    float = 0.0
+
+        # Zelflerend vermogen — EMA over gemeten waarden (alpha=0.15)
+        # Fallback als geen power-sensor geconfigureerd is
+        self._learned_filter_w: float = 150.0   # startschatting filtreerpomp
+        self._learned_heat_w:   float = 2000.0  # startschatting warmtepomp
+        self._power_store = Store(hass, 1, "cloudems_pool_learned_power_v1")
+        self._power_dirty = False
+        self._power_last_save: float = 0.0
         self._heat_last_off_ts:   float = 0.0
 
         # Daily tracking (reset at midnight)
@@ -161,6 +174,12 @@ class PoolController:
         heat_is_on   = self._get_switch_state(self._heat_eid)
         uv_is_on     = self._get_switch_state(self._uv_eid)
         robot_is_on  = self._get_switch_state(self._robot_eid)
+
+        # Leer vermogen via EMA als apparaat aan is en power-sensor geconfigureerd
+        if filter_is_on and self._filter_power_eid:
+            self._learn_power(self._filter_power_eid, is_filter=True)
+        if heat_is_on and self._heat_power_eid:
+            self._learn_power(self._heat_power_eid, is_filter=False)
 
         # Evalueer filter
         filter_action = await self._eval_filter(
@@ -212,12 +231,14 @@ class PoolController:
             "filter_mode":         status.filter_mode,
             "filter_hours_today":  status.filter_hours_today,
             "filter_target_hours": status.filter_target_hours,
+            "filter_power_w":      self._get_power_w(self._filter_power_eid, self._filter_eid, 150.0),
             "heat_is_on":          status.heat_action.is_on,
             "heat_action":         status.heat_action.action,
             "heat_reason":         status.heat_action.reason,
             "heat_mode":           status.heat_mode,
             "water_temp_c":        status.water_temp_c,
             "heat_setpoint_c":     status.heat_setpoint_c,
+            "heat_power_w":        self._get_power_w(self._heat_power_eid, self._heat_eid, 2000.0),
             "uv_is_on":            status.uv_is_on,
             "robot_is_on":         status.robot_is_on,
             "advice":              status.advice,
@@ -225,19 +246,23 @@ class PoolController:
 
     def update_config(
         self,
-        filter_entity: str = "",
-        heat_entity:   str = "",
-        temp_entity:   str = "",
-        uv_entity:     str = "",
-        robot_entity:  str = "",
-        heat_setpoint: float = HEAT_DEFAULT_SETPOINT_C,
+        filter_entity:       str = "",
+        heat_entity:         str = "",
+        temp_entity:         str = "",
+        uv_entity:           str = "",
+        robot_entity:        str = "",
+        heat_setpoint:       float = HEAT_DEFAULT_SETPOINT_C,
+        filter_power_entity: str = "",
+        heat_power_entity:   str = "",
     ) -> None:
-        self._filter_eid    = filter_entity
-        self._heat_eid      = heat_entity
-        self._temp_eid      = temp_entity
-        self._uv_eid        = uv_entity
-        self._robot_eid     = robot_entity
-        self._heat_setpoint = heat_setpoint
+        self._filter_eid         = filter_entity
+        self._heat_eid           = heat_entity
+        self._temp_eid           = temp_entity
+        self._uv_eid             = uv_entity
+        self._robot_eid          = robot_entity
+        self._heat_setpoint      = heat_setpoint
+        self._filter_power_eid   = filter_power_entity
+        self._heat_power_eid     = heat_power_entity
 
     # ── Internal helpers ────────────────────────────────────────────────────────
 
@@ -485,6 +510,65 @@ class PoolController:
             return False
         st = self._hass.states.get(entity_id)
         return bool(st and st.state == "on")
+
+    def _get_power_w(self, power_eid: str, switch_eid: str, fallback_w: float) -> float:
+        """Lees vermogen uit een power-sensor. Valt terug op geleerde/fallback waarde."""
+        if power_eid:
+            st = self._hass.states.get(power_eid)
+            if st and st.state not in ("unavailable", "unknown"):
+                try:
+                    return float(st.state)
+                except (ValueError, TypeError):
+                    pass
+        # Geen power-sensor geconfigureerd: gebruik geleerde schatting
+        is_filter = (switch_eid == self._filter_eid)
+        if is_filter:
+            return self._learned_filter_w if self._get_switch_state(switch_eid) else 0.0
+        return self._learned_heat_w if self._get_switch_state(switch_eid) else 0.0
+
+    def _learn_power(self, power_eid: str, is_filter: bool) -> None:
+        """EMA-update van geleerd vermogen zodra een meting beschikbaar is (alpha=0.15)."""
+        if not power_eid:
+            return
+        st = self._hass.states.get(power_eid)
+        if not st or st.state in ("unavailable", "unknown"):
+            return
+        try:
+            measured = float(st.state)
+        except (ValueError, TypeError):
+            return
+        if measured < 10:   # negeer nul-metingen (schakelaar net aan)
+            return
+        alpha = 0.15
+        if is_filter:
+            self._learned_filter_w = round(
+                self._learned_filter_w * (1 - alpha) + measured * alpha, 1)
+        else:
+            self._learned_heat_w = round(
+                self._learned_heat_w * (1 - alpha) + measured * alpha, 1)
+        self._power_dirty = True
+
+    async def async_load(self) -> None:
+        """Laad geleerde vermogenswaarden van schijf."""
+        data = await self._power_store.async_load()
+        if data:
+            self._learned_filter_w = float(data.get("filter_w", self._learned_filter_w))
+            self._learned_heat_w   = float(data.get("heat_w",   self._learned_heat_w))
+            _LOGGER.debug("PoolController: geladen — filter=%.0fW, heat=%.0fW",
+                          self._learned_filter_w, self._learned_heat_w)
+
+    async def async_save(self) -> None:
+        """Sla geleerde vermogenswaarden op (max 1x per 5 min)."""
+        if not self._power_dirty:
+            return
+        if time.time() - self._power_last_save < 300:
+            return
+        await self._power_store.async_save({
+            "filter_w": self._learned_filter_w,
+            "heat_w":   self._learned_heat_w,
+        })
+        self._power_dirty = False
+        self._power_last_save = time.time()
 
     async def _switch(self, entity_id: str, turn_on: bool) -> None:
         if not entity_id:

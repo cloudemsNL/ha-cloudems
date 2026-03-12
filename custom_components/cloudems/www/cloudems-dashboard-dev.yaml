@@ -1213,6 +1213,46 @@ views:
       entity: sensor.cloudems_pv_zelfconsumptiegraad
       attribute: advice
       name: Advies
+  - type: conditional
+    conditions:
+    - condition: template
+      value_template: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {{ alerts | selectattr('key', 'eq', 'inverter_negative_price_dim') | list | length > 0 }}
+    card:
+      type: markdown
+      content: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {% set a = (alerts | selectattr('key', 'eq', 'inverter_negative_price_dim') | list | first) %}
+        🔴 **{{ a.title }}** — {{ a.message }}
+      card_mod:
+        style: |
+          ha-card {
+            background: linear-gradient(135deg, rgba(231,76,60,0.15) 0%, rgba(192,57,43,0.2) 100%) !important;
+            border-left: 4px solid rgb(231,76,60) !important;
+            border-radius: 10px !important;
+            margin-bottom: 4px !important;
+          }
+  - type: conditional
+    conditions:
+    - condition: template
+      value_template: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {{ alerts | selectattr('key', 'eq', 'inverter_dimmer_disabled') | list | length > 0 }}
+    card:
+      type: markdown
+      content: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {% set a = (alerts | selectattr('key', 'eq', 'inverter_dimmer_disabled') | list | first) %}
+        🟡 **{{ a.title }}** — {{ a.message }}
+      card_mod:
+        style: |
+          ha-card {
+            background: linear-gradient(135deg, rgba(243,156,18,0.12) 0%, rgba(230,126,34,0.15) 100%) !important;
+            border-left: 4px solid rgb(243,156,18) !important;
+            border-radius: 10px !important;
+            margin-bottom: 4px !important;
+          }
   - type: entities
     title: ☀️ Zonnedimmer — Omvormers
     show_empty: false
@@ -1242,6 +1282,17 @@ views:
         entity: number.cloudems_zonnedimmer_1
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_1
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_1
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_1
         icon: mdi:brightness-percent
     - type: conditional
@@ -1269,6 +1320,17 @@ views:
         entity: number.cloudems_zonnedimmer_2
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_2
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_2
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_2
         icon: mdi:brightness-percent
     - type: conditional
@@ -1296,6 +1358,17 @@ views:
         entity: number.cloudems_zonnedimmer_3
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_3
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_3
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_3
         icon: mdi:brightness-percent
     - type: conditional
@@ -1317,6 +1390,17 @@ views:
         entity: number.cloudems_zonnedimmer_4
         attribute: setpoint
         icon: mdi:target
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_4
+        state_not: unavailable
+      row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_4
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
     - type: conditional
       conditions:
       - condition: state

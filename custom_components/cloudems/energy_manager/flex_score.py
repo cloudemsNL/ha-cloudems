@@ -120,7 +120,7 @@ def calculate_flex_score(
     # ── Boilers / slimme stopcontacten ────────────────────────────────────────
     for boiler in (boiler_status or []):
         is_on    = boiler.get("is_on", False)
-        power_w  = float(boiler.get("power_w", 0))
+        power_w  = float(boiler.get("power_w") or 0)
         label    = boiler.get("label", "Boiler")
         action   = boiler.get("action", "")
         # Flex = schakelbaar als apparaat nu uit is (kan aan bij behoefte)

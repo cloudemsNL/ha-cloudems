@@ -181,9 +181,17 @@ class DiscoveredPlug:
     friendly_name: str
     device_type:  str          # NILM device_type
     confidence:   float        # match-betrouwbaarheid
-    phase:        str = "L1"   # Fase nog onbekend bij ontdekking; verfijnd later
+    phase:        str = "?"    # "?" = onbekend totdat DSMR5-correlatie bewijs levert
     area:         str = ""     # HA-ruimte indien beschikbaar
     platform:     str = ""     # integratieplatform
+    # Nieuwe velden v4.5.86
+    manufacturer: str = ""     # apparaatfabrikant (uit device registry)
+    model:        str = ""     # apparaatmodel (uit device registry)
+    device_name:  str = ""     # echte HA device naam (bijv. "Koelkast Keuken")
+    source:       str = ""     # "powercalc" | "device_registry" | "keyword" | "platform" | "switch_sibling"
+    source_entity_id: str = "" # powercalc: de originele source entity (bijv. "switch.koelkast")
+    is_topology_meter: bool = False  # True als dit een submeter is, geen eindapparaat
+    pending_identity: bool = False   # True als device_type=socket maar naam onbekend → review nodig
 
 
 @dataclass
@@ -322,6 +330,20 @@ class SmartSensorDiscovery:
             for p in plugs[:10]:
                 _LOGGER.debug("  → %s: %s (%.0f%%)", p.entity_id, p.device_type, p.confidence * 100)
 
+        # Samenvatting per bron voor nilm log (indien backup beschikbaar)
+        _src_counts: dict = {}
+        _pending_count = 0
+        for p in plugs:
+            _src_counts[p.source] = _src_counts.get(p.source, 0) + 1
+            if p.pending_identity:
+                _pending_count += 1
+        _LOGGER.info(
+            "[nilm_discovery] scan klaar: %d plugs (%s), %d pending review",
+            len(plugs),
+            ", ".join(f"{k}:{v}" for k, v in sorted(_src_counts.items())),
+            _pending_count,
+        )
+
         return result
 
     def get_weather_value(self, sensor_type: str) -> Optional[float]:
@@ -457,16 +479,17 @@ class SmartSensorDiscovery:
         """
         Koppel een vermogenssensor aan een apparaattype.
 
-        Beslisboom:
-          1. Expliciete uitsluiting: bekende niet-stekker patronen → None
-          2. Keyword-match op entity_id + friendly_name → specifiek type
-          3. Platform via entity registry → 'socket' als het een smartplug-platform is
-          4. Platform via device registry (config_entry domain) → 'socket'
-          5. Switch-sibling: als hetzelfde HA-device ook een switch-entiteit heeft
-             is het vrijwel zeker een smart plug → 'socket' met conf 0.80
-          6. Attribuut-fallback: device_class=power + state_class=measurement
-             + 'vermogen'/'power'/'watt' in naam → 'socket' conf 0.42
-          7. Geen match → None
+        Prioriteitsketen (hoogste prioriteit eerst):
+          1. Expliciete uitsluiting → None
+          2. Powercalc path: parse source_entity + device registry voor echte naam/model
+          3. Device registry: echte device naam voor keyword-match
+          4. Keyword-match op entity_id + friendly_name + device naam
+          5. Platform via entity registry → 'socket' als smart-plug platform
+          6. Switch-sibling: schakelaar op zelfde device → 'socket'
+          7. Attribuut-fallback: device_class=power + state_class=measurement
+
+        Fase-toewijzing: altijd "?" bij ontdekking; verfijnd later via DSMR5-correlatie.
+        Socket zonder naamherkenning → pending_identity=True voor review dashboard.
         """
         friendly = str(attrs.get("friendly_name", entity_id)).lower()
         eid_low  = entity_id.lower()
@@ -477,74 +500,239 @@ class SmartSensorDiscovery:
             return None
         if self._EXCLUDE_PATTERNS.search(search):
             return None
-        # v4.4: aanvullende substring-uitsluitingen (energiemeter, uurprijs, enz.)
         if any(sub in search for sub in self._EXCLUDE_SUBSTRINGS):
             return None
 
-        best_type = None
-        best_conf = 0.0
+        best_type   = None
+        best_conf   = 0.0
+        source      = ""
+        device_name = ""
+        manufacturer= ""
+        model       = ""
+        source_entity_id = ""
+        area        = str(attrs.get("area", "") or "")
 
-        # ── Stap 2: keyword-match ──────────────────────────────────────────
-        for keyword, device_type, conf in DEVICE_KEYWORDS:
-            pattern = r'(^|[_\s\-\.])' + re.escape(keyword) + r'($|[_\s\-\.\d])'
-            if re.search(pattern, search):
-                if conf > best_conf:
-                    best_conf = conf
-                    best_type = device_type
+        # ── Stap 2: Powercalc path (hoogste prioriteit) ────────────────────
+        # Powercalc sensoren zijn gekoppeld aan een echt HA device via de
+        # device registry: device.name / manufacturer / model / area staan daar.
+        pc_info = self._get_powercalc_info(entity_id)
+        if pc_info:
+            device_name      = pc_info.get("device_name", "")
+            manufacturer     = pc_info.get("manufacturer", "")
+            model_str        = pc_info.get("model", "")
+            model            = model_str
+            source_entity_id = pc_info.get("source_entity_id", "")
+            area             = pc_info.get("area", area)
+            # Keyword-match op echte device naam + fabrikant + model
+            pc_search = f"{device_name} {manufacturer} {model_str} {eid_low} {friendly}".lower()
+            for keyword, device_type, conf in DEVICE_KEYWORDS:
+                pattern = r'(^|[_\s\-\.])' + re.escape(keyword) + r'($|[_\s\-\.\d])'
+                if re.search(pattern, pc_search):
+                    if conf > best_conf:
+                        best_conf = conf
+                        best_type = device_type
+                        source    = "powercalc"
+            if best_type is None:
+                # Powercalc sensor maar geen keyword match → socket met hoge conf
+                # (het is zeker een meting, maar type onbekend)
+                best_type = "socket"
+                best_conf = 0.70
+                source    = "powercalc"
+            _LOGGER.debug(
+                "[nilm_discovery] powercalc: %s → type=%s conf=%.2f device='%s' model='%s'",
+                entity_id, best_type, best_conf, device_name, model_str,
+            )
 
-        # ── Stap 3: platform via entity registry ───────────────────────────
+        # ── Stap 3 + 4: Device registry + keyword match ────────────────────
+        if best_type is None:
+            dev_info = self._get_device_info(entity_id)
+            if dev_info:
+                device_name  = dev_info.get("device_name", "")
+                manufacturer = dev_info.get("manufacturer", "")
+                model        = dev_info.get("model", "")
+                area         = dev_info.get("area", area)
+                dev_search   = f"{device_name} {manufacturer} {model} {eid_low} {friendly}".lower()
+                for keyword, device_type, conf in DEVICE_KEYWORDS:
+                    pattern = r'(^|[_\s\-\.])' + re.escape(keyword) + r'($|[_\s\-\.\d])'
+                    if re.search(pattern, dev_search):
+                        if conf > best_conf:
+                            best_conf = conf
+                            best_type = device_type
+                            source    = "device_registry"
+
+        # ── Stap 4b: Keyword match op entity_id + friendly name alleen ─────
+        if best_type is None:
+            for keyword, device_type, conf in DEVICE_KEYWORDS:
+                pattern = r'(^|[_\s\-\.])' + re.escape(keyword) + r'($|[_\s\-\.\d])'
+                if re.search(pattern, search):
+                    if conf > best_conf:
+                        best_conf = conf
+                        best_type = device_type
+                        source    = "keyword"
+
+        # ── Stap 5: Platform via entity registry ───────────────────────────
         platform = self._get_platform(entity_id)
         if best_type is None and platform in SMART_PLUG_PLATFORMS:
             best_type = "socket"
-            # v1.20: als het platform een bekend smart plug platform is, is dit 100% zeker
-            # een slim stopcontact — geen twijfel meer over het apparaattype.
-            best_conf = 1.0
+            best_conf = 0.85
+            source    = "platform"
+            _LOGGER.debug(
+                "[nilm_discovery] platform match: %s → socket via platform '%s'",
+                entity_id, platform,
+            )
 
-        # ── Stap 4 + 5: device registry ────────────────────────────────────
+        # ── Stap 6: Device registry — platform + switch-sibling ───────────
         if best_type is None:
             plat, has_switch = self._check_device_registry(entity_id)
             if plat:
                 platform = plat
             if has_switch:
-                # Switch-sibling = vrijwel zeker smart plug (aan/uit + vermogen)
-                # v1.20: schakelaar + vermogensmeting = definitief smart plug → 1.0
                 best_type = "socket"
-                best_conf = 1.0
+                best_conf = 0.90
+                source    = "switch_sibling"
             elif plat in SMART_PLUG_PLATFORMS:
                 best_type = "socket"
-                # v1.20: bekend platform zonder switch = waarschijnlijk smart plug → 1.0
-                best_conf = 1.0
+                best_conf = 0.85
+                source    = "platform"
 
-        # ── Stap 6: attribuut-fallback ─────────────────────────────────────
-        # v1.17.3: elke sensor met device_class=power + state_class=measurement
-        # die niet is uitgesloten, wordt als meetapparaat opgenomen.
+        # ── Stap 7: Attribuut-fallback ─────────────────────────────────────
         if best_type is None:
             dc = attrs.get("device_class", "")
             sc = attrs.get("state_class", "")
             if dc == "power" and sc == "measurement":
-                # Naam-hint geeft iets hogere conf
                 if re.search(r'(^|[_\s\.])(vermogen|power|watt|energie|verbruik|meting|usage)([_\s\.]|$)',
                               search, re.IGNORECASE):
                     best_type = "socket"
                     best_conf = 0.50
+                    source    = "attr_fallback"
                 else:
-                    # Geen naam-hint maar wél juiste device_class/state_class
                     best_type = "socket"
                     best_conf = 0.40
+                    source    = "attr_fallback"
 
         if best_type is None:
             return None
 
-        area = str(attrs.get("area", "") or "")
+        # Gebruik echte device naam als friendly_name als die beschikbaar is
+        display_name = device_name if device_name else attrs.get("friendly_name", entity_id)
+
+        # Socket zonder duidelijke identiteit → review nodig op dashboard
+        pending = (best_type == "socket" and source not in ("powercalc", "keyword", "device_registry")
+                   and not device_name)
+
+        _LOGGER.debug(
+            "[nilm_discovery] %s → type=%s conf=%.2f bron=%s area=%s pending=%s",
+            entity_id, best_type, best_conf, source, area or "?", pending,
+        )
 
         return DiscoveredPlug(
-            entity_id    = entity_id,
-            friendly_name= attrs.get("friendly_name", entity_id),
-            device_type  = best_type,
-            confidence   = best_conf,
-            area         = area,
-            platform     = platform or "",
+            entity_id        = entity_id,
+            friendly_name    = display_name,
+            device_type      = best_type,
+            confidence       = best_conf,
+            phase            = "?",   # altijd onbekend bij ontdekking
+            area             = area,
+            platform         = platform or "",
+            manufacturer     = manufacturer,
+            model            = model,
+            device_name      = device_name,
+            source           = source,
+            source_entity_id = source_entity_id,
+            pending_identity = pending,
         )
+
+    def _get_powercalc_info(self, entity_id: str) -> Optional[dict]:
+        """
+        Controleer of dit een powercalc sensor is en lees device informatie uit.
+
+        Powercalc koppelt zijn sensor aan het echte HA device via de device registry.
+        Zo staat de echte naam (bijv. "Koelkast Keuken"), fabrikant en model al klaar.
+
+        Geeft dict terug met: device_name, manufacturer, model, area, source_entity_id
+        of None als dit geen powercalc sensor is.
+        """
+        try:
+            entity_reg = er.async_get(self._hass)
+            entry = entity_reg.async_get(entity_id)
+            if not entry:
+                return None
+            # Controleer of platform powercalc is
+            if not entry.platform or "powercalc" not in entry.platform.lower():
+                return None
+
+            result: dict = {"source_entity_id": ""}
+
+            # Parse source entity uit powercalc unique_id (formaat: "powercalc_xxx_<source_entity>")
+            if entry.unique_id:
+                # Powercalc unique_ids bevatten vaak de source entity_id
+                uid = entry.unique_id
+                for prefix in ("powercalc_", "pc_"):
+                    if uid.startswith(prefix):
+                        candidate = uid[len(prefix):]
+                        if "." in candidate:
+                            result["source_entity_id"] = candidate
+                            break
+
+            # Device registry voor echte naam/fabrikant/model/area
+            if entry.device_id:
+                from homeassistant.helpers import device_registry as dr
+                dev_reg = dr.async_get(self._hass)
+                device  = dev_reg.async_get(entry.device_id)
+                if device:
+                    result["device_name"]  = device.name_by_user or device.name or ""
+                    result["manufacturer"] = device.manufacturer or ""
+                    result["model"]        = device.model or ""
+                    # Area via device of entity
+                    area_id = device.area_id or entry.area_id
+                    if area_id:
+                        from homeassistant.helpers import area_registry as ar
+                        area_reg = ar.async_get(self._hass)
+                        area_entry = area_reg.async_get_area(area_id)
+                        result["area"] = area_entry.name if area_entry else ""
+                    else:
+                        result["area"] = ""
+
+            return result if result.get("device_name") or result.get("source_entity_id") else None
+
+        except Exception as exc:
+            _LOGGER.debug("Powercalc info fout voor %s: %s", entity_id, exc)
+            return None
+
+    def _get_device_info(self, entity_id: str) -> Optional[dict]:
+        """
+        Lees device naam, fabrikant, model en area uit de HA device registry.
+
+        Geeft dict terug met: device_name, manufacturer, model, area
+        of None als geen device gevonden.
+        """
+        try:
+            from homeassistant.helpers import device_registry as dr, area_registry as ar
+            entity_reg = er.async_get(self._hass)
+            entry = entity_reg.async_get(entity_id)
+            if not entry or not entry.device_id:
+                return None
+
+            dev_reg = dr.async_get(self._hass)
+            device  = dev_reg.async_get(entry.device_id)
+            if not device:
+                return None
+
+            area_name = ""
+            area_id   = device.area_id or entry.area_id
+            if area_id:
+                area_reg   = ar.async_get(self._hass)
+                area_entry = area_reg.async_get_area(area_id)
+                area_name  = area_entry.name if area_entry else ""
+
+            return {
+                "device_name":  device.name_by_user or device.name or "",
+                "manufacturer": device.manufacturer or "",
+                "model":        device.model or "",
+                "area":         area_name,
+            }
+        except Exception as exc:
+            _LOGGER.debug("Device info fout voor %s: %s", entity_id, exc)
+            return None
 
     def _check_device_registry(self, entity_id: str) -> tuple:
         """

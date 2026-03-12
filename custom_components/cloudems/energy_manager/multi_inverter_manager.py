@@ -61,6 +61,10 @@ PID_SAMPLE_TIME_S   = 8.0    # Elke 8 seconden nieuwe berekening
 # onder het setpoint zit (voorkomt direct terug-oscilleren)
 RESTORE_HYSTERESIS_A = 2.0
 
+# Handmatige dim-override: na deze tijd hervat de automatische sturing
+# 30 minuten — genoeg om handmatig te testen, kort genoeg om nooit surplus te missen
+MANUAL_DIM_RESUME_DELAY_S = 1800  # 30 minuten
+
 
 @dataclass
 class InverterControl:
@@ -138,6 +142,11 @@ class MultiInverterManager:
         self._manual_dim_pct: dict[str, float | None] = {
             c.entity_id: None for c in inverter_controls
         }
+        self._manual_dim_set_at: dict[str, float] = {}  # timestamp when manual dim was set
+        # Last decision per inverter for dashboard display
+        self._last_decision: dict[str, DimDecision | None] = {
+            c.entity_id: None for c in inverter_controls
+        }
         # Per-inverter dimmer enable flag (mirrors the config "solar_dimmer" flag
         # but can be toggled at runtime via the dashboard switch)
         self._dimmer_enabled: dict[str, bool] = {
@@ -207,12 +216,17 @@ class MultiInverterManager:
         if current_epex_price is not None and current_epex_price <= self._neg_threshold:
             if not self._negative_price_active:
                 _LOGGER.info(
-                    "MultiInverterMgr: negatieve prijs %.4f €/kWh — alle omvormers dimmen",
+                    "MultiInverterMgr: negatieve all-in prijs %.4f €/kWh — alle omvormers dimmen",
                     current_epex_price,
                 )
             self._negative_price_active = True
 
             for ctrl in self._controls:
+                # v4.5.106: respecteer schakelaar — uitgeschakelde omvormer niet dimmen
+                if not self._dimmer_enabled.get(ctrl.entity_id, True):
+                    if self._current_pct[ctrl.entity_id] < 100.0:
+                        await self._set_output(ctrl, 100.0)
+                    continue
                 target = ctrl.min_power_pct
                 if self._current_pct[ctrl.entity_id] != target:
                     await self._set_output(ctrl, target)
@@ -221,7 +235,7 @@ class MultiInverterManager:
                         label=ctrl.label or ctrl.entity_id,
                         action="negative_price",
                         target_pct=target,
-                        reason=f"EPEX {current_epex_price:.4f} <= {self._neg_threshold:.4f} €/kWh",
+                        reason=f"all-in {current_epex_price:.4f} <= {self._neg_threshold:.4f} €/kWh",
                     ))
             return decisions
 
@@ -230,7 +244,9 @@ class MultiInverterManager:
             _LOGGER.info("MultiInverterMgr: prijs genormaliseerd — omvormers herstellen")
             self._negative_price_active = False
             for ctrl in self._controls:
-                await self._set_output(ctrl, 100.0)
+                # v4.5.106: uitgeschakelde omvormer laten staan op 100% (al gedaan door 1b)
+                if self._dimmer_enabled.get(ctrl.entity_id, True):
+                    await self._set_output(ctrl, 100.0)
                 for pid in self._phase_pids.values():
                     pid.reset()
 
@@ -295,6 +311,20 @@ class MultiInverterManager:
                                 target_pct=100.0,
                                 reason="alle fasen vrij",
                             ))
+
+        # v4.5.108: sla laatste beslissing op per omvormer voor dashboard display
+        for d in decisions:
+            self._last_decision[d.inverter_id] = d
+        # Omvormers zonder beslissing dit rondje → actie = "idle" (op vol vermogen)
+        for ctrl in self._controls:
+            if ctrl.entity_id not in {d.inverter_id for d in decisions}:
+                self._last_decision[ctrl.entity_id] = DimDecision(
+                    inverter_id=ctrl.entity_id,
+                    label=ctrl.label or ctrl.entity_id,
+                    action="idle",
+                    target_pct=self._current_pct.get(ctrl.entity_id, 100.0),
+                    reason="✅ Automatisch beheer — vol vermogen",
+                )
 
         return decisions
 
@@ -495,6 +525,11 @@ class MultiInverterManager:
         self._manual_dim_pct[entity_id] = (
             max(0.0, min(100.0, float(pct))) if pct is not None else None
         )
+        if pct is not None:
+            import time as _time
+            self._manual_dim_set_at[entity_id] = _time.time()
+        else:
+            self._manual_dim_set_at.pop(entity_id, None)
         _LOGGER.info(
             "MultiInverterMgr: handmatige dim '%s' → %s",
             entity_id, f"{pct:.0f}%" if pct is not None else "auto",
@@ -557,6 +592,7 @@ class MultiInverterManager:
 
     def get_dimmer_state(self, entity_id: str) -> dict:
         """Return current dim state for one inverter (for HA entity state)."""
+        import time as _time
         manual_pct  = self._manual_dim_pct.get(entity_id)
         current_pct = self._current_pct.get(entity_id, 100.0)
         ctrl = next((c for c in self._controls if c.entity_id == entity_id), None)
@@ -568,18 +604,36 @@ class MultiInverterManager:
         else:
             setpoint_str = f"{active_pct:.1f} %"
 
-        resume_s = None
-        timer = getattr(self, "_manual_dim_timers", {}).get(entity_id)
-        # timer is a cancel callback; we can't read remaining time, show fixed label
-        if timer is not None and manual_pct is not None:
-            resume_s = MANUAL_DIM_RESUME_DELAY_S
+        # Resterende tijd handmatige override
+        resume_in_s = None
+        if manual_pct is not None:
+            set_at = self._manual_dim_set_at.get(entity_id)
+            if set_at:
+                elapsed = _time.time() - set_at
+                remaining = max(0, MANUAL_DIM_RESUME_DELAY_S - elapsed)
+                resume_in_s = int(remaining)
+
+        # Laatste beslissing voor duidelijke status
+        last = self._last_decision.get(entity_id)
+        action_labels = {
+            "idle":           "✅ Vol vermogen — automatisch",
+            "restore":        "🔼 Hersteld naar 100%",
+            "dim_pid":        "📉 Dimmen — fase-overbelasting",
+            "dim_full":       "⬇️ Volledig gedimd",
+            "negative_price": "🔴 Gedimd — negatieve stroomprijs",
+            "manual_override": f"🖐 Handmatig {active_pct:.0f}% — hervat over {resume_in_s//60 if resume_in_s else '?'} min",
+        }
+        status_label = action_labels.get(last.action, last.action) if last else "⏳ Wachten op eerste cyclus"
 
         return {
             "current_pct":    current_pct,
             "manual_pct":     manual_pct,
             "manual_active":  manual_pct is not None,
             "setpoint":       setpoint_str,
-            "auto_resume_in": f"{resume_s}s" if resume_s else None,
+            "auto_resume_in": f"{resume_in_s}s" if resume_in_s else None,
             "dimmer_enabled": self._dimmer_enabled.get(entity_id, True),
+            "status":         status_label,
+            "last_action":    last.action if last else None,
+            "last_reason":    last.reason if last else None,
         }
 

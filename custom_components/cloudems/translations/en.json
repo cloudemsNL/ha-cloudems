@@ -512,6 +512,23 @@
           "username": "Email address",
           "password": "Password"
         }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Edit boiler: {unit_label} — {group_name}",
+        "description": "Edit the settings for boiler **{unit_label}** in group **{group_name}**.\n\n**💡 Target temperature:** during PV surplus, CloudEMS automatically uses the maximum setpoint.\n**⚡ Power:** learned automatically from the energy sensor.",
+        "data": {
+          "bu_entity": "Boiler entity",
+          "bu_temp_sensor": "Temperature sensor (optional)",
+          "bu_energy_sensor": "Energy sensor (optional)",
+          "bu_label": "Name of this boiler",
+          "bu_setpoint": "Target temperature (°C)",
+          "bu_control_mode": "Control mode",
+          "bu_surplus_setpoint": "Setpoint during PV surplus (°C)",
+          "bu_preset_on": "Preset ON",
+          "bu_preset_off": "Preset OFF",
+          "bu_dimmer_on_pct": "Dimmer ON (%)",
+          "bu_dimmer_off_pct": "Dimmer OFF (%)"
+        }
       }
     },
     "abort": {

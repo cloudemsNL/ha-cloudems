@@ -395,6 +395,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.gas_predictor import GasPredictor as _GP, STORAGE_KEY_GAS_PREDICTOR as _SKEY_GP
         self._gas_predictor = _GP(Store(hass, 1, _SKEY_GP))
         self._gas_prediction: dict = {}
+        self._gas_dhw_hint_sent: str = ""  # datum van laatste DHW-hint notificatie (YYYY-MM-DD)
         # v4.0.5: Tariefwijziging detector
         from .energy_manager.tariff_change_detector import TariffChangeDetector as _TCD, STORAGE_KEY_TARIFF_DETECTOR as _SKEY_TC
         self._tariff_detector = _TCD(Store(hass, 1, _SKEY_TC), config)
@@ -1151,6 +1152,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "learned_markup_samples": 0,
                 "learned_eb_kwh":         round(_eb, 5),
                 "learned_btw_rate":       _vat_rate,
+                # v4.5.87: gasprijs meegeven voor gas-vs-stroom vergelijking
+                "gas_price_eur_m3":       float(self._config.get("gas_price_eur_m3") or 1.25),
             }
 
         epex_base = price_info.get("current")
@@ -1261,6 +1264,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "learned_markup_samples": 0,
             "learned_eb_kwh":         round(_tax, 5),
             "learned_btw_rate":       round(diag_vat, 4),
+            # v4.5.87: gasprijs meegeven zodat boiler_controller gas-vs-stroom kan vergelijken
+            "gas_price_eur_m3":       float(self._config.get("gas_price_eur_m3") or 1.25),
         }
 
 
@@ -2341,14 +2346,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if _pool_filter_eid or _pool_heat_eid:
             from .energy_manager.pool_controller import PoolController
             self._pool_ctrl = PoolController(
-                hass           = self.hass,
-                filter_entity  = _pool_filter_eid,
-                heat_entity    = _pool_heat_eid,
-                temp_entity    = pool_cfg.get("temp_entity",   ""),
-                uv_entity      = pool_cfg.get("uv_entity",     ""),
-                robot_entity   = pool_cfg.get("robot_entity",  ""),
-                heat_setpoint  = float(pool_cfg.get("heat_setpoint", 28.0)),
+                hass                 = self.hass,
+                filter_entity        = _pool_filter_eid,
+                heat_entity          = _pool_heat_eid,
+                temp_entity          = pool_cfg.get("temp_entity",          ""),
+                uv_entity            = pool_cfg.get("uv_entity",            ""),
+                robot_entity         = pool_cfg.get("robot_entity",         ""),
+                heat_setpoint        = float(pool_cfg.get("heat_setpoint",  28.0)),
+                filter_power_entity  = pool_cfg.get("filter_power_entity",  ""),
+                heat_power_entity    = pool_cfg.get("heat_power_entity",    ""),
             )
+            await self._pool_ctrl.async_load()
             _LOGGER.info("CloudEMS: PoolController actief (filter=%s, heat=%s)",
                          _pool_filter_eid, _pool_heat_eid)
         else:
@@ -2715,6 +2723,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # Eerste keer — zet default op basis van configuratie
                 if not hasattr(self, attr):
                     setattr(self, attr, bool(default))
+                continue
+            # v4.5.103: negeer unavailable/unknown — voorkomt dat crashes alle
+            # module-toggles op False zetten doordat HA switches tijdelijk
+            # unavailable zijn tijdens een coordinator crash-cyclus.
+            if st.state not in ("on", "off"):
                 continue
             val = st.state == "on"
             if not hasattr(self, attr):
@@ -3634,16 +3647,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         await self._pv_forecast.async_update(eid, pw, pk)
 
             # Multi-inverter manager
+            # v4.5.105: gebruik all-in prijs (incl. EB+BTW) voor negatieve-prijs check —
+            # ruwe EPEX kan negatief zijn terwijl all-in (incl. energiebelasting) nog positief is.
+            _inv_price = (price_info.get("current_all_in")
+                          if price_info.get("current_all_in") is not None
+                          else current_price)
             inv_decisions: list = []
             if self._multi_inv_manager:
                 inv_decisions = await self._multi_inv_manager.async_evaluate(
                     phase_currents    =self._limiter.phase_currents,
-                    current_epex_price=current_price,
+                    current_epex_price=_inv_price,
                 )
                 for d in inv_decisions:
                     if d.action in ("dim_pid","negative_price","dim_full"):
                         self._log_decision("solar_dim",
                             f"🔆 Omvormer {d.label}: {d.action} → {d.target_pct:.0f}% — {d.reason}")
+                # v4.5.108: sla dimmer-status op voor alerts/banner
+                _mgr_status = self._multi_inv_manager.get_status()
+                _dimmer_states = {}
+                for _ctrl in self._multi_inv_manager._controls:
+                    _st = self._multi_inv_manager.get_dimmer_state(_ctrl.entity_id)
+                    _st["label"] = _ctrl.label or _ctrl.entity_id
+                    _dimmer_states[_ctrl.entity_id] = _st
+                self._data["inverter_dimmer"] = {
+                    "active":           any(d.action in ("dim_pid","negative_price","dim_full") for d in inv_decisions),
+                    "negative_price":   any(d.action == "negative_price" for d in inv_decisions),
+                    "decisions":        [{"label": d.label, "action": d.action, "pct": d.target_pct, "reason": d.reason} for d in inv_decisions],
+                    "dimmer_enabled":   _mgr_status.get("dimmer_enabled", {}),
+                    "controls":         [c.entity_id for c in self._multi_inv_manager._controls],
+                    "dimmer_states":    _dimmer_states,
+                }
 
             # Peak shaving
             peak_data = {}
@@ -3767,6 +3800,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         water_temp_c = _pool_water_c,
                     )
                     pool_data = self._pool_ctrl.get_status_dict(_pool_status)
+                    await self._pool_ctrl.async_save()
                     # v4.5.11: log altijd (ook idle) voor volledig terugkijken
                     self._log_decision(
                         "pool_filter",
@@ -5969,6 +6003,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("GasPredictor dagcyclus fout: %s", _gp_err)
 
             # v4.0.5: Tariff detector wekelijks opslaan
+
+            # v4.5.88: Gas DHW hint — detecteer of gas voor warm water gebruikt wordt
+            await self._async_check_gas_dhw_hint()
             try:
                 import datetime as _dt_tc
                 if _dt_tc.date.today().weekday() == 0:  # maandag
@@ -6763,7 +6800,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # v2.2.3: systeemgezondheid
                 "system_health":        self._build_system_health(price_info),
                 # v2.4.0: nieuwe modules
-                "gas_analysis":         gas_analysis_data,
+                "gas_analysis":         {
+                    **gas_analysis_data,
+                    "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
+                },
                 "energy_budget":        energy_budget_data,
                 "appliance_roi":        appliance_roi_data,
                 "solar_dimmer":         self._solar_dimmer.get_curtailment_stats() if self._solar_dimmer else {},
@@ -7076,6 +7116,116 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return float(state.state) if state.state not in ("unavailable", "unknown", "", None) else None
         except (ValueError, TypeError):
             return None
+
+    async def _async_check_gas_dhw_hint(self) -> None:
+        """v4.5.88: Detecteer of gas waarschijnlijk gebruikt wordt voor warm water (DHW)
+        terwijl de gebruiker has_gas_heating=False heeft op zijn boiler(s).
+
+        Signalen:
+          1. Gas sensor aanwezig én gasverbruik > 0 (DSMR of standalone sensor)
+          2. Geen enkele boiler heeft has_gas_heating=True ingesteld
+          3. Zomer (maand 5-9): CV staat bijna zeker uit → gas = DHW of koken
+             of: buitentemp > 18°C en er is toch significant gasverbruik vandaag
+          4. NILM heeft een cv_ketel ontdekt maar er is geen elektrische boiler geconfigureerd
+
+        Stuurt één keer per 14 dagen een persistent_notification als hint.
+        Nooit als de gebruiker al has_gas_heating=True heeft ingesteld.
+        """
+        import datetime as _dt_dhw
+
+        try:
+            # Al een hint gestuurd in de afgelopen 14 dagen?
+            _today = str(_dt_dhw.date.today())
+            if self._gas_dhw_hint_sent:
+                try:
+                    _sent = _dt_dhw.date.fromisoformat(self._gas_dhw_hint_sent)
+                    if (_dt_dhw.date.today() - _sent).days < 14:
+                        return
+                except ValueError:
+                    pass
+
+            # Zijn er al boilers met has_gas_heating="yes" of "no"? Dan weet de gebruiker het al.
+            _boiler_cfgs = self._config.get("boiler_configs", [])
+            _boiler_cfgs += [b for g in self._config.get("boiler_groups", []) for b in g.get("boilers", [])]
+            if any(bc.get("has_gas_heating") in ("yes", "no") for bc in _boiler_cfgs):
+                return
+
+            # Heeft de installatie überhaupt gas?
+            _gas_m3_total = (self._data or {}).get("p1_data", {}).get("gas_m3_total") or 0.0
+            if _gas_m3_total <= 0:
+                # Geen P1 gas — probeer standalone gas sensor
+                _gas_m3_total = self._read_gas_sensor() or 0.0
+            if _gas_m3_total <= 0:
+                return  # geen gassensor → kunnen niets detecteren
+
+            # Signaal 1: Zomermaanden (mei-sept) → CV bijna zeker uit, gas = DHW/koken
+            _month = _dt_dhw.date.today().month
+            _is_summer = 5 <= _month <= 9
+
+            # Signaal 2: Buitentemp > 18°C én gasverbruik vandaag > 0.1 m³
+            _gas_today = (self._data or {}).get("gas_analysis", {}).get("gas_m3_today", 0.0)
+            _outside_eid = self._config.get("outside_temp_entity", "")
+            _outside_c = self._read_state(_outside_eid) if _outside_eid else None
+            _warm_buiten = _outside_c is not None and float(_outside_c) > 18.0
+
+            # Signaal 3: NILM heeft cv_ketel ontdekt (gas CV aanwezig in huis)
+            _nilm_devices = self._nilm.get_devices() if self._nilm else []
+            _cv_in_nilm = any(
+                getattr(d, "device_type", "") == "cv_ketel" or "cv" in getattr(d, "label", "").lower()
+                for d in _nilm_devices
+            )
+
+            # Signaal 4: Geen elektrische boiler in config maar wel gas
+            _has_electric_boiler = len(_boiler_cfgs) > 0
+
+            # Beslissing: stuur hint als minstens 2 signalen positief zijn
+            _score = sum([
+                _is_summer and _gas_today > 0.05,   # zomer + gasverbruik vandaag
+                _warm_buiten and _gas_today > 0.1,   # warm buiten + toch gas
+                _cv_in_nilm,                          # CV ketel ontdekt via NILM
+                not _has_electric_boiler and _gas_today > 0.1,  # geen el. boiler maar gas
+            ])
+
+            if _score < 1:
+                return
+
+            # Bouw de reden op
+            _redenen = []
+            if _is_summer and _gas_today > 0.05:
+                _redenen.append(f"gasverbruik in de zomer ({_gas_today:.2f} m³ vandaag, maand {_month})")
+            if _warm_buiten and _gas_today > 0.1:
+                _redenen.append(f"buitentemp {_outside_c:.0f}°C — CV staat waarschijnlijk uit")
+            if _cv_in_nilm:
+                _redenen.append("CloudEMS heeft een CV-ketel herkend in uw installatie")
+            if not _has_electric_boiler and _gas_today > 0.1:
+                _redenen.append("geen elektrische boiler geconfigureerd, maar wel gasverbruik")
+
+            _msg = (
+                "☑️ **CloudEMS tip: Gas voor warm water?**\n\n"
+                f"CloudEMS ziet gasverbruik terwijl er geen CV-verwarming nodig is. "
+                f"Mogelijk gebruikt u gas voor warm tapwater (boiler/geiser).\n\n"
+                f"**Gedetecteerd:**\n"
+                + "\n".join(f"- {r}" for r in _redenen)
+                + "\n\n"
+                "Als u een **gasgestookte boiler** heeft voor warm water, zet dan bij de "
+                "boiler-instellingen **'CV-ketel aanwezig (gas)'** aan. CloudEMS houdt dan "
+                "rekening met de gasprijs bij de keuze om de elektrische boiler al dan niet "
+                "bij te sturen.\n\n"
+                "_U hoeft niets te doen als u alleen een elektrische boiler heeft._"
+            )
+
+            self.hass.components.persistent_notification.async_create(
+                message=_msg,
+                title="💧 CloudEMS — Gasverbruik voor warm water?",
+                notification_id="cloudems_gas_dhw_hint",
+            )
+            self._gas_dhw_hint_sent = _today
+            _LOGGER.info(
+                "CloudEMS DHW-hint gestuurd (score=%d, redenen=%s)", _score, _redenen
+            )
+
+        except Exception as _dhw_err:
+            _LOGGER.debug("Gas DHW hint detectie fout: %s", _dhw_err)
 
     def _collect_multi_battery_data(self) -> list:
         """Collect and self-learn stats for all configured batteries."""

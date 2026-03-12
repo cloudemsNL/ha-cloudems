@@ -770,6 +770,79 @@ class NotificationEngine:
         elif "budget_overschrijding" in alerts:
             alerts["budget_overschrijding"]["active"] = False
 
+        # v4.5.108: PV dimmer alerts
+        inv_dim = data.get("inverter_dimmer", {})
+        if inv_dim:
+            # Alert 1: actief aan het dimmen (negatieve prijs)
+            if inv_dim.get("negative_price"):
+                dimmed = [d["label"] for d in inv_dim.get("decisions", []) if d["action"] == "negative_price"]
+                alerts["inverter_negative_price_dim"] = {
+                    "priority": "warning",
+                    "category": "pv",
+                    "title":    "☀️ Zonnedimmer actief — negatieve stroomprijs",
+                    "message":  (
+                        f"Omvormer(s) {', '.join(dimmed)} worden gedimd omdat de all-in stroomprijs "
+                        f"negatief is. Teruglevering kost nu geld. CloudEMS beschermt je automatisch."
+                    ),
+                    "active": True,
+                }
+            else:
+                alerts["inverter_negative_price_dim"] = {"active": False, "priority": "warning", "category": "pv", "title": "", "message": ""}
+
+            # Alert 2: handmatige override actief
+            manual_active = [d["label"] for d in inv_dim.get("decisions", []) if d["action"] == "manual_override"]
+            if manual_active:
+                # haal resterende tijd op uit dimmer_state (via inverter_dimmer_states)
+                states = inv_dim.get("dimmer_states", {})
+                resume_parts = []
+                for eid, st in states.items():
+                    if st.get("manual_active"):
+                        remaining = st.get("auto_resume_in")
+                        mins = int(remaining.rstrip("s")) // 60 if remaining else "?"
+                        resume_parts.append(f"{st.get('label', eid)} ({mins} min)")
+                alerts["inverter_manual_override"] = {
+                    "priority": "info",
+                    "category": "pv",
+                    "title":    "🖐 Zonnedimmer — handmatige override actief",
+                    "message":  (
+                        f"Omvormer(s) {', '.join(manual_active)} staan op handmatige instelling. "
+                        f"Automatisch beheer hervat na: {', '.join(resume_parts) if resume_parts else '30 min'}."
+                    ),
+                    "active": True,
+                }
+            else:
+                alerts["inverter_manual_override"] = {"active": False, "priority": "info", "category": "pv", "title": "", "message": ""}
+
+            # Alert 3: dimmer uitgeschakeld terwijl er surplus is (herinnering)
+            solar_w = float(data.get("solar_power", 0) or 0)
+            grid_w  = float(data.get("grid_power", 0) or 0)
+            surplus = solar_w > 200 and grid_w < -100  # surplus: zon hoog, teruglevering actief
+            dimmer_enabled = inv_dim.get("dimmer_enabled", {})
+            disabled_labels = []
+            for eid, enabled in dimmer_enabled.items():
+                if not enabled:
+                    for ctrl_eid in inv_dim.get("controls", []):
+                        if ctrl_eid == eid:
+                            disabled_labels.append(eid.split(".")[-1])
+                            break
+                    else:
+                        disabled_labels.append(eid.split(".")[-1])
+
+            if disabled_labels and surplus:
+                alerts["inverter_dimmer_disabled"] = {
+                    "priority": "info",
+                    "category": "pv",
+                    "title":    "☀️ Zonnedimmer uitgeschakeld — surplus onbenut",
+                    "message":  (
+                        f"Er is zonne-surplus ({solar_w:.0f}W zon, {abs(grid_w):.0f}W teruglevering) "
+                        f"maar de zonnedimmer staat uit voor: {', '.join(disabled_labels)}. "
+                        "Zet de schakelaar aan om te profiteren van automatisch dimmen bij negatieve prijzen."
+                    ),
+                    "active": True,
+                }
+            else:
+                alerts["inverter_dimmer_disabled"] = {"active": False, "priority": "info", "category": "pv", "title": "", "message": ""}
+
         return alerts
 
     async def async_maybe_save(self) -> None:

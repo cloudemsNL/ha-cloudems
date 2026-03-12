@@ -102,6 +102,7 @@ class EventCluster:
     # 0.0 = puur resistief (ketel/oven), 1.0 = puur reactief (inductiemotor)
     # Discrimineert motor-apparaten van resistieve lasten bij zelfde wattage.
     centroid_reactive_frac: float = 0.0   # gemiddelde sin(phi) over cluster-events
+    phase_votes: dict = field(default_factory=lambda: {"L1": 0, "L2": 0, "L3": 0})
 
     def distance(self, power_w: float, duration_s: float,
                  reactive_frac: float | None = None) -> float:
@@ -208,7 +209,8 @@ class NILMEventClusterer:
     # ── Publieke API ──────────────────────────────────────────────────────────
 
     def add_unknown_event(self, power_w: float, duration_s: float,
-                          reactive_frac: float | None = None) -> None:
+                          reactive_frac: float | None = None,
+                          phase: str | None = None) -> None:
         """
         Voeg een onbekend event toe aan het dichtstbijzijnde cluster,
         of maak een nieuw cluster aan.
@@ -238,10 +240,15 @@ class NILMEventClusterer:
 
         if best_cluster and best_dist < threshold:
             best_cluster.update(power_w, duration_s, reactive_frac)
+            if phase in ("L1", "L2", "L3"):
+                best_cluster.phase_votes[phase] = best_cluster.phase_votes.get(phase, 0) + 1
         else:
             if len(self._clusters) >= MAX_CLUSTERS:
                 self._prune_old_clusters()
             new_id = f"cluster_{int(time.time() * 1000) % 100000}"
+            votes = {"L1": 0, "L2": 0, "L3": 0}
+            if phase in ("L1", "L2", "L3"):
+                votes[phase] = 1
             cl = EventCluster(
                 cluster_id    = new_id,
                 centroid_w    = power_w,
@@ -249,6 +256,7 @@ class NILMEventClusterer:
                 event_count   = 1,
                 suggested_type = _suggest_type(power_w, duration_s),
                 centroid_reactive_frac = reactive_frac or 0.0,
+                phase_votes   = votes,
             )
             self._clusters.append(cl)
 
@@ -272,6 +280,9 @@ class NILMEventClusterer:
                     s for s in self._pending_suggestions
                     if s.get("cluster_id") != cluster_id
                 ]
+                # Dominante fase bepalen uit stemmen
+                _votes = cl.phase_votes if isinstance(cl.phase_votes, dict) else {"L1": 0, "L2": 0, "L3": 0}
+                _dominant_phase = max(_votes, key=_votes.get) if any(_votes.values()) else "L1"
                 return {
                     "cluster_id":  cl.cluster_id,
                     "power_w":     cl.centroid_w,
@@ -279,6 +290,7 @@ class NILMEventClusterer:
                     "device_name": device_name,
                     "device_type": device_type,
                     "event_count": cl.event_count,
+                    "phase":       _dominant_phase,
                 }
         return None
 

@@ -442,6 +442,23 @@
         "data_description": {
           "dsmr_source": "Kies hoe CloudEMS de netmeterdata ophaalt. Gebruik de DSMR/HomeWizard-integratie als je die al hebt ingesteld in HA, anders selecteer je handmatig sensoren of stel je een directe verbinding in."
         }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Bewerk boiler: {unit_label} — {group_name}",
+        "description": "Wijzig de instellingen van boiler **{unit_label}** in groep **{group_name}**.\n\n**💡 Doeltemperatuur:** bij PV-surplus gebruikt CloudEMS automatisch de maximale setpoint.\n**⚡ Vermogen:** wordt automatisch geleerd vanuit de energiesensor.",
+        "data": {
+          "bu_entity": "Boiler entiteit",
+          "bu_temp_sensor": "Temperatuursensor (optioneel)",
+          "bu_energy_sensor": "Energiesensor (optioneel)",
+          "bu_label": "Naam van deze boiler",
+          "bu_setpoint": "Doeltemperatuur (°C)",
+          "bu_control_mode": "Aansturingsmodus",
+          "bu_surplus_setpoint": "Setpoint bij PV-surplus (°C)",
+          "bu_preset_on": "Preset AAN",
+          "bu_preset_off": "Preset UIT",
+          "bu_dimmer_on_pct": "Dimmer AAN (%)",
+          "bu_dimmer_off_pct": "Dimmer UIT (%)"
+        }
       }
     },
     "abort": {

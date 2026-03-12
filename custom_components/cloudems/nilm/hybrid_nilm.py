@@ -95,7 +95,7 @@ class AnchoredDevice:
     entity_id:   str
     device_type: str
     name:        str
-    phase:       str = "L1"
+    phase:       str = "?"    # "?" = onbekend, "L1/L2/L3" = bevestigd of kandidaat, "ALL" = 3-fase
     power_w:     float = 0.0
     is_on:       bool  = False
     last_update: float = field(default_factory=time.time)
@@ -112,9 +112,35 @@ class AnchoredDevice:
     on_events:   int   = 0                     # aantal keer dat het apparaat AAN was
     power_max_w: float = 0.0                   # hoogste gemeten vermogen (voor display)
 
+    # v4.5.86: uitgebreide metadata
+    manufacturer:      str  = ""   # fabrikant uit device registry
+    model:             str  = ""   # model uit device registry
+    source:            str  = ""   # "powercalc" | "device_registry" | "keyword" | ...
+    source_entity_id:  str  = ""   # powercalc source entity
+    area:              str  = ""   # HA-ruimte
+    is_topology_meter: bool = False # True = submeter, niet tellen in kamertotaal
+    pending_identity:  bool = False # True = socket zonder bekende apparaat → review
+
     @property
     def is_stale(self) -> bool:
         return (time.time() - self.last_update) > SMART_PLUG_STALE_S
+
+    @property
+    def phase_display(self) -> str:
+        """Dashboard-weergave van de fase.
+        Regels:
+          phase_confirmed=True → "L1" / "L2" / "L3" / "3-fase"
+          phase != "?" en niet confirmed → "L1?" (kandidaat)
+          phase = "?" → "?" (onbekend, geen misleidende indicator)
+          phase = "ALL" → "3-fase"
+        """
+        if self.phase == "ALL":
+            return "3-fase"
+        if self.phase == "?":
+            return "?"
+        if self.phase_confirmed:
+            return self.phase
+        return f"{self.phase}?"
 
 
 @dataclass
@@ -276,15 +302,31 @@ class HybridNILM:
             for plug in result.plugs:
                 if plug.entity_id not in self._anchors:
                     self._anchors[plug.entity_id] = AnchoredDevice(
-                        plug_id    = plug.entity_id,
-                        entity_id  = plug.entity_id,
-                        device_type= plug.device_type,
-                        name       = plug.friendly_name,
-                        phase      = plug.phase,
+                        plug_id          = plug.entity_id,
+                        entity_id        = plug.entity_id,
+                        device_type      = plug.device_type,
+                        name             = plug.friendly_name,
+                        phase            = plug.phase,
+                        manufacturer     = plug.manufacturer,
+                        model            = plug.model,
+                        source           = plug.source,
+                        source_entity_id = plug.source_entity_id,
+                        area             = plug.area,
+                        is_topology_meter= plug.is_topology_meter,
+                        pending_identity = plug.pending_identity,
                     )
-                    _LOGGER.info("HybridNILM: nieuw anker → %s (%s, %s)",
-                                 plug.friendly_name, plug.device_type, plug.entity_id)
+                    _LOGGER.info(
+                        "[nilm_anchor] nieuw anker → %s (type=%s bron=%s area=%s fab=%s pending=%s)",
+                        plug.friendly_name, plug.device_type, plug.source,
+                        plug.area or "?", plug.manufacturer or "?", plug.pending_identity,
+                    )
                     self._stats["discoveries"] += 1
+                else:
+                    # Bestaand anker: update metadata die kan veranderen (area, pending)
+                    anchor = self._anchors[plug.entity_id]
+                    anchor.area             = plug.area or anchor.area
+                    anchor.pending_identity = plug.pending_identity
+                    anchor.is_topology_meter= plug.is_topology_meter
 
             # Actuele vermogenswaardes inlezen
             for eid, anchor in self._anchors.items():
@@ -317,14 +359,26 @@ class HybridNILM:
                               len(self._anchors), active,
                               self._weather.temperature_c, self._weather.season)
                 self._last_diag_log = time.time()
+                # v4.5.86: restsignaal per fase loggen naar nilm log
+                anchor_totals = self.get_anchored_power_per_phase()
+                _LOGGER.debug(
+                    "[nilm_residual] anchor totaal per fase: L1=%.0fW L2=%.0fW L3=%.0fW "
+                    "(ankers=%d actief=%d pending_review=%d)",
+                    anchor_totals.get("L1", 0), anchor_totals.get("L2", 0),
+                    anchor_totals.get("L3", 0), len(self._anchors), active,
+                    sum(1 for a in self._anchors.values() if a.pending_identity),
+                )
 
         except Exception as exc:
             _LOGGER.debug("HybridNILM refresh fout: %s", exc)
 
     def _refine_anchor_phases(self) -> None:
-        """Verfijn de fase van L1-standaard ankers via correlatie met fase-deltas."""
+        """Verfijn de fase van ankers met onbekende/onbevestigde fase via DSMR5-correlatie."""
         for anchor in self._anchors.values():
-            if anchor.phase != "L1" or not anchor.is_on or anchor.power_w < 100:
+            # Sla over: 3-fase ankers en ankers die al bevestigd zijn op een specifieke fase
+            if anchor.phase == "ALL" or anchor.phase_confirmed:
+                continue
+            if not anchor.is_on or anchor.power_w < 100:
                 continue
             best_ph, best_diff = None, float("inf")
             for ph, snap in self._phase_snapshots.items():
@@ -335,7 +389,10 @@ class HybridNILM:
                     best_diff = diff
                     best_ph   = ph
             if best_ph and best_ph != anchor.phase:
-                _LOGGER.debug("HybridNILM: %s fase verfijnd L1→%s", anchor.name, best_ph)
+                _LOGGER.debug(
+                    "[nilm_phase] HybridNILM: %s fase %s→%s (via DSMR5 correlatie)",
+                    anchor.name, anchor.phase or "?", best_ph,
+                )
                 anchor.phase = best_ph
 
     def _correlate_socket_phases(self) -> None:
@@ -420,7 +477,7 @@ class HybridNILM:
             if anchor.phase_confirm_count >= SOCKET_PHASE_CONFIRM_COUNT:
                 if anchor.phase != best_ph:
                     _LOGGER.info(
-                        "HybridNILM: %s fase gewijzigd %s→%s via DSMR5 "
+                        "[nilm_phase] %s fase gewijzigd %s→%s via DSMR5 "
                         "(delta=%.0fW, fase-delta=%.0fW, err=%.0f%%)",
                         anchor.name, anchor.phase, best_ph, delta,
                         self._phase_snapshots[best_ph].delta_w,
@@ -428,7 +485,7 @@ class HybridNILM:
                     )
                 else:
                     _LOGGER.info(
-                        "HybridNILM: %s fase bevestigd als %s via DSMR5 "
+                        "[nilm_phase] %s fase bevestigd als %s via DSMR5 "
                         "(delta=%.0fW, err=%.0f%%)",
                         anchor.name, best_ph, delta, best_rel_err * 100,
                     )
@@ -527,25 +584,33 @@ class HybridNILM:
 
         return [
             {
-                "device_id":     f"__hybrid_{a.plug_id}__",
-                "device_type":   a.device_type,
-                "name":          a.name,
-                "confidence":    1.0,
-                "current_power": a.power_w if a.is_on else 0.0,
-                "is_on":         a.is_on,
-                "source":        "smart_plug",
-                "phase":         a.phase,
-                "phase_confirmed": a.phase_confirmed,
-                "confirmed":     True,
-                "user_feedback": "correct",
+                "device_id":        f"__hybrid_{a.plug_id}__",
+                "device_type":      a.device_type,
+                "name":             a.name,
+                "confidence":       1.0,
+                "current_power":    a.power_w if a.is_on else 0.0,
+                "is_on":            a.is_on,
+                "source":           "smart_plug",
+                "phase":            a.phase,
+                "phase_display":    a.phase_display,   # "L1" / "L1?" / "?" / "3-fase"
+                "phase_confirmed":  a.phase_confirmed,
+                "confirmed":        True,
+                "user_feedback":    "correct",
                 # v1.17.3: zodat apparaten ook zichtbaar zijn in stand-by in de NILM-kaart
-                "on_events":     max(a.on_events, 1),  # minstens 1: ontdekt = gezien
-                "power_min":     round(a.power_max_w, 1),
-                "entity_id":     a.entity_id,
-                "source_entity_id": a.entity_id,   # v1.20: room meter area lookup
+                "on_events":        max(a.on_events, 1),
+                "power_min":        round(a.power_max_w, 1),
+                "entity_id":        a.entity_id,
+                "source_entity_id": a.entity_id,
+                # v4.5.86: extra metadata
+                "manufacturer":     a.manufacturer,
+                "model":            a.model,
+                "area":             a.area,
+                "is_topology_meter": a.is_topology_meter,
+                "pending_identity": a.pending_identity,
+                "anchor_source":    a.source,
             }
             for a in self._anchors.values()
-            if not a.is_stale and not _is_infra(a.name)
+            if not a.is_stale and not _is_infra(a.name) and not a.is_topology_meter
         ]
 
     def get_anchored_power_per_phase(self) -> Dict[str, float]:

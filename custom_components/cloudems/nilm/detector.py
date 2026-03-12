@@ -1487,6 +1487,7 @@ class NILMDetector:
                     power_w    = abs(event.delta_power),
                     duration_s = 0.0,   # duur onbekend op dit punt
                     reactive_frac = _rfrac,
+                    phase      = event.phase,
                 )
             except Exception as _ce:
                 _LOGGER.debug("NILM clusterer fout: %s", _ce)
@@ -2433,7 +2434,7 @@ class NILMDetector:
                 source       = "cluster",
                 confirmed    = True,
                 detection_count = result.get("event_count", 1),
-                phase        = "L1",
+                phase        = result.get("phase", "L1"),
             )
             dev.energy = DeviceEnergy(device_id=dev_id)
             self._devices[dev_id] = dev
@@ -2977,11 +2978,16 @@ class NILMDetector:
 
         # Filter: skip devices that have too low confidence or too few on-events,
         # unless they come from a smart plug anchor (those are always reliable).
-        def _min_events(dtype: str) -> int:
+        def _min_events(dtype: str, last_seen: float = 0.0) -> int:
             base = RARE_TYPES_MIN_EVENTS.get(dtype, MIN_ON_EVENTS_DEFAULT)
             # Adaptieve override: als dit type meer fp's had, verhoog drempel
             override = self._adaptive_overrides.get(dtype, {})
             base = max(base, override.get("min_events", base))
+            # v4.5.104: warmup factor NIET toepassen op opgeslagen devices (last_seen
+            # vóór deze sessie) — die zijn al eerder gevalideerd door het systeem.
+            # Warmup is alleen bedoeld voor nieuw gedetecteerde devices in de huidige sessie.
+            if last_seen > 0 and last_seen < self._started_at:
+                return base  # opgeslagen device: geen warmup penalty
             return base * _warmup_factor
 
         raw = [
@@ -2989,7 +2995,7 @@ class NILMDetector:
             if d.get("source") == "smart_plug"
             or (
                 d.get("confidence", 0) >= NILM_MIN_CONFIDENCE
-                and d.get("on_events", 0) >= _min_events(d.get("device_type", ""))
+                and d.get("on_events", 0) >= _min_events(d.get("device_type", ""), d.get("last_seen", 0.0))
             )
         ]
 

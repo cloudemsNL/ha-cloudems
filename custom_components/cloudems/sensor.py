@@ -95,6 +95,7 @@ async def async_setup_entry(
     entities: list = [
         CloudEMSPowerSensor(coordinator, entry),
         CloudEMSHomeLoadSensor(coordinator, entry),   # v4.0.9+: EMA-gefilterd huisverbruik
+        CloudEMSHomeRestSensor(coordinator, entry),   # v4.5.98+: REST voor flow kaart
         # CloudEMSGridNetPowerSensor removed – CloudEMSPowerSensor owns
         # sensor.cloudems_power (unique_id _power). Name was fixed from
         # "CloudEMS Grid · Net Power" → "CloudEMS Power" to match expected entity_id.
@@ -553,6 +554,90 @@ class CloudEMSHomeLoadSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
+    """Resterend huisverbruik voor de flow kaart.
+
+    Berekening (Kirchhoff):
+        REST = ZON + NET_netto - ACCU_netto - BOILER - EV - EBIKE - POOL
+
+    Dit is het verbruik dat niet door een eigen CloudEMS-module wordt beheerd.
+    Wordt gebruikt door cloudems-flow-card als THUIS-node zodat de som klopt.
+    """
+    _attr_name      = "CloudEMS · Huis Rest Verbruik"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon      = "mdi:home-minus"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_home_rest"
+        self.entity_id = "sensor.cloudems_home_rest"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @staticmethod
+    def _boiler_w(data: dict) -> float:
+        boilers = data.get("boiler_status", [])
+        return sum(float(b.get("power_w") or 0) for b in boilers)
+
+    @staticmethod
+    def _ev_w(data: dict) -> float:
+        ev = data.get("ev_session", {})
+        if ev.get("session_active"):
+            return float(ev.get("session_current_a") or 0) * 230.0
+        return 0.0
+
+    @staticmethod
+    def _ebike_w(data: dict) -> float:
+        mm = data.get("micro_mobility")
+        if not mm or not isinstance(mm, dict):
+            return 0.0
+        return sum(float(s.get("power_w", 0)) for s in mm.get("active_sessions", []))
+
+    @staticmethod
+    def _pool_w(data: dict) -> float:
+        pool = data.get("pool", {}) or {}
+        return float(pool.get("filter_power_w") or 0) + float(pool.get("heat_power_w") or 0)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        solar_w = float(d.get("solar_power_w", 0) or 0)
+        grid_w  = float(d.get("grid_power_w",  0) or 0)   # positief=import, negatief=export
+        # Som van alle batterijen — positief=laden, negatief=ontladen
+        bat_w   = sum(float(b.get("power_w") or 0) for b in (d.get("batteries") or []))
+        rest = solar_w + grid_w - bat_w \
+               - self._boiler_w(d) \
+               - self._ev_w(d) \
+               - self._ebike_w(d) \
+               - self._pool_w(d)
+        return round(max(0.0, rest), 1)
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data or {}
+        solar_w = float(d.get("solar_power_w", 0) or 0)
+        grid_w  = float(d.get("grid_power_w",  0) or 0)
+        bat_w   = sum(float(b.get("power_w") or 0) for b in (d.get("batteries") or []))
+        boiler  = self._boiler_w(d)
+        ev      = self._ev_w(d)
+        ebike   = self._ebike_w(d)
+        pool    = self._pool_w(d)
+        return {
+            "solar_w":   round(solar_w, 1),
+            "grid_w":    round(grid_w, 1),
+            "battery_w": round(bat_w, 1),
+            "boiler_w":  round(boiler, 1),
+            "ev_w":      round(ev, 1),
+            "ebike_w":   round(ebike, 1),
+            "pool_w":    round(pool, 1),
+            "total_managed_w": round(boiler + ev + ebike + pool, 1),
+        }
+
+
 class CloudEMSPriceSensor(CoordinatorEntity, SensorEntity):
     _attr_name = "CloudEMS Energy · Price"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -740,11 +825,13 @@ class CloudEMSPoolStatusSensor(CoordinatorEntity, SensorEntity):
             "filter_reason":       pool.get("filter_reason", ""),
             "filter_hours_today":  pool.get("filter_hours_today", 0.0),
             "filter_target_hours": pool.get("filter_target_hours", 4.0),
+            "filter_power_w":      pool.get("filter_power_w", 0),
             "heat_is_on":          pool.get("heat_is_on", False),
             "heat_mode":           pool.get("heat_mode", "off"),
             "heat_reason":         pool.get("heat_reason", ""),
             "water_temp_c":        pool.get("water_temp_c"),
             "heat_setpoint_c":     pool.get("heat_setpoint_c", 28.0),
+            "heat_power_w":        pool.get("heat_power_w", 0),
             "uv_is_on":            pool.get("uv_is_on", False),
             "robot_is_on":         pool.get("robot_is_on", False),
             "advice":              pool.get("advice", ""),
@@ -752,6 +839,11 @@ class CloudEMSPoolStatusSensor(CoordinatorEntity, SensorEntity):
             "filter_entity_id":    cfg.get("filter_entity", ""),
             "heat_entity_id":      cfg.get("heat_entity", ""),
             "temp_entity_id":      cfg.get("temp_entity", ""),
+            # Geleerde vermogenswaardes (zichtbaar voor diagnostiek)
+            "learned_filter_w":    getattr(self.coordinator._pool_ctrl, "_learned_filter_w", None)
+                                   if getattr(self.coordinator, "_pool_ctrl", None) else None,
+            "learned_heat_w":      getattr(self.coordinator._pool_ctrl, "_learned_heat_w", None)
+                                   if getattr(self.coordinator, "_pool_ctrl", None) else None,
         }
 
 

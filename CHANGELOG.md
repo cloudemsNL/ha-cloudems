@@ -1,3 +1,9 @@
+## v4.5.85
+- Fix: content: > vervangen door content: | zodat newlines behouden blijven in markdown tabellen
+
+## v4.5.84
+- Fix: Energie Monitor markdown tabel rendert nu correct ({% set %} en {% for %} op dezelfde regel als pipe-tekens)
+
 # Changelog
 
 ## [4.5.66] — 2026-03-11

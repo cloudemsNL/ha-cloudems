@@ -88,6 +88,10 @@ class ShutterState:
     pid_integral: float = 0.0
     pid_prev_error: float = 0.0
     pid_last_time: float = 0.0
+    # v4.5.86: shadow decision — wat de automaat zou doen bij override/uit
+    shadow_action: str = ""
+    shadow_reason: str = ""
+    shadow_position: Optional[int] = None
     pid_last_output: float = 50.0           # start op 50% (half open)
 
 
@@ -99,6 +103,11 @@ class ShutterDecision:
     position: Optional[int] = None         # alleen bij action=position
     reason: str = ""
     priority: int = 0                       # hogere waarde = hogere prioriteit
+    # v4.5.86: shadow decision — wat de automaat zou doen als hij aan stond
+    # Altijd berekend, ook bij override of automaat-uit.
+    shadow_action: str = ""                 # wat de automaat zou doen
+    shadow_reason: str = ""                 # waarom
+    shadow_position: Optional[int] = None  # doelpositie bij shadow_action=position
 
 
 @dataclass
@@ -442,6 +451,12 @@ class ShutterController:
                 room_setpoint=room_setpoints.get(cfg.area_id),
             )
             decisions.append(decision)
+            # v4.5.86: shadow altijd opslaan op state zodat get_status() het kan tonen
+            _sh_state = self._states.get(cfg.entity_id)
+            if _sh_state and decision.shadow_action:
+                _sh_state.shadow_action   = decision.shadow_action
+                _sh_state.shadow_reason   = decision.shadow_reason
+                _sh_state.shadow_position = decision.shadow_position
 
         await self._apply_decisions(decisions)
         return decisions
@@ -809,20 +824,36 @@ class ShutterController:
             reason = "automaat uitgeschakeld"
             if until:
                 reason = f"automaat uit tot {until.strftime('%d-%m %H:%M')}"
+            # Shadow: bereken wat de automaat zou doen (voor dashboard advies)
+            shadow = self._evaluate_shadow(cfg, outdoor_temp_c, solar_elevation_deg,
+                                           solar_azimuth_deg, pv_surplus_w, room_temp, room_setpoint)
             return ShutterDecision(
-                entity_id=cfg.entity_id,
-                action=SHUTTER_ACTION_IDLE,
-                reason=reason,
-                priority=0,
+                entity_id    = cfg.entity_id,
+                action       = SHUTTER_ACTION_IDLE,
+                reason       = reason,
+                priority     = 0,
+                shadow_action  = shadow.action,
+                shadow_reason  = shadow.reason,
+                shadow_position= shadow.position,
             )
 
         # ── Prio 2: Handmatige override (tijdelijk, bijv. 2u) ────────────────
         if state and state.override_until and dt_util.now() < state.override_until:
+            # Shadow: bereken wat de automaat zou doen (voor dashboard advies)
+            shadow = self._evaluate_shadow(cfg, outdoor_temp_c, solar_elevation_deg,
+                                           solar_azimuth_deg, pv_surplus_w, room_temp, room_setpoint)
+            _LOGGER.debug(
+                "[shutter_shadow] %s override actief → automaat zou: %s (%s)",
+                cfg.entity_id, shadow.action, shadow.reason,
+            )
             return ShutterDecision(
-                entity_id=cfg.entity_id,
-                action=state.override_action,
-                reason=SHUTTER_REASON_MANUAL,
-                priority=150,
+                entity_id    = cfg.entity_id,
+                action       = state.override_action,
+                reason       = SHUTTER_REASON_MANUAL,
+                priority     = 150,
+                shadow_action  = shadow.action,
+                shadow_reason  = shadow.reason,
+                shadow_position= shadow.position,
             )
 
         # ── Prio 3: Nachtschema — volledig sluiten ───────────────────────────
@@ -921,6 +952,59 @@ class ShutterController:
             reason="binnen comfort — geen actie",
             priority=0,
         )
+
+    def _evaluate_shadow(
+        self,
+        cfg: "ShutterConfig",
+        outdoor_temp_c,
+        solar_elevation_deg,
+        solar_azimuth_deg,
+        pv_surplus_w: float,
+        room_temp,
+        room_setpoint,
+    ) -> "ShutterDecision":
+        """
+        Berekent wat de automaat zou doen als hij aan stond (shadow decision).
+
+        Wordt gebruikt bij manual override of automaat-uit zodat het dashboard
+        kan tonen: "Automaat zou sluiten — oververhitting 27°C"
+        Slaat prio 1 (automaat-uit) en prio 2 (override) over.
+        """
+        state    = self._states.get(cfg.entity_id)
+        setpoint = self._setpoint(cfg, room_setpoint)
+        if room_temp is None and cfg.temp_sensor:
+            room_temp = self._read_temp_sensor(cfg.temp_sensor)
+        sun_on_window = self._sun_hits_window(
+            cfg.orientation, solar_azimuth_deg, solar_elevation_deg
+        )
+        if self._is_night(cfg):
+            current = state.current_position if state else -1
+            if current != 0:
+                return ShutterDecision(
+                    entity_id=cfg.entity_id, action=SHUTTER_ACTION_POSITION,
+                    position=0, reason="nacht — zou sluiten", priority=120,
+                )
+            return ShutterDecision(cfg.entity_id, SHUTTER_ACTION_IDLE,
+                                   reason="nacht — al gesloten", priority=0)
+        if self._morning_blocked(cfg):
+            return ShutterDecision(cfg.entity_id, SHUTTER_ACTION_IDLE,
+                                   reason=f"zou wachten op ochtend ({self._morning_open(cfg)})", priority=0)
+        if cfg.auto_overheat and room_temp is not None and room_temp > setpoint + 3.0:
+            return ShutterDecision(
+                entity_id=cfg.entity_id, action=SHUTTER_ACTION_POSITION,
+                position=cfg.min_position,
+                reason=f"oververhitting ({room_temp:.1f}°C > {setpoint+3:.1f}°C)", priority=100,
+            )
+        if room_temp is not None and state is not None:
+            pid_pos = self._pid_position(cfg, state, room_temp, setpoint, pv_surplus_w, sun_on_window)
+            if pid_pos is not None:
+                return ShutterDecision(
+                    entity_id=cfg.entity_id, action=SHUTTER_ACTION_POSITION,
+                    position=pid_pos,
+                    reason=f"PID temp={room_temp:.1f}°C sp={setpoint:.1f}°C → {pid_pos}%", priority=60,
+                )
+        return ShutterDecision(cfg.entity_id, SHUTTER_ACTION_IDLE,
+                               reason="binnen comfort — geen actie", priority=0)
 
     @staticmethod
     def _sun_hits_window(
@@ -1039,6 +1123,10 @@ class ShutterController:
                 "auto_enabled":    self.get_auto_enabled(cfg.entity_id),
                 "automaat":        self.get_auto_enabled(cfg.entity_id) and not override_active,
                 "auto_disabled_until": state.auto_disabled_until.isoformat() if state.auto_disabled_until else None,
+                # v4.5.86: shadow — wat de automaat zou doen (tonen als advies op dashboard)
+                "shadow_action":   state.shadow_action,
+                "shadow_reason":   state.shadow_reason,
+                "shadow_position": state.shadow_position,
                 "night_close_time":    self._night_close(cfg),
                 "morning_open_time":   self._morning_open(cfg),
                 "default_setpoint":    self._read_helper_float(cfg, "setpoint", cfg.default_setpoint),

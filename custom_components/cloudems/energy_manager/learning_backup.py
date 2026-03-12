@@ -70,6 +70,17 @@ DECISIONS_LOG_NAME     = "cloudems_decisions.log"
 DECISIONS_MAX_BYTES    = 2 * 1024 * 1024  # 2 MB per bestand
 DECISIONS_BACKUP_COUNT = 10               # 10 rotaties → max 20 MB
 
+# NILM log: dedicated logbestand voor alle NILM-gerelateerde events.
+# NILM genereert elke cyclus meerdere log-entries (discovery, topology,
+# fase-bevestiging, anchor-registratie, actief leren, restsignaal).
+# Door dit apart te houden verdrinkt het niet in cloudems_high.log en
+# is gericht debuggen via "tail -f cloudems_nilm.log" mogelijk.
+# Categorieën: nilm_discovery, nilm_topology, nilm_phase, nilm_anchor,
+#              nilm_active_learn, nilm_residual
+NILM_LOG_NAME     = "cloudems_nilm.log"
+NILM_MAX_BYTES    = 2 * 1024 * 1024  # 2 MB per bestand
+NILM_BACKUP_COUNT = 10               # 10 rotaties → max 20 MB
+
 
 class LearningBackup:
     """
@@ -85,6 +96,7 @@ class LearningBackup:
         self._normal_path    = os.path.join(self._dir, NORMAL_LOG_NAME)
         self._high_path      = os.path.join(self._dir, HIGH_LOG_NAME)
         self._decisions_path = os.path.join(self._dir, DECISIONS_LOG_NAME)
+        self._nilm_path      = os.path.join(self._dir, NILM_LOG_NAME)
 
     async def async_setup(self) -> None:
         """Maak de backup-directory aan als die niet bestaat."""
@@ -256,6 +268,25 @@ class LearningBackup:
         # Mirror naar high log zodat alles op één plek terug te vinden is
         await self._write_log(self._high_path, category, payload,
                               HIGH_MAX_BYTES, HIGH_BACKUP_COUNT)
+
+    # ── NILM log (dedicated NILM events — discovery, topology, fase, anker) ──
+
+    async def async_log_nilm(self, category: str, payload: dict) -> None:
+        """Schrijf een NILM-event naar cloudems_nilm.log.
+
+        Categorieën:
+          nilm_discovery    — classificatie per sensor (type, conf, bron, stap)
+          nilm_topology     — upstream/downstream meter relaties
+          nilm_phase        — fase-bevestigingen en streaks
+          nilm_anchor       — anker registratie, updates, bron
+          nilm_active_learn — actief-leer verzoeken en resultaten
+          nilm_residual     — restsignaal per fase na aftrek anchor+powercalc
+
+        Rotatie: 10 × 2 MB = max 20 MB.
+        Tip voor debugging: tail -f cloudems_backup/cloudems_nilm.log
+        """
+        await self._write_log(self._nilm_path, category, payload,
+                              NILM_MAX_BYTES, NILM_BACKUP_COUNT)
 
     # ── Interne loghelper ─────────────────────────────────────────────────────
 

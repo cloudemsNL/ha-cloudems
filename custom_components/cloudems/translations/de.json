@@ -486,6 +486,23 @@
             "description": "Lijst van gevonden sensoren"
           }
         }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Boiler bearbeiten: {unit_label} — {group_name}",
+        "description": "Einstellungen des Boilers **{unit_label}** in Gruppe **{group_name}** ändern.\n\n**💡 Zieltemperatur:** Bei PV-Überschuss verwendet CloudEMS automatisch den maximalen Sollwert.\n**⚡ Leistung:** Wird automatisch vom Energiesensor gelernt.",
+        "data": {
+          "bu_entity": "Boiler-Entität",
+          "bu_temp_sensor": "Temperatursensor (optional)",
+          "bu_energy_sensor": "Energiesensor (optional)",
+          "bu_label": "Name dieses Boilers",
+          "bu_setpoint": "Zieltemperatur (°C)",
+          "bu_control_mode": "Steuerungsmodus",
+          "bu_surplus_setpoint": "Sollwert bei PV-Überschuss (°C)",
+          "bu_preset_on": "Preset EIN",
+          "bu_preset_off": "Preset AUS",
+          "bu_dimmer_on_pct": "Dimmer EIN (%)",
+          "bu_dimmer_off_pct": "Dimmer AUS (%)"
+        }
       }
     },
     "abort": {

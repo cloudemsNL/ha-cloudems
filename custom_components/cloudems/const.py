@@ -496,6 +496,7 @@ CONF_BATTERY_COUNT             = "battery_count"
 # ── v1.13.0 — Energy source comparison (electricity vs gas) ──────────────────
 CONF_GAS_PRICE_SENSOR          = "gas_price_sensor"       # HA sensor reporting €/m³
 CONF_GAS_PRICE_FIXED           = "gas_price_fixed"        # fixed €/m³ fallback
+CONF_HAS_GAS_HEATING           = "has_gas_heating"        # CV-ketel voor warm water: null=niet geconfigureerd, "yes"=ja, "no"=nee
 CONF_BOILER_EFFICIENCY         = "boiler_efficiency"       # electric boiler COP (default 0.95)
 CONF_HEAT_PUMP_COP             = "heat_pump_cop"           # heat pump COP (default 3.5)
 GAS_KWH_PER_M3                 = 9.769                    # calorific value (Groningen gas)

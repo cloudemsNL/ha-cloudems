@@ -239,6 +239,16 @@ class GasAnalyzer:
             self._year_key          = year_key
             self._year_gas_start_m3 = gas_m3_cumulative
 
+        # Initialiseer startpunten als ze nog None zijn (eerste tick na installatie)
+        if self._today_gas_start_m3 is None:
+            self._today_gas_start_m3 = gas_m3_cumulative
+        if self._month_gas_start_m3 is None:
+            self._month_gas_start_m3 = gas_m3_cumulative
+        if self._week_gas_start_m3 is None:
+            self._week_gas_start_m3 = gas_m3_cumulative
+        if self._year_gas_start_m3 is None:
+            self._year_gas_start_m3 = gas_m3_cumulative
+
         self._last_gas_m3 = gas_m3_cumulative
         self._today_temps.append(outside_temp_c)
         self._dirty = True
@@ -383,7 +393,12 @@ class GasAnalyzer:
 
         return GasAnalysisData(
             gas_m3_today         = round(gas_today, 3),
+            gas_m3_week          = round(gas_week, 3),
+            gas_m3_year          = round(gas_year, 1),
             gas_m3_month         = round(gas_month, 1),
+            gas_cost_today_eur   = cost_today,
+            gas_cost_week_eur    = cost_week,
+            gas_cost_year_eur    = cost_year,
             gas_cost_month_eur   = cost_month,
             efficiency_m3_hdd    = round(eff, 4),
             efficiency_rating    = rating,

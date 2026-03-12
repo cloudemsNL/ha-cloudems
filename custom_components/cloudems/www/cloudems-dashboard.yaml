@@ -1,6 +1,6 @@
 title: ⚡ CloudEMS
 resources:
-  - url: /local/cloudems/cloudems-cards.js
+  - url: /local/cloudems/cloudems-cards.js?v=4.5.101
     type: module
   - url: /local/cloudems/cloudems-card-mod.js
     type: module
@@ -116,7 +116,7 @@ views:
         display_zero_state: true
         invert_state: true
       home:
-        entity: sensor.cloudems_huisverbruik
+        entity: sensor.cloudems_home_rest
         name: Thuis
         display_zero_state: true
     watt_threshold: 1000
@@ -1587,46 +1587,47 @@ views:
           color: rgb(163,163,163) !important;
         }
   - type: markdown
-    title: 🏠 Verbruik per Kamer
-    content: |-
+    title: ⚡ CloudEMS — Energie Monitor
+    content: |
       {% set ov = state_attr('sensor.cloudems_kamers_overzicht', 'rooms') or [] %}
       {% set top = states('sensor.cloudems_kamers_overzicht') %}
       {% set total_w = state_attr('sensor.cloudems_kamers_overzicht', 'total_power_w') | float(0) %}
-      {% set total_kwh = ov | sum(attribute='kwh_today') | float(0) %}
       {% set all_devs = state_attr('sensor.cloudems_nilm_devices','device_list') or [] %}
       {% if ov %}
-      **Hoogste verbruik nu:** {{ top }} · **Totaal:** {{ total_w | round(0) | int }} W
-
-      | Kamer | Nu (W) | Vandaag (kWh) | % van vandaag |
-      |---|---:|---:|---:|
-      {% for r in ov | sort(attribute='kwh_today', reverse=True) %}
-      {%- set pct = ((r.kwh_today | float(0)) / total_kwh * 100) if total_kwh > 0 else 0 -%}
-      | {{ r.room | title }} | {{ r.power_w | round(0) | int }} | {{ r.kwh_today | round(2) }} | {{ pct | round(1) }}% |
-      {% endfor %}
+      ## ⚡ Huisverbruik
+      **Totaal:** {{ total_w | int }} W
+      **Hoogste verbruiker:** 🏆 {{ top }}
 
       ---
-      {% for r in ov | sort(attribute='kwh_today', reverse=True) %}
-      {%- set room_devs = all_devs | selectattr('room','defined') | selectattr('room','eq', r.room) | list -%}
-      {%- if room_devs | length > 0 -%}
-      **{{ r.room | title }}** ({{ r.power_w | int }} W)
 
-      | Apparaat | W | Fase | Status | ID |
-      |---|---:|---|---|---|
-      {%- for d in room_devs | sort(attribute='power_w', reverse=true) -%}
-      {%- set ph = d.get('phase','?') -%}
-      {%- set ph_ico = '🔵' if ph == 'L1' else ('🟡' if ph == 'L2' else ('🟢' if ph == 'L3' else '⚫')) -%}
-      {%- set status = '✅' if d.get('confirmed') else ('🚫' if d.get('user_suppressed') else '⏳') -%}
-      {%- set active = '🟢' if d.get('is_on') else '⚫' -%}
-      | {{ active }} {{ d.get('name', d.get('device_type','?')) }} | {{ d.get('power_w',0) | int }} | {{ ph_ico }} {{ ph }} | {{ status }} | `{{ d.get('device_id','?') }}` |
-      {%- endfor %}
+      ## 📊 Vermogen per kamer
 
-      {% endif %}
-      {%- endfor %}
+      | Kamer | Vermogen | Bar | Vandaag |
+      | --- | ---: | --- | ---: |
+      {% for r in ov | sort(attribute='power_w', reverse=True) %}{% set bar = '█' * ((r.power_w | int / total_w * 20) | int) if total_w > 0 else '' %}| {{ r.room | title }} | {{ r.power_w | int }} W | {{ bar }} | {{ r.kwh_today | round(2) }} kWh |
+      {% endfor %}
+      ---
+      {% for r in ov | sort(attribute='power_w', reverse=True) %}{% set room_devs = all_devs | selectattr('room','defined') | selectattr('room','eq', r.room) | list %}{% if room_devs | length > 0 %}
 
-      _Kamers worden automatisch herkend via HA-zones en apparaattypen_
-      _Om een bevestigd apparaat te verwijderen: kopieer het ID → Ontwikkelaarshulpmiddelen → Services → cloudems.dismiss\_device_
+      ## 🔌 {{ r.room | title }} ({{ r.power_w | int }} W)
+
+      | Apparaat | W | Fase | Status |
+      | --- | ---: | --- | --- |
+      {% for d in room_devs | sort(attribute='power_w', reverse=True) %}{% set ph = d.get('phase','?') %}{% set ph_ico = '🔵' if ph == 'L1' else ('🟡' if ph == 'L2' else ('🟢' if ph == 'L3' else '⚪')) %}{% set status = '✅ confirmed' if d.get('confirmed') else ('🚫 ignored' if d.get('user_suppressed') else '🧠 learning') %}{% set active = '🟢' if d.get('is_on') else '⚫' %}| {{ active }} {{ d.get('name', d.get('device_type','?')) }} | {{ d.get('power_w',0) | int }} | {{ ph_ico }} {{ ph }} | {{ status }} |
+      {% endfor %}{% endif %}{% endfor %}
+
+      ---
+
+      🧠 **NILM status**
+      - 🟢 actief apparaat
+      - ⚫ standby
+      - 🧠 learning
+      - ✅ bevestigd
+      - 🚫 genegeerd
       {% else %}
-      Kamermeter leert apparaatlocaties — beschikbaar zodra NILM apparaten herkent (~24 uur).
+      🧠 **CloudEMS NILM is nog aan het leren.**
+      Apparaten verschijnen automatisch zodra herkenning klaar is
+      (meestal binnen **12-24 uur**).
       {% endif %}
     card_mod:
       style: |
@@ -2975,6 +2976,46 @@ views:
           letter-spacing: 0.04em !important;
           padding: 14px 16px 12px !important;
         }
+  - type: conditional
+    conditions:
+    - condition: template
+      value_template: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {{ alerts | selectattr('key', 'eq', 'inverter_negative_price_dim') | list | length > 0 }}
+    card:
+      type: markdown
+      content: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {% set a = (alerts | selectattr('key', 'eq', 'inverter_negative_price_dim') | list | first) %}
+        🔴 **{{ a.title }}** — {{ a.message }}
+      card_mod:
+        style: |
+          ha-card {
+            background: linear-gradient(135deg, rgba(231,76,60,0.15) 0%, rgba(192,57,43,0.2) 100%) !important;
+            border-left: 4px solid rgb(231,76,60) !important;
+            border-radius: 10px !important;
+            margin-bottom: 4px !important;
+          }
+  - type: conditional
+    conditions:
+    - condition: template
+      value_template: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {{ alerts | selectattr('key', 'eq', 'inverter_dimmer_disabled') | list | length > 0 }}
+    card:
+      type: markdown
+      content: >
+        {% set alerts = state_attr('sensor.cloudems_actieve_meldingen', 'active_alerts') or [] %}
+        {% set a = (alerts | selectattr('key', 'eq', 'inverter_dimmer_disabled') | list | first) %}
+        🟡 **{{ a.title }}** — {{ a.message }}
+      card_mod:
+        style: |
+          ha-card {
+            background: linear-gradient(135deg, rgba(243,156,18,0.12) 0%, rgba(230,126,34,0.15) 100%) !important;
+            border-left: 4px solid rgb(243,156,18) !important;
+            border-radius: 10px !important;
+            margin-bottom: 4px !important;
+          }
   - type: entities
     title: ☀️ Zonnedimmer — Omvormers
     show_empty: false
@@ -3004,6 +3045,17 @@ views:
         entity: number.cloudems_zonnedimmer_1
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_1
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_1
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_1
         icon: mdi:brightness-percent
     - type: conditional
@@ -3031,6 +3083,17 @@ views:
         entity: number.cloudems_zonnedimmer_2
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_2
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_2
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_2
         icon: mdi:brightness-percent
     - type: conditional
@@ -3058,6 +3121,17 @@ views:
         entity: number.cloudems_zonnedimmer_3
         state_not: unavailable
       row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_3
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_3
+        state_not: unavailable
+      row:
         entity: number.cloudems_zonnedimmer_3
         icon: mdi:brightness-percent
     - type: conditional
@@ -3079,6 +3153,17 @@ views:
         entity: number.cloudems_zonnedimmer_4
         attribute: setpoint
         icon: mdi:target
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: number.cloudems_zonnedimmer_4
+        state_not: unavailable
+      row:
+        type: attribute
+        entity: number.cloudems_zonnedimmer_4
+        attribute: status
+        name: 🔆 Status beslissing
+        icon: mdi:information-outline
     - type: conditional
       conditions:
       - condition: state

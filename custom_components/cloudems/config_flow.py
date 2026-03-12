@@ -3247,15 +3247,50 @@ class CloudEMSOptionsFlow(_OptionsBase):
         """Wizard stap: zwembad filter + warmtepomp configuratie."""
         data = self._data()
         pool_cfg = data.get("pool", {}) or {}
+
+        def _find_power_sensor(switch_eid: str) -> str:
+            """Zoek automatisch een vermogensensor bij een schakelaar-entiteit.
+
+            Strategie: neem de naam van de schakelaar (bijv. 'zwembad_pomp'),
+            zoek dan sensoren met W/kW unit die die naam bevatten.
+            """
+            if not switch_eid:
+                return ""
+            # naam zonder domein, bijv. 'zwembad_pomp'
+            base = switch_eid.split(".", 1)[-1].lower()
+            keywords = [p for p in base.replace("_", " ").split() if len(p) > 2]
+            candidates = [
+                s.entity_id for s in self.hass.states.async_all("sensor")
+                if s.attributes.get("unit_of_measurement") in ("W", "kW")
+            ]
+            # score op overlappende keywords
+            scored = []
+            for eid in candidates:
+                eid_lower = eid.lower()
+                score = sum(1 for kw in keywords if kw in eid_lower)
+                if score > 0:
+                    scored.append((eid, score))
+            if not scored:
+                return ""
+            scored.sort(key=lambda x: (-x[1], len(x[0])))
+            return scored[0][0]
+
+        # Auto-fill power sensoren als ze nog niet geconfigureerd zijn
+        filter_eid        = pool_cfg.get("filter_entity", "")
+        heat_eid          = pool_cfg.get("heat_entity", "")
+        filter_power_def  = pool_cfg.get("filter_power_entity") or _find_power_sensor(filter_eid)
+        heat_power_def    = pool_cfg.get("heat_power_entity")   or _find_power_sensor(heat_eid)
+
         if user_input is not None:
-            # Sla pool config op als genest dict
             new_pool = {
-                "filter_entity": user_input.get("pool_filter_entity", ""),
-                "heat_entity":   user_input.get("pool_heat_entity", ""),
-                "temp_entity":   user_input.get("pool_temp_entity", ""),
-                "uv_entity":     user_input.get("pool_uv_entity", ""),
-                "robot_entity":  user_input.get("pool_robot_entity", ""),
-                "heat_setpoint": float(user_input.get("pool_heat_setpoint", 28.0)),
+                "filter_entity":       user_input.get("pool_filter_entity", ""),
+                "heat_entity":         user_input.get("pool_heat_entity", ""),
+                "temp_entity":         user_input.get("pool_temp_entity", ""),
+                "uv_entity":           user_input.get("pool_uv_entity", ""),
+                "robot_entity":        user_input.get("pool_robot_entity", ""),
+                "heat_setpoint":       float(user_input.get("pool_heat_setpoint", 28.0)),
+                "filter_power_entity": user_input.get("pool_filter_power_entity", ""),
+                "heat_power_entity":   user_input.get("pool_heat_power_entity", ""),
             }
             return self._save({"pool": new_pool})
         return self.async_show_form(
@@ -3264,9 +3299,15 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("pool_filter_entity", default=pool_cfg.get("filter_entity", "")):
                     selector.EntitySelector(selector.EntitySelectorConfig(
                         domain=["switch", "input_boolean"])),
+                vol.Optional("pool_filter_power_entity", default=filter_power_def):
+                    selector.EntitySelector(selector.EntitySelectorConfig(
+                        domain=["sensor"])),
                 vol.Optional("pool_heat_entity", default=pool_cfg.get("heat_entity", "")):
                     selector.EntitySelector(selector.EntitySelectorConfig(
                         domain=["switch", "input_boolean", "climate"])),
+                vol.Optional("pool_heat_power_entity", default=heat_power_def):
+                    selector.EntitySelector(selector.EntitySelectorConfig(
+                        domain=["sensor"])),
                 vol.Optional("pool_temp_entity", default=pool_cfg.get("temp_entity", "")):
                     selector.EntitySelector(selector.EntitySelectorConfig(
                         domain=["sensor"])),
@@ -3493,6 +3534,14 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 # Tijdelijk: voeg lege placeholder toe die in boiler_group_unit wordt ingevuld
                 return await self.async_step_boiler_group_unit()
 
+            if action.startswith("edit_unit_"):
+                u_idx = int(action.split("_")[-1])
+                groups[idx]["name"] = user_input.get("bg_name", group.get("name", "Groep"))
+                groups[idx]["mode"] = user_input.get("bg_mode", group.get("mode", "auto"))
+                self._opts[CONF_BOILER_GROUPS] = groups
+                self._opts["_bg_unit_edit_idx"] = u_idx
+                return await self.async_step_boiler_unit_edit()
+
             if action.startswith("remove_unit_"):
                 u_idx = int(action.split("_")[-1])
                 new_units = [u for i, u in enumerate(units) if i != u_idx]
@@ -3521,6 +3570,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
             selector.SelectOptionDict(value="save",     label="💾 Opslaan en terug"),
             selector.SelectOptionDict(value="add_unit", label="➕ Extra boiler toevoegen"),
         ]
+        for i, u in enumerate(units):
+            lbl = u.get("label", u.get("entity_id", f"Boiler {i+1}"))
+            edit_actions.append(selector.SelectOptionDict(
+                value=f"edit_unit_{i}", label=f"✏️ Bewerk boiler: {lbl}"
+            ))
         for i, u in enumerate(units):
             lbl = u.get("label", u.get("entity_id", f"Boiler {i+1}"))
             edit_actions.append(selector.SelectOptionDict(
@@ -3633,6 +3687,90 @@ class CloudEMSOptionsFlow(_OptionsBase):
                                                   mode="slider", unit_of_measurement="%")
                 ),
                 vol.Optional("bu_dimmer_off_pct", default=0): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")
+                ),
+            }),
+        )
+
+
+    async def async_step_boiler_unit_edit(self, user_input=None):
+        """Bewerk een bestaande boiler-unit — pre-filled met huidige waarden."""
+        groups  = list(self._opts.get(CONF_BOILER_GROUPS, []))
+        g_idx   = int(self._opts.get("_bg_edit_idx", 0))
+        u_idx   = int(self._opts.get("_bg_unit_edit_idx", 0))
+        group   = groups[g_idx] if g_idx < len(groups) else {}
+        units   = list(group.get("units", []))
+        unit    = units[u_idx] if u_idx < len(units) else {}
+
+        if user_input is not None:
+            updated = dict(unit)  # behoud alle bestaande keys (power_w, priority, etc.)
+            updated.update({
+                "entity_id":          user_input.get("bu_entity", unit.get("entity_id", "")),
+                "temp_sensor":        user_input.get("bu_temp_sensor", unit.get("temp_sensor", "")),
+                "energy_sensor":      user_input.get("bu_energy_sensor", unit.get("energy_sensor", "")),
+                "label":              user_input.get("bu_label", unit.get("label", f"Boiler {u_idx+1}")),
+                "setpoint_c":         float(user_input.get("bu_setpoint", unit.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C))),
+                "surplus_setpoint_c": float(user_input.get("bu_surplus_setpoint", unit.get("surplus_setpoint_c", 75.0))),
+                "control_mode":       user_input.get("bu_control_mode", unit.get("control_mode", "setpoint")),
+                "preset_on":          user_input.get("bu_preset_on",  unit.get("preset_on",  "boost")),
+                "preset_off":         user_input.get("bu_preset_off", unit.get("preset_off", "green")),
+                "dimmer_on_pct":      float(user_input.get("bu_dimmer_on_pct",  unit.get("dimmer_on_pct",  100))),
+                "dimmer_off_pct":     float(user_input.get("bu_dimmer_off_pct", unit.get("dimmer_off_pct", 0))),
+            })
+            units[u_idx] = updated
+            groups[g_idx]["units"] = units
+            self._opts[CONF_BOILER_GROUPS] = groups
+            return await self.async_step_boiler_group_edit()
+
+        return self.async_show_form(
+            step_id="boiler_unit_edit",
+            description_placeholders={
+                "unit_label": unit.get("label", unit.get("entity_id", f"Boiler {u_idx+1}")),
+                "group_name": group.get("name", "?"),
+            },
+            data_schema=vol.Schema({
+                vol.Required("bu_entity", default=unit.get("entity_id", "")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain=["switch", "climate", "water_heater", "input_boolean"]
+                    )
+                ),
+                vol.Optional("bu_temp_sensor", description={"suggested_value": unit.get("temp_sensor", "")}): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+                ),
+                vol.Optional("bu_energy_sensor", description={"suggested_value": unit.get("energy_sensor", "")}): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class=["power", "energy"])
+                ),
+                vol.Optional("bu_label", default=unit.get("label", f"Boiler {u_idx+1}")): str,
+                vol.Optional("bu_setpoint", default=unit.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C)):
+                    vol.All(vol.Coerce(float), vol.Range(min=30, max=90)),
+                vol.Optional("bu_control_mode", default=unit.get("control_mode", "setpoint")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            {"value": "switch",         "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
+                            {"value": "setpoint",       "label": "🌡️ Setpoint instellen (climate / water_heater) — aanbevolen"},
+                            {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus / accu vol (aanbevolen voor Ariston)"},
+                            {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston green/boost)"},
+                            {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
+                        ],
+                        mode="list",
+                    )
+                ),
+                vol.Optional("bu_surplus_setpoint", default=unit.get("surplus_setpoint_c", 75.0)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=90, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional("bu_preset_on",  default=unit.get("preset_on",  "boost")): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")
+                ),
+                vol.Optional("bu_preset_off", default=unit.get("preset_off", "green")): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")
+                ),
+                vol.Optional("bu_dimmer_on_pct", default=unit.get("dimmer_on_pct", 100)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")
+                ),
+                vol.Optional("bu_dimmer_off_pct", default=unit.get("dimmer_off_pct", 0)): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=100, step=5,
                                                   mode="slider", unit_of_measurement="%")
                 ),
