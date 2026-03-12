@@ -389,7 +389,7 @@ You can also support by starring this repository, [reporting bugs](https://githu
 
 ## License
 
-MIT © 2026 CloudEMS · [cloudems.eu](https://cloudems.eu)
+© 2026 CloudEMS · [cloudems.eu](https://cloudems.eu)
 
 ---
 
