@@ -17,16 +17,20 @@
         },
         "placeholders": {
           "buy_me_coffee_url": {
-            "description": "URL van de donatiepagina"
+            "description": "URL van de donatiepagina",
+            "example": "buy_me_coffee_url"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "support_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "support_url"
           },
           "website": {
-            "description": "URL van de website"
+            "description": "URL van de website",
+            "example": "website"
           }
         }
       },
@@ -80,13 +84,16 @@
         },
         "placeholders": {
           "detected": {
-            "description": "Aantal automatisch gevonden sensoren"
+            "description": "Aantal automatisch gevonden sensoren",
+            "example": "detected"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "mains_voltage": {
-            "description": "mains_voltage"
+            "description": "mains_voltage",
+            "example": "mains_voltage"
           }
         }
       },
@@ -113,14 +120,22 @@
           "power_sensor_l1": "─────────── Leistungssensoren (W) ───────────",
           "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
           "power_sensor_l2_export": "Einspeisung pro Phase L2.",
-          "power_sensor_l3_export": "Einspeisung pro Phase L3."
+          "power_sensor_l3_export": "Einspeisung pro Phase L3.",
+          "phase_sensors_L2": "Strom in Ampere auf Phase L2.",
+          "phase_sensors_L3": "Strom in Ampere auf Phase L3.",
+          "power_sensor_l2": "Direkte Leistungsmessung auf L2 (W).",
+          "power_sensor_l3": "Direkte Leistungsmessung auf L3 (W).",
+          "voltage_sensor_l2": "Aktuelle Spannung auf L2.",
+          "voltage_sensor_l3": "Aktuelle Spannung auf L3."
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "phase_count": {
-            "description": "Aantal fasen van de aansluiting"
+            "description": "Aantal fasen van de aansluiting",
+            "example": "phase_count"
           }
         }
       },
@@ -140,7 +155,8 @@
           "battery_sensor": "─────────── Speicher ───────────",
           "ev_charger_entity": "─────────── E-Auto Laden ───────────",
           "gas_sensor": "Gasverbrauchssensor für Gasanalyse und Wärmepumpen-COP.",
-          "gas_price_fixed": "Fester Gaspreis in €/m³ wenn kein Live-Preissensor verfügbar."
+          "gas_price_fixed": "Fester Gaspreis in €/m³ wenn kein Live-Preissensor verfügbar.",
+          "negative_price_threshold": "Preisniveau, bei dem die Solaranlagenabschaltung aktiviert wird. Standard: 0,00 EUR/kWh."
         }
       },
       "inverter_count": {
@@ -151,7 +167,8 @@
         },
         "placeholders": {
           "docs_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "docs_url"
           }
         }
       },
@@ -178,16 +195,20 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -209,7 +230,13 @@
         },
         "data_description": {
           "price_alert_high_eur_kwh": "Benachrichtigung senden, wenn der EPEX-Preis diesen Wert überschreitet.",
-          "nilm_min_confidence": "Geräte mit geringerer Konfidenz werden im Dashboard ausgeblendet."
+          "nilm_min_confidence": "Geräte mit geringerer Konfidenz werden im Dashboard ausgeblendet.",
+          "cost_tracking_enabled": "Tägliche, monatliche und jährliche Energiekosten anhand von Live-EPEX-Preisen verfolgen.",
+          "dynamic_loading": "Erhöhen Sie den EV-Ladestrom in den günstigsten EPEX-Stunden und reduzieren Sie ihn in teuren Stunden.",
+          "dynamic_load_price_threshold": "Preis, bei dem oder darunter eine Stunde für EV-Laden als 'günstig' gilt.",
+          "peak_shaving_enabled": "Begrenzen Sie den monatlichen Spitzenbedarf, indem abschaltbare Lasten ausgeschaltet werden, wenn der Bedarf das Limit überschreitet. Relevant für Kapazitätstarif.",
+          "phase_balance_enabled": "Verteilen Sie Lasten automatisch um, um die Phasenungleichgewicht innerhalb des Schwellenwerts zu halten.",
+          "phase_balance_threshold_a": "Maximal zulässige Stromdifferenz zwischen Phasen, bevor die Neuverteilung ausgelöst wird (A)."
         }
       },
       "peak_config": {
@@ -217,6 +244,11 @@
         "data": {
           "peak_shaving_limit_w": "Spitzenlastgrenze (W)",
           "peak_shaving_assets": "Abschaltbare Verbraucher"
+        },
+        "description": "Konfigurieren Sie das Spitzenleistungslimit und welche Lasten CloudEMS abschalten darf, um darunter zu bleiben.",
+        "data_description": {
+          "peak_shaving_limit_w": "Maximal erlaubte Netzimportleistung in Watt. Bei Überschreitung schaltet CloudEMS abschaltbare Lasten aus.",
+          "peak_shaving_assets": "Wählen Sie Schalter, Leuchten oder andere steuerbare Entitäten aus, die zur Reduzierung der Spitzenlast ausgeschaltet werden dürfen."
         }
       },
       "ai_config": {
@@ -230,8 +262,14 @@
         },
         "placeholders": {
           "premium_url": {
-            "description": "URL van de premium pagina"
+            "description": "URL van de premium pagina",
+            "example": "premium_url"
           }
+        },
+        "data_description": {
+          "ai_provider": "Wählen Sie, welches KI-Backend CloudEMS zur Geräteerkennung verwendet. Ollama und integriert sind lokal; Cloud erfordert einen API-Schlüssel.",
+          "cloud_api_key": "Geben Sie Ihren API-Schlüssel für den ausgewählten Cloud-Anbieter ein. Leer lassen bei Keiner oder Ollama.",
+          "nilm_min_confidence": "Erkennungen unter diesem Konfidenzwert werden ignoriert. Niedriger = mehr Ergebnisse, aber mehr Fehlalarme. Standard: 0.65."
         }
       },
       "ollama_config": {
@@ -240,6 +278,12 @@
           "ollama_host": "Ollama-Host (z.B. localhost oder 192.168.1.x)",
           "ollama_port": "Ollama-Port (Standard 11434)",
           "ollama_model": "Ollama-Modell (z.B. llama3, mistral, phi3)"
+        },
+        "description": "Konfigurieren Sie den Ollama-Server, den CloudEMS für lokale KI-Inferenz verwendet.",
+        "data_description": {
+          "ollama_host": "Hostname oder IP-Adresse Ihrer Ollama-Instanz.",
+          "ollama_port": "TCP-Port, auf dem Ollama lauscht. Standard ist 11434.",
+          "ollama_model": "Name des zu verwendenden Ollama-Modells. Empfohlen: llama3, mistral oder phi3 (kleinste)."
         }
       },
       "advanced": {
@@ -260,6 +304,9 @@
           "diagram_url": {
             "description": "URL van het diagram"
           }
+        },
+        "data_description": {
+          "p1_host": "Geben Sie die IP-Adresse Ihres P1-Gateways ein (HomeWizard Energy, SLIMMELEZER+, P1ib, …). Leer lassen, wenn Sie bereits eine DSMR-Integration haben."
         }
       },
       "battery_detail": {
@@ -277,7 +324,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Batterij volgnummer"
+            "description": "Batterij volgnummer",
+            "example": "battery_num"
           }
         }
       },
@@ -311,7 +359,8 @@
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           }
         }
       },
@@ -329,7 +378,8 @@
           "price_include_tax": "Include energy tax",
           "price_include_btw": "Include VAT (21%)",
           "selected_supplier": "Supplier (for default markup)",
-          "supplier_markup": "Manual markup (€/kWh)"
+          "supplier_markup": "Manual markup (€/kWh)",
+          "energy_prices_country": "Land (für Lieferantenoptionen)"
         }
       },
       "climate": {
@@ -394,11 +444,29 @@
           "preset_on": "Preset name ON (e.g. boost)",
           "preset_off": "Preset name OFF (e.g. green)",
           "dimmer_on_pct": "Dimmer value ON (%)",
-          "dimmer_off_pct": "Dimmer value OFF (%)"
+          "dimmer_off_pct": "Dimmer value OFF (%)",
+          "bu_entity": "Boiler-Entität (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperatursensor (optional)",
+          "bu_energy_sensor": "Leistungssensor (optional)",
+          "bu_label": "Name dieses Boilers",
+          "bu_brand": "Marke / Modell",
+          "bu_boiler_type": "Boilertyp",
+          "boiler_type": "Boilertyp",
+          "bu_control_mode": "Steuermodus",
+          "bu_setpoint": "Zieltemperatur — Normalbetrieb (°C)",
+          "bu_surplus_setpoint": "Sollwert bei PV-Überschuss / Akku voll (°C)",
+          "bu_max_setpoint_boost": "Absoluter Sollwert-Höchstwert (°C)",
+          "bu_preset_on": "Preset-Name EIN (z.B. BOOST)",
+          "bu_preset_off": "Preset-Name AUS (z.B. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer an (%)",
+          "bu_dimmer_off_pct": "Dimmer aus (%)",
+          "max_setpoint_entity": "Max-Sollwert-Entität (z.B. number.ariston_max_setpoint_temperature)",
+          "max_setpoint_boost_c": "Max. Sollwert bei PV-Überschuss / Akku voll (°C)"
         },
         "data_description": {
           "setpoint_c": "Normal setpoint. During PV surplus, the maximum setpoint is used automatically to store as much solar energy as possible.",
-          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default."
+          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default.",
+          "max_setpoint_entity": "Optional: Number-Entität, die vor jeder Temperaturänderung das Hardware-Maximum setzt (erforderlich für Ariston Lydos Hybrid)."
         }
       },
       "mail": {
@@ -428,12 +496,24 @@
           "zonneplan_min_soc": "Min. SoC Entladen (%)",
           "zonneplan_max_soc": "Max. SoC Laden (%)",
           "zonneplan_charge_w": "Standard-Ladeleistung (W)",
-          "zonneplan_discharge_w": "Standard-Entladeleistung (W)"
+          "zonneplan_discharge_w": "Standard-Entladeleistung (W)",
+          "zonneplan_ev_sensor": "EV-Ladepunkt-Sensor (EV-Sperre)",
+          "zonneplan_ev_block_w": "EV-Sperre-Schwellenwert (W, 0 = aus)",
+          "zonneplan_house_sensor": "Hausverbrauchssensor (Anti-Rundpumpen)",
+          "zonneplan_min_house_load_w": "Mindest-Hausverbrauch zum Entladen (W)",
+          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
           "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore."
+          "zonneplan_restore_after_min": "0 = never automatically restore.",
+          "zonneplan_ev_sensor": "Sensor für die EV-Ladeleistung. Leer lassen um die EV-Sperre zu deaktivieren.",
+          "zonneplan_ev_block_w": "Wenn der EV-Ladepunkt mehr als diesen Wert verbraucht, wird das Entladen gesperrt. 0 = EV-Sperre deaktiviert.",
+          "zonneplan_house_sensor": "Sensor für den gesamten Hausverbrauch. Leer lassen um Anti-Rundpumpen zu deaktivieren.",
+          "zonneplan_min_house_load_w": "Das Entladen wird gesperrt, wenn der Hausverbrauch unter diesem Wert liegt. Verhindert Rundpumpen (Laden → Entladen ohne echten Verbrauch).",
+          "zonneplan_min_soc": "Das Entladen stoppt, wenn der SoC diesen Prozentsatz erreicht. Schützt die Batterielebensdauer.",
+          "zonneplan_max_soc": "Das Laden stoppt, wenn der SoC diesen Prozentsatz erreicht.",
+          "zonneplan_soc_reserve_high": "Minimaler SoC, der beibehalten wird, wenn noch mehrere HIGH-Stunden in der Prognose sind. Verhindert, dass die Batterie zu früh entladen wird."
         }
       },
       "gas_opts": {
@@ -501,7 +581,44 @@
           "bu_preset_on": "Preset EIN",
           "bu_preset_off": "Preset AUS",
           "bu_dimmer_on_pct": "Dimmer EIN (%)",
-          "bu_dimmer_off_pct": "Dimmer AUS (%)"
+          "bu_dimmer_off_pct": "Dimmer AUS (%)",
+          "bu_boiler_type": "Boilertyp",
+          "bu_brand": "Marke / Typ",
+          "bu_max_setpoint_boost": "Absoluter Sollwert-Höchstwert (°C)"
+        }
+      },
+      "boiler_brand": {
+        "title": "🏷️ Marke / Typ Boiler {idx} von {total}",
+        "description": "Wählen Sie die Boilermarke. CloudEMS füllt automatisch den richtigen Steuermodus, Sollwerte und Sicherheitsgrenzen aus.",
+        "data": {
+          "brand": "Marke / Typ"
+        }
+      },
+      "dsmr_source": {
+        "title": "📡 Messdatenquelle",
+        "description": "Wie liest CloudEMS die Smart-Meter-Daten?",
+        "data": {
+          "dsmr_source": "Messdatenquelle"
+        },
+        "data_description": {
+          "dsmr_source": "Wählen Sie, wie CloudEMS die Netzzählerdaten abruft. Verwenden Sie die DSMR/HomeWizard-Integration, wenn Sie diese bereits konfiguriert haben."
+        }
+      },
+      "price_provider": {
+        "title": "⚡ Preisquelle — direkte Lieferantenverbindung",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Preisquelle"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Zugangsdaten — {provider_label}",
+        "description": "Geben Sie Ihre Zugangsdaten für {provider_label} ein. CloudEMS speichert sie sicher und verwendet sie nur zum Abrufen von Preisen.",
+        "data": {
+          "username": "E-Mail-Adresse",
+          "password": "Passwort",
+          "api_key": "API-Schlüssel",
+          "access_token": "API-Token"
         }
       }
     },
@@ -550,7 +667,8 @@
           "gas_price_sensor": "Gas price sensor (€/m³) — optional",
           "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
           "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
-          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)",
+          "enable_solar_dimmer": "Solare Abregelung bei negativem Preis"
         },
         "description": "PV-Sensor, Ladepunkt und Solarabschaltung."
       },
@@ -582,7 +700,10 @@
           "ai_provider": "AI provider",
           "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)"
         },
-        "description": "Select the AI provider and adjust NILM detection settings. NILM-detected devices appear as sensors under Settings → Devices → CloudEMS. You can confirm, rename or dismiss them there."
+        "description": "Select the AI provider and adjust NILM detection settings. NILM-detected devices appear as sensors under Settings → Devices → CloudEMS. You can confirm, rename or dismiss them there.",
+        "data_description": {
+          "nilm_min_confidence": "Erkennungen unter diesem Konfidenzwert werden ignoriert. 0.65 ist ein guter Standardwert."
+        }
       },
       "advanced_opts": {
         "title": "📡 P1 & Erweitert",
@@ -595,12 +716,14 @@
           "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
           "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
           "battery_degradation_enabled": "Track battery degradation",
-          "congestion_enabled": "Enable grid congestion detection"
+          "congestion_enabled": "Enable grid congestion detection",
+          "dsmr_source": "Messdatenquelle"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
           "battery_chemistry": "Select your battery chemistry. LFP degrades slower than NMC.",
-          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low."
+          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low.",
+          "dsmr_source": "Wählen Sie, wie CloudEMS die Netzzählerdaten abruft."
         }
       },
       "inverter_detail_opts": {
@@ -617,13 +740,16 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -635,7 +761,8 @@
         },
         "placeholders": {
           "inverter_names": {
-            "description": "inverter_names"
+            "description": "inverter_names",
+            "example": "inverter_names"
           }
         }
       },
@@ -647,10 +774,12 @@
         },
         "placeholders": {
           "current_count": {
-            "description": "Current battery count"
+            "description": "Current battery count",
+            "example": "current_count"
           },
           "battery_names": {
-            "description": "Names of existing batteries"
+            "description": "Names of existing batteries",
+            "example": "battery_names"
           }
         }
       },
@@ -669,7 +798,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Battery sequence number"
+            "description": "Battery sequence number",
+            "example": "battery_num"
           }
         }
       },
@@ -710,7 +840,8 @@
           "supplier_markup": "Eigener Aufschlag (€/kWh)",
           "contract_type": "Vertragstyp",
           "fixed_import_price": "Fester Importtarif (€/kWh)",
-          "fixed_export_price": "Fester Einspeisevergütung (€/kWh)"
+          "fixed_export_price": "Fester Einspeisevergütung (€/kWh)",
+          "energy_prices_country": "Land"
         },
         "title": "💶 Prices & Tax"
       },
@@ -792,16 +923,20 @@
         "description": "Hieronder staan alle gedetecteerde NILM-apparaten.\n\n**Huidig overzicht:**\n```\n{devices_overview}\n```\n\n**Hernoemen** — gebruik de service `{rename_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `name`: nieuwe weergavenaam (max. 60 tekens)\n- `device_type`: optioneel het type corrigeren\n\n**Verbergen/tonen** — gebruik de service `{hide_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `hidden`: `true` om te verbergen, `false` om te tonen\n\n👉 [Open Ontwikkeltools → Services]({devtools_url})",
         "placeholders": {
           "devices_overview": {
-            "description": "devices_overview"
+            "description": "devices_overview",
+            "example": "devices_overview"
           },
           "devtools_url": {
-            "description": "devtools_url"
+            "description": "devtools_url",
+            "example": "devtools_url"
           },
           "hide_service": {
-            "description": "hide_service"
+            "description": "hide_service",
+            "example": "hide_service"
           },
           "rename_service": {
-            "description": "rename_service"
+            "description": "rename_service",
+            "example": "rename_service"
           }
         }
       },
@@ -844,10 +979,12 @@
         },
         "placeholders": {
           "groups_info": {
-            "description": "groups_info"
+            "description": "groups_info",
+            "example": "groups_info"
           },
           "tip": {
-            "description": "tip"
+            "description": "tip",
+            "example": "tip"
           }
         }
       },
@@ -869,7 +1006,8 @@
         },
         "placeholders": {
           "info": {
-            "description": "info"
+            "description": "info",
+            "example": "info"
           }
         }
       },
@@ -906,7 +1044,10 @@
           "bu_dimmer_on_pct": "Dimmer-Wert EIN (%)",
           "bu_dimmer_off_pct": "Dimmer-Wert AUS (%)",
           "bu_energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)",
-          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)"
+          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)",
+          "bu_boiler_type": "Boilertyp",
+          "bu_brand": "Marke / Modell",
+          "bu_max_setpoint_boost": "Absoluter Sollwert-Höchstwert (°C)"
         }
       },
       "managed_battery_opts": {
@@ -919,10 +1060,20 @@
           "zonneplan_min_soc": "Min. SoC (%)",
           "zonneplan_max_soc": "Max. SoC (%)",
           "zonneplan_charge_w": "Ladeleistung (W)",
-          "zonneplan_discharge_w": "Entladeleistung (W)"
+          "zonneplan_discharge_w": "Entladeleistung (W)",
+          "zonneplan_ev_sensor": "EV-Ladepunkt-Sensor (EV-Sperre)",
+          "zonneplan_ev_block_w": "EV-Sperre-Schwellenwert (W, 0 = aus)",
+          "zonneplan_house_sensor": "Hausverbrauchssensor (Anti-Rundpumpen)",
+          "zonneplan_min_house_load_w": "Mindest-Hausverbrauch zum Entladen (W)",
+          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)"
         },
         "data_description": {
-          "zonneplan_enabled": "{zonneplan_description}"
+          "zonneplan_enabled": "{zonneplan_description}",
+          "zonneplan_ev_sensor": "Sensor für die EV-Ladeleistung. Leer lassen um die EV-Sperre zu deaktivieren.",
+          "zonneplan_ev_block_w": "Wenn der EV-Ladepunkt mehr als diesen Wert verbraucht, wird das Entladen gesperrt. 0 = EV-Sperre deaktiviert.",
+          "zonneplan_house_sensor": "Sensor für den gesamten Hausverbrauch. Leer lassen um Anti-Rundpumpen zu deaktivieren.",
+          "zonneplan_min_house_load_w": "Das Entladen wird gesperrt, wenn der Hausverbrauch unter diesem Wert liegt. Verhindert Rundpumpen.",
+          "zonneplan_soc_reserve_high": "Minimaler SoC, der beibehalten wird, wenn noch mehrere HIGH-Stunden in der Prognose sind."
         }
       },
       "climate_opts": {
@@ -983,6 +1134,67 @@
           "latest_hour": "Latest hour (0–23)",
           "grace_s": "Grace period (seconds)",
           "notify": "Send notification on delay"
+        }
+      },
+      "boiler_group_brand": {
+        "title": "🏷️ Marke / Typ — Boiler {unit_num} von {total} ({group_name})",
+        "description": "Wählen Sie die Boilermarke. CloudEMS füllt Steuermodus, Sollwerte und Grenzen automatisch aus.",
+        "data": {
+          "brand": "Marke / Typ"
+        }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Boiler bearbeiten: {unit_label}",
+        "description": "Gruppe: **{group_name}**\n\nPassen Sie Marke oder Einstellungen dieses Boilers an.",
+        "data": {
+          "bu_entity": "Boiler-Entität (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperatursensor (optional)",
+          "bu_energy_sensor": "Leistungssensor (optional)",
+          "bu_label": "Name dieses Boilers",
+          "bu_brand": "Marke / Modell",
+          "bu_boiler_type": "Boilertyp",
+          "bu_control_mode": "Steuermodus",
+          "bu_setpoint": "Zieltemperatur — Normalbetrieb (°C)",
+          "bu_surplus_setpoint": "Sollwert bei PV-Überschuss / Akku voll (°C)",
+          "bu_max_setpoint_boost": "Absoluter Sollwert-Höchstwert (°C)",
+          "bu_max_setpoint_entity": "Max-Sollwert-Entität (z.B. number.ariston_max_setpoint_temperature)",
+          "bu_preset_on": "Preset-Name EIN (z.B. BOOST)",
+          "bu_preset_off": "Preset-Name AUS (z.B. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer an (%)",
+          "bu_dimmer_off_pct": "Dimmer aus (%)"
+        },
+        "data_description": {
+          "bu_max_setpoint_entity": "Optional: Number-Entität, die vor jeder Temperaturänderung das Hardware-Maximum setzt (erforderlich für Ariston Lydos Hybrid)."
+        }
+      },
+      "prices_epex_opts": {
+        "title": "💶 Preise — Steuern & Aufschlag",
+        "description": "{info}",
+        "data": {
+          "contract_type": "Vertragstyp",
+          "price_include_btw": "MwSt. einbeziehen",
+          "price_include_tax": "Energiesteuer einbeziehen",
+          "selected_supplier": "Lieferant (für Standard-Aufschlag)",
+          "supplier_markup": "Manueller Aufschlag (€/kWh)",
+          "fixed_import_price": "Fester Importtarif (€/kWh)",
+          "fixed_export_price": "Fester Exporttarif (€/kWh)"
+        }
+      },
+      "prices_provider_opts": {
+        "title": "💶 Preise — Lieferant",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Preisquelle / Lieferant"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "🔑 Zugangsdaten — {provider_label}",
+        "description": "Geben Sie Ihre Zugangsdaten für {provider_label} ein.",
+        "data": {
+          "username": "E-Mail-Adresse",
+          "password": "Passwort",
+          "api_key": "API-Schlüssel",
+          "access_token": "API-Token"
         }
       }
     },

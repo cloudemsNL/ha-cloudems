@@ -118,6 +118,193 @@ def _ent(domains=None):
     return selector.EntitySelector(cfg)
 
 
+# ── Merk-presets voor boiler wizard ──────────────────────────────────────────
+# Elke entry bevat de volledige backend-config die automatisch wordt ingevuld.
+# "_label" is alleen UI. De gebruiker kan alles daarna nog aanpassen.
+BOILER_BRAND_PRESETS: dict[str, dict] = {
+    # ── Generiek (bovenaan — meest gekozen startpunt) ─────────────────────────
+    "unknown": {
+        "_label":               "❓ Merk onbekend — handmatig instellen",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       0.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           40.0,
+    },
+    "generic_resistive": {
+        "_label":               "⚡ Generiek elektrisch (switch / setpoint)",
+        "boiler_type":          "resistive",
+        "control_mode":         "switch",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       0.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           40.0,
+    },
+    "generic_heatpump": {
+        "_label":               "♻️ Generiek warmtepomp boiler",
+        "boiler_type":          "heat_pump",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 60.0,
+        "surplus_setpoint_c":   60.0,
+        "hardware_max_c":       60.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           40.0,
+        "hardware_deadband_c":  2.0,
+    },
+    # ── Ariston ──────────────────────────────────────────────────────────────
+    "ariston_lydos_hybrid": {
+        "_label":               "🔥 Ariston Lydos Hybrid (warmtepomp + weerstand)",
+        "boiler_type":          "hybrid",
+        "control_mode":         "preset",
+        "preset_on":            "BOOST",
+        "preset_off":           "GREEN",
+        "max_setpoint_boost_c": 75.0,
+        "max_setpoint_green_c": 53.0,
+        "hardware_max_c":       75.0,
+        "surplus_setpoint_c":   75.0,
+        "setpoint_c":           53.0,
+        "min_temp_c":           35.0,
+        "hardware_deadband_c":  2.0,
+        "stall_timeout_s":      300.0,
+        "stall_boost_c":        5.0,
+    },
+    "ariston_velis_evo": {
+        "_label":               "⚡ Ariston Velis Evo (elektrisch)",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "MANUAL",
+        "preset_off":           "MANUAL",
+        "max_setpoint_boost_c": 80.0,
+        "surplus_setpoint_c":   80.0,
+        "hardware_max_c":       80.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           35.0,
+    },
+    "ariston_andris": {
+        "_label":               "⚡ Ariston Andris Lux (elektrisch)",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "MANUAL",
+        "preset_off":           "MANUAL",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       75.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           35.0,
+    },
+    # ── Midea / Comfee (midea_ac_lan integratie) ─────────────────────────────
+    "midea_e2": {
+        "_label":               "💧 Midea / Comfee elektrisch boiler (E2)",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       75.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           30.0,
+    },
+    "midea_e3": {
+        "_label":               "🔥 Midea / Comfee gas boiler (E3)",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 65.0,
+        "surplus_setpoint_c":   65.0,
+        "hardware_max_c":       65.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           35.0,
+    },
+    # ── Daikin ───────────────────────────────────────────────────────────────
+    "daikin_altherma_dhw": {
+        "_label":               "♻️ Daikin Altherma DHW (warmtepomp boiler)",
+        "boiler_type":          "heat_pump",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 60.0,
+        "surplus_setpoint_c":   60.0,
+        "hardware_max_c":       60.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           40.0,
+        "hardware_deadband_c":  3.0,
+    },
+    # ── Vaillant ─────────────────────────────────────────────────────────────
+    "vaillant_unistor": {
+        "_label":               "♻️ Vaillant uniSTOR / aroSTOR (warmtepomp boiler)",
+        "boiler_type":          "heat_pump",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 65.0,
+        "surplus_setpoint_c":   65.0,
+        "hardware_max_c":       65.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           40.0,
+        "hardware_deadband_c":  3.0,
+    },
+    # ── Stiebel Eltron ───────────────────────────────────────────────────────
+    "stiebel_wwk": {
+        "_label":               "♻️ Stiebel Eltron WWK / SHW (warmtepomp boiler)",
+        "boiler_type":          "heat_pump",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 65.0,
+        "surplus_setpoint_c":   65.0,
+        "hardware_max_c":       65.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           40.0,
+        "hardware_deadband_c":  2.0,
+    },
+    # ── A.O. Smith / State / American Water Heater ───────────────────────────
+    "aosmith_electric": {
+        "_label":               "⚡ A.O. Smith / State elektrisch",
+        "boiler_type":          "resistive",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 60.0,
+        "surplus_setpoint_c":   60.0,
+        "hardware_max_c":       60.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           35.0,
+    },
+    # ── Itho Daalderop ───────────────────────────────────────────────────────
+    "itho_heatpump": {
+        "_label":               "♻️ Itho Daalderop warmtepomp boiler",
+        "boiler_type":          "heat_pump",
+        "control_mode":         "setpoint",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 60.0,
+        "surplus_setpoint_c":   60.0,
+        "hardware_max_c":       60.0,
+        "setpoint_c":           55.0,
+        "min_temp_c":           40.0,
+        "hardware_deadband_c":  3.0,
+    },
+}
+
+def _boiler_brand_selector() -> selector.SelectSelector:
+    opts = [
+        selector.SelectOptionDict(value=k, label=v["_label"])
+        for k, v in BOILER_BRAND_PRESETS.items()
+    ]
+    return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="dropdown"))
+
+
 # ── Auto-detection ────────────────────────────────────────────────────────────
 
 def _score(entity_id: str, keywords: list[str]) -> int:
@@ -1013,6 +1200,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._existing_shutter_cfgs = list(self._config.get(CONF_SHUTTER_CONFIGS, []))
             self._config[CONF_SHUTTER_COUNT]   = self._shutter_count
             self._config[CONF_SHUTTER_CONFIGS] = []
+            self._config["shutter_global_smoke_sensor"] = user_input.get("shutter_global_smoke_sensor") or ""
             self._shutter_step = 0
             self._overkiz_prefill = overkiz_covers
             if self._shutter_count == 0 and overkiz_covers:
@@ -1036,6 +1224,12 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_SHUTTER_COUNT, default=existing_count): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=opts, mode="dropdown")
+                ),
+                vol.Optional(
+                    "shutter_global_smoke_sensor",
+                    description={"suggested_value": self._config.get("shutter_global_smoke_sensor", "")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)
                 ),
             }),
             description_placeholders={"overkiz_found": overkiz_msg},
@@ -1147,6 +1341,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "night_close_time":  user_input.get("shutter_night_close", "23:00"),
                 "morning_open_time": user_input.get("shutter_morning_open", "07:30"),
                 "default_setpoint":  float(user_input.get("shutter_default_setpoint", 20.0)),
+                "smoke_sensor":    user_input.get("shutter_smoke_sensor") or "",
             })
             self._shutter_step += 1
             if self._shutter_step < self._shutter_count:
@@ -1193,6 +1388,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("shutter_night_close",    default=existing.get("night_close_time", "23:00")):  str,
                 vol.Optional("shutter_morning_open",   default=existing.get("morning_open_time", "07:30")): str,
                 vol.Optional("shutter_default_setpoint", default=existing.get("default_setpoint", 20.0)):   vol.Coerce(float),
+                vol.Optional("shutter_smoke_sensor", description={"suggested_value": existing.get("smoke_sensor", "")}): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)),
             }),
             description_placeholders={
                 "shutter_num":  str(i),
@@ -1660,7 +1856,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._boiler_group_mode  = user_input.get("group_mode", BOILER_MODE_AUTO)
             self._boiler_unit_index  = 0
             self._boiler_units_tmp   = []
-            return await self.async_step_boiler_unit()
+            return await self.async_step_boiler_brand()
 
         return self.async_show_form(
             step_id="boiler_groups",
@@ -1693,38 +1889,73 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
         )
 
-    async def async_step_boiler_unit(self, user_input=None):
-        """Wizard-stap: configureer één boiler-unit in de huidige groep."""
+    async def async_step_boiler_brand(self, user_input=None):
+        """Wizard-stap: kies het merk/type van de boiler. Vult automatisch de juiste instellingen."""
         idx   = getattr(self, "_boiler_unit_index", 0)
         total = int(getattr(self, "_boiler_unit_count", 1))
 
         if user_input is not None:
-            control_mode = user_input.get("control_mode", "switch")
+            brand = user_input.get("brand", "unknown")
+            self._boiler_brand_tmp = BOILER_BRAND_PRESETS.get(brand, BOILER_BRAND_PRESETS["unknown"]).copy()
+            self._boiler_brand_tmp["_brand_key"] = brand
+            return await self.async_step_boiler_unit()
+
+        return self.async_show_form(
+            step_id="boiler_brand",
+            description_placeholders={
+                "idx":   str(idx + 1),
+                "total": str(total),
+                "group": getattr(self, "_boiler_group_name", "?"),
+            },
+            data_schema=vol.Schema({
+                vol.Required("brand", default="unknown"): _boiler_brand_selector(),
+            }),
+        )
+
+    async def async_step_boiler_unit(self, user_input=None):
+        """Wizard-stap: configureer één boiler-unit in de huidige groep."""
+        idx   = getattr(self, "_boiler_unit_index", 0)
+        total = int(getattr(self, "_boiler_unit_count", 1))
+        # Merk-preset van vorige stap (async_step_boiler_brand)
+        bp    = getattr(self, "_boiler_brand_tmp", BOILER_BRAND_PRESETS["unknown"])
+
+        if user_input is not None:
+            control_mode = user_input.get("control_mode", bp.get("control_mode", "switch"))
             unit = {
-                "entity_id":      user_input["entity_id"],
-                "label":          user_input.get("label", f"Boiler {idx + 1}"),
-                "temp_sensor":    user_input.get("temp_sensor", ""),
-                "energy_sensor":  user_input.get("energy_sensor", ""),
-                "power_w":        DEFAULT_BOILER_POWER_W,  # wordt geleerd via energy_sensor
-                "setpoint_c":     float(user_input.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C)),
-                "min_temp_c":     float(user_input.get("min_temp_c", DEFAULT_BOILER_MIN_TEMP_C)),
-                "comfort_floor_c":float(user_input.get("comfort_floor_c", DEFAULT_BOILER_COMFORT_C)),
-                "priority":       int(user_input.get("priority", idx)),
-                "min_on_minutes": int(user_input.get("min_on_minutes", DEFAULT_BOILER_MIN_ON_MIN)),
-                "min_off_minutes":int(user_input.get("min_off_minutes", DEFAULT_BOILER_MIN_OFF_MIN)),
-                "control_mode":   control_mode,
-                "preset_on":      user_input.get("preset_on",  "boost"),
-                "preset_off":     user_input.get("preset_off", "green"),
-                "dimmer_on_pct":  float(user_input.get("dimmer_on_pct",  100)),
-                "dimmer_off_pct": float(user_input.get("dimmer_off_pct", 0)),
-                # Stel modus vast op basis van entiteitstype
-                "modes": ["cheap_hours", "negative_price", "pv_surplus", "export_reduce"],
+                "entity_id":            user_input["entity_id"],
+                "label":                user_input.get("label", f"Boiler {idx + 1}"),
+                "temp_sensor":          user_input.get("temp_sensor", ""),
+                "energy_sensor":        user_input.get("energy_sensor", ""),
+                "power_w":              DEFAULT_BOILER_POWER_W,
+                "setpoint_c":           float(user_input.get("setpoint_c",           bp.get("setpoint_c",           DEFAULT_BOILER_SETPOINT_C))),
+                "min_temp_c":           float(user_input.get("min_temp_c",           bp.get("min_temp_c",           DEFAULT_BOILER_MIN_TEMP_C))),
+                "comfort_floor_c":      float(user_input.get("comfort_floor_c",      DEFAULT_BOILER_COMFORT_C)),
+                "surplus_setpoint_c":   float(user_input.get("surplus_setpoint_c",   bp.get("surplus_setpoint_c",   75.0))),
+                "max_setpoint_boost_c": float(user_input.get("max_setpoint_boost_c", bp.get("max_setpoint_boost_c", 75.0))),
+                "max_setpoint_green_c": float(user_input.get("max_setpoint_green_c", bp.get("max_setpoint_green_c", 53.0))),
+                "hardware_max_c":       float(user_input.get("hardware_max_c",       bp.get("hardware_max_c",       0.0))),
+                "hardware_deadband_c":  float(bp.get("hardware_deadband_c",  0.0)),
+                "stall_timeout_s":      float(bp.get("stall_timeout_s",      300.0)),
+                "stall_boost_c":        float(bp.get("stall_boost_c",        5.0)),
+                "priority":             int(user_input.get("priority", idx)),
+                "min_on_minutes":       int(user_input.get("min_on_minutes",  DEFAULT_BOILER_MIN_ON_MIN)),
+                "min_off_minutes":      int(user_input.get("min_off_minutes", DEFAULT_BOILER_MIN_OFF_MIN)),
+                "control_mode":         control_mode,
+                "boiler_type":          user_input.get("boiler_type", bp.get("boiler_type", "resistive")),
+                "preset_on":            user_input.get("preset_on",  bp.get("preset_on",  "on")),
+                "preset_off":           user_input.get("preset_off", bp.get("preset_off", "off")),
+                "dimmer_on_pct":        float(user_input.get("dimmer_on_pct",  100)),
+                "dimmer_off_pct":       float(user_input.get("dimmer_off_pct", 0)),
+                "max_setpoint_entity":  user_input.get("max_setpoint_entity", ""),
+                "brand":                bp.get("_brand_key", "unknown"),
+                "modes":                ["cheap_hours", "negative_price", "pv_surplus", "export_reduce"],
             }
             getattr(self, "_boiler_units_tmp", []).append(unit)
             self._boiler_unit_index = idx + 1
+            self._boiler_brand_tmp  = BOILER_BRAND_PRESETS["unknown"]  # reset voor volgende boiler
 
             if self._boiler_unit_index < total:
-                return await self.async_step_boiler_unit()
+                return await self.async_step_boiler_brand()
 
             # Alle units van deze groep zijn klaar — sla groep op
             group = {
@@ -1739,7 +1970,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_BOILER_GROUPS] = groups
             return await self.async_step_mail()
 
-        # Detecteer switch/climate/water_heater entiteiten als suggestie
+        # Detecteer water_heater / climate / switch entiteiten als suggestie
         all_states   = self.hass.states.async_all()
         boiler_hints = sorted(set(
             s.entity_id for s in all_states
@@ -1749,69 +1980,91 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                "warmwater", "hw", "dhw", "cv"))
         ))
 
+        _default_sp   = bp.get("setpoint_c",          DEFAULT_BOILER_SETPOINT_C)
+        _default_min  = bp.get("min_temp_c",           DEFAULT_BOILER_MIN_TEMP_C)
+        _default_mxsp = bp.get("max_setpoint_boost_c", 75.0)
+        _brand_label  = bp.get("_label",               "❓ Onbekend")
+        _brand_key    = bp.get("_brand_key",            "unknown")
+        _is_known_brand = _brand_key not in ("unknown", "generic_resistive", "generic_heatpump")
+
+        # Basis schema — altijd getoond
+        schema_dict = {
+            vol.Required("entity_id"): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "climate", "water_heater", "input_boolean"]
+                )
+            ),
+            vol.Optional("label",
+                         description={"suggested_value": f"Boiler {idx + 1}"}): str,
+            vol.Optional("temp_sensor"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+            ),
+            vol.Optional("energy_sensor"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor",
+                    device_class=["power", "energy"])
+            ),
+            vol.Optional("setpoint_c", default=_default_sp): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=30, max=85, step=1,
+                                              mode="slider", unit_of_measurement="°C")
+            ),
+            # v4.6.25: max_setpoint_entity — number-entity die de hardware-limiet bestuurt
+            # (bijv. number.ariston_max_setpoint_temperature). CloudEMS zet deze entity
+            # vóór set_temperature zodat de boiler echt 75°C kan bereiken in BOOST-modus.
+            vol.Optional("max_setpoint_entity"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="number")
+            ),
+        }
+
+        # Geavanceerde velden alleen tonen als merk onbekend/generiek is
+        if not _is_known_brand:
+            _default_cm   = bp.get("control_mode", "switch")
+            _default_type = bp.get("boiler_type",  "resistive")
+            _default_pon  = bp.get("preset_on",    "on")
+            _default_poff = bp.get("preset_off",   "off")
+            schema_dict.update({
+                vol.Optional("min_temp_c", default=_default_min): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=20, max=60, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional("max_setpoint_boost_c", default=_default_mxsp): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional("boiler_type", default=_default_type): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "resistive", "label": "⚡ Elektrisch weerstand (boiler, geiser)"},
+                        {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
+                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand, bijv. Ariston Lydos Hybrid)"},
+                    ], mode="list")
+                ),
+                vol.Optional("control_mode", default=_default_cm): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",         "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
+                        {"value": "setpoint",       "label": "🌡️ Setpoint instellen (climate / water_heater)"},
+                        {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
+                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
+                        {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
+                    ], mode="list")
+                ),
+                vol.Optional("preset_on",  default=_default_pon):  selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("preset_off", default=_default_poff): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("dimmer_on_pct",  default=100): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
+                vol.Optional("dimmer_off_pct", default=0):   selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
+            })
+
         return self.async_show_form(
             step_id="boiler_unit",
             description_placeholders={
-                "idx":   str(idx + 1),
-                "total": str(total),
-                "group": getattr(self, "_boiler_group_name", "?"),
+                "idx":         str(idx + 1),
+                "total":       str(total),
+                "group":       getattr(self, "_boiler_group_name", "?"),
+                "brand_label": _brand_label,
             },
-            data_schema=vol.Schema({
-                vol.Required("entity_id"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "climate", "water_heater", "input_boolean"]
-                    )
-                ),
-                vol.Optional("label",
-                             description={"suggested_value": f"Boiler {idx + 1}"}): str,
-                vol.Optional("temp_sensor"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
-                ),
-                vol.Optional("energy_sensor"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor",
-                        device_class=["power", "energy"])
-                ),
-                vol.Optional("setpoint_c",
-                             default=DEFAULT_BOILER_SETPOINT_C): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=30, max=80, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("min_temp_c",
-                             default=DEFAULT_BOILER_MIN_TEMP_C): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=30, max=60, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("comfort_floor_c",
-                             default=DEFAULT_BOILER_COMFORT_C): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=35, max=70, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("control_mode", default="switch"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[
-                            {"value": "switch",   "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
-                            {"value": "setpoint", "label": "🌡️ Setpoint instellen (climate / water_heater) — aanbevolen"},
-                            {"value": "preset",   "label": "🎛️ Preset modus (bijv. Ariston green/boost)"},
-                            {"value": "dimmer",   "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
-                        ],
-                        mode="list",
-                    )
-                ),
-                vol.Optional("preset_on",  default="boost"): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
-                ),
-                vol.Optional("preset_off", default="green"): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
-                ),
-                vol.Optional("dimmer_on_pct", default=100): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
-                vol.Optional("dimmer_off_pct", default=0): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
-            }),
+            data_schema=vol.Schema(schema_dict),
         )
 
 
@@ -3177,6 +3430,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "night_close_time":  user_input.get("shutter_night_close", "23:00"),
                 "morning_open_time": user_input.get("shutter_morning_open", "07:30"),
                 "default_setpoint":  float(user_input.get("shutter_default_setpoint", 20.0)),
+                "smoke_sensor":    user_input.get("shutter_smoke_sensor") or "",
             })
             self._shutter_step += 1
             if self._shutter_step < self._shutter_count:
@@ -3219,6 +3473,12 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("shutter_night_close",    default=existing.get("night_close_time", "23:00")):  str,
                 vol.Optional("shutter_morning_open",   default=existing.get("morning_open_time", "07:30")): str,
                 vol.Optional("shutter_default_setpoint", default=existing.get("default_setpoint", 20.0)):   vol.Coerce(float),
+                vol.Optional(
+                    "shutter_smoke_sensor",
+                    description={"suggested_value": existing.get("smoke_sensor", "")},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)
+                ),
             }),
             description_placeholders={
                 "shutter_num":  str(i),
@@ -3493,7 +3753,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             self._opts["_bg_edit_idx"] = len(groups) - 1
             self._opts["_bg_unit_count"] = unit_count
             self._opts["_bg_unit_step"] = 0
-            return await self.async_step_boiler_group_unit()
+            return await self.async_step_boiler_group_brand()
 
         return self.async_show_form(
             step_id="boiler_group_add",
@@ -3532,7 +3792,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 self._opts["_bg_unit_count"] = len(units) + 1
                 self._opts["_bg_unit_step"]  = len(units)
                 # Tijdelijk: voeg lege placeholder toe die in boiler_group_unit wordt ingevuld
-                return await self.async_step_boiler_group_unit()
+                return await self.async_step_boiler_group_brand()
 
             if action.startswith("edit_unit_"):
                 u_idx = int(action.split("_")[-1])
@@ -3602,40 +3862,84 @@ class CloudEMSOptionsFlow(_OptionsBase):
             }),
         )
 
-    async def async_step_boiler_group_unit(self, user_input=None):
-        """Configureer één boiler-unit binnen een groep."""
-        groups = list(self._opts.get(CONF_BOILER_GROUPS, []))
-        g_idx = int(self._opts.get("_bg_edit_idx", 0))
+    async def async_step_boiler_group_brand(self, user_input=None):
+        """Options flow: kies merk/type boiler — vult instellingen automatisch voor."""
         u_step = int(self._opts.get("_bg_unit_step", 0))
         u_total = int(self._opts.get("_bg_unit_count", 1))
-        group = groups[g_idx] if g_idx < len(groups) else {}
-        units = list(group.get("units", []))
+        groups = list(self._opts.get(CONF_BOILER_GROUPS, []))
+        g_idx  = int(self._opts.get("_bg_edit_idx", 0))
+        group  = groups[g_idx] if g_idx < len(groups) else {}
+
+        if user_input is not None:
+            brand = user_input.get("brand", "unknown")
+            self._opts["_bg_brand_preset"] = brand
+            return await self.async_step_boiler_group_unit()
+
+        return self.async_show_form(
+            step_id="boiler_group_brand",
+            description_placeholders={
+                "unit_num":   str(u_step + 1),
+                "total":      str(u_total),
+                "group_name": group.get("name", "?"),
+            },
+            data_schema=vol.Schema({
+                vol.Required("brand", default="unknown"): _boiler_brand_selector(),
+            }),
+        )
+
+    async def async_step_boiler_group_unit(self, user_input=None):
+        """Configureer één boiler-unit binnen een groep."""
+        groups  = list(self._opts.get(CONF_BOILER_GROUPS, []))
+        g_idx   = int(self._opts.get("_bg_edit_idx", 0))
+        u_step  = int(self._opts.get("_bg_unit_step", 0))
+        u_total = int(self._opts.get("_bg_unit_count", 1))
+        group   = groups[g_idx] if g_idx < len(groups) else {}
+        units   = list(group.get("units", []))
+        # Merk-preset van vorige stap
+        brand_key = self._opts.pop("_bg_brand_preset", "unknown")
+        bp = BOILER_BRAND_PRESETS.get(brand_key, BOILER_BRAND_PRESETS["unknown"])
 
         if user_input is not None:
             units.append({
-                "entity_id":       user_input.get("bu_entity", ""),
-                "temp_sensor":     user_input.get("bu_temp_sensor", ""),
-                "energy_sensor":   user_input.get("bu_energy_sensor", ""),
-                "label":           user_input.get("bu_label", f"Boiler {u_step+1}"),
-                "setpoint_c":      float(user_input.get("bu_setpoint", DEFAULT_BOILER_SETPOINT_C)),
-                "surplus_setpoint_c": float(user_input.get("bu_surplus_setpoint", 75.0)),
-                "power_w":         DEFAULT_BOILER_POWER_W,
-                "priority":        u_step + 1,
-                "control_mode":    user_input.get("bu_control_mode", "setpoint"),
-                "preset_on":       user_input.get("bu_preset_on",  "boost"),
-                "preset_off":      user_input.get("bu_preset_off", "green"),
-                "dimmer_on_pct":   float(user_input.get("bu_dimmer_on_pct",  100)),
-                "dimmer_off_pct":  float(user_input.get("bu_dimmer_off_pct", 0)),
+                "entity_id":            user_input.get("bu_entity", ""),
+                "temp_sensor":          user_input.get("bu_temp_sensor", ""),
+                "energy_sensor":        user_input.get("bu_energy_sensor", ""),
+                "label":                user_input.get("bu_label", f"Boiler {u_step+1}"),
+                "setpoint_c":           float(user_input.get("bu_setpoint",           bp.get("setpoint_c",           DEFAULT_BOILER_SETPOINT_C))),
+                "surplus_setpoint_c":   float(user_input.get("bu_surplus_setpoint",   bp.get("surplus_setpoint_c",   75.0))),
+                "max_setpoint_boost_c": float(user_input.get("bu_max_setpoint_boost", bp.get("max_setpoint_boost_c", 75.0))),
+                "max_setpoint_green_c": float(bp.get("max_setpoint_green_c", 53.0)),
+                "hardware_max_c":       float(bp.get("hardware_max_c",       0.0)),
+                "hardware_deadband_c":  float(bp.get("hardware_deadband_c",  0.0)),
+                "stall_timeout_s":      float(bp.get("stall_timeout_s",      300.0)),
+                "stall_boost_c":        float(bp.get("stall_boost_c",        5.0)),
+                "power_w":              DEFAULT_BOILER_POWER_W,
+                "priority":             u_step + 1,
+                "boiler_type":          user_input.get("bu_boiler_type",  bp.get("boiler_type",  "resistive")),
+                "control_mode":         user_input.get("bu_control_mode", bp.get("control_mode", "setpoint")),
+                "preset_on":            user_input.get("bu_preset_on",    bp.get("preset_on",    "on")),
+                "preset_off":           user_input.get("bu_preset_off",   bp.get("preset_off",   "off")),
+                "dimmer_on_pct":        float(user_input.get("bu_dimmer_on_pct",  100)),
+                "dimmer_off_pct":       float(user_input.get("bu_dimmer_off_pct", 0)),
+                "brand":                brand_key,
             })
             groups[g_idx]["units"] = units
             self._opts[CONF_BOILER_GROUPS] = groups
             self._opts["_bg_unit_step"] = u_step + 1
             if u_step + 1 < u_total:
-                return await self.async_step_boiler_group_unit()
-            # Als we vanuit edit kwamen (group al bestaat), terug naar edit
+                return await self.async_step_boiler_group_brand()
             if len(groups[g_idx].get("units", [])) > 1 or self._opts.get("_bg_edit_idx", -1) >= 0:
                 return await self.async_step_boiler_group_edit()
             return self._save(self._opts)
+
+        _default_cm   = bp.get("control_mode",         "setpoint")
+        _default_sp   = bp.get("setpoint_c",            DEFAULT_BOILER_SETPOINT_C)
+        _default_srsp = bp.get("surplus_setpoint_c",    75.0)
+        _default_mxsp = bp.get("max_setpoint_boost_c",  75.0)
+        _default_type = bp.get("boiler_type",           "resistive")
+        _default_pon  = bp.get("preset_on",             "on")
+        _default_poff = bp.get("preset_off",            "off")
+        _brand_label  = bp.get("_label",                "❓ Onbekend")
 
         return self.async_show_form(
             step_id="boiler_group_unit",
@@ -3643,6 +3947,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "unit_num":    str(u_step + 1),
                 "total":       str(u_total),
                 "group_name":  group.get("name", "?"),
+                "brand_label": _brand_label,
             },
             data_schema=vol.Schema({
                 vol.Required("bu_entity"): selector.EntitySelector(
@@ -3658,38 +3963,42 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         device_class=["power", "energy"])
                 ),
                 vol.Optional("bu_label", default=f"Boiler {u_step+1}"): str,
-                vol.Optional("bu_setpoint", default=DEFAULT_BOILER_SETPOINT_C):
-                    vol.All(vol.Coerce(float), vol.Range(min=30, max=90)),
-                vol.Optional("bu_control_mode", default="setpoint"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[
-                            {"value": "switch",             "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
-                            {"value": "setpoint",           "label": "🌡️ Setpoint instellen (climate / water_heater) — aanbevolen"},
-                            {"value": "setpoint_boost",     "label": "🌡️⚡ Setpoint + Boost bij PV-surplus / accu vol (aanbevolen voor Ariston)"},
-                            {"value": "preset",             "label": "🎛️ Preset modus (bijv. Ariston green/boost)"},
-                            {"value": "dimmer",             "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
-                        ],
-                        mode="list",
-                    )
+                vol.Optional("bu_boiler_type", default=_default_type): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
+                        {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
+                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
+                    ], mode="list")
                 ),
-                vol.Optional("bu_surplus_setpoint", default=75.0): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=40, max=90, step=1,
+                vol.Optional("bu_setpoint", default=_default_sp): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=30, max=85, step=1,
                                                   mode="slider", unit_of_measurement="°C")
                 ),
-                vol.Optional("bu_preset_on",  default="boost"): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
+                vol.Optional("bu_surplus_setpoint", default=_default_srsp): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
                 ),
-                vol.Optional("bu_preset_off", default="green"): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
+                vol.Optional("bu_max_setpoint_boost", default=_default_mxsp): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
                 ),
+                vol.Optional("bu_control_mode", default=_default_cm): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",             "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint",           "label": "🌡️ Setpoint instellen"},
+                        {"value": "setpoint_boost",     "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
+                        {"value": "preset",             "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
+                        {"value": "dimmer",             "label": "💡 Dimmer / vermogensregeling"},
+                    ], mode="list")
+                ),
+                vol.Optional("bu_preset_on",  default=_default_pon):  selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("bu_preset_off", default=_default_poff): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
                 vol.Optional("bu_dimmer_on_pct", default=100): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
+                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
                 vol.Optional("bu_dimmer_off_pct", default=0): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
+                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
             }),
         )
 
@@ -3704,24 +4013,154 @@ class CloudEMSOptionsFlow(_OptionsBase):
         unit    = units[u_idx] if u_idx < len(units) else {}
 
         if user_input is not None:
-            updated = dict(unit)  # behoud alle bestaande keys (power_w, priority, etc.)
+            # Haal merk-preset op als gebruiker een ander merk kiest
+            brand_key = user_input.get("bu_brand", unit.get("brand", "unknown"))
+            bp = BOILER_BRAND_PRESETS.get(brand_key, BOILER_BRAND_PRESETS["unknown"])
+            _brand_changed = brand_key != unit.get("brand", "unknown")
+            _is_known = brand_key not in ("unknown", "generic_resistive", "generic_heatpump")
+
+            updated = dict(unit)
             updated.update({
-                "entity_id":          user_input.get("bu_entity", unit.get("entity_id", "")),
-                "temp_sensor":        user_input.get("bu_temp_sensor", unit.get("temp_sensor", "")),
-                "energy_sensor":      user_input.get("bu_energy_sensor", unit.get("energy_sensor", "")),
-                "label":              user_input.get("bu_label", unit.get("label", f"Boiler {u_idx+1}")),
-                "setpoint_c":         float(user_input.get("bu_setpoint", unit.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C))),
-                "surplus_setpoint_c": float(user_input.get("bu_surplus_setpoint", unit.get("surplus_setpoint_c", 75.0))),
-                "control_mode":       user_input.get("bu_control_mode", unit.get("control_mode", "setpoint")),
-                "preset_on":          user_input.get("bu_preset_on",  unit.get("preset_on",  "boost")),
-                "preset_off":         user_input.get("bu_preset_off", unit.get("preset_off", "green")),
-                "dimmer_on_pct":      float(user_input.get("bu_dimmer_on_pct",  unit.get("dimmer_on_pct",  100))),
-                "dimmer_off_pct":     float(user_input.get("bu_dimmer_off_pct", unit.get("dimmer_off_pct", 0))),
+                "entity_id":            user_input.get("bu_entity",           unit.get("entity_id", "")),
+                "temp_sensor":          user_input.get("bu_temp_sensor",      unit.get("temp_sensor", "")),
+                "energy_sensor":        user_input.get("bu_energy_sensor",    unit.get("energy_sensor", "")),
+                "label":                user_input.get("bu_label",            unit.get("label", f"Boiler {u_idx+1}")),
+                # boiler_type/control_mode/preset: bij known brand altijd uit preset overnemen
+                # (velden niet getoond), tenzij generic → dan uit user_input
+                "boiler_type":          bp.get("boiler_type", "resistive") if _is_known
+                                        else user_input.get("bu_boiler_type", unit.get("boiler_type", "resistive")),
+                "setpoint_c":           float(user_input.get("bu_setpoint",           unit.get("setpoint_c",           DEFAULT_BOILER_SETPOINT_C))),
+                "max_setpoint_entity":   user_input.get("bu_max_setpoint_entity", unit.get("max_setpoint_entity", "")),
+                # surplus_setpoint en max_setpoint_boost: bij known brand uit preset,
+                # bij generiek uit user_input (velden zichtbaar)
+                "surplus_setpoint_c":   float(bp.get("surplus_setpoint_c", unit.get("surplus_setpoint_c", 75.0)) if _is_known
+                                              else user_input.get("bu_surplus_setpoint", unit.get("surplus_setpoint_c", bp.get("surplus_setpoint_c", 75.0)))),
+                "max_setpoint_boost_c": float(bp.get("max_setpoint_boost_c", unit.get("max_setpoint_boost_c", 75.0)) if _is_known
+                                              else user_input.get("bu_max_setpoint_boost", unit.get("max_setpoint_boost_c", bp.get("max_setpoint_boost_c", 75.0)))),
+                "max_setpoint_green_c": float(bp.get("max_setpoint_green_c", unit.get("max_setpoint_green_c", 53.0)) if _brand_changed else unit.get("max_setpoint_green_c", bp.get("max_setpoint_green_c", 53.0))),
+                "hardware_max_c":       float(bp.get("hardware_max_c", unit.get("hardware_max_c", 0.0)) if _brand_changed else unit.get("hardware_max_c", bp.get("hardware_max_c", 0.0))),
+                "hardware_deadband_c":  float(bp.get("hardware_deadband_c", unit.get("hardware_deadband_c", 0.0)) if _brand_changed else unit.get("hardware_deadband_c", 0.0)),
+                "stall_timeout_s":      float(bp.get("stall_timeout_s", unit.get("stall_timeout_s", 300.0)) if _brand_changed else unit.get("stall_timeout_s", 300.0)),
+                "stall_boost_c":        float(bp.get("stall_boost_c", unit.get("stall_boost_c", 5.0)) if _brand_changed else unit.get("stall_boost_c", 5.0)),
+                "control_mode":         bp.get("control_mode", "setpoint") if _is_known
+                                        else user_input.get("bu_control_mode", unit.get("control_mode", "setpoint")),
+                "preset_on":            bp.get("preset_on", "on") if _is_known
+                                        else user_input.get("bu_preset_on", unit.get("preset_on", "on")),
+                "preset_off":           bp.get("preset_off", "off") if _is_known
+                                        else user_input.get("bu_preset_off", unit.get("preset_off", "off")),
+                "dimmer_on_pct":        float(user_input.get("bu_dimmer_on_pct",  unit.get("dimmer_on_pct",  100))),
+                "dimmer_off_pct":       float(user_input.get("bu_dimmer_off_pct", unit.get("dimmer_off_pct", 0))),
+                "brand":                brand_key,
             })
             units[u_idx] = updated
             groups[g_idx]["units"] = units
             self._opts[CONF_BOILER_GROUPS] = groups
             return await self.async_step_boiler_group_edit()
+
+        # Haal huidige merk-preset op voor pre-fill
+        cur_brand = unit.get("brand", "unknown")
+        # v4.6.26: Auto-detectie voor oude configs zonder brand-sleutel.
+        # Vergelijk opgeslagen control_mode + preset_on/off met bekende presets.
+        if cur_brand in ("unknown", "") and unit.get("control_mode"):
+            _saved_cm   = unit.get("control_mode", "")
+            _saved_pon  = unit.get("preset_on",    "").upper()
+            _saved_poff = unit.get("preset_off",   "").upper()
+            _saved_type = unit.get("boiler_type",  "")
+            for _bk, _bpreset in BOILER_BRAND_PRESETS.items():
+                if _bk in ("unknown", "generic_resistive", "generic_heatpump"):
+                    continue
+                # Match op control_mode + preset_on/off (case-insensitief)
+                _cm_match  = _bpreset.get("control_mode") == _saved_cm
+                _pon_match = _bpreset.get("preset_on",  "").upper() == _saved_pon
+                _poff_match= _bpreset.get("preset_off", "").upper() == _saved_poff
+                # Extra: match ook op boiler_type als presets gelijk zijn
+                _type_match= _bpreset.get("boiler_type", "") == _saved_type
+                if _cm_match and (_pon_match and _poff_match or _type_match):
+                    cur_brand = _bk
+                    break
+        # Laatste fallback: boiler_type=hybrid + control_mode=preset → ariston_lydos_hybrid
+        if cur_brand in ("unknown", "") and unit.get("boiler_type") == "hybrid" and unit.get("control_mode") == "preset":
+            cur_brand = "ariston_lydos_hybrid"
+        bp = BOILER_BRAND_PRESETS.get(cur_brand, BOILER_BRAND_PRESETS["unknown"])
+        _is_known_brand = cur_brand not in ("unknown", "generic_resistive", "generic_heatpump")
+
+        # Basis schema — altijd getoond
+        edit_schema = {
+            vol.Required("bu_entity", default=unit.get("entity_id", "")): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "climate", "water_heater", "input_boolean"]
+                )
+            ),
+            vol.Optional("bu_temp_sensor",
+                         description={"suggested_value": unit.get("temp_sensor", "")}): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+            ),
+            vol.Optional("bu_energy_sensor",
+                         description={"suggested_value": unit.get("energy_sensor", "")}): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class=["power", "energy"])
+            ),
+            vol.Optional("bu_label", default=unit.get("label", f"Boiler {u_idx+1}")): str,
+            vol.Optional("bu_brand", default=cur_brand): _boiler_brand_selector(),
+            vol.Optional("bu_setpoint",
+                         default=unit.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C)): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=30, max=85, step=1,
+                                              mode="slider", unit_of_measurement="°C")
+            ),
+            # v4.6.25: max_setpoint_entity — number-entity die de hardware-limiet bestuurt
+            # (bijv. number.ariston_max_setpoint_temperature). Altijd zichtbaar zodat ook
+            # gebruikers van bekende merken dit veld kunnen invullen.
+            vol.Optional("bu_max_setpoint_entity",
+                         description={"suggested_value": unit.get("max_setpoint_entity", "")}): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="number")
+            ),
+        }
+
+        # Geavanceerde velden alleen tonen als merk onbekend/generiek is
+        if not _is_known_brand:
+            edit_schema.update({
+                vol.Optional("bu_surplus_setpoint",
+                             default=unit.get("surplus_setpoint_c", bp.get("surplus_setpoint_c", 75.0))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional("bu_max_setpoint_boost",
+                             default=unit.get("max_setpoint_boost_c", bp.get("max_setpoint_boost_c", 75.0))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")
+                ),
+                vol.Optional("bu_boiler_type",
+                             default=unit.get("boiler_type", bp.get("boiler_type", "resistive"))): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
+                        {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
+                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
+                    ], mode="list")
+                ),
+                vol.Optional("bu_control_mode",
+                             default=unit.get("control_mode", bp.get("control_mode", "setpoint"))): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",         "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint",       "label": "🌡️ Setpoint instellen"},
+                        {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
+                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
+                        {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling"},
+                    ], mode="list")
+                ),
+                vol.Optional("bu_preset_on",
+                             default=unit.get("preset_on",  bp.get("preset_on",  "on"))): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("bu_preset_off",
+                             default=unit.get("preset_off", bp.get("preset_off", "off"))): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("bu_dimmer_on_pct",
+                             default=unit.get("dimmer_on_pct", 100)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+                vol.Optional("bu_dimmer_off_pct",
+                             default=unit.get("dimmer_off_pct", 0)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+            })
 
         return self.async_show_form(
             step_id="boiler_unit_edit",
@@ -3729,52 +4168,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "unit_label": unit.get("label", unit.get("entity_id", f"Boiler {u_idx+1}")),
                 "group_name": group.get("name", "?"),
             },
-            data_schema=vol.Schema({
-                vol.Required("bu_entity", default=unit.get("entity_id", "")): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "climate", "water_heater", "input_boolean"]
-                    )
-                ),
-                vol.Optional("bu_temp_sensor", description={"suggested_value": unit.get("temp_sensor", "")}): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
-                ),
-                vol.Optional("bu_energy_sensor", description={"suggested_value": unit.get("energy_sensor", "")}): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class=["power", "energy"])
-                ),
-                vol.Optional("bu_label", default=unit.get("label", f"Boiler {u_idx+1}")): str,
-                vol.Optional("bu_setpoint", default=unit.get("setpoint_c", DEFAULT_BOILER_SETPOINT_C)):
-                    vol.All(vol.Coerce(float), vol.Range(min=30, max=90)),
-                vol.Optional("bu_control_mode", default=unit.get("control_mode", "setpoint")): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=[
-                            {"value": "switch",         "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
-                            {"value": "setpoint",       "label": "🌡️ Setpoint instellen (climate / water_heater) — aanbevolen"},
-                            {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus / accu vol (aanbevolen voor Ariston)"},
-                            {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston green/boost)"},
-                            {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
-                        ],
-                        mode="list",
-                    )
-                ),
-                vol.Optional("bu_surplus_setpoint", default=unit.get("surplus_setpoint_c", 75.0)): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=40, max=90, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("bu_preset_on",  default=unit.get("preset_on",  "boost")): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
-                ),
-                vol.Optional("bu_preset_off", default=unit.get("preset_off", "green")): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")
-                ),
-                vol.Optional("bu_dimmer_on_pct", default=unit.get("dimmer_on_pct", 100)): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
-                vol.Optional("bu_dimmer_off_pct", default=unit.get("dimmer_off_pct", 0)): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5,
-                                                  mode="slider", unit_of_measurement="%")
-                ),
-            }),
+            data_schema=vol.Schema(edit_schema),
         )
 
 

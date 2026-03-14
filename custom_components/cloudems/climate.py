@@ -116,49 +116,53 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Registreer één climate entity per ontdekte zone."""
+    """Registreer climate entities: zone thermostaten + virtuele boiler thermostaten."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Wacht tot de zone_climate manager beschikbaar is
+    # ── 1. Zone thermostaten ─────────────────────────────────────────────────
     zone_mgr = getattr(coordinator, "_zone_climate", None)
-    if not zone_mgr:
-        _LOGGER.debug("CloudEMS climate: zone_climate_manager niet actief — geen entities")
-        return
+    if zone_mgr:
+        zones = getattr(zone_mgr, "_zones", [])
+        from .const import CONF_CLIMATE_ZONES_ENABLED
+        cfg_all = {**entry.data, **entry.options}
+        enabled_zones = cfg_all.get(CONF_CLIMATE_ZONES_ENABLED)
 
-    zones = getattr(zone_mgr, "_zones", [])
-    if not zones:
-        _LOGGER.debug("CloudEMS climate: geen zones ontdekt")
-        return
+        def _is_enabled(zone) -> bool:
+            if not enabled_zones:
+                return True
+            import re as _re
+            slug = _re.sub(r"[^a-z0-9]+", "_", zone._area_name.lower()).strip("_")
+            return zone._area_id in enabled_zones or slug in enabled_zones
 
-    # Filter zones op basis van climate_zones_enabled (per-zone toggle in flow)
-    from .const import CONF_CLIMATE_ZONES_ENABLED
-    cfg_all = {**entry.data, **entry.options}
-    enabled_zones = cfg_all.get(CONF_CLIMATE_ZONES_ENABLED)  # None = alles aan (backwards compat)
+        active_zones = [z for z in zones if _is_enabled(z)]
+        if active_zones:
+            zone_entities: list = [CloudEMSClimateHub(coordinator, entry)]
+            zone_entities += [
+                CloudEMSClimateEntity(coordinator, entry, zone)
+                for zone in active_zones
+            ]
+            async_add_entities(zone_entities, update_before_add=True)
+            _LOGGER.info(
+                "CloudEMS climate: hub + %d zone-entities aangemaakt (%d van %d zones actief)",
+                len(active_zones), len(active_zones), len(zones),
+            )
+            # Registreer in entity device log
+            try:
+                from .entity_device_log import get_entity_device_log
+                log = get_entity_device_log(hass, entry)
+                if log:
+                    for e in zone_entities:
+                        uid = getattr(e, "_attr_unique_id", None) or getattr(e, "unique_id", None)
+                        if uid:
+                            log.register("climate", e.entity_id, uid, "zone_climate")
+            except Exception:
+                pass
+        else:
+            _LOGGER.debug("CloudEMS climate: alle zones uitgeschakeld in config")
+    else:
+        _LOGGER.debug("CloudEMS climate: zone_climate_manager niet actief — geen zone-entities")
 
-    def _is_enabled(zone) -> bool:
-        if not enabled_zones:
-            return True  # niets geconfigureerd → alles aan
-        import re as _re
-        slug = _re.sub(r"[^a-z0-9]+", "_", zone._area_name.lower()).strip("_")
-        return zone._area_id in enabled_zones or slug in enabled_zones
-
-    active_zones = [z for z in zones if _is_enabled(z)]
-
-    if not active_zones:
-        _LOGGER.debug("CloudEMS climate: alle zones uitgeschakeld in config")
-        return
-
-    # Hub parent device + zone entities
-    entities = [CloudEMSClimateHub(coordinator, entry)]
-    entities += [
-        CloudEMSClimateEntity(coordinator, entry, zone)
-        for zone in active_zones
-    ]
-    _LOGGER.info(
-        "CloudEMS climate: hub + %d zone-entities aangemaakt (%d van %d zones actief)",
-        len(active_zones), len(active_zones), len(zones),
-    )
-    async_add_entities(entities, update_before_add=True)
+    # Virtuele boiler entities zitten op het water_heater platform (water_heater.py)
 
 
 

@@ -17,16 +17,20 @@
         },
         "placeholders": {
           "buy_me_coffee_url": {
-            "description": "URL van de donatiepagina"
+            "description": "URL van de donatiepagina",
+            "example": "buy_me_coffee_url"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "support_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "support_url"
           },
           "website": {
-            "description": "URL van de website"
+            "description": "URL van de website",
+            "example": "website"
           }
         }
       },
@@ -41,7 +45,8 @@
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           }
         }
       },
@@ -85,10 +90,15 @@
         },
         "placeholders": {
           "detected": {
-            "description": "Aantal automatisch gevonden sensoren"
+            "description": "Aantal automatisch gevonden sensoren",
+            "example": "detected"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          },
+          "mains_voltage": {
+            "example": "mains_voltage"
           }
         }
       },
@@ -125,10 +135,12 @@
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "phase_count": {
-            "description": "Aantal fasen van de aansluiting"
+            "description": "Aantal fasen van de aansluiting",
+            "example": "phase_count"
           }
         }
       },
@@ -160,7 +172,8 @@
         },
         "placeholders": {
           "docs_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "docs_url"
           }
         }
       },
@@ -187,16 +200,20 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -254,7 +271,8 @@
         },
         "placeholders": {
           "premium_url": {
-            "description": "URL van de premium pagina"
+            "description": "URL van de premium pagina",
+            "example": "premium_url"
           }
         }
       },
@@ -318,7 +336,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Batterij volgnummer"
+            "description": "Batterij volgnummer",
+            "example": "battery_num"
           }
         }
       },
@@ -347,7 +366,8 @@
           "price_include_tax": "Inclure la taxe sur l'énergie",
           "price_include_btw": "Inclure la TVA (21%)",
           "selected_supplier": "Supplier (for default markup)",
-          "supplier_markup": "Marge manuelle (€/kWh)"
+          "supplier_markup": "Marge manuelle (€/kWh)",
+          "energy_prices_country": "Pays (pour les options fournisseur)"
         },
         "title": "💶 Prices & Tax"
       },
@@ -430,11 +450,29 @@
           "preset_off": "Preset when INACTIVE (e.g. green)",
           "dimmer_on_pct": "Dimmer level ON (%)",
           "dimmer_off_pct": "Dimmer level OFF (%)",
-          "energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)"
+          "energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)",
+          "bu_entity": "Entité chauffe-eau (water_heater / switch / climate)",
+          "bu_temp_sensor": "Capteur de température (optionnel)",
+          "bu_energy_sensor": "Capteur de puissance (optionnel)",
+          "bu_label": "Nom de ce chauffe-eau",
+          "bu_brand": "Marque / modèle",
+          "bu_boiler_type": "Type de chauffe-eau",
+          "boiler_type": "Type de chauffe-eau",
+          "bu_control_mode": "Mode de commande",
+          "bu_setpoint": "Température cible — usage normal (°C)",
+          "bu_surplus_setpoint": "Consigne lors du surplus PV / batterie pleine (°C)",
+          "bu_max_setpoint_boost": "Limite supérieure absolue de la consigne (°C)",
+          "bu_preset_on": "Nom du preset MARCHE (ex. BOOST)",
+          "bu_preset_off": "Nom du preset ARRÊT (ex. GREEN)",
+          "bu_dimmer_on_pct": "Variateur marche (%)",
+          "bu_dimmer_off_pct": "Variateur arrêt (%)",
+          "max_setpoint_entity": "Entité consigne maximale (ex. number.ariston_max_setpoint_temperature)",
+          "max_setpoint_boost_c": "Consigne max. lors du surplus PV / batterie pleine (°C)"
         },
         "data_description": {
           "setpoint_c": "Normal setpoint. During PV surplus, the maximum setpoint is used automatically to store as much solar energy as possible.",
-          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default."
+          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default.",
+          "max_setpoint_entity": "Optionnel: entité number qui définit le maximum matériel avant chaque changement de température (requis pour Ariston Lydos Hybrid)."
         }
       },
       "diagnostics": {
@@ -485,12 +523,24 @@
           "zonneplan_min_soc": "SoC min. décharge (%)",
           "zonneplan_max_soc": "SoC max. charge (%)",
           "zonneplan_charge_w": "Puissance de charge par défaut (W)",
-          "zonneplan_discharge_w": "Puissance de décharge par défaut (W)"
+          "zonneplan_discharge_w": "Puissance de décharge par défaut (W)",
+          "zonneplan_ev_sensor": "Capteur borne EV (bloqueur EV)",
+          "zonneplan_ev_block_w": "Seuil bloqueur EV (W, 0 = désactivé)",
+          "zonneplan_house_sensor": "Capteur consommation maison (anti-pompage)",
+          "zonneplan_min_house_load_w": "Consommation min. maison pour décharge (W)",
+          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
           "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore."
+          "zonneplan_restore_after_min": "0 = never automatically restore.",
+          "zonneplan_ev_sensor": "Capteur pour la puissance de la borne EV. Laisser vide pour désactiver le bloqueur EV.",
+          "zonneplan_ev_block_w": "Si la borne EV consomme plus que cette valeur, la décharge est bloquée. 0 = bloqueur EV désactivé.",
+          "zonneplan_house_sensor": "Capteur pour la consommation totale de la maison. Laisser vide pour désactiver l'anti-pompage.",
+          "zonneplan_min_house_load_w": "La décharge est bloquée si la consommation de la maison est inférieure à cette valeur. Évite le pompage circulaire (charge → décharge sans utilisation réelle).",
+          "zonneplan_min_soc": "La décharge s'arrête quand le SoC atteint ce pourcentage. Protège la durée de vie de la batterie.",
+          "zonneplan_max_soc": "La charge s'arrête quand le SoC atteint ce pourcentage.",
+          "zonneplan_soc_reserve_high": "SoC minimal conservé lorsque plusieurs heures HIGH sont encore dans la prévision. Évite que la batterie se décharge trop tôt."
         }
       },
       "gas_opts": {
@@ -520,7 +570,44 @@
           "bu_preset_on": "Preset ON",
           "bu_preset_off": "Preset OFF",
           "bu_dimmer_on_pct": "Variateur ON (%)",
-          "bu_dimmer_off_pct": "Variateur OFF (%)"
+          "bu_dimmer_off_pct": "Variateur OFF (%)",
+          "bu_boiler_type": "Type de chauffe-eau",
+          "bu_brand": "Marque / type",
+          "bu_max_setpoint_boost": "Limite supérieure absolue de la consigne (°C)"
+        }
+      },
+      "boiler_brand": {
+        "title": "🏷️ Marque / type chauffe-eau {idx} sur {total}",
+        "description": "Sélectionnez la marque du chauffe-eau. CloudEMS remplit automatiquement le mode de commande, les points de consigne et les limites de sécurité.",
+        "data": {
+          "brand": "Marque / type"
+        }
+      },
+      "dsmr_source": {
+        "title": "📡 Source compteur",
+        "description": "Comment CloudEMS doit-il lire les données du compteur intelligent?",
+        "data": {
+          "dsmr_source": "Source compteur"
+        },
+        "data_description": {
+          "dsmr_source": "Choisissez comment CloudEMS récupère les données du compteur réseau. Utilisez l'intégration DSMR/HomeWizard si vous l'avez déjà configurée."
+        }
+      },
+      "price_provider": {
+        "title": "⚡ Source de prix — connexion directe fournisseur",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Source de prix"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Identifiants — {provider_label}",
+        "description": "Saisissez vos identifiants pour {provider_label}. CloudEMS les stocke en toute sécurité et ne les utilise que pour récupérer les prix.",
+        "data": {
+          "username": "Adresse e-mail",
+          "password": "Mot de passe",
+          "api_key": "Clé API",
+          "access_token": "Jeton API"
         }
       }
     },
@@ -588,7 +675,8 @@
           "gas_price_sensor": "Gas price sensor (€/m³) — optional",
           "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
           "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
-          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)",
+          "enable_solar_dimmer": "Écrêtement solaire à prix négatif"
         },
         "description": "Solar panel sensor, EV charger and solar curtailment."
       },
@@ -635,12 +723,14 @@
           "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
           "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
           "battery_degradation_enabled": "Suivre la dégradation de la batterie",
-          "congestion_enabled": "Enable grid congestion detection"
+          "congestion_enabled": "Enable grid congestion detection",
+          "dsmr_source": "Source compteur"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
           "battery_chemistry": "Select your battery chemistry. LFP degrades slower than NMC.",
-          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low."
+          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low.",
+          "dsmr_source": "Choisissez comment CloudEMS récupère les données du compteur réseau."
         }
       },
       "inverter_detail_opts": {
@@ -657,13 +747,16 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -675,7 +768,8 @@
         },
         "placeholders": {
           "inverter_names": {
-            "description": "inverter_names"
+            "description": "inverter_names",
+            "example": "inverter_names"
           }
         }
       },
@@ -687,10 +781,12 @@
         },
         "placeholders": {
           "current_count": {
-            "description": "Current battery count"
+            "description": "Current battery count",
+            "example": "current_count"
           },
           "battery_names": {
-            "description": "Names of existing batteries"
+            "description": "Names of existing batteries",
+            "example": "battery_names"
           }
         }
       },
@@ -709,7 +805,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Battery sequence number"
+            "description": "Battery sequence number",
+            "example": "battery_num"
           }
         }
       },
@@ -750,7 +847,8 @@
           "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected",
           "contract_type": "Contract type",
           "fixed_import_price": "Fixed import tariff (€/kWh)",
-          "fixed_export_price": "Fixed feed-in tariff (€/kWh)"
+          "fixed_export_price": "Fixed feed-in tariff (€/kWh)",
+          "energy_prices_country": "Pays"
         },
         "title": "💶 Prices & Tax"
       },
@@ -772,16 +870,20 @@
         "data": {},
         "placeholders": {
           "devices_overview": {
-            "description": "devices_overview"
+            "description": "devices_overview",
+            "example": "devices_overview"
           },
           "devtools_url": {
-            "description": "devtools_url"
+            "description": "devtools_url",
+            "example": "devtools_url"
           },
           "hide_service": {
-            "description": "hide_service"
+            "description": "hide_service",
+            "example": "hide_service"
           },
           "rename_service": {
-            "description": "rename_service"
+            "description": "rename_service",
+            "example": "rename_service"
           }
         }
       },
@@ -875,7 +977,8 @@
         },
         "placeholders": {
           "info": {
-            "description": "info"
+            "description": "info",
+            "example": "info"
           }
         }
       },
@@ -888,10 +991,12 @@
         },
         "placeholders": {
           "groups_info": {
-            "description": "groups_info"
+            "description": "groups_info",
+            "example": "groups_info"
           },
           "tip": {
-            "description": "tip"
+            "description": "tip",
+            "example": "tip"
           }
         }
       },
@@ -928,7 +1033,10 @@
           "bu_dimmer_on_pct": "Dimmer level ON (%)",
           "bu_dimmer_off_pct": "Dimmer level OFF (%)",
           "bu_energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)",
-          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)"
+          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)",
+          "bu_boiler_type": "Type de chauffe-eau",
+          "bu_brand": "Marque / modèle",
+          "bu_max_setpoint_boost": "Limite supérieure absolue de la consigne (°C)"
         }
       },
       "managed_battery_opts": {
@@ -941,10 +1049,20 @@
           "zonneplan_min_soc": "SoC min. (%)",
           "zonneplan_max_soc": "SoC max. (%)",
           "zonneplan_charge_w": "Puissance charge (W)",
-          "zonneplan_discharge_w": "Puissance décharge (W)"
+          "zonneplan_discharge_w": "Puissance décharge (W)",
+          "zonneplan_ev_sensor": "Capteur borne EV (bloqueur EV)",
+          "zonneplan_ev_block_w": "Seuil bloqueur EV (W, 0 = désactivé)",
+          "zonneplan_house_sensor": "Capteur consommation maison (anti-pompage)",
+          "zonneplan_min_house_load_w": "Consommation min. maison pour décharge (W)",
+          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)"
         },
         "data_description": {
-          "zonneplan_enabled": "{zonneplan_description}"
+          "zonneplan_enabled": "{zonneplan_description}",
+          "zonneplan_ev_sensor": "Capteur pour la puissance de la borne EV. Laisser vide pour désactiver le bloqueur EV.",
+          "zonneplan_ev_block_w": "Si la borne EV consomme plus que cette valeur, la décharge est bloquée. 0 = bloqueur EV désactivé.",
+          "zonneplan_house_sensor": "Capteur pour la consommation totale de la maison. Laisser vide pour désactiver l'anti-pompage.",
+          "zonneplan_min_house_load_w": "La décharge est bloquée si la consommation de la maison est inférieure à cette valeur. Évite le pompage circulaire.",
+          "zonneplan_soc_reserve_high": "SoC minimal conservé lorsque plusieurs heures HIGH sont encore dans la prévision."
         }
       },
       "climate_opts": {
@@ -1005,6 +1123,67 @@
           "latest_hour": "Latest hour (0–23)",
           "grace_s": "Grace period (seconds)",
           "notify": "Send notification on delay"
+        }
+      },
+      "boiler_group_brand": {
+        "title": "🏷️ Marque / type — Chauffe-eau {unit_num} sur {total} ({group_name})",
+        "description": "Sélectionnez la marque du chauffe-eau. CloudEMS remplit automatiquement le mode de commande, les consignes et les limites.",
+        "data": {
+          "brand": "Marque / type"
+        }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Modifier chauffe-eau: {unit_label}",
+        "description": "Groupe: **{group_name}**\n\nModifiez la marque ou les paramètres de ce chauffe-eau.",
+        "data": {
+          "bu_entity": "Entité chauffe-eau (water_heater / switch / climate)",
+          "bu_temp_sensor": "Capteur de température (optionnel)",
+          "bu_energy_sensor": "Capteur de puissance (optionnel)",
+          "bu_label": "Nom de ce chauffe-eau",
+          "bu_brand": "Marque / modèle",
+          "bu_boiler_type": "Type de chauffe-eau",
+          "bu_control_mode": "Mode de commande",
+          "bu_setpoint": "Température cible — usage normal (°C)",
+          "bu_surplus_setpoint": "Consigne lors du surplus PV / batterie pleine (°C)",
+          "bu_max_setpoint_boost": "Limite supérieure absolue de la consigne (°C)",
+          "bu_max_setpoint_entity": "Entité consigne maximale (ex. number.ariston_max_setpoint_temperature)",
+          "bu_preset_on": "Nom du preset MARCHE (ex. BOOST)",
+          "bu_preset_off": "Nom du preset ARRÊT (ex. GREEN)",
+          "bu_dimmer_on_pct": "Variateur marche (%)",
+          "bu_dimmer_off_pct": "Variateur arrêt (%)"
+        },
+        "data_description": {
+          "bu_max_setpoint_entity": "Optionnel: entité number qui définit le maximum matériel avant chaque changement de température (requis pour Ariston Lydos Hybrid)."
+        }
+      },
+      "prices_epex_opts": {
+        "title": "💶 Prix — Taxes & Majoration",
+        "description": "{info}",
+        "data": {
+          "contract_type": "Type de contrat",
+          "price_include_btw": "Inclure la TVA",
+          "price_include_tax": "Inclure la taxe énergétique",
+          "selected_supplier": "Fournisseur (pour la majoration standard)",
+          "supplier_markup": "Majoration manuelle (€/kWh)",
+          "fixed_import_price": "Tarif d'importation fixe (€/kWh)",
+          "fixed_export_price": "Tarif d'exportation fixe (€/kWh)"
+        }
+      },
+      "prices_provider_opts": {
+        "title": "💶 Prix — Fournisseur",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Source de prix / Fournisseur"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "🔑 Identifiants — {provider_label}",
+        "description": "Saisissez vos identifiants pour {provider_label}.",
+        "data": {
+          "username": "Adresse e-mail",
+          "password": "Mot de passe",
+          "api_key": "Clé API",
+          "access_token": "Jeton API"
         }
       }
     },

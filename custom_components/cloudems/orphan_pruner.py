@@ -321,6 +321,15 @@ class OrphanPruner:
                     active.add(f"{entry_id}_shutter_{safe}_{static_suffix}")
                     active.add(f"{entry_id}_shutterv2_{safe}_{static_suffix}")
 
+        # ── Virtuele boiler thermostaten (v4.6.13) ────────────────────────────
+        boiler_ctrl = getattr(coord, "_boiler_ctrl", None)
+        if boiler_ctrl:
+            all_boilers = list(getattr(boiler_ctrl, "_boilers", [])) + [
+                b for g in getattr(boiler_ctrl, "_groups", []) for b in g.boilers
+            ]
+            for b in all_boilers:
+                _all_with_prefix(f"{entry_id}_vboiler_{b.entity_id}")
+
         return active
 
     def _filter_dynamic_uids(
@@ -344,6 +353,7 @@ class OrphanPruner:
             (f"{entry_id}_zone_climate_", self._is_dynamic_zone_climate),
             (f"{entry_id}_shutter_",      self._always_dynamic),
             (f"{entry_id}_shutterv2_",    self._always_dynamic),
+            (f"{entry_id}_vboiler_",      self._always_dynamic),   # v4.6.13: virtuele boiler thermostaten
         ]
 
         for uid, reg in all_registered.items():

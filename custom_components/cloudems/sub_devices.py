@@ -37,10 +37,15 @@ from .const import DOMAIN, MANUFACTURER, VERSION
 # ── Sub-device type sleutels ─────────────────────────────────────────────────
 
 SUB_NILM        = "nilm_control"      # NILM bevestig/afwijs-knoppen
-SUB_SHUTTER     = "shutter_control"   # Rolluik actie-knoppen + module-schakelaar
+SUB_SHUTTER     = "shutter_control"   # Rolluik actie-knoppen, tijden, setpoints + module-schakelaar
 SUB_PV_DIMMER   = "pv_dimmer"         # PV dimmer schakelaars + sliders
 SUB_SOLAR       = "solar"             # Omvormer profiel + clipping sensoren
 SUB_ZONE_CLIMATE = "zone_climate"     # Per-zone klimaat sensoren
+SUB_BOILER      = "boiler"            # Warm-water boiler status, kalk, thermisch model
+SUB_PRICE       = "price"             # Energieprijzen: huidig, goedkoop, EPEX, tarieven
+SUB_LAMP        = "lamp"              # Lampcirculatie sturing + module-schakelaar
+SUB_BATTERY     = "battery"           # Batterijopslag status & sturing
+SUB_GRID        = "grid"              # Net & fase-monitoring
 
 # ── Sub-device metadata ──────────────────────────────────────────────────────
 
@@ -51,6 +56,12 @@ _SUB_DEVICE_META: dict[str, tuple[str, str]] = {
     SUB_PV_DIMMER:     ("CloudEMS PV Dimmer",          "mdi:solar-power"),
     SUB_SOLAR:         ("CloudEMS Zonne-energie",      "mdi:solar-panel-large"),
     SUB_ZONE_CLIMATE:  ("CloudEMS Zone Klimaat",       "mdi:home-thermometer"),
+    SUB_BOILER:        ("CloudEMS Warm Water",         "mdi:water-boiler"),
+    SUB_PRICE:         ("CloudEMS Energieprijzen",     "mdi:currency-eur"),
+    SUB_LAMP:          ("CloudEMS Lampcirculatie",     "mdi:lightbulb-group"),
+    SUB_BATTERY:       ("CloudEMS Batterij",              "mdi:battery-charging"),
+    SUB_GRID:          ("CloudEMS Net & Fasen",           "mdi:transmission-tower"),
+
 }
 
 

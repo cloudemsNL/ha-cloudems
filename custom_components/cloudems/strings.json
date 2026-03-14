@@ -362,9 +362,16 @@
           "unit_count": "Aantal boilers in groep"
         }
       },
+      "boiler_brand": {
+        "title": "🏷️ Merk / type boiler {idx} van {total}",
+        "description": "Selecteer het merk van de boiler. CloudEMS vult automatisch de juiste sturingmodus, setpoints en veiligheidslimieten in.\n\n💡 Je kunt alles in de volgende stap nog aanpassen.",
+        "data": {
+          "brand": "Merk / type"
+        }
+      },
       "boiler_unit": {
-        "title": "🚿 Boiler {boiler_num} van {total}",
-        "description": "Configureer de entiteit en instellingen voor deze boiler.",
+        "title": "🚿 Boiler {idx} van {total} — {group} ({brand_label})",
+        "description": "Configureer de entiteit en instellingen voor deze boiler. De instellingen zijn vooraf ingevuld op basis van het gekozen merk.",
         "data": {
           "unit_entity": "Boiler entiteit (switch / climate / water_heater / number)",
           "unit_temp_sensor": "Temperatuursensor (optioneel)",
@@ -375,16 +382,38 @@
           "entity_id": "Schakelaar entiteit (switch.*)",
           "temp_sensor": "Temperatuursensor",
           "label": "Label (weergavenaam)",
-          "setpoint_c": "Setpoint (°C)",
+          "boiler_type": "Type boiler",
+          "setpoint_c": "Setpoint (°C) — normaal gebruik",
           "min_temp_c": "Minimumtemperatuur (°C)",
           "comfort_floor_c": "Comfortdrempel (°C)",
+          "max_setpoint_boost_c": "Max. setpoint bij PV-surplus / accu vol (°C)",
           "power_w": "Vermogen (W)",
           "priority": "Prioriteit (1=hoog)",
           "min_on_minutes": "Min. aan-tijd (min)",
           "min_off_minutes": "Min. uit-tijd (min)",
           "control_mode": "Sturingmodus",
-          "preset_on": "Preset bij ACTIEF (bijv. boost)",
-          "preset_off": "Preset bij INACTIEF (bijv. green)"
+          "preset_on": "Preset bij ACTIEF (bijv. BOOST)",
+          "preset_off": "Preset bij INACTIEF (bijv. GREEN)",
+          "dimmer_on_pct": "Dimmer aan (%)",
+          "dimmer_off_pct": "Dimmer uit (%)",
+          "bu_entity": "Boiler entiteit (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperatuursensor (optioneel)",
+          "bu_energy_sensor": "Vermogenssensor (optioneel)",
+          "bu_label": "Naam van deze boiler",
+          "bu_brand": "Merk / model",
+          "bu_setpoint": "Doeltemperatuur — normaal gebruik (°C)",
+          "bu_surplus_setpoint": "Setpoint bij PV-surplus / accu vol (°C)",
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "bu_boiler_type": "Type boiler",
+          "bu_control_mode": "Sturingmodus",
+          "bu_preset_on": "Preset naam AAN (bijv. BOOST)",
+          "bu_preset_off": "Preset naam UIT (bijv. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer aan (%)",
+          "bu_dimmer_off_pct": "Dimmer uit (%)",
+          "max_setpoint_entity": "Max setpoint entiteit (bijv. number.ariston_max_setpoint_temperature)"
+        },
+        "data_description": {
+          "max_setpoint_entity": "Optioneel: number-entity die het hardware-maximum instelt vóór elke temperatuurwijziging (vereist voor Ariston Lydos Hybrid)"
         }
       },
       "mail": {
@@ -445,17 +474,20 @@
       },
       "boiler_unit_edit": {
         "title": "✏️ Bewerk boiler: {unit_label} — {group_name}",
-        "description": "Wijzig de instellingen van boiler **{unit_label}** in groep **{group_name}**.\n\n**💡 Doeltemperatuur:** bij PV-surplus gebruikt CloudEMS automatisch de maximale setpoint.\n**⚡ Vermogen:** wordt automatisch geleerd vanuit de energiesensor.",
+        "description": "Wijzig de instellingen van boiler **{unit_label}** in groep **{group_name}**.\n\n💡 Kies een ander merk om de instellingen automatisch bij te werken.",
         "data": {
           "bu_entity": "Boiler entiteit",
           "bu_temp_sensor": "Temperatuursensor (optioneel)",
-          "bu_energy_sensor": "Energiesensor (optioneel)",
+          "bu_energy_sensor": "Vermogenssensor (optioneel)",
           "bu_label": "Naam van deze boiler",
-          "bu_setpoint": "Doeltemperatuur (°C)",
-          "bu_control_mode": "Aansturingsmodus",
+          "bu_brand": "Merk / type",
+          "bu_boiler_type": "Type boiler",
+          "bu_setpoint": "Doeltemperatuur (°C) — normaal gebruik",
           "bu_surplus_setpoint": "Setpoint bij PV-surplus (°C)",
-          "bu_preset_on": "Preset AAN",
-          "bu_preset_off": "Preset UIT",
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "bu_control_mode": "Sturingmodus",
+          "bu_preset_on": "Preset bij ACTIEF (bijv. BOOST)",
+          "bu_preset_off": "Preset bij INACTIEF (bijv. GREEN)",
           "bu_dimmer_on_pct": "Dimmer AAN (%)",
           "bu_dimmer_off_pct": "Dimmer UIT (%)"
         }
@@ -825,15 +857,31 @@
           "bg_mode": "Cascade modus"
         }
       },
-      "boiler_group_unit": {
-        "title": "🚿 Boiler {unit_num} van {total} — {group_name}",
-        "description": "Link the HA entity for boiler {unit_num} of {total} in group '{group_name}'.\n\n**💡 Target temperature:** during PV surplus, CloudEMS automatically uses the maximum setpoint to store solar energy.\n\n**⚡ Power:** learned automatically from the energy sensor.",
+      "boiler_group_brand": {
+        "title": "🏷️ Merk / type — Boiler {unit_num} van {total} ({group_name})",
+        "description": "Selecteer het merk van de boiler. CloudEMS vult sturingmodus, setpoints en limieten automatisch in.",
         "data": {
-          "bu_entity": "Boiler entiteit",
+          "brand": "Merk / type"
+        }
+      },
+      "boiler_group_unit": {
+        "title": "🚿 Boiler {unit_num} van {total} — {group_name} ({brand_label})",
+        "description": "Koppel de HA-entiteit en stel parameters in. Waarden zijn vooraf ingevuld op basis van het gekozen merk.",
+        "data": {
+          "bu_entity": "Boiler entiteit (water_heater / switch / climate)",
           "bu_temp_sensor": "Temperatuursensor (optioneel)",
+          "bu_energy_sensor": "Vermogenssensor (optioneel)",
           "bu_label": "Naam van deze boiler",
-          "bu_setpoint": "Doeltemperatuur (°C)",
-          "bu_power_w": "Vermogen (W)"
+          "bu_boiler_type": "Type boiler",
+          "bu_setpoint": "Doeltemperatuur — normaal gebruik (°C)",
+          "bu_surplus_setpoint": "Setpoint bij PV-surplus / accu vol (°C)",
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "bu_control_mode": "Sturingmodus",
+          "bu_preset_on": "Preset naam AAN (bijv. BOOST)",
+          "bu_preset_off": "Preset naam UIT (bijv. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer aan (%)",
+          "bu_dimmer_off_pct": "Dimmer uit (%)",
+          "bu_brand": "Merk / model"
         }
       },
       "managed_battery_opts": {
@@ -880,6 +928,30 @@
           "api_key": "API-sleutel",
           "username": "E-mailadres",
           "password": "Wachtwoord"
+        }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Boiler bewerken: {unit_label}",
+        "description": "Groep: **{group_name}**\n\nPas het merk of de instellingen van deze boiler aan.",
+        "data": {
+          "bu_entity": "Boiler entiteit (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperatuursensor (optioneel)",
+          "bu_energy_sensor": "Vermogenssensor (optioneel)",
+          "bu_label": "Naam van deze boiler",
+          "bu_brand": "Merk / model",
+          "bu_setpoint": "Doeltemperatuur — normaal gebruik (°C)",
+          "bu_surplus_setpoint": "Setpoint bij PV-surplus / accu vol (°C)",
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "bu_boiler_type": "Type boiler",
+          "bu_control_mode": "Sturingmodus",
+          "bu_preset_on": "Preset naam AAN (bijv. BOOST)",
+          "bu_preset_off": "Preset naam UIT (bijv. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer aan (%)",
+          "bu_dimmer_off_pct": "Dimmer uit (%)",
+          "bu_max_setpoint_entity": "Max setpoint entiteit (bijv. number.ariston_max_setpoint_temperature)"
+        },
+        "data_description": {
+          "bu_max_setpoint_entity": "Optioneel: number-entity die het hardware-maximum instelt vóór elke temperatuurwijziging (vereist voor Ariston Lydos Hybrid)"
         }
       }
     },

@@ -288,6 +288,13 @@ class ZonneplanProvider(BatteryProvider):
         self._surplus_slider_high: bool  = False   # True = slider staat nu hoog (surplus-modus)
         self._surplus_high_since:  float = 0.0     # timestamp eerste keer surplus > drempel
         self._last_slider_write:   float = 0.0     # timestamp laatste slider/mode schrijfactie
+        # Max-probe variabelen — worden gebruikt in async_force_slider_calibrate en get_state
+        self._probe_active:        bool  = False
+        self._probe_last_run:      float = 0.0
+        self._probe_key:           Optional[str]   = None
+        self._probe_current_w:     Optional[float] = None
+        self._probe_confirmed_w:   Optional[float] = None
+        self._probe_step_w:        Optional[float] = None
 
         self._last_state = BatteryProviderState(
             provider_id=self.PROVIDER_ID, provider_label=self.PROVIDER_LABEL

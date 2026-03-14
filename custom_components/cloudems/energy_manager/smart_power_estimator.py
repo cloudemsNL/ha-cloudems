@@ -884,7 +884,7 @@ class SmartPowerEstimator:
 
     def _compute(self, s: EntityPowerState, state: str, attrs: Dict) -> float:
         if s.learned_w > 0 and s.confidence in (Confidence.MEDIUM, Confidence.HIGH):
-            if s.domain == "light" and "brightness" in attrs:
+            if s.domain == "light" and attrs.get("brightness") is not None:
                 return round(s.learned_w * float(attrs["brightness"]) / 255.0, 1)
             return s.learned_w
         if self._powercalc_available:

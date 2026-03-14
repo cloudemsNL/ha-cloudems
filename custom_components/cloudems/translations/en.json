@@ -17,16 +17,20 @@
         },
         "placeholders": {
           "buy_me_coffee_url": {
-            "description": "URL van de donatiepagina"
+            "description": "URL van de donatiepagina",
+            "example": "buy_me_coffee_url"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "support_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "support_url"
           },
           "website": {
-            "description": "URL van de website"
+            "description": "URL van de website",
+            "example": "website"
           }
         }
       },
@@ -41,7 +45,8 @@
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           }
         }
       },
@@ -85,10 +90,15 @@
         },
         "placeholders": {
           "detected": {
-            "description": "Aantal automatisch gevonden sensoren"
+            "description": "Aantal automatisch gevonden sensoren",
+            "example": "detected"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          },
+          "mains_voltage": {
+            "example": "mains_voltage"
           }
         }
       },
@@ -125,10 +135,12 @@
         },
         "placeholders": {
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "phase_count": {
-            "description": "Aantal fasen van de aansluiting"
+            "description": "Aantal fasen van de aansluiting",
+            "example": "phase_count"
           }
         }
       },
@@ -160,7 +172,8 @@
         },
         "placeholders": {
           "docs_url": {
-            "description": "URL van de documentatie"
+            "description": "URL van de documentatie",
+            "example": "docs_url"
           }
         }
       },
@@ -187,16 +200,20 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "diagram_url": {
-            "description": "URL van het diagram"
+            "description": "URL van het diagram",
+            "example": "diagram_url"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -254,7 +271,8 @@
         },
         "placeholders": {
           "premium_url": {
-            "description": "URL van de premium pagina"
+            "description": "URL van de premium pagina",
+            "example": "premium_url"
           }
         }
       },
@@ -308,7 +326,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Batterij volgnummer"
+            "description": "Batterij volgnummer",
+            "example": "battery_num"
           }
         }
       },
@@ -338,7 +357,8 @@
           "price_include_tax": "Include energy tax",
           "price_include_btw": "Include VAT (21%)",
           "selected_supplier": "Supplier (for default markup)",
-          "supplier_markup": "Manual markup (€/kWh)"
+          "supplier_markup": "Manual markup (€/kWh)",
+          "energy_prices_country": "Country (for supplier options)"
         }
       },
       "mail": {
@@ -410,11 +430,39 @@
           "preset_on": "Preset name ON (e.g. boost)",
           "preset_off": "Preset name OFF (e.g. green)",
           "dimmer_on_pct": "Dimmer value ON (%)",
-          "dimmer_off_pct": "Dimmer value OFF (%)"
+          "dimmer_off_pct": "Dimmer value OFF (%)",
+          "bu_entity": "Boiler entity (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperature sensor (optional)",
+          "bu_energy_sensor": "Power sensor (optional)",
+          "bu_label": "Name of this boiler",
+          "bu_brand": "Brand / model",
+          "bu_boiler_type": "Boiler type",
+          "boiler_type": "Boiler type",
+          "bu_control_mode": "Control mode",
+          "bu_setpoint": "Target temperature — normal use (°C)",
+          "bu_surplus_setpoint": "Setpoint during PV surplus / battery full (°C)",
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)",
+          "bu_preset_on": "Preset name ON (e.g. BOOST)",
+          "bu_preset_off": "Preset name OFF (e.g. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer on (%)",
+          "bu_dimmer_off_pct": "Dimmer off (%)",
+          "max_setpoint_entity": "Max setpoint entity (e.g. number.ariston_max_setpoint_temperature)",
+          "max_setpoint_boost_c": "Max. setpoint during PV surplus / battery full (°C)",
+          "unit_entity": "Boiler entity (switch / climate / water_heater / number)",
+          "unit_label": "Name of this boiler",
+          "unit_power_w": "Power (W)",
+          "unit_priority": "Priority (low number = first)",
+          "unit_setpoint": "Target temperature (°C)",
+          "unit_temp_sensor": "Temperature sensor (optional)",
+          "power_w": "Power (W)",
+          "priority": "Priority (1=high)",
+          "min_on_minutes": "Min. on-time (min)",
+          "min_off_minutes": "Min. off-time (min)"
         },
         "data_description": {
           "setpoint_c": "Normal setpoint. During PV surplus, the maximum setpoint is used automatically to store as much solar energy as possible.",
-          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default."
+          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default.",
+          "max_setpoint_entity": "Optional: number entity that sets the hardware maximum before each temperature change (required for Ariston Lydos Hybrid)."
         }
       },
       "diagnostics": {
@@ -465,12 +513,24 @@
           "zonneplan_min_soc": "Min. SoC for discharge (%)",
           "zonneplan_max_soc": "Max. SoC for charge (%)",
           "zonneplan_charge_w": "Default charge power (W)",
-          "zonneplan_discharge_w": "Default discharge power (W)"
+          "zonneplan_discharge_w": "Default discharge power (W)",
+          "zonneplan_ev_sensor": "EV charger sensor (EV blocker)",
+          "zonneplan_ev_block_w": "EV blocker threshold (W, 0 = off)",
+          "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
+          "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
+          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
           "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore."
+          "zonneplan_restore_after_min": "0 = never automatically restore.",
+          "zonneplan_ev_sensor": "Sensor for EV charger power. Leave empty to disable the EV blocker.",
+          "zonneplan_ev_block_w": "If the EV charger consumes more than this value, discharge is blocked. 0 = EV blocker disabled.",
+          "zonneplan_house_sensor": "Sensor for total house consumption. Leave empty to disable anti-roundtrip.",
+          "zonneplan_min_house_load_w": "Discharge is blocked when house consumption is below this value. Prevents roundtripping (charging → discharging without real use).",
+          "zonneplan_min_soc": "Discharge stops when SoC reaches this percentage. Protects battery life.",
+          "zonneplan_max_soc": "Charging stops when SoC reaches this percentage.",
+          "zonneplan_soc_reserve_high": "Minimum SoC kept when multiple HIGH hours are still in the forecast. Prevents the battery from being discharged too early."
         }
       },
       "gas_opts": {
@@ -527,7 +587,17 @@
           "bu_preset_on": "Preset ON",
           "bu_preset_off": "Preset OFF",
           "bu_dimmer_on_pct": "Dimmer ON (%)",
-          "bu_dimmer_off_pct": "Dimmer OFF (%)"
+          "bu_dimmer_off_pct": "Dimmer OFF (%)",
+          "bu_boiler_type": "Boiler type",
+          "bu_brand": "Brand / type",
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)"
+        }
+      },
+      "boiler_brand": {
+        "title": "🏷️ Brand / type boiler {idx} of {total}",
+        "description": "Select the boiler brand. CloudEMS automatically fills in the correct control mode, setpoints and safety limits.",
+        "data": {
+          "brand": "Brand / type"
         }
       }
     },
@@ -594,7 +664,8 @@
           "gas_price_sensor": "Gas price sensor (€/m³) — optional",
           "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
           "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
-          "heat_pump_cop": "Heat pump COP (1.0–8.0)"
+          "heat_pump_cop": "Heat pump COP (1.0–8.0)",
+          "enable_solar_dimmer": "Curtail solar at negative price"
         },
         "description": "Solar panel sensor, EV charger and solar curtailment."
       },
@@ -647,7 +718,8 @@
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
           "battery_chemistry": "Select your battery chemistry. LFP degrades slower than NMC.",
-          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low."
+          "outside_temp_entity": "Optional: link an outdoor temperature sensor. CloudEMS will prioritise heat pump / CV when cold and price is low.",
+          "dsmr_source": "Choose how CloudEMS retrieves grid meter data."
         }
       },
       "inverter_detail_opts": {
@@ -664,13 +736,16 @@
         },
         "placeholders": {
           "azimuth_tip": {
-            "description": "Tip voor azimut-instelling"
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
           },
           "inverter_num": {
-            "description": "Omvormer volgnummer"
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
           },
           "tilt_tip": {
-            "description": "Tip voor hellingshoek-instelling"
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
           }
         }
       },
@@ -682,7 +757,8 @@
         },
         "placeholders": {
           "inverter_names": {
-            "description": "inverter_names"
+            "description": "inverter_names",
+            "example": "inverter_names"
           }
         }
       },
@@ -694,10 +770,12 @@
         },
         "placeholders": {
           "current_count": {
-            "description": "Current battery count"
+            "description": "Current battery count",
+            "example": "current_count"
           },
           "battery_names": {
-            "description": "Names of existing batteries"
+            "description": "Names of existing batteries",
+            "example": "battery_names"
           }
         }
       },
@@ -716,7 +794,8 @@
         },
         "placeholders": {
           "battery_num": {
-            "description": "Battery sequence number"
+            "description": "Battery sequence number",
+            "example": "battery_num"
           }
         }
       },
@@ -758,7 +837,8 @@
           "supplier_markup": "Custom markup (€/kWh) — when 'Custom markup' is selected",
           "contract_type": "Contract type",
           "fixed_import_price": "Fixed import tariff (€/kWh)",
-          "fixed_export_price": "Fixed feed-in tariff (€/kWh)"
+          "fixed_export_price": "Fixed feed-in tariff (€/kWh)",
+          "energy_prices_country": "Country"
         }
       },
       "gas_opts": {
@@ -779,16 +859,20 @@
         "data": {},
         "placeholders": {
           "devices_overview": {
-            "description": "devices_overview"
+            "description": "devices_overview",
+            "example": "devices_overview"
           },
           "devtools_url": {
-            "description": "devtools_url"
+            "description": "devtools_url",
+            "example": "devtools_url"
           },
           "hide_service": {
-            "description": "hide_service"
+            "description": "hide_service",
+            "example": "hide_service"
           },
           "rename_service": {
-            "description": "rename_service"
+            "description": "rename_service",
+            "example": "rename_service"
           }
         }
       },
@@ -838,7 +922,23 @@
         "title": "⚡ Cheap Hours Switches",
         "description": "![]({diagram_url})\n\nCloudEMS automatically turns each switch **ON** when the cheapest electricity block starts — never OFF (you control that yourself or via automation).\n\n**Examples:** boiler, tumble dryer, water pump, garden lights, EV charger without smart charging.\n\n---\n\nYou currently have **{current_count}** switch(es) configured.\n\nChoose how many switches you want to set up *(0 = disable)*.",
         "data": {
-          "cheap_switch_count": "Number of cheap-hours switches"
+          "cheap_switch_count": "Number of cheap-hours switches",
+          "slot1_entity": "Slot 1 — switch",
+          "slot1_earliest": "Slot 1 — earliest hour",
+          "slot1_latest": "Slot 1 — latest hour",
+          "slot1_window": "Slot 1 — window size",
+          "slot2_entity": "Slot 2 — switch",
+          "slot2_earliest": "Slot 2 — earliest hour",
+          "slot2_latest": "Slot 2 — latest hour",
+          "slot2_window": "Slot 2 — window size",
+          "slot3_entity": "Slot 3 — switch",
+          "slot3_earliest": "Slot 3 — earliest hour",
+          "slot3_latest": "Slot 3 — latest hour",
+          "slot3_window": "Slot 3 — window size",
+          "slot4_entity": "Slot 4 — switch",
+          "slot4_earliest": "Slot 4 — earliest hour",
+          "slot4_latest": "Slot 4 — latest hour",
+          "slot4_window": "Slot 4 — window size"
         }
       },
       "tab_visibility_opts": {
@@ -866,7 +966,8 @@
         },
         "placeholders": {
           "info": {
-            "description": "info"
+            "description": "info",
+            "example": "info"
           }
         }
       },
@@ -874,7 +975,16 @@
         "title": "🚿 Hot Water Cascade",
         "description": "**Configured groups:**\n\n{groups_info}\n\n💡 {tip}",
         "data": {
-          "bg_action": "Choose an action"
+          "bg_action": "Choose an action",
+          "boiler_groups_enabled": "Hot water cascade active"
+        },
+        "placeholders": {
+          "groups_info": {
+            "example": "groups_info"
+          },
+          "tip": {
+            "example": "tip"
+          }
         }
       },
       "boiler_group_add": {
@@ -910,7 +1020,10 @@
           "bu_dimmer_on_pct": "Dimmer value ON (%)",
           "bu_dimmer_off_pct": "Dimmer value OFF (%)",
           "bu_energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)",
-          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)"
+          "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)",
+          "bu_boiler_type": "Boiler type",
+          "bu_brand": "Brand / model",
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)"
         }
       },
       "managed_battery_opts": {
@@ -923,10 +1036,20 @@
           "zonneplan_min_soc": "Min. SoC discharge (%)",
           "zonneplan_max_soc": "Max. SoC charge (%)",
           "zonneplan_charge_w": "Charge power (W)",
-          "zonneplan_discharge_w": "Discharge power (W)"
+          "zonneplan_discharge_w": "Discharge power (W)",
+          "zonneplan_ev_sensor": "EV charger sensor (EV blocker)",
+          "zonneplan_ev_block_w": "EV blocker threshold (W, 0 = off)",
+          "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
+          "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
+          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)"
         },
         "data_description": {
-          "zonneplan_enabled": "{zonneplan_description}"
+          "zonneplan_enabled": "{zonneplan_description}",
+          "zonneplan_ev_sensor": "Sensor for EV charger power. Leave empty to disable the EV blocker.",
+          "zonneplan_ev_block_w": "If the EV charger consumes more than this value, discharge is blocked. 0 = EV blocker disabled.",
+          "zonneplan_house_sensor": "Sensor for total house consumption. Leave empty to disable anti-roundtrip.",
+          "zonneplan_min_house_load_w": "Discharge is blocked when house consumption is below this value. Prevents roundtripping.",
+          "zonneplan_soc_reserve_high": "Minimum SoC kept when multiple HIGH hours are still in the forecast."
         }
       },
       "battery_type_opts": {
@@ -1017,6 +1140,37 @@
           "api_key": "API key",
           "username": "Email address",
           "password": "Password"
+        }
+      },
+      "boiler_group_brand": {
+        "title": "🏷️ Brand / type — Boiler {unit_num} of {total} ({group_name})",
+        "description": "Select the boiler brand. CloudEMS automatically fills in the control mode, setpoints and limits.",
+        "data": {
+          "brand": "Brand / type"
+        }
+      },
+      "boiler_unit_edit": {
+        "title": "✏️ Edit boiler: {unit_label}",
+        "description": "Group: **{group_name}**\n\nAdjust the brand or settings of this boiler.",
+        "data": {
+          "bu_entity": "Boiler entity (water_heater / switch / climate)",
+          "bu_temp_sensor": "Temperature sensor (optional)",
+          "bu_energy_sensor": "Power sensor (optional)",
+          "bu_label": "Name of this boiler",
+          "bu_brand": "Brand / model",
+          "bu_boiler_type": "Boiler type",
+          "bu_control_mode": "Control mode",
+          "bu_setpoint": "Target temperature — normal use (°C)",
+          "bu_surplus_setpoint": "Setpoint during PV surplus / battery full (°C)",
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)",
+          "bu_max_setpoint_entity": "Max setpoint entity (e.g. number.ariston_max_setpoint_temperature)",
+          "bu_preset_on": "Preset name ON (e.g. BOOST)",
+          "bu_preset_off": "Preset name OFF (e.g. GREEN)",
+          "bu_dimmer_on_pct": "Dimmer on (%)",
+          "bu_dimmer_off_pct": "Dimmer off (%)"
+        },
+        "data_description": {
+          "bu_max_setpoint_entity": "Optional: number entity that sets the hardware maximum before each temperature change (required for Ariston Lydos Hybrid)."
         }
       }
     },

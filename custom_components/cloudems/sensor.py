@@ -37,7 +37,7 @@ from .const import (
     CONF_NILM_PRUNE_THRESHOLD, DEFAULT_NILM_PRUNE_THRESHOLD,
     CONF_NILM_PRUNE_MIN_DAYS, DEFAULT_NILM_PRUNE_MIN_DAYS,
 )
-from .sub_devices import sub_device_info, SUB_SOLAR, SUB_ZONE_CLIMATE, SUB_NILM
+from .sub_devices import sub_device_info, SUB_SOLAR, SUB_ZONE_CLIMATE, SUB_NILM, SUB_BOILER, SUB_PRICE, SUB_LAMP, SUB_SHUTTER, SUB_BATTERY, SUB_GRID
 from .coordinator import CloudEMSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -157,6 +157,7 @@ async def async_setup_entry(
         CloudEMSDecisionLogSensor(coordinator, entry),
         CloudEMSBoilerStatusSensor(coordinator, entry),
         CloudEMSPoolStatusSensor(coordinator, entry),
+        CloudEMSEntityLogSensor(coordinator, entry),    # v4.6.13: entity/device log
         CloudEMSLampCirculationSensor(coordinator, entry),
         # v1.5: AI / NILM status sensor
         CloudEMSAIStatusSensor(coordinator, entry),
@@ -654,7 +655,7 @@ class CloudEMSPriceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_energy_price"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self):
@@ -763,7 +764,7 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_boiler_status"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
 
     @property
     def native_value(self):
@@ -867,7 +868,7 @@ class CloudEMSLampCirculationSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_lamp_circulation_status"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_LAMP)
 
     @property
     def native_value(self) -> str:
@@ -929,7 +930,7 @@ class CloudEMSPhaseCurrentSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = f"sensor.cloudems_current_{phase.lower()}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -963,7 +964,7 @@ class CloudEMSPhaseVoltageSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_voltage_{phase.lower()}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -985,7 +986,7 @@ class CloudEMSPhasePowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_power_{phase.lower()}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1005,7 +1006,7 @@ class CloudEMSPhaseBalanceSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_phase_balance"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1185,7 +1186,7 @@ class CloudEMSGridCongestionSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_congestion"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1220,7 +1221,7 @@ class CloudEMSBatteryHealthSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_battery_soh"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
     @property
     def native_value(self):
@@ -1261,7 +1262,7 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = "sensor.cloudems_battery_so_c"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
     @property
     def native_value(self):
@@ -1336,7 +1337,7 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         self._last_day: int | None = None
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
     def _accumulate(self, total_w: float) -> None:
         """Accumuleer kWh op basis van 10s-interval. Reset om middernacht."""
@@ -1405,7 +1406,7 @@ class CloudEMSMonthlyPeakSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_monthly_peak_import"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1461,7 +1462,7 @@ class CloudEMSScaleInfoSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_scale_info"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
 
     @property
     def native_value(self):
@@ -1545,7 +1546,7 @@ class CloudEMSCheapHourBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_cheap_hour_{rank}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def is_on(self) -> bool:
@@ -1799,7 +1800,7 @@ class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_p1_power"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1835,7 +1836,7 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_net_power"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1872,7 +1873,7 @@ class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_import_power"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def available(self) -> bool:
@@ -1913,7 +1914,7 @@ class CloudEMSGridExportPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_export_power"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def available(self) -> bool:
@@ -1955,7 +1956,7 @@ class CloudEMSGridImportEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_import_energy_t{tariff}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -1983,7 +1984,7 @@ class CloudEMSGridExportEnergySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_grid_export_energy_t{tariff}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -2015,7 +2016,7 @@ class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_import_power_{phase.lower()}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -2060,7 +2061,7 @@ class CloudEMSPhaseExportPowerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_export_power_{phase.lower()}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -2106,7 +2107,7 @@ class CloudEMSPricePreviousHourSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_price_prev_hour"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self):
@@ -2140,7 +2141,7 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = "sensor.cloudems_price_current_hour"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self):
@@ -2216,7 +2217,7 @@ class CloudEMSPriceNextHourSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_price_next_hour"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self):
@@ -2639,7 +2640,7 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_epex_today"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self):
@@ -2794,7 +2795,7 @@ class CloudEMSCheapest4hBlockSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_cheapest_4h_block"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     def _block(self) -> dict:
         ep = (self.coordinator.data or {}).get("energy_price", {})
@@ -3239,7 +3240,7 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_battery_schedule"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
     @property
     def native_value(self):
@@ -3439,7 +3440,13 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return round(sum(i.get("current_w", 0) for i in self._invs), 1) or None
+        invs = self._invs
+        # Return 0.0 when no inverter data yet (e.g. cold start) so card
+        # does not show "geen omvormer geconfigureerd". Return None only
+        # when coordinator has no data at all.
+        if self.coordinator.data is None:
+            return None
+        return round(sum(i.get("current_w", 0) for i in invs), 1)
 
     @property
     def extra_state_attributes(self):
@@ -4070,7 +4077,7 @@ class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_thermal_model"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
 
     @property
     def native_value(self):
@@ -4397,6 +4404,10 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         sc = (self.coordinator.data or {}).get("self_consumption", {})
         return sc.get("ratio_pct", None)
+
+    @property
+    def extra_state_attributes(self):
+        sc = (self.coordinator.data or {}).get("self_consumption", {})
         return {
             "export_pct":         sc.get("export_pct"),
             "pv_today_kwh":       sc.get("pv_today_kwh"),
@@ -4527,7 +4538,7 @@ class CloudEMSPhaseMigrationSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_phase_migration"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -4876,7 +4887,7 @@ class CloudEMSBalancerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_energy_balancer"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self):
@@ -5294,7 +5305,7 @@ class CloudEMSCheapSwitchesSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_cheap_switches"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
 
     @property
     def native_value(self) -> int:
@@ -5927,7 +5938,7 @@ class CloudEMSKwartierPiekSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = "sensor.cloudems_kwartier_piek"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self) -> float:
@@ -6154,7 +6165,7 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_battery_savings"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
     @property
     def native_value(self):
@@ -6195,7 +6206,7 @@ class CloudEMSShutterOverrideSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_shutter_override_{safe}"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_SHUTTER)
 
     def _remaining_seconds(self) -> int | None:
         """Bereken resterende seconden vanuit shutter controller state."""
@@ -6350,7 +6361,7 @@ class CloudEMSMeterTopologySensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_meter_topology"
 
     @property
-    def device_info(self): return _device_info(self._entry)
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
 
     @property
     def native_value(self) -> int:
@@ -6460,4 +6471,68 @@ class CloudEMSZonneplanKalibratieSensor(CoordinatorEntity, SensorEntity):
             "learned_max_deliver_w": lmd if lmd and lmd < 9999 else None,
             "learned_max_solar_w":   lms if lms and lms < 9999 else None,
             "has_sliders":           zp.get("has_sliders", False),
+        }
+
+
+class CloudEMSEntityLogSensor(CoordinatorEntity, SensorEntity):
+    """Sensor: entity/device log — toont aangemakte entities en orphan status.
+
+    State: "X actief / Y orphan"
+    Attributes: volledige lijst per source, orphan details, pruned count.
+    """
+    _attr_name = "CloudEMS · Entity Log"
+    _attr_icon = "mdi:format-list-checks"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_entity_log"
+
+    @property
+    def device_info(self):
+        return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self) -> str:
+        log = (self.coordinator.data or {}).get("entity_log", {})
+        active  = log.get("active",   0)
+        orphans = log.get("orphaned", 0)
+        total   = log.get("total",    0)
+        if orphans:
+            return f"{active}/{total} actief ⚠ {orphans} orphan"
+        return f"{active}/{total} actief"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        log = (self.coordinator.data or {}).get("entity_log", {})
+        entries = log.get("entries", [])
+
+        # Groepeer op source
+        by_source: dict[str, dict] = {}
+        for e in entries:
+            src = e.get("source", "unknown")
+            if src not in by_source:
+                by_source[src] = {"active": 0, "orphaned": 0, "entities": []}
+            if e.get("absent_ticks", 0) == 0:
+                by_source[src]["active"] += 1
+            else:
+                by_source[src]["orphaned"] += 1
+            by_source[src]["entities"].append({
+                "entity_id":    e.get("entity_id"),
+                "absent_ticks": e.get("absent_ticks", 0),
+                "created_at":   e.get("created_at"),
+            })
+
+        orphan_list = [
+            {"entity_id": e.get("entity_id"), "absent_ticks": e.get("absent_ticks")}
+            for e in entries if e.get("absent_ticks", 0) > 0
+        ]
+
+        return {
+            "total":       log.get("total",   0),
+            "active":      log.get("active",  0),
+            "orphaned":    log.get("orphaned",0),
+            "pruned_ever": log.get("pruned",  0),
+            "by_source":   by_source,
+            "orphans":     orphan_list,
         }

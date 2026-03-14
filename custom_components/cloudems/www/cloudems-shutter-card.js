@@ -1,465 +1,257 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-// All rights reserved. Unauthorized copying, redistribution, or commercial
-// use of this file is strictly prohibited. See LICENSE for full terms.
+// All rights reserved. See LICENSE for full terms.
+// CloudEMS Shutter Card  v2.0.0
 
-/**
- * CloudEMS Shutter Card  v1.0.0
- * Rolluiken — Status, beslissing & automaat-beheer
- *
- *   type: custom:cloudems-shutter-card
- *
- * Optional:
- *   title: "Mijn Rolluiken"
- *   show_learning: true     (default true — oriëntatie/leer info)
- */
-
-const SHUTTER_VERSION = "1.0.0";
-
-// ── Design: warm slate with sky-blue accents ──────────────────────────────────
+const SHUTTER_VERSION = "2.0.0";
 const SHUTTER_STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
-
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
-    --s-bg:       #1a1f2e;
-    --s-surface:  #212840;
-    --s-surface2: #252c3f;
-    --s-border:   rgba(255,255,255,0.07);
-    --s-sky:      #7dd3fc;
-    --s-sky-dim:  rgba(125,211,252,0.1);
-    --s-indigo:   #818cf8;
-    --s-green:    #4ade80;
-    --s-amber:    #fb923c;
-    --s-red:      #f87171;
-    --s-text:     #e2e8f0;
-    --s-muted:    #64748b;
-    --s-subtext:  #94a3b8;
-    --s-mono:     'JetBrains Mono', monospace;
-    --s-sans:     'DM Sans', sans-serif;
-    --s-r:        14px;
-    --s-rs:       8px;
+    --s-bg:#0e1520;--s-surface:#141c2b;--s-border:rgba(255,255,255,0.06);
+    --s-sky:#7dd3fc;--s-sky-dim:rgba(125,211,252,0.10);
+    --s-indigo:#818cf8;--s-indigo-dim:rgba(129,140,248,0.10);
+    --s-green:#4ade80;--s-amber:#fb923c;--s-red:#f87171;
+    --s-muted:#374151;--s-subtext:#6b7280;--s-text:#f1f5f9;
+    --s-mono:'JetBrains Mono',monospace;--s-sans:'Syne',sans-serif;--s-r:14px;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  .card {
-    background: var(--s-bg);
-    border-radius: var(--s-r);
-    border: 1px solid var(--s-border);
-    overflow: hidden;
-    font-family: var(--s-sans);
-    transition: border-color .3s, box-shadow .3s, transform .2s;
-  }
-  .card:hover {
-    border-color: rgba(125,211,252,.3);
-    box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 20px rgba(125,211,252,.05);
-    transform: translateY(-2px);
-  }
-
-  /* ── Header ── */
-  .hdr {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 15px 18px 13px;
-    background: linear-gradient(135deg, var(--s-sky-dim) 0%, transparent 60%);
-    border-bottom: 1px solid var(--s-border);
-    position: relative;
-    overflow: hidden;
-  }
-  .hdr::after {
-    content: '';
-    position: absolute;
-    right: 16px; top: 50%;
-    transform: translateY(-50%);
-    font-size: 52px;
-    opacity: .04;
-    pointer-events: none;
-    line-height: 1;
-  }
-  .hdr-icon { font-size: 20px; }
-  .hdr-texts { flex: 1; }
-  .hdr-title { font-size: 14px; font-weight: 800; color: var(--s-text); letter-spacing: .02em; }
-  .hdr-sub   { font-size: 11px; font-weight: 500; color: var(--s-muted); margin-top: 2px; }
-  .hdr-badges { display: flex; gap: 6px; flex-wrap: wrap; }
-
-  /* ── Summary strip ── */
-  .summary-strip {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border-bottom: 1px solid var(--s-border);
-  }
-  .sum-box {
-    padding: 11px 14px;
-    border-right: 1px solid var(--s-border);
-    text-align: center;
-  }
-  .sum-box:last-child { border-right: none; }
-  .sum-val { font-family: var(--s-mono); font-size: 18px; font-weight: 600; color: var(--s-text); }
-  .sum-key { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--s-muted); margin-top: 3px; }
-
-  /* ── Section ── */
-  .section { padding: 12px 18px; border-bottom: 1px solid var(--s-border); }
-  .section:last-child { border-bottom: none; }
-  .sec-title {
-    font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .12em;
-    color: var(--s-muted); margin-bottom: 9px;
-    display: flex; align-items: center; gap: 6px;
-  }
-  .sec-title::after { content: ''; flex: 1; height: 1px; background: var(--s-border); }
-
-  /* ── Shutter row ── */
-  .shutter-row {
-    background: var(--s-surface);
-    border: 1px solid var(--s-border);
-    border-radius: var(--s-rs);
-    padding: 11px 14px;
-    margin-bottom: 8px;
-    animation: fadeUp .25s ease both;
-  }
-  .shutter-row:last-child { margin-bottom: 0; }
-
-  .shutter-top {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 9px;
-  }
-  .shutter-name { font-size: 13px; font-weight: 700; color: var(--s-text); flex: 1; }
-  .auto-badge {
-    font-size: 10px; font-weight: 700;
-    padding: 2px 8px; border-radius: 20px;
-    letter-spacing: .04em;
-  }
-  .auto-on  { background: rgba(74,222,128,.1); color: var(--s-green); border: 1px solid rgba(74,222,128,.25); }
-  .auto-off { background: rgba(248,113,113,.1); color: var(--s-red); border: 1px solid rgba(248,113,113,.25); }
-
-  /* ── Position bar ── */
-  .pos-bar-wrap {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 9px;
-  }
-  .pos-bar-track {
-    flex: 1; height: 6px;
-    background: rgba(255,255,255,.06);
-    border-radius: 3px;
-    overflow: hidden;
-    position: relative;
-  }
-  .pos-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width .7s ease;
-    background: linear-gradient(90deg, var(--s-sky), var(--s-indigo));
-  }
-  .pos-pct {
-    font-family: var(--s-mono);
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--s-text);
-    min-width: 34px;
-    text-align: right;
-  }
-
-  /* ── Shutter meta row ── */
-  .shutter-meta {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-  .meta-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10.5px;
-    font-weight: 600;
-    padding: 3px 8px;
-    border-radius: 5px;
-    background: rgba(255,255,255,.04);
-    border: 1px solid var(--s-border);
-    color: var(--s-subtext);
-  }
-  .meta-chip.open     { background: rgba(74,222,128,.07);  color: var(--s-green); border-color: rgba(74,222,128,.2); }
-  .meta-chip.close    { background: rgba(248,113,113,.07); color: var(--s-red);   border-color: rgba(248,113,113,.2); }
-  .meta-chip.idle     { background: rgba(100,116,139,.07); color: var(--s-muted); }
-  .meta-chip.decision { background: var(--s-sky-dim); color: var(--s-sky); border-color: rgba(125,211,252,.2); }
-  .meta-chip.override { background: rgba(251,146,60,.1); color: var(--s-amber); border-color: rgba(251,146,60,.2); }
-
-  /* ── Decision block ── */
-  .decision-block {
-    background: rgba(255,255,255,.025);
-    border-radius: 6px;
-    padding: 7px 10px;
-    margin-top: 7px;
-    font-size: 11px;
-    color: var(--s-subtext);
-    line-height: 1.5;
-    border-left: 2px solid rgba(125,211,252,.35);
-  }
-  .decision-block strong { color: var(--s-text); }
-
-  /* ── Override list ── */
-  .override-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 0;
-    border-bottom: 1px solid rgba(255,255,255,.04);
-    font-size: 12px;
-    animation: fadeUp .25s ease both;
-  }
-  .override-row:last-child { border-bottom: none; }
-  .ov-name { flex: 1; font-weight: 600; color: var(--s-text); }
-  .ov-timer {
-    font-family: var(--s-mono);
-    font-size: 11px;
-    background: rgba(251,146,60,.1);
-    color: var(--s-amber);
-    border: 1px solid rgba(251,146,60,.2);
-    border-radius: 4px;
-    padding: 2px 7px;
-  }
-
-  /* ── Learning section ── */
-  .learn-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    font-size: 11.5px;
-    color: var(--s-subtext);
-    line-height: 1.5;
-    padding: 5px 0;
-    border-bottom: 1px solid rgba(255,255,255,.04);
-  }
-  .learn-row:last-child { border-bottom: none; }
-  .learn-row .lk { color: var(--s-muted); font-size: 10.5px; min-width: 100px; flex-shrink: 0; }
-  .learn-row .lv { font-family: var(--s-mono); color: var(--s-text); font-weight: 600; }
-
-  /* ── Module off ── */
-  .module-off {
-    display: flex; align-items: center; gap: 10px;
-    margin: 12px; padding: 11px 15px;
-    background: rgba(251,146,60,.08);
-    border: 1px solid rgba(251,146,60,.3);
-    border-radius: var(--s-rs);
-    font-size: 12px; color: var(--s-amber); font-weight: 500;
-  }
-
-  /* ── Empty ── */
-  .empty { text-align: center; padding: 20px 16px; color: var(--s-muted); font-size: 11.5px; line-height: 1.7; }
-  .empty-icon { font-size: 28px; display: block; margin-bottom: 8px; opacity: .4; }
-
-  /* ── Badge ── */
-  .badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; letter-spacing: .05em; }
-  .badge-ok     { background: rgba(125,211,252,.1); color: var(--s-sky);    border: 1px solid rgba(125,211,252,.25); }
-  .badge-warn   { background: rgba(251,146,60,.1);  color: var(--s-amber);  border: 1px solid rgba(251,146,60,.25); }
-
-  .spinner { width: 14px; height: 14px; border: 2px solid rgba(125,211,252,.15); border-top-color: var(--s-sky); border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; }
-  @keyframes spin   { to { transform: rotate(360deg); } }
-  @keyframes fadeUp { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  .card{background:var(--s-bg);border-radius:var(--s-r);border:1px solid var(--s-border);overflow:hidden;font-family:var(--s-sans);transition:border-color .3s,box-shadow .3s;}
+  .card:hover{border-color:rgba(125,211,252,.15);box-shadow:0 8px 40px rgba(0,0,0,.7);}
+  .hdr{display:flex;align-items:center;gap:10px;padding:14px 18px 12px;border-bottom:1px solid var(--s-border);position:relative;overflow:hidden;}
+  .hdr::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--s-sky-dim) 0%,transparent 60%);pointer-events:none;}
+  .hdr-icon{font-size:18px;flex-shrink:0;}
+  .hdr-texts{flex:1;}
+  .hdr-title{font-size:13px;font-weight:700;color:var(--s-text);letter-spacing:.04em;text-transform:uppercase;}
+  .hdr-sub{font-size:11px;color:var(--s-subtext);margin-top:2px;}
+  .hdr-badges{display:flex;gap:5px;}
+  .badge{font-family:var(--s-mono);font-size:9px;padding:3px 8px;border-radius:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;}
+  .badge-ok{background:var(--s-sky-dim);color:var(--s-sky);border:1px solid rgba(125,211,252,.2);}
+  .badge-warn{background:rgba(251,146,60,.12);color:var(--s-amber);border:1px solid rgba(251,146,60,.2);}
+  .badge-auto{background:var(--s-indigo-dim);color:var(--s-indigo);border:1px solid rgba(129,140,248,.2);}
+  .sum-strip{display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid var(--s-border);}
+  .sum-box{padding:11px 14px;border-right:1px solid var(--s-border);display:flex;flex-direction:column;gap:2px;text-align:center;}
+  .sum-box:last-child{border-right:none;}
+  .sum-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--s-muted);}
+  .sum-val{font-family:var(--s-mono);font-size:18px;font-weight:700;}
+  .shutters-section{padding:10px 18px 12px;}
+  .shutter-row{padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04);animation:fadeUp .35s ease both;}
+  .shutter-row:last-child{border-bottom:none;}
+  .shutter-top{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+  .shutter-name{font-size:13px;font-weight:600;color:var(--s-text);flex:1;}
+  .auto-badge{font-family:var(--s-mono);font-size:9px;font-weight:600;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.06em;}
+  .auto-badge.on{background:var(--s-sky-dim);color:var(--s-sky);border:1px solid rgba(125,211,252,.2);}
+  .auto-badge.off{background:rgba(248,113,113,.12);color:var(--s-red);border:1px solid rgba(248,113,113,.2);}
+  .auto-badge.ov{background:rgba(251,146,60,.12);color:var(--s-amber);border:1px solid rgba(251,146,60,.2);}
+  /* Shutter visual — animated slats */
+  .blind-wrap{width:100%;height:28px;background:rgba(255,255,255,.03);border-radius:4px;overflow:hidden;position:relative;margin-bottom:6px;border:1px solid var(--s-border);}
+  .blind-closed{position:absolute;left:0;top:0;height:100%;background:linear-gradient(90deg,var(--s-sky-dim),rgba(125,211,252,.06));border-right:1px solid rgba(125,211,252,.2);transition:width .8s cubic-bezier(.4,0,.2,1);}
+  .blind-pct{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:var(--s-mono);font-size:10px;font-weight:600;color:var(--s-sky);}
+  .blind-slats{position:absolute;left:0;top:0;height:100%;overflow:hidden;transition:width .8s cubic-bezier(.4,0,.2,1);}
+  .slat{height:4px;background:rgba(125,211,252,.25);border-radius:1px;margin:3px 4px;}
+  .shutter-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;}
+  .meta-chip{font-family:var(--s-mono);font-size:9px;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,.05);color:var(--s-subtext);border:1px solid var(--s-border);}
+  .meta-chip.action-open{background:rgba(74,222,128,.08);color:var(--s-green);border-color:rgba(74,222,128,.2);}
+  .meta-chip.action-close{background:rgba(125,211,252,.08);color:var(--s-sky);border-color:rgba(125,211,252,.2);}
+  .meta-chip.action-idle{color:var(--s-muted);}
+  .meta-chip.override{background:rgba(251,146,60,.1);color:var(--s-amber);border-color:rgba(251,146,60,.2);}
+  .shadow-hint{font-size:10px;color:var(--s-subtext);font-style:italic;padding:3px 0 0;display:flex;gap:5px;align-items:center;}
+  .overrides-section{border-top:1px solid var(--s-border);padding:10px 18px 12px;}
+  .sec-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--s-muted);margin-bottom:7px;}
+  .ov-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03);animation:fadeUp .3s ease both;}
+  .ov-row:last-child{border-bottom:none;}
+  .ov-name{flex:1;font-size:12px;color:var(--s-text);}
+  .ov-timer{font-family:var(--s-mono);font-size:12px;font-weight:600;color:var(--s-amber);}
+  .module-off{padding:10px 18px;background:rgba(248,113,113,.08);border-bottom:1px solid rgba(248,113,113,.2);font-size:11px;font-weight:600;color:var(--s-red);}
+  .empty{padding:36px;text-align:center;color:var(--s-muted);display:flex;flex-direction:column;align-items:center;gap:12px;}
+  .empty-icon{font-size:40px;opacity:.3;}
+  .unavail{padding:16px 18px;text-align:center;color:var(--s-amber);font-size:12px;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 `;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-const esc = s => String(s ?? "—").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
-function posBar(pos) {
-  if (pos < 0) return `<div class="pos-bar-wrap"><div class="pos-bar-track"><div class="pos-bar-fill" style="width:0%"></div></div><span class="pos-pct">—</span></div>`;
-  return `<div class="pos-bar-wrap">
-    <div class="pos-bar-track"><div class="pos-bar-fill" style="width:${pos}%"></div></div>
-    <span class="pos-pct">${pos}%</span>
-  </div>`;
-}
-
-function actionChip(act) {
-  if (act === "open")  return `<span class="meta-chip open">🔼 Open</span>`;
-  if (act === "close") return `<span class="meta-chip close">🔽 Dicht</span>`;
-  return `<span class="meta-chip idle">⏸ Idle</span>`;
-}
-
-// ── Card ──────────────────────────────────────────────────────────────────────
 class CloudemsShutterCard extends HTMLElement {
-  constructor() { super(); this.attachShadow({ mode:"open" }); this._prevJson = ""; }
-
-  setConfig(cfg) {
-    this._cfg = { title: cfg.title ?? "Rolluiken", show_learning: cfg.show_learning !== false, ...cfg };
-    this._render();
+  constructor(){ super(); this.attachShadow({mode:"open"}); this._prev=""; }
+  setConfig(c){ this._cfg={title:c.title??"Rolluiken",show_learning:c.show_learning!==false,...c}; this._render(); }
+  set hass(h){
+    this._hass=h;
+    const st=h.states["sensor.cloudems_status"];
+    const sw=h.states["switch.cloudems_module_rolluiken"];
+    // Hash only meaningful shutter data — NOT last_updated/timer countdowns
+    const shutterData=st?.attributes?.shutters??{};
+    const shutters=shutterData.shutters??[];
+    const shutterHash=shutters.map(s=>`${s.entity_id}:${s.position}:${s.last_action}:${s.auto_enabled}:${s.override_active}`).join("|");
+    // For override timers: only re-render when a timer appears/disappears (not every tick)
+    const ovActive=Object.keys(h.states).filter(k=>
+      k.startsWith("sensor.cloudems_rolluik_")&&k.endsWith("_override_restant")&&
+      h.states[k].state&&h.states[k].state!=="00:00:00"&&
+      h.states[k].state!=="unavailable"&&h.states[k].state!=="unknown"
+    ).sort().join(",");
+    const j=JSON.stringify([shutterHash,sw?.state,st?.state,ovActive]);
+    if(j!==this._prev){this._prev=j;this._render();}
   }
+  _render(){
+    const sh=this.shadowRoot; if(!sh) return;
+    const h=this._hass, c=this._cfg??{};
+    if(!h){ sh.innerHTML=`<style>${SHUTTER_STYLES}</style><div class="card"><div class="empty"><span class="empty-icon">🪟</span></div></div>`; return; }
 
-  set hass(hass) {
-    this._hass = hass;
-    const json = JSON.stringify([
-      hass.states["sensor.cloudems_status"]?.last_changed,
-      hass.states["switch.cloudems_module_rolluiken"]?.state,
-    ]);
-    if (json !== this._prevJson) { this._prevJson = json; this._render(); }
-  }
+    const stS=h.states["sensor.cloudems_status"];
+    const sw=h.states["switch.cloudems_module_rolluiken"];
 
-  _render() {
-    const sh = this.shadowRoot;
-    if (!sh) return;
-    const hass = this._hass;
-    const cfg  = this._cfg ?? {};
-
-    if (!hass) {
-      sh.innerHTML = `<style>${SHUTTER_STYLES}</style><div class="card"><div class="empty"><span class="spinner"></span></div></div>`;
+    if(!stS||stS.state==="unavailable"||stS.state==="unknown"){
+      sh.innerHTML=`<style>${SHUTTER_STYLES}</style><div class="card">
+        <div class="hdr"><span class="hdr-icon">🪟</span><div class="hdr-texts"><div class="hdr-title">${esc(c.title)}</div><div class="hdr-sub" style="color:var(--s-amber)">⚠️ CloudEMS status sensor niet beschikbaar</div></div></div>
+        <div class="unavail">sensor.cloudems_status is ${esc(stS?.state??"niet gevonden")} — controleer de integratie logs.</div>
+      </div>`;
       return;
     }
 
-    const statusSensor = hass.states["sensor.cloudems_status"];
-    const modSwitch    = hass.states["switch.cloudems_module_rolluiken"];
-    const shutterData  = statusSensor?.attributes?.shutters ?? {};
-    const shutters     = shutterData.shutters ?? [];
+    const shutterData=stS.attributes?.shutters??{};
+    const shutters=shutterData.shutters??[];
+    const total=shutters.length;
+    const autoOn=shutters.filter(s=>s.auto_enabled!==false).length;
+    const overrides=shutters.filter(s=>s.override_active).length;
+    const openCnt=shutters.filter(s=>(s.last_action||"").toLowerCase()==="open").length;
 
-    // Module off banner
-    const moduleOffHtml = (modSwitch?.state === "off")
-      ? `<div class="module-off">⚠️ Rolluiken module staat uit — schakel in via Configuratie.</div>`
-      : "";
+    const hasWarn=overrides>0||shutters.some(s=>s.auto_enabled===false);
+    const moduleOff=sw?.state==="off";
 
-    // Summary counts
-    const total    = shutters.length;
-    const autoOn   = shutters.filter(s => s.auto_enabled !== false).length;
-    const overrides= shutters.filter(s => s.override_active).length;
-    const openCnt  = shutters.filter(s => s.last_action === "open").length;
-
-    // Header badge
-    const hasWarning = overrides > 0 || shutters.some(s => s.auto_enabled === false);
-    const badgeHtml = total > 0
-      ? `<span class="badge ${hasWarning ? "badge-warn" : "badge-ok"}">${total} rolluik${total !== 1 ? "en" : ""}</span>`
-      : "";
-
-    // Empty state
-    if (total === 0) {
-      sh.innerHTML = `
-        <style>${SHUTTER_STYLES}</style>
-        <div class="card">
-          ${moduleOffHtml}
-          <div class="hdr">
-            <span class="hdr-icon">🪟</span>
-            <div class="hdr-texts">
-              <div class="hdr-title">${esc(cfg.title)}</div>
-              <div class="hdr-sub">Geen rolluiken geconfigureerd</div>
-            </div>
-          </div>
-          <div class="empty">
-            <span class="empty-icon">🪟</span>
-            Nog geen rolluiken gekoppeld.<br>
-            Configureer via <strong>CloudEMS → Rolluiken</strong>.
-          </div>
-        </div>`;
+    if(total===0){
+      sh.innerHTML=`<style>${SHUTTER_STYLES}</style><div class="card">
+        ${moduleOff?`<div class="module-off">⚠️ Rolluiken module staat uit — schakel in via Configuratie.</div>`:""}
+        <div class="hdr"><span class="hdr-icon">🪟</span><div class="hdr-texts"><div class="hdr-title">${esc(c.title)}</div><div class="hdr-sub">Geen rolluiken geconfigureerd</div></div></div>
+        <div class="empty"><span class="empty-icon">🪟</span>Configureer rolluiken via <strong>CloudEMS → Rolluiken</strong>.</div>
+      </div>`;
       return;
     }
 
-    // ── Shutter rows ──
-    const shutterRows = shutters.map((s, i) => {
-      const pos     = s.position ?? -1;
-      const act     = s.last_action ?? "";
-      const autoOn  = s.auto_enabled !== false;
-      const label   = s.label ?? s.entity_id ?? `Rolluik ${i+1}`;
-      const dec     = s.decision;
-      const reason  = s.reason;
-      const ovAct   = s.override_active;
+    // Shutter rows
+    const rows=shutters.map((s,i)=>{
+      const pos=parseFloat(s.position??s.current_position??-1);
+      const act=(s.last_action||"").toLowerCase();
+      const reason=s.last_reason||"";
+      const shadow=s.shadow_action||"";
+      const shadowReason=s.shadow_reason||"";
+      const autoEnabled=s.auto_enabled!==false;
+      const overrideActive=s.override_active||false;
+      const label=s.label||s.entity_id||`Rolluik ${i+1}`;
 
-      const decisionBlock = (dec || reason) ? `
-        <div class="decision-block">
-          ${dec ? `<strong>${esc(dec)}</strong>` : ""}
-          ${reason ? ` — ${esc(reason)}` : ""}
-        </div>` : "";
+      // Auto badge
+      const autoCls=!autoEnabled?"off":overrideActive?"ov":"on";
+      const autoLabel=!autoEnabled?"🔴 UIT":overrideActive?"🟠 Override":"🤖 AAN";
 
-      return `
-        <div class="shutter-row" style="animation-delay:${i * .07}s">
-          <div class="shutter-top">
-            <span class="shutter-name">${esc(label)}</span>
-            <span class="auto-badge ${autoOn ? "auto-on" : "auto-off"}">${autoOn ? "🤖 AAN" : "🔴 UIT"}</span>
+      // Action chip
+      const actChipCls=act==="open"?"action-open":act==="close"?"action-close":"action-idle";
+      const actIcon=act==="open"?"🔼":act==="close"?"🔽":"⏸";
+
+      // Blind visual — slats showing position
+      const closedPct=pos>=0?(100-pos):50; // pos=100 = open, pos=0 = closed
+      const nSlats=5;
+      const slatsHtml=Array.from({length:nSlats},()=>`<div class="slat"></div>`).join("");
+
+      return `<div class="shutter-row" style="animation-delay:${i*.07}s">
+        <div class="shutter-top">
+          <span class="shutter-name">${esc(label)}</span>
+          <span class="auto-badge ${autoCls}">${autoLabel}</span>
+        </div>
+        <div class="blind-wrap">
+          <div class="blind-closed" style="width:${Math.min(closedPct,100)}%">
+            <div class="blind-slats" style="width:100%">${slatsHtml}</div>
           </div>
-          ${posBar(pos)}
-          <div class="shutter-meta">
-            ${actionChip(act)}
-            ${dec ? `<span class="meta-chip decision">📋 ${esc(dec)}</span>` : ""}
-            ${ovAct ? `<span class="meta-chip override">⏱️ Override</span>` : ""}
-          </div>
-          ${!dec && reason ? decisionBlock : ""}
-          ${dec && reason ? `<div class="decision-block">${esc(reason)}</div>` : ""}
-        </div>`;
+          <span class="blind-pct">${pos>=0?Math.round(pos)+"%":"—"}</span>
+        </div>
+        <div class="shutter-meta">
+          <span class="meta-chip ${actChipCls}">${actIcon} ${esc(act||"idle")}</span>
+          ${overrideActive?`<span class="meta-chip override">⏱️ Override</span>`:""}
+          ${reason?`<span class="meta-chip">${esc(reason.length>40?reason.slice(0,40)+"…":reason)}</span>`:""}
+        </div>
+        ${shadow&&shadow!==act&&!autoEnabled?`<div class="shadow-hint">🤖 <span>Automaat zou: <strong>${esc(shadow)}</strong>${shadowReason?" — "+esc(shadowReason):""}</span></div>`:""}
+      </div>`;
     }).join("");
 
-    // ── Override timers (from sensor entities) ──
-    const overrideEntities = Object.values(hass.states).filter(e =>
-      e.entity_id.startsWith("sensor.cloudems_rolluik_") &&
-      e.entity_id.endsWith("_override_restant") &&
-      e.state && e.state !== "00:00:00" &&
-      e.state !== "unavailable" && e.state !== "unknown"
+    // Override timers — guard against state objects without entity_id
+    const ovEntities=Object.values(h.states).filter(e=>
+      e?.entity_id?.startsWith("sensor.cloudems_rolluik_")&&
+      e.entity_id.endsWith("_override_restant")&&
+      e.state&&e.state!=="00:00:00"&&
+      e.state!=="unavailable"&&e.state!=="unknown"
     );
-
-    const overrideSection = overrideEntities.length > 0 ? `
-      <div class="section">
+    const ovHtml=ovEntities.length>0?`
+      <div class="overrides-section">
         <div class="sec-title">⏱️ Actieve overrides</div>
-        ${overrideEntities.map((e, i) => {
-          const name = e.attributes.friendly_name ?? e.entity_id;
-          return `<div class="override-row" style="animation-delay:${i*.06}s">
-            <span>⏰</span>
-            <span class="ov-name">${esc(name.replace(/override restant/i,"").trim())}</span>
+        ${ovEntities.map((e,i)=>{
+          const name=(e.attributes.friendly_name||e.entity_id).replace(/override restant/i,"").trim();
+          return `<div class="ov-row" style="animation-delay:${i*.05}s">
+            <span>⏰</span><span class="ov-name">${esc(name)}</span>
             <span class="ov-timer">${esc(e.state)}</span>
           </div>`;
         }).join("")}
-      </div>` : "";
+      </div>`:"";
 
-    // ── Learning info ──
-    const learningHtml = cfg.show_learning ? `
-      <div class="section">
-        <div class="sec-title">🧭 Oriëntatie & leren</div>
-        <div class="learn-row"><span class="lk">Methode</span><span class="lv">Temp. & zoncorrelatie</span></div>
-        <div class="learn-row"><span class="lk">Automaat</span><span class="lv">${autoOn} van ${total} aan</span></div>
-        ${overrides > 0 ? `<div class="learn-row"><span class="lk">Overrides</span><span class="lv" style="color:var(--s-amber)">${overrides} actief</span></div>` : ""}
-        <div class="learn-row" style="border:none;padding-top:6px;padding-bottom:0;color:var(--s-muted);font-style:italic;font-size:10.5px">
-          <span>Oriëntatie wordt automatisch geleerd via temperatuur- en zoncorrelatie.</span>
+    sh.innerHTML=`<style>${SHUTTER_STYLES}</style>
+    <div class="card">
+      ${moduleOff?`<div class="module-off">⚠️ Rolluiken module staat uit — schakel in via Configuratie.</div>`:""}
+      <div class="hdr">
+        <span class="hdr-icon">🪟</span>
+        <div class="hdr-texts">
+          <div class="hdr-title">${esc(c.title)}</div>
+          <div class="hdr-sub">${autoOn} automaat aan · ${openCnt} open · ${total} totaal</div>
         </div>
-      </div>` : "";
-
-    // ── Full HTML ──
-    sh.innerHTML = `
-      <style>${SHUTTER_STYLES}</style>
-      <div class="card">
-        ${moduleOffHtml}
-        <div class="hdr">
-          <span class="hdr-icon">🪟</span>
-          <div class="hdr-texts">
-            <div class="hdr-title">${esc(cfg.title)}</div>
-            <div class="hdr-sub">${autoOn} automaat aan · ${openCnt} open</div>
-          </div>
-          <div class="hdr-badges">${badgeHtml}</div>
+        <div class="hdr-badges">
+          <span class="badge ${hasWarn?"badge-warn":"badge-ok"}">${total} rolluik${total!==1?"en":""}</span>
+          ${autoOn>0?`<span class="badge badge-auto">${autoOn} auto</span>`:""}
         </div>
-
-        <div class="summary-strip">
-          <div class="sum-box">
-            <div class="sum-val">${total}</div>
-            <div class="sum-key">Totaal</div>
-          </div>
-          <div class="sum-box">
-            <div class="sum-val" style="color:var(--s-green)">${autoOn}</div>
-            <div class="sum-key">Automaat</div>
-          </div>
-          <div class="sum-box">
-            <div class="sum-val" style="color:${overrides > 0 ? "var(--s-amber)" : "var(--s-muted)"}">${overrides}</div>
-            <div class="sum-key">Overrides</div>
-          </div>
-        </div>
-
-        <div class="section">
-          <div class="sec-title">🪟 Status & beslissing</div>
-          ${shutterRows}
-        </div>
-
-        ${overrideSection}
-        ${learningHtml}
-      </div>`;
+      </div>
+      <div class="sum-strip">
+        <div class="sum-box"><span class="sum-label">Totaal</span><span class="sum-val" style="color:var(--s-sky)">${total}</span></div>
+        <div class="sum-box"><span class="sum-label">Automaat</span><span class="sum-val" style="color:${autoOn>0?"var(--s-green)":"var(--s-muted)"}">${autoOn}</span></div>
+        <div class="sum-box"><span class="sum-label">Overrides</span><span class="sum-val" style="color:${overrides>0?"var(--s-amber)":"var(--s-muted)"}">${overrides}</span></div>
+      </div>
+      <div class="shutters-section">${rows}</div>
+      ${ovHtml}
+    </div>`;
   }
+  static getStubConfig(){ return {title:"Rolluiken",show_learning:true}; }
+  getCardSize(){ return 6; }
 
-  static getStubConfig() { return { title: "Rolluiken", show_learning: true }; }
-  getCardSize() { return 6; }
+  static getConfigElement(){ return document.createElement("cloudems-shutter-card-editor"); }
+  static getStubConfig(){ return {type:"cloudems-shutter-card"}; }
 }
 
-customElements.define("cloudems-shutter-card", CloudemsShutterCard);
-window.customCards = window.customCards ?? [];
-window.customCards.push({ type:"cloudems-shutter-card", name:"CloudEMS Shutter Card", description:"Rolluiken status, beslissing en automaat-beheer", preview:true });
-console.info(`%c CLOUDEMS-SHUTTER-CARD %c v${SHUTTER_VERSION} `, "background:#7dd3fc;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#1a1f2e;color:#7dd3fc;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");
+
+
+class CloudemsShutterCardEditor extends HTMLElement {
+  constructor(){ super(); this.attachShadow({mode:"open"}); }
+  setConfig(c){ this._cfg={...c}; this._render(); }
+  _fire(){
+    this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:this._cfg},bubbles:true,composed:true}));
+  }
+  _render(){
+    const cfg=this._cfg||{};
+    this.shadowRoot.innerHTML=`
+<style>
+.wrap{padding:8px;}
+.row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.row:last-child{border-bottom:none;}
+.lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px;}
+input[type=text],input[type=number]{background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color,rgba(255,255,255,.15));border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:150px;box-sizing:border-box;}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--primary-color,#03a9f4);cursor:pointer;}
+</style>
+<div class="wrap">
+        <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${cfg.title??"Rolluiken"}"></div>
+        <div class="row"><label class="lbl">Toon leervoortgang</label><input type="checkbox" name="show_learning" ${cfg.show_learning!==false?"checked":""}></div>
+</div>`;
+    this.shadowRoot.querySelectorAll("input").forEach(el=>{
+      el.addEventListener("change",()=>{
+        const n=el.name, nc={...this._cfg};
+        if(n==="title") nc[n]=el.value;
+        if(n==="show_learning") nc[n]=el.checked;
+        this._cfg=nc; this._fire();
+      });
+    });
+  }
+}
+customElements.define("cloudems-shutter-card-editor", CloudemsShutterCardEditor);
+customElements.define("cloudems-shutter-card",CloudemsShutterCard);
+window.customCards=window.customCards??[];
+window.customCards.push({type:"cloudems-shutter-card",name:"CloudEMS Shutter Card",description:"Rolluiken status, positie-visualisatie & automaat-beheer",preview:true});
+console.info(`%c CLOUDEMS-SHUTTER-CARD %c v${SHUTTER_VERSION} `,"background:#7dd3fc;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#7dd3fc;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

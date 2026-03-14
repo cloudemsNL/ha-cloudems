@@ -16,6 +16,11 @@
 
 ---
 
+> [!WARNING]
+> **🧪 Beta versie** — CloudEMS is actief in ontwikkeling. De kernfunctionaliteit (NILM, prijsoptimalisatie, batterij- en boilersturing) is stabiel en in dagelijks gebruik. Nieuwe functies zoals de interactieve JS-kaarten zijn in beta.
+>
+> **Dashboard na installatie:** Het CloudEMS dashboard wordt automatisch aangemaakt. Bij sommige installaties (met name na een dashboard-verwijdering of HACS-update) is **twee keer herstarten** van Home Assistant nodig voordat het dashboard zichtbaar is in de sidebar. Dit is een bekende beperking van de HA Lovelace API en wordt onderzocht.
+
 CloudEMS transforms your smart meter into an intelligent energy brain. It observes, learns, predicts and acts — automatically aligning every flexible load in your home to the cheapest electricity, maximising solar self-consumption, protecting circuits from overload, and keeping your home safe while you're away.
 
 Everything runs **100% locally** on your Home Assistant instance. No cloud. No subscription. No data ever leaves your home.

@@ -32,12 +32,35 @@ PLATFORMS = [
     Platform.BUTTON,
     Platform.SELECT,
     Platform.CLIMATE,          # v4.0.8: CloudEMS zone thermostat
+    Platform.WATER_HEATER,     # v4.6.16: CloudEMS virtuele boiler water heaters
     Platform.TEXT,             # v4.3.6: rolluik tijden
 ]
 
-LOVELACE_CARDS_URL     = f"/local/cloudems/cloudems-cards.js?v={VERSION}"
-LOVELACE_CARDMOD_URL   = f"/local/cloudems/cloudems-card-mod.js?v={VERSION}"
+LOVELACE_CARDS_URL          = f"/local/cloudems/cloudems-cards.js?v={VERSION}"
+LOVELACE_CARDMOD_URL        = f"/local/cloudems/cloudems-card-mod.js?v={VERSION}"
+LOVELACE_BOILER_URL         = f"/local/cloudems/cloudems-boiler-card.js?v={VERSION}"
+LOVELACE_BATTERY_URL        = f"/local/cloudems/cloudems-battery-card.js?v={VERSION}"
+LOVELACE_SHUTTER_URL        = f"/local/cloudems/cloudems-shutter-card.js?v={VERSION}"
+LOVELACE_SOLAR_URL          = f"/local/cloudems/cloudems-solar-card.js?v={VERSION}"
+LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={VERSION}"
+LOVELACE_OVERVIEW_URL       = f"/local/cloudems/cloudems-overview-card.js?v={VERSION}"
+LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VERSION}"
+LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
+
+# Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
+_ALL_JS_RESOURCES = [
+    (LOVELACE_CARDS_URL,        "cloudems-cards.js"),
+    (LOVELACE_CARDMOD_URL,      "cloudems-card-mod.js"),
+    (LOVELACE_BOILER_URL,       "cloudems-boiler-card.js"),
+    (LOVELACE_BATTERY_URL,      "cloudems-battery-card.js"),
+    (LOVELACE_SHUTTER_URL,      "cloudems-shutter-card.js"),
+    (LOVELACE_SOLAR_URL,        "cloudems-solar-card.js"),
+    (LOVELACE_PV_FORECAST_URL,  "cloudems-pv-forecast-card.js"),
+    (LOVELACE_OVERVIEW_URL,     "cloudems-overview-card.js"),
+    (LOVELACE_SWITCHES_URL,     "cloudems-switches-card.js"),
+    (LOVELACE_ZELFCONS_URL,     "cloudems-zelfconsumptie-card.js"),
+]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
 _STALE_CARD_JS_KEYWORD = "cloudems-card.js"
@@ -102,12 +125,11 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         current_items = list(resources.async_items())
 
         # Stap 1: verwijder verouderde CloudEMS resource-entries
-        # Inclusief de nooit-bestaande cloudems-card.js die fout werd geregistreerd
-        stale_keywords = ["cloudems-card.js", "cloudems-cards.js", "cloudems-card-mod.js"]
-        correct_urls   = {LOVELACE_CARDS_URL, LOVELACE_CARDMOD_URL}
+        all_keywords = [kw for _, kw in _ALL_JS_RESOURCES] + ["cloudems-card.js"]
+        correct_urls = {url for url, _ in _ALL_JS_RESOURCES}
         for item in current_items:
             item_url = item.get("url", "")
-            if any(kw in item_url for kw in stale_keywords) and item_url not in correct_urls:
+            if any(kw in item_url for kw in all_keywords) and item_url not in correct_urls:
                 try:
                     await resources.async_delete_item(item["id"])
                     _LOGGER.info("CloudEMS: verouderde Lovelace resource verwijderd → %s", item_url)
@@ -119,11 +141,8 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         current_items = list(resources.async_items())
         current = {r.get("url", ""): r for r in current_items}
 
-        # Stap 2: registreer/update de correcte resource-entries (alleen bestaande JS files)
-        for url, keyword in [
-            (LOVELACE_CARDS_URL,    "cloudems-cards.js"),
-            (LOVELACE_CARDMOD_URL,  "cloudems-card-mod.js"),
-        ]:
+        # Stap 2: registreer/update ALLE CloudEMS JS-resources
+        for url, keyword in _ALL_JS_RESOURCES:
             matches = [v for k, v in current.items() if keyword in k]
             if matches:
                 item = matches[0]
@@ -509,8 +528,16 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
             # Zorg dat resources in de storage-config de versie-cache-buster hebben.
             # Hiermee laadt de browser na elke update de nieuwste JS — geen hard refresh nodig.
             dashboard_config["resources"] = [
-                {"url": f"/local/cloudems/cloudems-cards.js?v={VERSION}",    "type": "module"},
-                {"url": f"/local/cloudems/cloudems-card-mod.js?v={VERSION}", "type": "module"},
+                {"url": f"/local/cloudems/cloudems-cards.js?v={VERSION}",          "type": "module"},
+                {"url": f"/local/cloudems/cloudems-card-mod.js?v={VERSION}",             "type": "module"},
+                {"url": f"/local/cloudems/cloudems-boiler-card.js?v={VERSION}",    "type": "module"},
+                {"url": f"/local/cloudems/cloudems-battery-card.js?v={VERSION}",   "type": "module"},
+                {"url": f"/local/cloudems/cloudems-shutter-card.js?v={VERSION}",   "type": "module"},
+                {"url": f"/local/cloudems/cloudems-solar-card.js?v={VERSION}",     "type": "module"},
+                {"url": f"/local/cloudems/cloudems-pv-forecast-card.js?v={VERSION}","type": "module"},
+                {"url": f"/local/cloudems/cloudems-overview-card.js?v={VERSION}",  "type": "module"},
+                {"url": f"/local/cloudems/cloudems-switches-card.js?v={VERSION}",  "type": "module"},
+                {"url": f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}", "type": "module"},
             ]
 
             # Registreer in sidebar als nog niet aanwezig
@@ -535,7 +562,10 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
                 "data": {"config": dashboard_config},
             }
             dash_cfg.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2), encoding="utf-8")
-            _LOGGER.info("CloudEMS: dashboard config bijgewerkt → %s", dash_cfg.name)
+            _LOGGER.info(
+                "CloudEMS: dashboard '%s' config geschreven naar %s (%d bytes)",
+                slug, dash_cfg.name, dash_cfg.stat().st_size
+            )
 
         if reg_changed:
             reg["data"]["items"] = items
@@ -545,19 +575,113 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
 
     try:
         created = await hass.async_add_executor_job(_do_storage_work)
-        if created:
-            _LOGGER.info("CloudEMS: nieuwe dashboards aangemaakt: %s — herstart HA om sidebar te zien", created)
-        else:
-            _LOGGER.info("CloudEMS: alle dashboard configs bijgewerkt")
+        _LOGGER.info(
+            "CloudEMS: dashboard storage geschreven — nieuw: %s",
+            created if created else "geen"
+        )
 
-        # ── Live reload ────────────────────────────────────────────────────────
-        # Na HACS-update zijn de .storage bestanden bijgewerkt maar HA heeft de
-        # vorige versie nog in memory.  Forceer een reload van elk dashboard-object
-        # zodat gebruikers zonder herstart de nieuwe views zien.
+        # ── Injecteer dashboards live in lovelace zonder herstart ──────────────
+        # Na verwijdering staat het dashboard in storage maar niet in memory.
+        # Gebruik de lovelace collection API om het direct te registreren.
+        if created:
+            await _async_inject_dashboards(hass, created)
+
+        # ── Live reload van bestaande dashboards ───────────────────────────────
         await _async_reload_cloudems_dashboards(hass)
+
+        # ── Herstel verwijderd dashboard ───────────────────────────────────────
+        # Na verwijdering + herstart: storage is correct maar lovelace.dashboards
+        # dict in memory mist het dashboard omdat HA het laadde vóór onze storage
+        # write. Probeer het dashboard live in te laden via de collection API.
+        if created:
+            async def _inject_dashboards_after_ha_start():
+                """Wacht tot HA volledig gestart is, injecteer dan de dashboards."""
+                await hass.async_block_till_done()
+                try:
+                    from homeassistant.components import lovelace as _ll2
+                    from homeassistant.components.lovelace import dashboard as _ll_dash
+                    lovelace_data = hass.data.get(_ll2.DOMAIN)
+                    if not lovelace_data:
+                        _LOGGER.warning("CloudEMS: lovelace niet beschikbaar voor dashboard inject")
+                        return
+                    dashboards = getattr(lovelace_data, "dashboards", None)
+                    if dashboards is None and hasattr(lovelace_data, "get"):
+                        dashboards = lovelace_data.get("dashboards", {})
+                    if dashboards is None:
+                        _LOGGER.warning("CloudEMS: dashboards dict niet gevonden")
+                        return
+                    for slug in created:
+                        if slug not in (dashboards if isinstance(dashboards, dict) else {}):
+                            _LOGGER.info("CloudEMS: dashboard '%s' ontbreekt in memory — herstart HA om sidebar te zien", slug)
+                        else:
+                            _LOGGER.info("CloudEMS: dashboard '%s' al aanwezig in memory", slug)
+                except Exception as _inj_err:
+                    _LOGGER.debug("CloudEMS: dashboard inject check mislukt: %s", _inj_err)
+            hass.async_create_task(_inject_dashboards_after_ha_start())
 
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("CloudEMS: kon Lovelace dashboard niet aanmaken: %s", err)
+
+
+async def _async_inject_dashboards(hass: HomeAssistant, slugs: list) -> None:
+    """Registreer verwijderde dashboards live in lovelace via de StorageCollection API.
+
+    HA beheert dashboards via een StorageCollection object. Als we async_create_item()
+    aanroepen, wordt het dashboard zowel in memory als in storage geregistreerd —
+    identiek aan wat de UI doet wanneer een gebruiker een dashboard toevoegt.
+    """
+    _DASHBOARD_DEFS = {
+        "cloudems-lovelace": {
+            "url_path": "cloudems-lovelace",
+            "require_admin": False,
+            "title": "CloudEMS",
+            "icon": "mdi:lightning-bolt",
+            "show_in_sidebar": True,
+            "mode": "storage",
+        },
+        "cloudems-dev": {
+            "url_path": "cloudems-dev",
+            "require_admin": True,
+            "title": "⚗️ CloudEMS DEV",
+            "icon": "mdi:flask",
+            "show_in_sidebar": True,
+            "mode": "storage",
+        },
+    }
+    try:
+        from homeassistant.components import lovelace as _ll
+        lovelace_data = hass.data.get(_ll.DOMAIN)
+        if not lovelace_data:
+            return
+
+        # Zoek de StorageCollection — heet "dashboards" of zit als attr op het object
+        coll = None
+        for attr in ("dashboards", "_dashboards", "dashboard_collection", "_dashboard_collection"):
+            candidate = (
+                lovelace_data.get(attr) if isinstance(lovelace_data, dict)
+                else getattr(lovelace_data, attr, None)
+            )
+            if candidate is not None and hasattr(candidate, "async_create_item"):
+                coll = candidate
+                break
+
+        if coll is None:
+            _LOGGER.debug("CloudEMS inject: StorageCollection niet gevonden, herstart nodig")
+            return
+
+        for slug in slugs:
+            defn = _DASHBOARD_DEFS.get(slug)
+            if not defn:
+                continue
+            try:
+                # async_create_item voegt toe aan memory + schrijft storage
+                await coll.async_create_item(defn)
+                _LOGGER.info("CloudEMS: dashboard '%s' live geregistreerd zonder herstart ✓", slug)
+            except Exception as _ce:
+                # Kan falen als het al bestaat (race condition) — dat is OK
+                _LOGGER.debug("CloudEMS inject '%s': %s", slug, _ce)
+    except Exception as err:
+        _LOGGER.debug("CloudEMS inject fout: %s", err)
 
 
 async def _async_reload_cloudems_dashboards(hass: HomeAssistant) -> None:
@@ -859,6 +983,13 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
                 domain, f"turn_{state}", {"entity_id": entity_id}, blocking=False
             )
 
+    async def set_boiler_setpoint(call: ServiceCall):
+        """Pas het setpoint aan voor een boiler via het CloudEMS dashboard."""
+        if coordinator._boiler_ctrl:
+            entity_id  = call.data["entity_id"]
+            setpoint_c = float(call.data["setpoint_c"])
+            coordinator._boiler_ctrl.update_setpoint(entity_id, setpoint_c)
+
     hass.services.async_register(DOMAIN, "confirm_device",         confirm_device)
     hass.services.async_register(DOMAIN, "dismiss_device",         dismiss_device)
     hass.services.async_register(DOMAIN, "nilm_feedback",          nilm_feedback)
@@ -1007,6 +1138,11 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "download_energy_report", download_energy_report,
         schema=vol.Schema({vol.Optional("month", default=""): str}))
     hass.services.async_register(DOMAIN, "boiler_override",        boiler_override)
+    hass.services.async_register(DOMAIN, "set_boiler_setpoint",    set_boiler_setpoint,
+        schema=vol.Schema({
+            vol.Required("entity_id"): str,
+            vol.Required("setpoint_c"): vol.All(vol.Coerce(float), vol.Range(min=30, max=85)),
+        }))
 
     # v2.1: reset leerdata leveringsboiler-detectie
     async def reset_delivery_learning(call: ServiceCall):

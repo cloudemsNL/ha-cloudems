@@ -485,8 +485,49 @@ class CloudemsPvForecastCard extends HTMLElement {
     return { title: "Zonnepanelen", show_tomorrow: true, show_epex: true, show_confidence: true };
   }
   getCardSize() { return 5; }
+
+  static getConfigElement(){ return document.createElement("cloudems-pv-forecast-card-editor"); }
+  static getStubConfig(){ return {type:"cloudems-pv-forecast-card"}; }
 }
 
+
+
+class CloudemsPvForecastCardEditor extends HTMLElement {
+  constructor(){ super(); this.attachShadow({mode:"open"}); }
+  setConfig(c){ this._cfg={...c}; this._render(); }
+  _fire(){
+    this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:this._cfg},bubbles:true,composed:true}));
+  }
+  _render(){
+    const cfg=this._cfg||{};
+    this.shadowRoot.innerHTML=`
+<style>
+.wrap{padding:8px;}
+.row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.row:last-child{border-bottom:none;}
+.lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px;}
+input[type=text],input[type=number]{background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color,rgba(255,255,255,.15));border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:150px;box-sizing:border-box;}
+input[type=checkbox]{width:18px;height:18px;accent-color:var(--primary-color,#03a9f4);cursor:pointer;}
+</style>
+<div class="wrap">
+        <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${cfg.title??"Zonnepanelen"}"></div>
+        <div class="row"><label class="lbl">Toon morgen forecast</label><input type="checkbox" name="show_tomorrow" ${cfg.show_tomorrow!==false?"checked":""}></div>
+        <div class="row"><label class="lbl">Toon EPEX overlay</label><input type="checkbox" name="show_epex" ${cfg.show_epex!==false?"checked":""}></div>
+        <div class="row"><label class="lbl">Toon onzekerheidsband</label><input type="checkbox" name="show_confidence" ${cfg.show_confidence!==false?"checked":""}></div>
+</div>`;
+    this.shadowRoot.querySelectorAll("input").forEach(el=>{
+      el.addEventListener("change",()=>{
+        const n=el.name, nc={...this._cfg};
+        if(n==="title") nc[n]=el.value;
+        if(n==="show_tomorrow") nc[n]=el.checked;
+        if(n==="show_epex") nc[n]=el.checked;
+        if(n==="show_confidence") nc[n]=el.checked;
+        this._cfg=nc; this._fire();
+      });
+    });
+  }
+}
+customElements.define("cloudems-pv-forecast-card-editor", CloudemsPvForecastCardEditor);
 customElements.define("cloudems-pv-forecast-card", CloudemsPvForecastCard);
 window.customCards = window.customCards ?? [];
 window.customCards.push({

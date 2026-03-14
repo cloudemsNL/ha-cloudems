@@ -53,8 +53,11 @@ BACKUP_KEY           = "solar_learner"
 
 IRRADIANCE_MIN_W         = 100
 MIN_POWER_DELTA_W        = 50
-MIN_PHASE_DETECTIONS     = 5
-PHASE_CONFIRM_RATIO      = 0.70
+# v4.6.12: verhoogd van 5→10 en 0.70→0.80 — systeem had te snel een fase besloten
+# (Goodwe zat op L3 maar werd fout geleerd). Meer stemmen + hogere zekerheidsdrempel
+# zorgen voor betrouwbaardere fase-detectie.
+MIN_PHASE_DETECTIONS     = 10
+PHASE_CONFIRM_RATIO      = 0.80
 LEARNING_SAVE_INTERVAL_S = 120
 
 # Cross-validatie
@@ -69,7 +72,7 @@ NEW_PANEL_CONFIRM_COUNT = 3
 # Alle drie fasen moeten stijgen bij een PV-sprong. De kleinste delta mag niet
 # minder dan dit aandeel van de grootste delta zijn (symmetriecheck).
 THREE_PHASE_BALANCE_RATIO  = 0.20   # kleinste / grootste ≥ 0.20 → 3-fasig (v2.6: verlaagd van 0.35, echte omvormers nooit perfect gesymmetreerd)
-THREE_PHASE_MIN_DETECTIONS = 4      # aantal bevestigingen voor definitief "3F"
+THREE_PHASE_MIN_DETECTIONS = 6      # v4.6.12: verhoogd van 4→6 — meer bevestigingen vóór definitief "3F"
 THREE_PHASE_LABEL          = "3F"   # label dat in sensor/dashboard verschijnt
 
 # Peak-power fallback: als een omvormer ooit meer heeft geleverd dan dit vermogen,

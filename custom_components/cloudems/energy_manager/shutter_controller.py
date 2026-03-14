@@ -53,6 +53,9 @@ class ShutterConfig:
     # Temperatuursensor fallback (gebruikt als er geen zone climate is voor deze ruimte)
     temp_sensor: str = ""                   # sensor.xxx met device_class temperature
 
+    # Rookmelder per rolluik/ruimte (optioneel — naast de globale sensor)
+    smoke_sensor: str = ""                  # binary_sensor.xxx, on = rook gedetecteerd
+
     # Gedragsopties
     auto_thermal: bool = True               # automatisch op thermisch comfort
     auto_solar_gain: bool = True            # openen voor passieve zonnewarmte
@@ -64,6 +67,7 @@ class ShutterConfig:
     night_close_time: str = "23:00"         # tijdstip waarop rolluik 's nachts sluit
     morning_open_time: str = "07:30"        # vroegste tijdstip voor automatisch openen
     default_setpoint: float = 20.0          # fallback setpoint als geen klimaat beschikbaar
+    smoke_sensor: str = ""                  # optioneel: binary_sensor per rolluik/ruimte
 
     # PID instellingen (positie-sturing)
     pid_kp: float = 15.0                    # proportionele versterking
@@ -145,6 +149,7 @@ class ShutterController:
         # v4.3.7: nieuwe features
         self._weather_entity: str | None = None          # weer-integratie
         self._is_storm: bool = False                     # storm gedetecteerd
+        self._global_smoke_sensor: str | None = None         # optioneel: 1 algemene rookmelder sensor
         self._presence_entities: list[str] = []          # person.* / device_tracker.*
         self._anyone_home: bool = True                   # iemand thuis?
 
@@ -182,6 +187,7 @@ class ShutterController:
                 night_close_time=c.get("night_close_time", DEFAULT_SHUTTER_NIGHT_CLOSE),
                 morning_open_time=c.get("morning_open_time", DEFAULT_SHUTTER_MORNING_OPEN),
                 default_setpoint=float(c.get("default_setpoint", DEFAULT_SHUTTER_SETPOINT)),
+                smoke_sensor=c.get("smoke_sensor", ""),
                 pid_kp=float(c.get("pid_kp", 15.0)),
                 pid_ki=float(c.get("pid_ki", 0.5)),
                 pid_kd=float(c.get("pid_kd", 2.0)),
@@ -311,6 +317,19 @@ class ShutterController:
         """Update actuele windsnelheid (m/s) en drempel. Wordt door coordinator aangeroepen."""
         self._current_wind_speed = wind_ms
         self._wind_threshold_ms  = threshold_ms
+
+    def set_global_smoke_sensor(self, entity_id: str | None) -> None:
+        """Koppel een algemene rookmelder binary_sensor (geldt voor alle rolluiken)."""
+        self._global_smoke_sensor = entity_id
+
+    def _smoke_detected(self, cfg: "ShutterConfig") -> bool:
+        """True als globale rookmelder OF rolluik-specifieke rookmelder actief is."""
+        def _is_on(eid: str) -> bool:
+            if not eid:
+                return False
+            state = self.hass.states.get(eid)
+            return state is not None and state.state == "on"
+        return _is_on(self._global_smoke_sensor or "") or _is_on(cfg.smoke_sensor)
 
     def set_weather_entity(self, entity_id: str | None) -> None:
         """Koppel een HA weather entiteit voor storm/wind detectie."""
@@ -798,33 +817,30 @@ class ShutterController:
         room_temp: float | None,
         room_setpoint: float | None,
     ) -> ShutterDecision:
-        state = self._states.get(cfg.entity_id)
+        state    = self._states.get(cfg.entity_id)
+        is_night = self._is_night(cfg)
+        night_window   = f"{self._night_close(cfg)}–{self._morning_open(cfg)}"
+        _wind_speed    = getattr(self, '_current_wind_speed', None)
+        _wind_thr      = getattr(self, '_wind_threshold_ms', 12.0)
+        wind_active    = _wind_speed is not None and _wind_speed >= _wind_thr
+        storm_active   = getattr(self, '_is_storm', False)
 
-        # ── Prio 0: Wind- & stormbeveiliging — altijd actief ────────────────
-        _wind_speed = getattr(self, '_current_wind_speed', None)
-        _wind_thr   = getattr(self, '_wind_threshold_ms', 12.0)
-        if _wind_speed is not None and _wind_speed >= _wind_thr:
+        # ── Prio 0: Rookmelder — altijd OPEN, dag én nacht ───────────────────
+        if self._smoke_detected(cfg):
+            _LOGGER.warning("ShutterController [%s]: rookmelder actief → open", cfg.entity_id)
             return ShutterDecision(
                 entity_id=cfg.entity_id,
                 action=SHUTTER_ACTION_OPEN,
-                reason=f"windbeveiliging ({_wind_speed:.0f} m/s)",
-                priority=200,
-            )
-        if getattr(self, '_is_storm', False):
-            return ShutterDecision(
-                entity_id=cfg.entity_id,
-                action=SHUTTER_ACTION_OPEN,
-                reason=SHUTTER_REASON_STORM,
-                priority=195,
+                reason="rookmelder actief",
+                priority=255,
             )
 
-        # ── Prio 1: Automaat uitgeschakeld (handmatig of getimed) ────────────
+        # ── Prio 1: Automaat uitgeschakeld ────────────────────────────────────
         if state and not self.get_auto_enabled(cfg.entity_id):
             until  = state.auto_disabled_until
             reason = "automaat uitgeschakeld"
             if until:
                 reason = f"automaat uit tot {until.strftime('%d-%m %H:%M')}"
-            # Shadow: bereken wat de automaat zou doen (voor dashboard advies)
             shadow = self._evaluate_shadow(cfg, outdoor_temp_c, solar_elevation_deg,
                                            solar_azimuth_deg, pv_surplus_w, room_temp, room_setpoint)
             return ShutterDecision(
@@ -837,9 +853,8 @@ class ShutterController:
                 shadow_position= shadow.position,
             )
 
-        # ── Prio 2: Handmatige override (tijdelijk, bijv. 2u) ────────────────
+        # ── Prio 2: Handmatige override — dag én nacht ───────────────────────
         if state and state.override_until and dt_util.now() < state.override_until:
-            # Shadow: bereken wat de automaat zou doen (voor dashboard advies)
             shadow = self._evaluate_shadow(cfg, outdoor_temp_c, solar_elevation_deg,
                                            solar_azimuth_deg, pv_surplus_w, room_temp, room_setpoint)
             _LOGGER.debug(
@@ -856,22 +871,65 @@ class ShutterController:
                 shadow_position= shadow.position,
             )
 
-        # ── Prio 3: Nachtschema — volledig sluiten ───────────────────────────
-        if self._is_night(cfg):
+        # ── Prio 3: Nachtschema (night_close t/m morning_open per rolluik) ───
+        # Binnen deze tijden: automaat bevroren — geen thermisch, geen afwezig.
+        # Wind/storm → dicht (of al dicht = IDLE). Niets gaat open.
+        if is_night:
+            if wind_active or storm_active:
+                wind_reason = (
+                    f"windbeveiliging 's nachts ({_wind_speed:.0f} m/s)"
+                    if wind_active else "storm 's nachts"
+                )
+                current = state.current_position if state else -1
+                if current != 0:
+                    _LOGGER.info("ShutterController [%s]: %s — sluit naar 0", cfg.entity_id, wind_reason)
+                    return ShutterDecision(
+                        entity_id=cfg.entity_id,
+                        action=SHUTTER_ACTION_POSITION,
+                        position=0,
+                        reason=wind_reason,
+                        priority=200,
+                    )
+                return ShutterDecision(
+                    entity_id=cfg.entity_id,
+                    action=SHUTTER_ACTION_IDLE,
+                    reason=f"{wind_reason} — al gesloten",
+                    priority=0,
+                )
+            # Geen wind/storm: éénmalig sluiten, daarna IDLE
             current = state.current_position if state else -1
             if current != 0:
+                _LOGGER.info("ShutterController [%s]: nacht (%s) — sluit naar 0", cfg.entity_id, night_window)
                 return ShutterDecision(
                     entity_id=cfg.entity_id,
                     action=SHUTTER_ACTION_POSITION,
                     position=0,
-                    reason=f"nacht (sluit {self._night_close(cfg)}–{self._morning_open(cfg)})",
+                    reason=f"nacht ({night_window})",
                     priority=120,
                 )
             return ShutterDecision(
                 entity_id=cfg.entity_id,
                 action=SHUTTER_ACTION_IDLE,
-                reason="nacht — al gesloten",
+                reason=f"nacht ({night_window}) — bevroren",
                 priority=0,
+            )
+
+        # ── Vanaf hier: overdag ───────────────────────────────────────────────
+
+        # ── Prio 4: Wind/storm overdag → volledig open ────────────────────────
+        if wind_active:
+            return ShutterDecision(
+                entity_id=cfg.entity_id,
+                action=SHUTTER_ACTION_OPEN,
+                reason=f"windbeveiliging ({_wind_speed:.0f} m/s)",
+                priority=200,
+            )
+        if storm_active:
+            return ShutterDecision(
+                entity_id=cfg.entity_id,
+                action=SHUTTER_ACTION_OPEN,
+                reason=SHUTTER_REASON_STORM,
+                priority=195,
             )
 
         # ── Prio 4: Ochtend geblokkeerd — wacht op openingstijd ──────────────

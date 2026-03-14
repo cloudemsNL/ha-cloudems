@@ -35,6 +35,7 @@ Copyright 2025 CloudEMS — https://cloudems.eu
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -97,6 +98,23 @@ MODE_CONGESTION_OFF = "congestion_off"
 BOILER_TYPE_RESISTIVE = "resistive"
 BOILER_TYPE_HEAT_PUMP = "heat_pump"
 BOILER_TYPE_HYBRID    = "hybrid"
+
+# v4.6.18: leesbare merknamen voor dashboard / diagnostiek
+_BRAND_LABELS: dict[str, str] = {
+    "ariston_lydos_hybrid": "Ariston Lydos Hybrid",
+    "ariston_velis_evo":    "Ariston Velis Evo",
+    "ariston_andris":       "Ariston Andris Lux",
+    "midea_e2":             "Midea / Comfee E2",
+    "midea_e3":             "Midea / Comfee E3",
+    "daikin_altherma_dhw":  "Daikin Altherma DHW",
+    "vaillant_unistor":     "Vaillant uniSTOR / aroSTOR",
+    "stiebel_wwk":          "Stiebel Eltron WWK",
+    "aosmith_electric":     "A.O. Smith elektrisch",
+    "itho_heatpump":        "Itho Daalderop WP",
+    "generic_resistive":    "Generiek elektrisch",
+    "generic_heatpump":     "Generiek warmtepomp",
+    "unknown":              "Onbekend",
+}
 BOILER_TYPE_VARIABLE  = "variable"
 
 CASCADE_SEQUENTIAL  = "sequential"
@@ -131,6 +149,17 @@ LEGIONELLA_CONFIRM_S      = 3600   # seconden ≥65°C nodig voor bevestigde ont
 LEGIONELLA_INTERVAL_DAYS  = 7      # maximaal interval tussen cycli
 LEGIONELLA_DEADLINE_DAYS  = 8      # na N dagen: force-cycle ongeacht prijs/tijd
 LEGIONELLA_PRICE_RANK     = 4      # plan in één van de goedkoopste N uren van dag
+
+# ─── Ariston cloud verify/retry ──────────────────────────────────────────────
+# De Ariston cloud is onbetrouwbaar: settings komen soms niet aan of worden
+# overschreven. Na elke send controleren we of de state overeenkomt en retrien
+# indien nodig — met toenemende backoff om 429-blocks te vermijden.
+ARISTON_VERIFY_DELAY_S    = 15     # eerste verify: 15s na send
+ARISTON_RETRY_BACKOFF     = [15, 30, 60, 120]  # delays tussen retries (seconden)
+ARISTON_MAX_RETRIES       = 4      # maximaal 4 pogingen na de initiële send
+ARISTON_RATE_LIMIT_S      = 180    # bij 429: 3 minuten wachten voor nieuwe pogingen
+ARISTON_PRESET_TOLERANCE  = 0      # preset moet exact kloppen (string compare)
+ARISTON_TEMP_TOLERANCE    = 1.0    # setpoint mag ±1°C afwijken (float compare)
 
 # ─── Thermisch model: geleerde opwarmsnelheid ────────────────────────────────
 HEAT_RATE_ALPHA           = 0.10   # EMA-factor voor g_heat_rate bijwerking
@@ -227,8 +256,21 @@ class BoilerState:
     stagger_ticks:       int   = 0
     control_mode:        str   = "switch"
     surplus_setpoint_c:  float = 75.0    # setpoint bij PV-surplus (setpoint_boost modus)
+    # v4.6.13: hardware_max_c — absolute bovengrens voor alle setpoints die naar de
+    # hardware gestuurd worden. Voorkomt dat CloudEMS bijv. 78°C stuurt terwijl de boiler
+    # maar 60°C aankan. 0.0 = niet ingesteld (systeem gebruikt SAFETY_MAX_C - 2.0 = 78°C).
+    # Voor resistive boilers met een lager maximum: stel in op bijv. 60.0 of 65.0.
+    # Voor heat_pump/hybrid: max_setpoint_boost_c heeft dezelfde rol en heeft prioriteit.
+    hardware_max_c:      float = 0.0
     preset_on:           str   = "boost"
     preset_off:          str   = "green"
+    # v4.6.5: Ariston Lydos e.d. begrenzen setpoint per modus via een apart number-entity
+    # (bijv. number.ariston_max_setpoint_temperature). In GREEN-modus is dit bijv. 53°C.
+    # CloudEMS zet dit entity op 75°C bij BOOST zodat het gewenste setpoint ook echt
+    # bereikt kan worden. Bij terugschakelen naar GREEN wordt het teruggezet op preset_off_max_c.
+    max_setpoint_entity: str   = ""    # bijv. "number.ariston_max_setpoint_temperature"
+    max_setpoint_boost_c: float = 75.0  # waarde die gezet wordt bij BOOST
+    max_setpoint_green_c: float = 53.0  # waarde die teruggezet wordt bij GREEN
     dimmer_on_pct:       float = 100.0
     dimmer_off_pct:      float = 0.0
     dimmer_proportional: bool  = False
@@ -266,14 +308,70 @@ class BoilerState:
     _dimmer_last_pct:    float = field(default=0.0, repr=False)
     _dimmer_last_ts:     float = field(default=0.0, repr=False)
 
+    # ── v4.6.12: Hardware deadband compensatie + stall detectie ──────────────
+    # Ariston WP-boilers starten pas als de watertemperatuur ver genoeg onder het
+    # ingestelde setpoint zakt (interne hardware deadband van de boiler zelf).
+    # hardware_deadband_c wordt bij het verzonden setpoint opgeteld zodat de
+    # hardware-trigger eerder afgaat. Waarde 0.0 = automatisch:
+    #   heat_pump / hybrid → 2.0°C   resistive / variable → 0.0°C
+    hardware_deadband_c: float = 0.0
+    # Stall-detectie: als de boiler stall_timeout_s lang 0W trekt terwijl hij
+    # aan hoort te staan, wordt het setpoint tijdelijk met stall_boost_c verhoogd
+    # om de interne hardware-deadband te doorbreken.
+    stall_boost_c:       float = 5.0    # tijdelijke setpoint-boost bij stall (°C)
+    stall_timeout_s:     float = 300.0  # seconden 0W + want_on voor stall-detectie
+
+    _stall_start_ts:     float = field(default=0.0,   repr=False)
+    _stall_active:       bool  = field(default=False,  repr=False)
+    # v4.6.26: gebruiker kan BOOST pauzeren via virtual_boiler UI ("auto" kiezen)
+    _boost_paused_until: float = field(default=0.0,   repr=False)
+    # v4.6.42: handmatige override — coordinator slaat setpoint-berekening over
+    _manual_override_until: float = field(default=0.0, repr=False)
+    # v4.6.52: gecachede max_setpoint_entity (voorkomt entity-registry scan elke 10s)
+    _cached_max_setpoint_entity: str = field(default="", repr=False)
+
+    # v4.6.60: Cloud verify/retry — Ariston cloud is onbetrouwbaar, settings komen
+    # niet altijd aan. Na elke send slaan we het gewenste doel op en controleren
+    # periodiek of de echte state overeen komt. Zo niet → retry (max 4x, backoff).
+    _pending_preset:    str   = field(default="",  repr=False)  # gewenste operation_mode
+    _pending_setpoint:  float = field(default=0.0, repr=False)  # gewenste temperature
+    _pending_max_sp:    float = field(default=0.0, repr=False)  # gewenste max_setpoint
+    _pending_since:     float = field(default=0.0, repr=False)  # timestamp van laatste send
+    _pending_retries:   int   = field(default=0,   repr=False)  # aantal retries gedaan
+    _next_verify_ts:    float = field(default=0.0, repr=False)  # wanneer volgende verify
+    _rate_limited_until:float = field(default=0.0, repr=False)  # 429-block tot ts
+
     # ── v4.5.125: ACRouter (RobotDyn DimmerLink) hardware-integratie ──────────
     # Configuratie: stel control_mode="acrouter" + acrouter_host="192.168.x.x" in.
     # power_w blijft het nominale vermogen van het weerstandselement (bijv. 2000).
     acrouter_host:       str   = ""     # IP-adres van het ACRouter device
+    # v4.6.18: merk-identificatie (opgeslagen vanuit config_flow wizard)
+    brand:               str   = ""     # bijv. "ariston_lydos_hybrid", "midea_e2", "unknown"
     # Interne state (niet in config):
     _acrouter_last_mode: int   = field(default=-1,  repr=False)  # -1 = onbekend
     _acrouter_last_pct:  float = field(default=0.0, repr=False)
     _acrouter_last_ts:   float = field(default=0.0, repr=False)
+
+    @property
+    def hw_ceiling(self) -> float:
+        """Absolute hardware-bovengrens voor setpoints (°C).
+
+        Prioriteit:
+          1. hardware_max_c als > 0 (expliciet ingesteld door gebruiker)
+          2. max_setpoint_boost_c voor heat_pump/hybrid of preset-mode
+             (preset-mode impliceert altijd een WP/hybrid boiler zoals Ariston Lydos)
+          3. SAFETY_MAX_C - 2.0 als fallback (78°C)
+
+        Gebruikt op alle plaatsen waar we een setpoint naar de hardware sturen.
+        """
+        if self.hardware_max_c > 0:
+            return min(self.hardware_max_c, SAFETY_MAX_C - 1.0)
+        # v4.6.16: max_setpoint_boost_c altijd als ceiling gebruiken als het geconfigureerd is,
+        # ook voor resistive/switch boilers (bijv. Midea E2 max 75°C).
+        # Voorheen alleen voor heat_pump/hybrid/preset → resistive viel terug op 78°C fallback.
+        if self.max_setpoint_boost_c > 0:
+            return min(self.max_setpoint_boost_c, SAFETY_MAX_C - 1.0)
+        return SAFETY_MAX_C - 2.0  # default 78°C (softwareveiligheidsgrens)
 
     @property
     def needs_heat(self) -> bool:
@@ -285,7 +383,7 @@ class BoilerState:
         if self.current_temp_c is None:
             return True   # geen sensor → vertrouw op triggers
         sp = self.active_setpoint_c or self.setpoint_c
-        return self.current_temp_c < (sp - HYSTERESIS_C)
+        return self.current_temp_c <= (sp - HYSTERESIS_C)
 
     @property
     def temp_deficit_c(self) -> float:
@@ -341,12 +439,25 @@ class BoilerLearner:
     thermisch verlies per boiler, seizoensstatus, cycle_kwh.
     """
 
-    def __init__(self, group_id: str) -> None:
+    def __init__(self, group_id: str, hass=None) -> None:
         self._gid  = group_id
+        self._hass = hass
         self._data: dict = {}
-        self._load()
+        # Sync load via executor om blocking I/O in event loop te vermijden
+        if hass:
+            try:
+                loop = hass.loop
+                if loop and loop.is_running():
+                    loop.run_in_executor(None, self._load)
+                else:
+                    self._load()
+            except Exception:
+                self._load()
+        else:
+            self._load()
 
     def _load(self) -> None:
+        """Sync load — altijd via executor aanroepen vanuit event loop."""
         try:
             if os.path.exists(LEARN_FILE):
                 with open(LEARN_FILE) as f:
@@ -356,6 +467,18 @@ class BoilerLearner:
             self._data = {}
 
     def _save(self) -> None:
+        """Save via executor als hass beschikbaar, anders direct (alleen bij opstarten)."""
+        if self._hass is not None:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.run_in_executor(None, self._save_sync)
+                return
+            except RuntimeError:
+                pass
+        self._save_sync()
+
+    def _save_sync(self) -> None:
         try:
             os.makedirs(os.path.dirname(LEARN_FILE), exist_ok=True)
             with open(LEARN_FILE, "w") as f:
@@ -905,6 +1028,94 @@ class BoilerController:
         self._power_last_save = 0.0
 
     def _build_boiler(self, cfg: dict) -> BoilerState:
+        # v4.6.16: brand-veld → auto-defaults voor bekende merken.
+        # Waarden uit cfg hebben altijd prioriteit; brand vult alleen gaps.
+        _brand_defaults: dict = {}
+        _brand = cfg.get("brand", "")
+        if _brand:
+            # Importeer de preset-tabel uit config_flow indien beschikbaar,
+            # anders gebruik ingebakken kopie voor de meest voorkomende merken.
+            _BRAND_BUILTIN: dict[str, dict] = {
+                "ariston_lydos_hybrid": {
+                    "boiler_type": "hybrid", "control_mode": "preset",
+                    "preset_on": "BOOST", "preset_off": "GREEN",
+                    "max_setpoint_boost_c": 75.0, "max_setpoint_green_c": 53.0,
+                    "hardware_max_c": 75.0, "surplus_setpoint_c": 75.0,
+                    "hardware_deadband_c": 2.0, "stall_timeout_s": 300.0, "stall_boost_c": 5.0,
+                },
+                "ariston_velis_evo": {
+                    "boiler_type": "resistive", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 80.0, "hardware_max_c": 80.0,
+                    "surplus_setpoint_c": 80.0,
+                },
+                "ariston_andris": {
+                    "boiler_type": "resistive", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 75.0, "hardware_max_c": 75.0,
+                    "surplus_setpoint_c": 75.0,
+                },
+                "midea_e2": {
+                    "boiler_type": "resistive", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 75.0, "hardware_max_c": 75.0,
+                    "surplus_setpoint_c": 75.0,
+                },
+                "midea_e3": {
+                    "boiler_type": "resistive", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 65.0, "hardware_max_c": 65.0,
+                    "surplus_setpoint_c": 65.0,
+                },
+                "daikin_altherma_dhw": {
+                    "boiler_type": "heat_pump", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 60.0, "hardware_max_c": 60.0,
+                    "surplus_setpoint_c": 60.0, "hardware_deadband_c": 3.0,
+                },
+                "vaillant_unistor": {
+                    "boiler_type": "heat_pump", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 65.0, "hardware_max_c": 65.0,
+                    "surplus_setpoint_c": 65.0, "hardware_deadband_c": 3.0,
+                },
+                "stiebel_wwk": {
+                    "boiler_type": "heat_pump", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 65.0, "hardware_max_c": 65.0,
+                    "surplus_setpoint_c": 65.0, "hardware_deadband_c": 2.0,
+                },
+                "aosmith_electric": {
+                    "boiler_type": "resistive", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 60.0, "hardware_max_c": 60.0,
+                    "surplus_setpoint_c": 60.0,
+                },
+                "itho_heatpump": {
+                    "boiler_type": "heat_pump", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 60.0, "hardware_max_c": 60.0,
+                    "surplus_setpoint_c": 60.0, "hardware_deadband_c": 3.0,
+                },
+                "generic_heatpump": {
+                    "boiler_type": "heat_pump", "control_mode": "setpoint",
+                    "max_setpoint_boost_c": 60.0, "hardware_max_c": 60.0,
+                    "surplus_setpoint_c": 60.0, "hardware_deadband_c": 2.0,
+                },
+            }
+            _brand_defaults = _BRAND_BUILTIN.get(_brand, {})
+            if _brand_defaults:
+                _LOGGER.debug("BoilerController: merk '%s' → auto-defaults toegepast", _brand)
+
+        # v4.6.22: voor bekende merken zijn sturingsvelden vergrendeld op het preset-waarde.
+        # Dit voorkomt dat een oude opgeslagen config (bijv. control_mode="setpoint") de
+        # brand-specifieke instelling (bijv. control_mode="preset" voor Ariston Lydos Hybrid)
+        # blijft overschrijven na een merk-selectie.
+        _BRAND_LOCKED_KEYS = {"control_mode", "preset_on", "preset_off", "boiler_type"}
+        _known_brand = bool(_brand_defaults)
+
+        def _g(key, fallback):
+            """Brand-locked keys komen altijd uit brand-defaults voor bekende merken.
+            Overige keys: cfg heeft prioriteit, dan brand-default, dan fallback."""
+            if _known_brand and key in _BRAND_LOCKED_KEYS and key in _brand_defaults:
+                return _brand_defaults[key]
+            if key in cfg:
+                return cfg[key]
+            if key in _brand_defaults:
+                return _brand_defaults[key]
+            return fallback
+
         return BoilerState(
             entity_id          = cfg["entity_id"],
             label              = cfg.get("label", cfg["entity_id"]),
@@ -917,36 +1128,44 @@ class BoilerController:
             temp_sensor        = cfg.get("temp_sensor", ""),
             energy_sensor      = cfg.get("energy_sensor", ""),
             flow_sensor        = cfg.get("flow_sensor", ""),
-            setpoint_c         = float(cfg.get("setpoint_c", 60.0)),
-            min_temp_c         = float(cfg.get("min_temp_c", 40.0)),
+            setpoint_c         = float(_g("setpoint_c",         60.0)),
+            min_temp_c         = float(_g("min_temp_c",         40.0)),
             comfort_floor_c    = float(cfg.get("comfort_floor_c", 50.0)),
             setpoint_summer_c  = float(cfg.get("setpoint_summer_c", 0.0)),
             setpoint_winter_c  = float(cfg.get("setpoint_winter_c", 0.0)),
             priority           = int(cfg.get("priority", 0)),
-            control_mode       = cfg.get("control_mode", "switch"),
-            surplus_setpoint_c = float(cfg.get("surplus_setpoint_c", 75.0)),
-            preset_on          = cfg.get("preset_on",  "boost"),
-            preset_off         = cfg.get("preset_off", "green"),
+            control_mode       = _g("control_mode",       "switch"),
+            surplus_setpoint_c = float(_g("surplus_setpoint_c", 75.0)),
+            preset_on          = _g("preset_on",           "boost"),
+            preset_off         = _g("preset_off",          "green"),
+            max_setpoint_entity  = cfg.get("max_setpoint_entity", ""),
+            max_setpoint_boost_c = float(_g("max_setpoint_boost_c", 75.0)),
+            max_setpoint_green_c = float(_g("max_setpoint_green_c", 53.0)),
             dimmer_on_pct      = float(cfg.get("dimmer_on_pct",  100.0)),
             dimmer_off_pct      = float(cfg.get("dimmer_off_pct", 0.0)),
             dimmer_proportional = bool(cfg.get("dimmer_proportional", False)),
             post_saldering_mode = bool(cfg.get("post_saldering_mode", False)),
             delta_t_optimize    = bool(cfg.get("delta_t_optimize", False)),
-            boiler_type         = cfg.get("boiler_type", BOILER_TYPE_RESISTIVE),
+            boiler_type         = _g("boiler_type",        BOILER_TYPE_RESISTIVE),
             heat_up_hours       = float(cfg.get("heat_up_hours", 0.0)),
             boost_only_cheapest = int(cfg.get("boost_only_cheapest", 2)),
-            has_gas_heating     = str(cfg.get("has_gas_heating", "")),   # ""|"yes"|"no"
-            heat_pump_boiler    = bool(cfg.get("heat_pump_boiler", False)),  # backwards compat
+            has_gas_heating     = str(cfg.get("has_gas_heating", "")),
+            heat_pump_boiler    = bool(cfg.get("heat_pump_boiler", False)),
             water_hardness_dh   = float(cfg.get("water_hardness_dh", 14.0)),
             anode_threshold_kwh = float(cfg.get("anode_threshold_kwh", ANODE_DEFAULT_KWH)),
             limescale_detect    = bool(cfg.get("limescale_detect", True)),
             cop_curve_override  = cfg.get("cop_curve_override", None),
             acrouter_host       = cfg.get("acrouter_host", ""),
+            brand               = cfg.get("brand", ""),
+            hardware_deadband_c = float(_g("hardware_deadband_c", 0.0)),
+            stall_boost_c       = float(_g("stall_boost_c",       5.0)),
+            stall_timeout_s     = float(_g("stall_timeout_s",     300.0)),
+            hardware_max_c      = float(_g("hardware_max_c",      0.0)),
         )
 
     def _build_group(self, cfg: dict) -> CascadeGroup:
         group_id = cfg.get("id", "group")
-        learner  = BoilerLearner(group_id)
+        learner  = BoilerLearner(group_id, hass=self._hass)
         raw_units = cfg.get("units", [])
         skipped = [u for u in raw_units if not u.get("entity_id")]
         if skipped:
@@ -1020,20 +1239,37 @@ class BoilerController:
 
         # Tijdens PV-surplus: gebruik maximaal setpoint om zoveel mogelijk zonne-energie op te slaan
         surplus_active = effective_surplus >= surplus_threshold_w
+        _is_neg      = bool(price_info.get("is_negative", False))
+        # v4.6.6: bij negatieve prijs OF groot surplus (≥2× drempel) → hardware-max setpoint (bijv. 75°C)
+        _big_surplus = effective_surplus >= surplus_threshold_w * 2.0
+        _max_charge  = _is_neg or _big_surplus
 
         for b in self._boilers:
-            if b.boiler_type == BOILER_TYPE_VARIABLE:
+            # v4.6.42: handmatige override actief → setpoint niet overschrijven
+            if b._manual_override_until > time.time():
+                pass
+            elif b.boiler_type == BOILER_TYPE_VARIABLE:
                 # Variable boilers hebben intern vast setpoint — niet aanraken
                 b.active_setpoint_c = b.setpoint_c
             elif surplus_active and MODE_PV_SURPLUS in b.modes:
                 if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-                    # WP/hybrid: surplus_setpoint_c voor boost, maar nooit hoger dan veiligheidsgrens
-                    b.active_setpoint_c = min(b.surplus_setpoint_c, SAFETY_MAX_C - 2.0)
+                    _hw_max = b.hw_ceiling
+                    # Negatief of groot surplus → hardware-max (75°C); normaal surplus → surplus_setpoint_c
+                    _target = _hw_max if _max_charge else min(b.surplus_setpoint_c, _hw_max)
+                    b.active_setpoint_c = min(_target, b.hw_ceiling)
                 else:
-                    # Resistive: maximaal opladen met zonne-energie
-                    b.active_setpoint_c = SAFETY_MAX_C - 2.0
+                    # Resistive/variable: begrensd door hardware_max_c als ingesteld, anders 78°C
+                    _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
+                    b.active_setpoint_c = min(_target, b.hw_ceiling)
+            elif _is_neg and b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+                # Negatieve prijs zonder (groot) PV-surplus: ook naar hardware-max
+                b.active_setpoint_c = b.hw_ceiling
+            elif _is_neg:
+                # Resistive bij negatieve prijs: naar hardware-max
+                b.active_setpoint_c = b.hw_ceiling
             else:
-                b.active_setpoint_c = self._delta_t_setpoint(b, b.setpoint_c)
+                _sp = self._delta_t_setpoint(b, b.setpoint_c)
+                b.active_setpoint_c = min(_sp, b.hw_ceiling)
             decisions.append(await self._evaluate_single(
                 b, price_info, effective_surplus, phase_currents, surplus_threshold_w, export_threshold_a))
 
@@ -1042,16 +1278,26 @@ class BoilerController:
                 outside_c = next((b.outside_temp_c for b in group.boilers if b.outside_temp_c is not None), None)
                 season    = group.learner.update_season(outside_c)
                 for b in group.boilers:
-                    if b.boiler_type == BOILER_TYPE_VARIABLE:
+                    if b._manual_override_until > time.time():
+                        pass  # manual override actief → setpoint niet overschrijven
+                    elif b.boiler_type == BOILER_TYPE_VARIABLE:
                         b.active_setpoint_c = b.setpoint_c  # variable: intern vast
                     elif surplus_active and MODE_PV_SURPLUS in b.modes:
                         if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-                            b.active_setpoint_c = min(b.surplus_setpoint_c, SAFETY_MAX_C - 2.0)
+                            _hw_max = b.hw_ceiling
+                            _target = _hw_max if _max_charge else min(b.surplus_setpoint_c, _hw_max)
+                            b.active_setpoint_c = min(_target, b.hw_ceiling)
                         else:
-                            b.active_setpoint_c = SAFETY_MAX_C - 2.0
+                            _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
+                            b.active_setpoint_c = min(_target, b.hw_ceiling)
+                    elif _is_neg and b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+                        b.active_setpoint_c = b.hw_ceiling
+                    elif _is_neg:
+                        b.active_setpoint_c = b.hw_ceiling
                     else:
                         sp = self._seasonal_setpoint(b, season)
-                        b.active_setpoint_c = self._delta_t_setpoint(b, sp)
+                        _sp = self._delta_t_setpoint(b, sp)
+                        b.active_setpoint_c = min(_sp, b.hw_ceiling)
 
                 # Anomalie check — notificatie sturen als nodig
                 msg = group.learner.check_anomaly(group.boilers)
@@ -1184,12 +1430,28 @@ class BoilerController:
                 current_state=False,
             )
 
+        # v4.6.45: manual override actief → CloudEMS blijft af, virtual boiler stuurt zelf
+        if b._manual_override_until > time.time():
+            return BoilerDecision(
+                entity_id=b.entity_id, label=b.label,
+                action="hold_off", reason="manual override actief",
+                current_state=self._is_on(b.entity_id, b),
+            )
+
         is_on   = self._is_on(b.entity_id, b)
         want_on = False
         reason  = ""
 
         # Reset per-round flags
-        b.force_green = False
+        # v4.6.26: als gebruiker BOOST pauzeerde → force_green herstellen tot pauze voorbij
+        if b._boost_paused_until > 0:
+            if time.time() < b._boost_paused_until:
+                b.force_green = True   # blijf in GREEN/ECO zolang pauze actief
+            else:
+                b._boost_paused_until = 0.0  # pauze verlopen
+                b.force_green = False
+        else:
+            b.force_green = False
         # Backwards-compat: heat_pump_boiler=True → upgrade naar boiler_type
         if b.heat_pump_boiler and b.boiler_type == BOILER_TYPE_RESISTIVE:
             b.boiler_type = BOILER_TYPE_HEAT_PUMP
@@ -1218,6 +1480,20 @@ class BoilerController:
             or price_info.get(f"in_cheapest_{boost_n}h", False)
             or solar_surplus_w > surplus_threshold_w * 0.8
         )
+
+        # v4.6.5: heat_pump/hybrid met GREEN-mode temperatuurcap (bijv. Ariston GREEN = max 53°C).
+        # Pas active_setpoint_c aan naar de modus-specifieke grens zodat needs_heat en
+        # temp_deficit_c de werkelijk haalbare temperatuur weerspiegelen:
+        #   • Geen boost beschikbaar → gaan GREEN gebruiken → cap op max_setpoint_green_c
+        #   • Boost beschikbaar (surplus / goedkoop uur) → gaan BOOST gebruiken → cap op max_setpoint_boost_c
+        # Dit voorkomt dat CloudEMS denkt dat de boiler 26°C tekort heeft terwijl de boiler
+        # gewoon op zijn GREEN-maximum (53°C) staat.
+        if btype in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID) and b.max_setpoint_green_c > 0:
+            _mode_cap = b.max_setpoint_boost_c if _boost_allowed else b.max_setpoint_green_c
+            if b.active_setpoint_c > _mode_cap + 0.5:
+                b.active_setpoint_c = _mode_cap
+            # Herbereken deficit met de gecorrigeerde setpoint
+            _deficit = b.temp_deficit_c
 
         # ── TYPE 1: RESISTIVE — prijs en surplus domineren ───────────────────────────────
         if btype == BOILER_TYPE_RESISTIVE:
@@ -1260,6 +1536,12 @@ class BoilerController:
         # COP > 1: green (WP) is altijd goedkoper dan weerstand of gas.
         # green ALTIJD aan bij temperatuurtekort, ongeacht stroomprijs.
         # boost (weerstandselement) alleen bij goedkoopste N uren of surplus.
+        #
+        # v4.6.5: Ariston e.a. WP-boilers met GREEN/BOOST-modi:
+        #   • Onder green_mode_max_c (bijv. 53°C): GREEN verwarmt via WP (force_green=True)
+        #   • Bij surplus of goedkoop uur: ga naar BOOST (ook als temp < green_mode_max_c),
+        #     zodat de boiler al in de juiste modus staat vóór het setpoint bereikt is.
+        #   • Boven green_mode_max_c: ALTIJD BOOST (GREEN kan dit niet bereiken).
         elif btype == BOILER_TYPE_HEAT_PUMP:
             # COP-bewuste gas-vs-WP vergelijking: WP bijna altijd goedkoper dan gas
             _cop_wp  = _cop_from_temp(_outside, b.cop_curve_override) * COP_DHW_FACTOR
@@ -1267,6 +1549,13 @@ class BoilerController:
             _gas_th_wp = _gas_p_m3 / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
             _wp_th     = _current_price / max(_cop_wp, 0.1)
             _wp_cheaper_than_gas = (b.has_gas_heating != "yes") or (_wp_th <= _gas_th_wp + GAS_VS_ELEC_MARGIN)
+
+            # Boven green_mode_max_c: GREEN-modus kan dit niet bereiken → BOOST verplicht
+            _above_green_max = (
+                b.max_setpoint_green_c > 0
+                and _has_temp
+                and b.current_temp_c >= b.max_setpoint_green_c - 1.0
+            )
 
             if not b.needs_heat:
                 want_on = False
@@ -1277,10 +1566,15 @@ class BoilerController:
                 want_on = True
                 _heat_up_min = b.heat_up_hours * 60 if b.heat_up_hours > 0 else 600
                 _mts = b.minutes_to_setpoint or 0
-                if _boost_allowed:
+                if _boost_allowed or _above_green_max:
                     b.force_green = False  # boost: weerstandselement
-                    reason = f"WP boost+green: {_deficit:.1f}°C tekort"
-                    reason += f" (goedkoopste {boost_n}u)" if boost_n > 0 else ""
+                    if _above_green_max and not _boost_allowed:
+                        # Temp al boven GREEN-cap: BOOST nodig om setpoint te halen
+                        cop_str = f" COP≈{_cop_wp:.1f}" if _outside is not None else ""
+                        reason = f"WP boost{cop_str}: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
+                    else:
+                        reason = f"WP boost+green: {_deficit:.1f}°C tekort"
+                        reason += f" (goedkoopste {boost_n}u)" if boost_n > 0 else ""
                 else:
                     b.force_green = True   # alleen WP-element (green)
                     cop_str = f" COP≈{_cop_wp:.1f}" if _outside is not None else ""
@@ -1298,12 +1592,19 @@ class BoilerController:
 
         # ── TYPE 3: HYBRID — green (WP) altijd bij tekort, boost selectief ────────────
         # Bijv. Ariston Lydos Hybrid. green = WP-element, boost = weerstandselement.
+        # v4.6.5: boven green_mode_max_c ALTIJD BOOST (GREEN kan dit niet bereiken).
         elif btype == BOILER_TYPE_HYBRID:
             _cop_hyb   = _cop_from_temp(_outside, b.cop_curve_override) * COP_DHW_FACTOR
             _gas_p_m3h = price_info.get("gas_price_eur_m3", 1.25)
             _gas_th_h  = _gas_p_m3h / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
             _hyb_th    = _current_price / max(_cop_hyb, 0.1)
             cop_str_h  = f" COP≈{_cop_hyb:.1f}" if _outside is not None else ""
+
+            _above_green_max_h = (
+                b.max_setpoint_green_c > 0
+                and _has_temp
+                and b.current_temp_c >= b.max_setpoint_green_c - 1.0
+            )
 
             if not b.needs_heat:
                 want_on = False
@@ -1312,13 +1613,16 @@ class BoilerController:
                 want_on = True; reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
             else:
                 want_on = True
-                if _boost_allowed:
+                if _boost_allowed or _above_green_max_h:
                     b.force_green = False  # boost actief
-                    base = f"Hybrid green+boost{cop_str_h}: {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green+boost{cop_str_h}: geen temp sensor"
-                    if solar_surplus_w > surplus_threshold_w:
-                        reason = base + f" (surplus {solar_surplus_w:.0f}W)"
+                    if _above_green_max_h and not _boost_allowed:
+                        reason = f"Hybrid boost verplicht: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
                     else:
-                        reason = base + (f" (goedkoopste {boost_n}u)" if boost_n > 0 else "")
+                        base = f"Hybrid green+boost{cop_str_h}: {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green+boost{cop_str_h}: geen temp sensor"
+                        if solar_surplus_w > surplus_threshold_w:
+                            reason = base + f" (surplus {solar_surplus_w:.0f}W)"
+                        else:
+                            reason = base + (f" (goedkoopste {boost_n}u)" if boost_n > 0 else "")
                 else:
                     b.force_green = True   # alleen WP-element
                     reason = f"Hybrid green (WP{cop_str_h}): {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green (WP{cop_str_h}): geen temp sensor"
@@ -1387,6 +1691,49 @@ class BoilerController:
                         want_on = True
                         reason = f"Legionella DEADLINE overschreden: {days_since:.0f} dagen"
                         _LOGGER.warning("BoilerController [%s]: %s", b.label, reason)
+
+        # ── v4.6.12: Hardware deadband compensatie ────────────────────────────
+        # Ariston/WP-boilers starten pas als de watertemperatuur ver genoeg onder
+        # het setpoint zakt. We sturen een iets hoger setpoint om dit te compenseren.
+        # Auto-waarde: 2.0°C voor heat_pump/hybrid, 0.0 voor andere typen.
+        _hw_deadband = b.hardware_deadband_c
+        if _hw_deadband == 0.0 and btype in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+            _hw_deadband = 2.0
+        if _hw_deadband > 0.0 and b.active_setpoint_c > 0:
+            _compensated = min(b.active_setpoint_c + _hw_deadband, SAFETY_MAX_C - 1.0)
+            if abs(_compensated - b.active_setpoint_c) > 0.1:
+                _LOGGER.debug(
+                    "BoilerController [%s]: hardware deadband +%.1f°C → setpoint %.1f→%.1f°C",
+                    b.label, _hw_deadband, b.active_setpoint_c, _compensated,
+                )
+                b.active_setpoint_c = _compensated
+
+        # ── v4.6.12: Stall-detectie ───────────────────────────────────────────
+        # Als de boiler want_on=True maar 0W trekt (hardware deadband niet doorbroken),
+        # boost het setpoint tijdelijk om de hardware te forceren te starten.
+        _power_now = b.current_power_w or 0.0
+        _is_stalling = want_on and is_on and _power_now < 50.0 and b.current_temp_c is not None
+        if _is_stalling:
+            if b._stall_start_ts == 0.0:
+                b._stall_start_ts = now
+            elif now - b._stall_start_ts >= b.stall_timeout_s:
+                if not b._stall_active:
+                    b._stall_active = True
+                    _LOGGER.warning(
+                        "BoilerController [%s]: STALL gedetecteerd — %.0fs geen vermogen terwijl want_on. "
+                        "Setpoint tijdelijk +%.1f°C om hardware deadband te doorbreken.",
+                        b.label, b.stall_timeout_s, b.stall_boost_c,
+                    )
+                _boost_sp = min(b.active_setpoint_c + b.stall_boost_c, SAFETY_MAX_C - 1.0)
+                b.active_setpoint_c = _boost_sp
+                reason = reason + f" [stall boost +{b.stall_boost_c:.0f}°C → {_boost_sp:.0f}°C]"
+        else:
+            # Geen stall: reset teller
+            if b._stall_start_ts > 0 and not _is_stalling:
+                if b._stall_active:
+                    _LOGGER.info("BoilerController [%s]: stall opgelost — boiler trekt weer vermogen", b.label)
+                b._stall_start_ts = 0.0
+                b._stall_active   = False
 
         action = self._apply_timers(b, want_on, is_on, now, reason)
         if action == "turn_on":
@@ -1460,6 +1807,12 @@ class BoilerController:
         for b in order:
             is_on = self._is_on(b.entity_id, b)
 
+            # manual override actief → volledig overslaan
+            if b._manual_override_until > time.time():
+                decisions.append(BoilerDecision(b.entity_id, b.label,
+                    "hold_off", "manual override actief", is_on, group.id, 0.0))
+                continue
+
             # Netcongestie: leveringsboiler wel, buffers niet
             if b.congestion_active and not b.is_delivery:
                 if is_on: await self._switch_smart(b.entity_id, False, b, solar_surplus_w); b.last_off_ts = now
@@ -1517,6 +1870,10 @@ class BoilerController:
         slot  = 0
         for b in group.boilers:
             is_on = self._is_on(b.entity_id, b)
+            if b._manual_override_until > time.time():
+                decisions.append(BoilerDecision(b.entity_id, b.label,
+                    "hold_off", "manual override actief", is_on, group.id, 0.0))
+                continue
             if b not in needs:
                 if is_on: await self._switch_smart(b.entity_id, False, b, solar_surplus_w); b.last_off_ts = now
                 decisions.append(BoilerDecision(b.entity_id, b.label,
@@ -1545,6 +1902,10 @@ class BoilerController:
             key=lambda b: (b.priority, -b.temp_deficit_c))
         for b in group.boilers:
             is_on = self._is_on(b.entity_id, b)
+            if b._manual_override_until > time.time():
+                decisions.append(BoilerDecision(b.entity_id, b.label,
+                    "hold_off", "manual override actief", is_on, group.id, 0.0))
+                continue
             if b not in candidates:
                 if is_on: await self._switch_smart(b.entity_id, False, b, solar_surplus_w); b.last_off_ts = now
                 decisions.append(BoilerDecision(b.entity_id, b.label,
@@ -1743,8 +2104,9 @@ class BoilerController:
             if domain == "water_heater":
                 # v4.5.61: Ariston en andere water_heater integraties gebruiken
                 # 'operation_mode' als attribuut, niet 'preset_mode'
-                op = s.attributes.get("operation_mode") or s.attributes.get("preset_mode") or s.state
-                return op == preset_on
+                # v4.6.16: case-insensitief vergelijken (Ariston: UPPERCASE enum namen)
+                op = s.attributes.get("operation_mode") or s.attributes.get("current_operation") or s.attributes.get("preset_mode") or s.state
+                return (op or "").lower() == preset_on.lower()
             return s.attributes.get("preset_mode", s.state) == preset_on
 
         if ctrl == "acrouter":
@@ -1917,14 +2279,36 @@ class BoilerController:
             if boiler:
                 is_boost = (preset == boiler.preset_on)
                 if is_boost and boiler.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-                    # boost: gebruik surplus setpoint als er surplus is, anders normaal
-                    target_sp = boiler.surplus_setpoint_c if boiler.active_setpoint_c > boiler.setpoint_c else (boiler.active_setpoint_c or boiler.setpoint_c)
+                    # v4.6.24: BOOST stuurt altijd max_setpoint_boost_c als temperature.
+                    # Ariston Lydos respecteert set_temperature ook in BOOST-modus —
+                    # zonder dit getal stuurt CloudEMS het normale setpoint (bijv. 58°C)
+                    # en haalt de boiler nooit 75°C, ook al staat BOOST aan.
+                    # v4.6.57: uitzondering bij handmatige override — als active_setpoint_c
+                    # bewust lager is ingesteld (bijv. 71°C < 75°C), respecteer dat setpoint.
+                    # Zo kan de gebruiker via de virtuele thermostaat een tussenwaarde kiezen.
+                    _auto_boost_sp = boiler.max_setpoint_boost_c if boiler.max_setpoint_boost_c > 0 else boiler.surplus_setpoint_c
+                    _active_sp = boiler.active_setpoint_c or boiler.setpoint_c
+                    _is_manual = boiler._manual_override_until > time.time()
+                    if _is_manual and _active_sp > 0 and _active_sp < _auto_boost_sp:
+                        target_sp = _active_sp
+                    else:
+                        target_sp = _auto_boost_sp
                 elif not on:
                     # uitzetten: min_temp_c zodat boiler niet onnodig door blijft lopen
                     target_sp = boiler.min_temp_c
                 else:
                     target_sp = boiler.active_setpoint_c or boiler.setpoint_c
-                target_sp = round(min(target_sp, SAFETY_MAX_C - 2.0), 1)
+                # v4.6.16: cap target_sp per modus — GREEN kan nooit boven max_setpoint_green_c
+                # komen, BOOST nooit boven max_setpoint_boost_c. Voorkomt dat CloudEMS
+                # 78°C stuurt naar een Ariston Lydos die maar 53°C (GREEN) of 75°C (BOOST) aankan.
+                if boiler.control_mode == "preset" and is_boost:
+                    _preset_cap = boiler.max_setpoint_boost_c if boiler.max_setpoint_boost_c > 0 else boiler.hw_ceiling
+                elif boiler.control_mode == "preset" and on:
+                    # GREEN aan: cap op green-maximum
+                    _preset_cap = boiler.max_setpoint_green_c if boiler.max_setpoint_green_c > 0 else boiler.hw_ceiling
+                else:
+                    _preset_cap = boiler.hw_ceiling
+                target_sp = round(min(target_sp, _preset_cap, boiler.hw_ceiling), 1)
             else:
                 target_sp = 60.0 if on else 40.0
 
@@ -1939,26 +2323,150 @@ class BoilerController:
                               boiler.label if boiler else entity_id, preset, target_sp)
                 return
             if domain == "water_heater":
-                # v4.5.61: Ariston Lydos e.d. gebruiken set_operation_mode, niet set_preset_mode
+                # v4.6.5: Ariston Lydos e.d. begrenzen setpoint per modus via een apart
+                # number-entity (bijv. number.ariston_max_setpoint_temperature).
+                # In GREEN-modus staat dit op bijv. 53°C — dan kan set_temperature(60) nooit
+                # effectief zijn. Zet het number EERST op de juiste waarde vóór de moduswisseling:
+                #   BOOST aan  → max_setpoint_boost_c (bijv. 75°C) zodat het setpoint bereikt kan worden
+                #   GREEN aan  → max_setpoint_green_c (bijv. 53°C) zodat GREEN correct werkt
+
+                # v4.6.52: gebruik gecachede waarde, scan entity registry maar 1x
+                _resolved_max_entity = boiler.max_setpoint_entity if boiler else ""
+                if boiler and not _resolved_max_entity:
+                    if boiler._cached_max_setpoint_entity:
+                        _resolved_max_entity = boiler._cached_max_setpoint_entity
+                    else:
+                        try:
+                            from homeassistant.helpers import entity_registry as er
+                            _er = er.async_get(self._hass)
+                            _boiler_entry = _er.async_get(entity_id)
+                            if _boiler_entry and _boiler_entry.device_id:
+                                _device_id = _boiler_entry.device_id
+                                for _entry in _er.entities.values():
+                                    if (
+                                        _entry.device_id == _device_id
+                                        and _entry.domain == "number"
+                                        and "max_setpoint" in _entry.entity_id
+                                    ):
+                                        _resolved_max_entity = _entry.entity_id
+                                        boiler._cached_max_setpoint_entity = _entry.entity_id
+                                        _LOGGER.debug(
+                                            "BoilerController [%s]: auto-detected max_setpoint_entity='%s' (gecached)",
+                                            boiler.label, _resolved_max_entity,
+                                        )
+                                        break
+                        except Exception as _e:
+                            _LOGGER.debug("BoilerController: max_setpoint auto-detect fout: %s", _e)
+
+                # v4.6.16: Case-correctie voor integraties die UPPERCASE operation modes
+                # gebruiken (bijv. Ariston library: LydosPlantMode.GREEN/BOOST).
+                _wh_state = self._hass.states.get(entity_id)
+                _op_list  = _wh_state.attributes.get("operation_list", []) if _wh_state else []
+                _preset_to_send = preset
+                if _op_list and preset not in _op_list:
+                    _matched = next((op for op in _op_list if op.lower() == preset.lower()), None)
+                    if _matched:
+                        _LOGGER.debug(
+                            "BoilerController [%s]: preset '%s' → '%s' (case-correctie operation_list)",
+                            boiler.label if boiler else entity_id, preset, _matched,
+                        )
+                        _preset_to_send = _matched
+
+                # v4.6.57: stuurvolgorde voor Ariston Lydos (mode → max_setpoint → temperature)
+                # met delays zodat de cloud-sync niet wordt overgeslagen:
+                # 1) set_operation_mode — blocking
+                # 2) 2s wachten zodat Ariston cloud de mode-switch verwerkt
+                # 3) max_setpoint number aanpassen — blocking
+                # 4) 1s wachten zodat max_setpoint actief is
+                # 5) set_temperature — blocking
+
+                # Stap 1: mode-switch
                 if self._hass.services.has_service("water_heater", "set_operation_mode"):
                     await self._hass.services.async_call("water_heater", "set_operation_mode",
-                        {"entity_id": entity_id, "operation_mode": preset}, blocking=False)
-                else:
-                    # Fallback: probeer set_preset_mode (sommige integraties)
+                        {"entity_id": entity_id, "operation_mode": _preset_to_send}, blocking=True)
+                elif self._hass.services.has_service("water_heater", "set_preset_mode"):
                     await self._hass.services.async_call("water_heater", "set_preset_mode",
-                        {"entity_id": entity_id, "preset_mode": preset}, blocking=False)
-                # Stuur ook setpoint zodat Ariston weet wanneer hij klaar is
+                        {"entity_id": entity_id, "preset_mode": _preset_to_send}, blocking=True)
+                else:
+                    _LOGGER.debug("BoilerController [%s]: geen preset service beschikbaar, overgeslagen",
+                                  boiler.label if boiler else entity_id)
+
+                # Stap 2: korte pauze na mode-switch voor cloud-sync
+                if boiler and _resolved_max_entity:
+                    await asyncio.sleep(2)
+
+                # Stap 3: max_setpoint number aanpassen ná mode-switch
+                if boiler and _resolved_max_entity:
+                    _max_ent_state2 = self._hass.states.get(_resolved_max_entity)
+                    if _max_ent_state2 is not None:
+                        _is_boost_preset2 = (preset == boiler.preset_on)
+                        _desired_max2 = boiler.max_setpoint_boost_c if _is_boost_preset2 else boiler.max_setpoint_green_c
+                        _hw_max2 = _max_ent_state2.attributes.get("max")
+                        if _hw_max2 is not None:
+                            try:
+                                _desired_max2 = min(_desired_max2, float(_hw_max2))
+                            except (ValueError, TypeError):
+                                pass
+                        try:
+                            _cur_max2 = float(_max_ent_state2.state)
+                        except (ValueError, TypeError):
+                            _cur_max2 = None
+                        if _cur_max2 is None or abs(_cur_max2 - _desired_max2) > 0.5:
+                            _max_domain2 = _resolved_max_entity.split(".")[0]
+                            if self._hass.services.has_service(_max_domain2, "set_value"):
+                                _ent_attrs2 = _max_ent_state2.attributes
+                                _ent_min2 = float(_ent_attrs2.get("min", 0))
+                                _ent_max2 = float(_ent_attrs2.get("max", 99999))
+                                _desired_max2 = max(_ent_min2, min(_ent_max2, _desired_max2))
+                                await self._hass.services.async_call(
+                                    _max_domain2, "set_value",
+                                    {"entity_id": _resolved_max_entity, "value": _desired_max2},
+                                    blocking=True,
+                                )
+                                _LOGGER.debug(
+                                    "BoilerController [%s]: max_setpoint '%s' → %.1f°C (preset=%s)",
+                                    boiler.label, _resolved_max_entity, _desired_max2, preset,
+                                )
+                                # Stap 4: wacht tot max_setpoint actief is voordat setpoint gestuurd wordt
+                                await asyncio.sleep(1)
+
+                # Stap 5: setpoint sturen
                 if self._hass.services.has_service("water_heater", "set_temperature"):
                     await self._hass.services.async_call("water_heater", "set_temperature",
-                        {"entity_id": entity_id, "temperature": target_sp}, blocking=False)
-                _LOGGER.debug("BoilerController [%s]: water_heater preset=%s + setpoint=%.1f°C",
-                              boiler.label if boiler else entity_id, preset, target_sp)
+                        {"entity_id": entity_id, "temperature": target_sp}, blocking=True)
+                _LOGGER.info("BoilerController [%s]: ✓ water_heater preset=%s max=%.0f°C setpoint=%.1f°C",
+                              boiler.label if boiler else entity_id, _preset_to_send,
+                              boiler.max_setpoint_boost_c if boiler else 0, target_sp)
+
+                # v4.6.60: registreer als pending voor cloud verify/retry
+                if boiler:
+                    _max_sp_pending = 0.0
+                    if _resolved_max_entity:
+                        _is_boost_p = (preset == boiler.preset_on)
+                        _max_sp_pending = boiler.max_setpoint_boost_c if _is_boost_p else boiler.max_setpoint_green_c
+                    self._set_pending(boiler, _preset_to_send, target_sp, _max_sp_pending)
                 return
 
         if ctrl in ("setpoint", "setpoint_boost"):
             sp = ((boiler.active_setpoint_c or boiler.setpoint_c) if on else boiler.min_temp_c) if boiler else (60.0 if on else 40.0)
             svc_domain = domain if domain in ("climate", "water_heater") else None
             if svc_domain:
+                # v4.6.16: water_heater met ON_OFF feature (bijv. Midea E2/E3) vereist
+                # turn_on/turn_off om de boiler echt aan/uit te zetten.
+                # Stuur ALTIJD turn_on/turn_off zodat de boiler-power correct is,
+                # daarna set_temperature voor het gewenste setpoint.
+                if domain == "water_heater":
+                    _on_off_svc = "turn_on" if on else "turn_off"
+                    if self._hass.services.has_service("water_heater", _on_off_svc):
+                        await self._hass.services.async_call(
+                            "water_heater", _on_off_svc, {"entity_id": entity_id}, blocking=False
+                        )
+                    if not on:
+                        # Uitzetten: geen set_temperature nodig, turn_off volstaat
+                        _LOGGER.debug("BoilerController [%s]: water_heater turn_off",
+                                      boiler.label if boiler else entity_id)
+                        return
+
                 # water_heater.set_temperature bestaat alleen als de water_heater-platform
                 # geladen is. Bij ontbrekende service terugvallen op turn_on/off zodat de
                 # coordinator niet crasht.
@@ -2061,7 +2569,340 @@ class BoilerController:
             self._p1_last_ts   = time.time()
             _LOGGER.debug("P1 update: teruglevering %.0fW → boiler surplus bijgewerkt", surplus)
 
-    # ── Status output ─────────────────────────────────────────────────────────
+    # ── Setpoint bijwerken vanuit dashboard ──────────────────────────────────
+
+    def update_setpoint(self, entity_id: str, setpoint_c: float) -> bool:
+        """Pas setpoint_c aan voor de boiler met het opgegeven entity_id.
+        Geeft True terug als de boiler gevonden en bijgewerkt is."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                old = b.setpoint_c
+                b.setpoint_c        = float(setpoint_c)
+                b.active_setpoint_c = float(setpoint_c)
+                _LOGGER.info(
+                    "BoilerController [%s]: setpoint bijgewerkt %.1f → %.1f°C (via dashboard)",
+                    entity_id, old, setpoint_c,
+                )
+                return True
+        _LOGGER.warning("BoilerController.update_setpoint: entity_id %s niet gevonden", entity_id)
+        return False
+
+    def set_manual_override(self, entity_id: str, setpoint_c: float, seconds: float) -> bool:
+        """Zet handmatige override: setpoint vastzetten voor 'seconds' seconden.
+        Coordinator slaat setpoint-berekening over zolang override actief is."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b.setpoint_c             = float(setpoint_c)
+                b.active_setpoint_c      = float(setpoint_c)
+                b._manual_override_until = time.time() + seconds
+                _LOGGER.info(
+                    "BoilerController [%s]: manual override %.1f°C voor %.0fs",
+                    b.label, setpoint_c, seconds,
+                )
+                return True
+        return False
+
+    def clear_manual_override(self, entity_id: str) -> None:
+        """Wis handmatige override zodat coordinator het setpoint weer beheert."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._manual_override_until = 0.0
+                _LOGGER.info("BoilerController [%s]: manual override gewist", b.label)
+                return
+
+    async def send_now(self, entity_id: str, on: bool, setpoint_c: float | None = None) -> bool:
+        """Stuur direct een commando naar de echte boiler-entity, zonder te wachten op de
+        volgende evaluatiecyclus. Gebruikt door de virtual boiler bij handmatige bediening.
+        Bij preset-boilers (Ariston) wordt altijd GREEN + gebruikerssetpoint gestuurd,
+        nooit BOOST — dat is de taak van CloudEMS, niet van de handmatige override."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        boiler = next((b for b in all_b if b.entity_id == entity_id), None)
+        if boiler is None:
+            _LOGGER.warning("BoilerController.send_now: entity_id %s niet gevonden", entity_id)
+            return False
+        if setpoint_c is not None:
+            boiler.setpoint_c        = float(setpoint_c)
+            boiler.active_setpoint_c = min(float(setpoint_c), boiler.hw_ceiling)
+        # v4.6.48: voor preset-boilers: kies GREEN of BOOST op basis van het setpoint.
+        # Als het setpoint binnen de GREEN-grens valt → GREEN (zuiniger, stiller).
+        # Als het setpoint boven de GREEN-grens ligt → BOOST (enige manier om het te halen).
+        _prev_force_green = boiler.force_green
+        if boiler.control_mode == "preset":
+            green_max = boiler.max_setpoint_green_c if boiler.max_setpoint_green_c > 0 else 53.0
+            target = boiler.active_setpoint_c or boiler.setpoint_c
+            boiler.force_green = (target <= green_max)
+        _LOGGER.info(
+            "BoilerController [%s]: send_now on=%s setpoint=%.1f°C (handmatig)",
+            boiler.label, on, boiler.active_setpoint_c or boiler.setpoint_c,
+        )
+        await self._switch(entity_id, on, boiler)
+        boiler.force_green = _prev_force_green
+        return True
+
+    def pause_boost(self, entity_id: str, seconds: float = 3600.0) -> bool:
+        """Pauzeer BOOST voor de opgegeven boiler voor `seconds` seconden.
+        De boiler schakelt direct naar preset_off (GREEN/ECO) en CloudEMS
+        start geen nieuwe BOOST-cyclus tot de pauze verstreken is."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._boost_paused_until = time.time() + seconds
+                b.force_green = True
+                _LOGGER.info(
+                    "BoilerController [%s]: BOOST gepauzeerd voor %.0f s",
+                    b.label, seconds,
+                )
+                return True
+        return False
+
+    def resume_boost(self, entity_id: str) -> bool:
+        """Hef BOOST-pauze op voor de opgegeven boiler.
+        force_green wordt NIET gereset — de coordinator bepaalt zelf op basis van
+        surplus/prijs of BOOST of GREEN passend is."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._boost_paused_until = 0.0
+                _LOGGER.info("BoilerController [%s]: BOOST-pauze opgeheven", b.label)
+                return True
+        return False
+
+    def force_boost_once(self, entity_id: str, seconds: float = 4 * 3600) -> bool:
+        """Forceer BOOST voor `seconds` seconden, daarna terug naar normaal.
+        Zet _boost_paused_until op 0 (geen pauze) en zet active_setpoint_c op hw_ceiling
+        zodat de volgende evaluatiecyclus BOOST kiest."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._boost_paused_until = 0.0
+                b.force_green = False
+                b._manual_override_until = time.time() + seconds
+                b.active_setpoint_c = min(b.max_setpoint_boost_c or b.hw_ceiling, b.hw_ceiling)
+                b.setpoint_c = b.active_setpoint_c
+                _LOGGER.info(
+                    "BoilerController [%s]: BOOST geforceerd voor %.0fs (setpoint=%.1f°C)",
+                    b.label, seconds, b.active_setpoint_c,
+                )
+                return True
+        return False
+
+    def force_legionella(self, entity_id: str) -> bool:
+        """Forceer een legionella-cyclus: zet setpoint op LEGIONELLA_TEMP_C en
+        zet een manual override van 2 uur zodat CloudEMS niet tussenkomt."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._boost_paused_until = 0.0
+                b.force_green = False
+                leg_sp = max(LEGIONELLA_TEMP_C, b.hw_ceiling * 0.85)
+                leg_sp = min(leg_sp, b.hw_ceiling)
+                b._manual_override_until = time.time() + 2 * 3600
+                b.active_setpoint_c = leg_sp
+                b.setpoint_c = leg_sp
+                _LOGGER.info(
+                    "BoilerController [%s]: legionella-cyclus geforceerd (setpoint=%.1f°C, 2u)",
+                    b.label, leg_sp,
+                )
+                return True
+        return False
+
+    def force_stall_reset(self, entity_id: str) -> bool:
+        """Reset stall-detectie en stuur boiler opnieuw aan."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b._stall_active = False
+                b._stall_start_ts = 0.0
+                _LOGGER.info("BoilerController [%s]: stall gereset via virtual boiler", b.label)
+                return True
+        return False
+
+    # ── Ariston cloud verify / retry ──────────────────────────────────────────────────────────
+
+    def _set_pending(
+        self,
+        boiler: BoilerState,
+        preset: str,
+        setpoint_c: float,
+        max_sp: float = 0.0,
+    ) -> None:
+        """Registreer een verzonden commando als 'pending verificatie'.
+        Wordt aangeroepen direct na elke _switch() voor water_heater preset-boilers."""
+        boiler._pending_preset   = preset
+        boiler._pending_setpoint = setpoint_c
+        boiler._pending_max_sp   = max_sp
+        boiler._pending_since    = time.time()
+        boiler._pending_retries  = 0
+        boiler._next_verify_ts   = time.time() + ARISTON_VERIFY_DELAY_S
+        _LOGGER.debug(
+            "BoilerController [%s]: pending → preset=%s setpoint=%.1f°C (verify in %ds)",
+            boiler.label, preset, setpoint_c, ARISTON_VERIFY_DELAY_S,
+        )
+
+    def _read_ariston_state(self, boiler: BoilerState) -> tuple[str, float, float]:
+        """Lees de actuele state van de Ariston water_heater entity.
+        Geeft (operation_mode, current_setpoint, current_max_sp) terug.
+        Waarden zijn leeg/"0.0" als de entity niet beschikbaar is."""
+        s = self._hass.states.get(boiler.entity_id)
+        if s is None or s.state in ("unavailable", "unknown"):
+            return ("", 0.0, 0.0)
+        op = (
+            s.attributes.get("operation_mode")
+            or s.attributes.get("current_operation")
+            or s.attributes.get("preset_mode")
+            or s.state
+            or ""
+        )
+        try:
+            sp = float(s.attributes.get("temperature") or s.attributes.get("target_temp_high") or 0.0)
+        except (ValueError, TypeError):
+            sp = 0.0
+        # max_setpoint uit de number-entity
+        max_sp = 0.0
+        max_ent = boiler.max_setpoint_entity or boiler._cached_max_setpoint_entity
+        if max_ent:
+            ms = self._hass.states.get(max_ent)
+            if ms and ms.state not in ("unavailable", "unknown"):
+                try:
+                    max_sp = float(ms.state)
+                except (ValueError, TypeError):
+                    pass
+        return (op, sp, max_sp)
+
+    async def async_verify_pending(self) -> None:
+        """Controleer voor alle preset-boilers of de pending state is aangekomen.
+        Aangeroepen vanuit de coordinator-updatecyclus (elke 10s).
+        Retriet automatisch met backoff als de state niet klopt.
+        Respecteert 429-rate-limit window."""
+        now = time.time()
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+
+        for b in all_b:
+            # Alleen preset water_heater boilers — die hebben Ariston cloud sync nodig
+            if b.control_mode != "preset" or b.entity_id.split(".")[0] != "water_heater":
+                continue
+            # Geen pending commando
+            if not b._pending_preset or b._next_verify_ts == 0.0:
+                continue
+            # Nog niet tijd voor verify
+            if now < b._next_verify_ts:
+                continue
+            # Rate-limited
+            if now < b._rate_limited_until:
+                _LOGGER.debug(
+                    "BoilerController [%s]: rate-limited, verify uitgesteld (nog %.0fs)",
+                    b.label, b._rate_limited_until - now,
+                )
+                b._next_verify_ts = b._rate_limited_until + 5
+                continue
+            # Max retries bereikt → opgeven
+            if b._pending_retries >= ARISTON_MAX_RETRIES:
+                _LOGGER.warning(
+                    "BoilerController [%s]: verify mislukt na %d pogingen — "
+                    "Ariston cloud heeft preset=%s setpoint=%.1f°C niet geaccepteerd. Opgegeven.",
+                    b.label, ARISTON_MAX_RETRIES, b._pending_preset, b._pending_setpoint,
+                )
+                b._pending_preset  = ""
+                b._next_verify_ts  = 0.0
+                continue
+
+            # Lees actuele Ariston state
+            actual_preset, actual_sp, actual_max_sp = self._read_ariston_state(b)
+            if not actual_preset:
+                # Entity unavailable — probeer later
+                b._next_verify_ts = now + ARISTON_RETRY_BACKOFF[min(b._pending_retries, len(ARISTON_RETRY_BACKOFF)-1)]
+                continue
+
+            preset_ok  = actual_preset.lower() == b._pending_preset.lower()
+            setpoint_ok = b._pending_setpoint <= 0.1 or abs(actual_sp - b._pending_setpoint) <= ARISTON_TEMP_TOLERANCE
+            max_sp_ok  = b._pending_max_sp <= 0.1 or actual_max_sp <= 0.1 or abs(actual_max_sp - b._pending_max_sp) <= ARISTON_TEMP_TOLERANCE
+
+            if preset_ok and setpoint_ok and max_sp_ok:
+                _LOGGER.info(
+                    "BoilerController [%s]: ✓ Ariston cloud verify OK — "
+                    "preset=%s setpoint=%.1f°C (na %d retry(s))",
+                    b.label, actual_preset, actual_sp, b._pending_retries,
+                )
+                b._pending_preset = ""
+                b._next_verify_ts = 0.0
+                continue
+
+            # State klopt niet → retry
+            b._pending_retries += 1
+            delay = ARISTON_RETRY_BACKOFF[min(b._pending_retries - 1, len(ARISTON_RETRY_BACKOFF) - 1)]
+            _LOGGER.warning(
+                "BoilerController [%s]: Ariston verify mismatch (poging %d/%d) — "
+                "preset: verwacht=%s actueel=%s | setpoint: verwacht=%.1f actueel=%.1f | "
+                "max_sp: verwacht=%.1f actueel=%.1f → retry over %ds",
+                b.label, b._pending_retries, ARISTON_MAX_RETRIES,
+                b._pending_preset, actual_preset,
+                b._pending_setpoint, actual_sp,
+                b._pending_max_sp, actual_max_sp,
+                delay,
+            )
+            b._next_verify_ts = now + delay
+
+            # Stuur opnieuw — stap voor stap zoals in de normale _switch()
+            try:
+                # Stap 1: operation mode
+                if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                    await self._hass.services.async_call(
+                        "water_heater", "set_operation_mode",
+                        {"entity_id": b.entity_id, "operation_mode": b._pending_preset},
+                        blocking=True,
+                    )
+                await asyncio.sleep(2)
+
+                # Stap 2: max_setpoint indien nodig
+                max_ent = b.max_setpoint_entity or b._cached_max_setpoint_entity
+                if b._pending_max_sp > 0.1 and max_ent:
+                    ms = self._hass.states.get(max_ent)
+                    if ms:
+                        try:
+                            cur = float(ms.state)
+                        except (ValueError, TypeError):
+                            cur = None
+                        if cur is None or abs(cur - b._pending_max_sp) > ARISTON_TEMP_TOLERANCE:
+                            _dom = max_ent.split(".")[0]
+                            if self._hass.services.has_service(_dom, "set_value"):
+                                _attrs = ms.attributes
+                                _min = float(_attrs.get("min", 0))
+                                _max = float(_attrs.get("max", 99999))
+                                _v = max(_min, min(_max, b._pending_max_sp))
+                                await self._hass.services.async_call(
+                                    _dom, "set_value",
+                                    {"entity_id": max_ent, "value": _v},
+                                    blocking=True,
+                                )
+                                await asyncio.sleep(1)
+
+                # Stap 3: setpoint
+                if b._pending_setpoint > 0.1:
+                    if self._hass.services.has_service("water_heater", "set_temperature"):
+                        await self._hass.services.async_call(
+                            "water_heater", "set_temperature",
+                            {"entity_id": b.entity_id, "temperature": b._pending_setpoint},
+                            blocking=True,
+                        )
+
+            except Exception as _retry_err:
+                err_str = str(_retry_err)
+                if "429" in err_str or "Too Many" in err_str.lower() or "rate" in err_str.lower():
+                    b._rate_limited_until = now + ARISTON_RATE_LIMIT_S
+                    b._next_verify_ts = now + ARISTON_RATE_LIMIT_S + 5
+                    _LOGGER.warning(
+                        "BoilerController [%s]: Ariston 429 rate-limit — pauze %ds",
+                        b.label, ARISTON_RATE_LIMIT_S,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "BoilerController [%s]: Ariston retry fout: %s", b.label, _retry_err,
+                    )
+
+
 
     def get_status(self) -> list[dict]:
         # Inclusief groepsboilers — anders ziet de flow-kaart 0W bij cascade-configuraties
@@ -2070,14 +2911,27 @@ class BoilerController:
             {"entity_id": b.entity_id, "label": b.label,
              "is_on": self._is_on(b.entity_id, b),
              "temp_c": b.current_temp_c, "setpoint_c": b.active_setpoint_c or b.setpoint_c,
+             "active_setpoint_c": b.active_setpoint_c,  # gecapped op hw-max; None vóór eerste cyclus
              # current_power_w kan None zijn voor de eerste _read_sensors() cyclus.
              # Fallback: als de boiler nu aan staat, gebruik b.power_w als schatting.
              "power_w": b.current_power_w if b.current_power_w is not None
+                        else (b.power_w if self._is_on(b.entity_id, b) else 0.0),
+             "current_power_w": b.current_power_w if b.current_power_w is not None
                         else (b.power_w if self._is_on(b.entity_id, b) else 0.0),
              "cycle_kwh": round(b.cycle_kwh, 3),
              "thermal_loss_c_h": b.thermal_loss_c_h, "control_mode": b.control_mode,
              "boiler_type": b.boiler_type, "has_gas_heating": b.has_gas_heating,
              "post_saldering_mode": b.post_saldering_mode, "delta_t_optimize": b.delta_t_optimize,
+             # v4.6.12: actieve modus + werkelijk verwarmt op basis van vermogen
+             # v4.6.16: ook preset-mode boilers (bijv. Ariston via water_heater) correct weergeven
+             "actual_mode": (b.preset_off if b.force_green else b.preset_on)
+                            if (b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID)
+                                or b.control_mode == "preset")
+                            else ("on" if self._is_on(b.entity_id, b) else "off"),
+             "is_heating": (b.current_power_w or 0.0) > 50.0,
+             "stall_active": b._stall_active,
+             "brand": b.brand,
+             "brand_label": _BRAND_LABELS.get(b.brand, b.brand) if b.brand else "",
              # v4.5.92: gezondheid & veiligheid
              "cop_at_current_temp": _cop_from_temp(b.outside_temp_c, b.cop_curve_override)
                                     if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID) else None,
@@ -2104,9 +2958,12 @@ class BoilerController:
                   "is_on": self._is_on(b.entity_id, b),
                   "temp_c": b.current_temp_c, "setpoint_c": b.active_setpoint_c or b.setpoint_c,
                   "is_delivery": b.is_delivery, "priority": b.priority,
+                  "active_setpoint_c": b.active_setpoint_c,
                   "control_mode": b.control_mode, "power_w": b.current_power_w,
                   "cycle_kwh": round(b.cycle_kwh, 3),
                   "thermal_loss_c_h": b.thermal_loss_c_h,
+                  "brand": b.brand,
+                  "brand_label": _BRAND_LABELS.get(b.brand, b.brand) if b.brand else "",
                   "minutes_to_cold": g.learner.time_until_cold(b) if g.learner else None,
                   "post_saldering_mode": b.post_saldering_mode,
                   "delta_t_optimize": b.delta_t_optimize,

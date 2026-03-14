@@ -19,7 +19,7 @@ from .const import (
     DEFAULT_PID_EV_KP, DEFAULT_PID_EV_KI, DEFAULT_PID_EV_KD,
     DEFAULT_PRICE_THRESHOLD_CHEAP, DEFAULT_NILM_THRESHOLD_W,
 )
-from .sub_devices import sub_device_info, SUB_PV_DIMMER
+from .sub_devices import sub_device_info, SUB_PV_DIMMER, SUB_SHUTTER
 from .coordinator import CloudEMSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -160,11 +160,7 @@ class CloudEMSShutterSetpoint(CoordinatorEntity, NumberEntity):
         safe_id = shutter_entity_id.split(".")[-1].replace("-", "_")
         self._attr_unique_id  = f"{entry.entry_id}_shutterv2_{safe_id}_setpoint"
         self._attr_name       = f"CloudEMS Rolluik {label} Setpoint"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "CloudEMS",
-            "manufacturer": MANUFACTURER,
-        }
+        self._attr_device_info = sub_device_info(entry, SUB_SHUTTER)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

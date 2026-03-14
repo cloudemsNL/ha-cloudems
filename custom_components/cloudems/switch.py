@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 _LOGGER = logging.getLogger(__name__)
 
 from .const import DOMAIN, MANUFACTURER, ATTRIBUTION
-from .sub_devices import sub_device_info, SUB_PV_DIMMER, SUB_SHUTTER
+from .sub_devices import sub_device_info, SUB_PV_DIMMER, SUB_SHUTTER, SUB_LAMP, SUB_BATTERY, SUB_GRID
 from .coordinator import CloudEMSCoordinator
 
 
@@ -660,6 +660,9 @@ class CloudEMSBatterySchedulerSwitch(_CloudEMSModuleSwitch):
         self.entity_id = "switch.cloudems_module_batterij"
 
 
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 class CloudEMSZonneplanAutoForecastSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
     """Schakelaar voor Zonneplan/Nexus vendor-specifieke batterijsturing.
 
@@ -793,6 +796,9 @@ class CloudEMSLampCirculationSwitch(_CloudEMSModuleSwitch):
         self.async_write_ha_state()
 
 
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_LAMP)
 class CloudEMSEBikeSwitch(_CloudEMSModuleSwitch):
     """Module toggle voor E-bike & Scooter tracking."""
     _attr_name = "CloudEMS E-bike Module"

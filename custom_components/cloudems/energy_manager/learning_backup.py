@@ -107,7 +107,9 @@ class LearningBackup:
             try:
                 import json as _json, pathlib as _pl
                 _manifest = _pl.Path(__file__).parent.parent / "manifest.json"
-                _version = _json.loads(_manifest.read_text(encoding="utf-8")).get("version", "onbekend")
+                def _read_manifest():
+                    return _json.loads(_manifest.read_text(encoding="utf-8")).get("version", "onbekend")
+                _version = await self._hass.async_add_executor_job(_read_manifest)
             except Exception:
                 pass
             self._version = _version

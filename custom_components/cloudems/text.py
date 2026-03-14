@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import DOMAIN, MANUFACTURER, ATTRIBUTION, CONF_SHUTTER_CONFIGS, CONF_SHUTTER_COUNT
+from .sub_devices import sub_device_info, SUB_SHUTTER
 from .coordinator import CloudEMSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,11 +55,7 @@ class CloudEMSShutterTime(RestoreEntity, TextEntity):
         self._attr_unique_id  = f"{entry.entry_id}_shutterv2_{safe_id}_{suffix}"
         self._attr_name       = f"CloudEMS Rolluik {label} {friendly_suffix}"
         self._attr_icon       = icon
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "CloudEMS",
-            "manufacturer": MANUFACTURER,
-        }
+        self._attr_device_info = sub_device_info(entry, SUB_SHUTTER)
 
     async def async_added_to_hass(self) -> None:
         last = await self.async_get_last_state()

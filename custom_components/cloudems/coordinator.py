@@ -674,6 +674,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._lamp_circulation  = None  # v1.25.9: intelligente lampenbeveiliging
         self._shutter_ctrl      = None  # v3.9.0: rolluiken controller
         self._shutter_learner   = None  # v3.9.0: thermisch leermodel
+        self._entity_device_log = None  # v4.6.13: entity/device tracking + orphan cleanup
 
         # ── Module toggle attrs — geïnitialiseerd op safe defaults ────────────
         # Primaire modules: standaard AAN
@@ -2053,6 +2054,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._watchdog = CloudEMSWatchdog(self.hass, entry_id)
             await self._watchdog.async_setup()
             _LOGGER.info("CloudEMS Watchdog actief voor entry %s", entry_id)
+
+            # v4.6.13: EntityDeviceLog — bijhouden van alle aangemakte entities + orphan cleanup
+            try:
+                from .entity_device_log import EntityDeviceLog
+                entry_obj = self.hass.config_entries.async_get_entry(entry_id)
+                if entry_obj:
+                    self._entity_device_log = EntityDeviceLog(self.hass, entry_obj)
+                    await self._entity_device_log.async_load()
+                    _LOGGER.info("CloudEMS EntityDeviceLog actief voor entry %s", entry_id)
+            except Exception as _edl_err:
+                _LOGGER.warning("CloudEMS EntityDeviceLog kon niet starten: %s", _edl_err)
         else:
             _LOGGER.warning("CloudEMS Watchdog: kon entry_id niet bepalen, watchdog uitgeschakeld")
 
@@ -2440,6 +2452,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             _presence = cfg.get("shutter_presence_entities") or []
             if _presence:
                 self._shutter_ctrl.set_presence_entities(_presence)
+            _global_smoke = cfg.get("shutter_global_smoke_sensor") or ""
+            if _global_smoke:
+                self._shutter_ctrl.set_global_smoke_sensor(_global_smoke)
             # Input helpers aanmaken (tijden/setpoint/seizoen/aanwezigheid per rolluik)
             try:
                 await self._async_ensure_shutter_helpers(shutter_configs)
@@ -2666,6 +2681,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if getattr(self, "_gas_analysis", None):             _active_modules.append("GasAnalysis")
         if getattr(self, "_pool_ctrl", None):                _active_modules.append("Pool")
         if getattr(self, "_provider_manager", None):         _active_modules.append("ProviderManager")
+        if getattr(self, "_solar_learner", None):            _active_modules.append("SolarLearner")
+        if getattr(self, "_pv_forecast", None):              _active_modules.append("PVForecast")
+        if getattr(self, "_solar_dimmer", None):             _active_modules.append("SolarDimmer")
         _LOGGER.info(
             "CloudEMS v%s gestart — actieve modules: %s",
             _mf_version, ", ".join(_active_modules) if _active_modules else "geen"
@@ -3785,6 +3803,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         for ph in self._limiter._phases
                     },
                 )
+                # v4.6.60: controleer of Ariston cloud settings zijn aangekomen, retry indien niet
+                try:
+                    await self._boiler_ctrl.async_verify_pending()
+                except Exception as _vp_err:
+                    _LOGGER.debug("CloudEMS: boiler verify_pending fout (niet kritiek): %s", _vp_err)
                 for bd in boiler_decisions:
                     # v4.5.11: log altijd — ook hold_off — zodat we kunnen zien waarom
                     # de boiler NIET aan ging terwijl dat misschien had gemoeten.
@@ -7021,6 +7044,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._data["simulator"] = self._simulator.get_status()
                 if self._simulator.active:
                     self._data = self._simulator.apply(self._data)
+
+            # v4.6.13: EntityDeviceLog — tick + resultaat in data voor dashboard/diagnostics
+            if self._entity_device_log is not None:
+                try:
+                    self._data["entity_log"] = await self._entity_device_log.async_tick()
+                except Exception as _edl_err:
+                    _LOGGER.debug("EntityDeviceLog tick fout: %s", _edl_err)
+
             return self._data
 
         except Exception as exc:
