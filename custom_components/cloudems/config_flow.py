@@ -436,7 +436,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
       After ai_config    → advanced (P1 toggle → p1_config)
     """
 
-    VERSION = 5
+    VERSION = 6
 
     def __init__(self):
         self._config: Dict[str, Any] = {}
@@ -982,7 +982,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_INVERTER_COUNT]   = self._inv_count
             self._config[CONF_INVERTER_CONFIGS] = []
             self._inv_step = 0
-            return await self.async_step_inverter_detail() if self._inv_count > 0 else await self.async_step_battery_count()
+            return await self.async_step_inverter_detail() if self._inv_count > 0 else await self.async_step_managed_battery()
         existing_inv_count = str(len(self._config.get(CONF_INVERTER_CONFIGS, [])))
         return self.async_show_form(
             step_id="inverter_count",
@@ -1015,7 +1015,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_inverter_detail()
             if self._config[CONF_INVERTER_CONFIGS]:
                 self._config[CONF_ENABLE_MULTI_INVERTER] = True
-            return await self.async_step_battery_count()
+            self._came_from_advanced_battery = True
+            return await self.async_step_managed_battery()
         return self.async_show_form(
             step_id="inverter_detail",
             data_schema=vol.Schema({
@@ -1029,7 +1030,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}):    vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
                 # ── Begrenzing ────────────────────────────────────────────────
                 vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
-                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch","number"]),
+                vol.Optional("inv_control", default=existing.get("control_entity") or vol.UNDEFINED): _ent(["switch","number"]),
             }),
             description_placeholders={
                     "diagram_url": "/local/cloudems/diagrams/inverter_detail.svg",
@@ -1076,7 +1077,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self._config[k] = user_input[k]
 
             # Ga door naar handmatige batterij-setup of features
-            if self._advanced() and not getattr(self, "_came_from_advanced_battery", False):
+            if self._advanced():
                 return await self.async_step_battery_count()
             return await self.async_step_features()
 
@@ -1176,7 +1177,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="battery_detail",
             data_schema=vol.Schema({
                 vol.Required("bat_power_sensor", description={"suggested_value": existing_bat.get("power_sensor")}): _ent(),
-                vol.Optional("bat_soc_sensor",   description={"suggested_value": existing_bat.get("soc_sensor")}):   _ent(),
+                vol.Optional("bat_soc_sensor",   default=existing_bat.get("soc_sensor") or vol.UNDEFINED):   _ent(),
                 vol.Optional("bat_capacity_kwh",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=1000)),
                 vol.Optional("bat_max_charge_w",    default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("bat_max_discharge_w", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
@@ -1227,7 +1228,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ),
                 vol.Optional(
                     "shutter_global_smoke_sensor",
-                    description={"suggested_value": self._config.get("shutter_global_smoke_sensor", "")},
+                    default=self._config.get("shutter_global_smoke_sensor", "") or vol.UNDEFINED,
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)
                 ),
@@ -1388,7 +1389,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("shutter_night_close",    default=existing.get("night_close_time", "23:00")):  str,
                 vol.Optional("shutter_morning_open",   default=existing.get("morning_open_time", "07:30")): str,
                 vol.Optional("shutter_default_setpoint", default=existing.get("default_setpoint", 20.0)):   vol.Coerce(float),
-                vol.Optional("shutter_smoke_sensor", description={"suggested_value": existing.get("smoke_sensor", "")}): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)),
+                vol.Optional("shutter_smoke_sensor", default=existing.get("smoke_sensor", "") or vol.UNDEFINED): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)),
             }),
             description_placeholders={
                 "shutter_num":  str(i),
@@ -2244,6 +2245,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
         # mag een bestaande geconfigureerde waarde NIET overschrijven.
         extra_clean = {k: v for k, v in extra.items() if v not in (None, "")}
         merged = {**entry.data, **entry.options, **extra_clean}
+        # v4.6.175: als _opts boiler_groups heeft, altijd die gebruiken —
+        # voorkomt dat een andere wizard-stap de boiler config terugzet naar entry.data
+        if CONF_BOILER_GROUPS in self._opts and CONF_BOILER_GROUPS not in extra_clean:
+            merged[CONF_BOILER_GROUPS] = self._opts[CONF_BOILER_GROUPS]
 
         # ── Afgeleide velden ───────────────────────────────────────────────────
         # CONF_MAX_CURRENT_PER_PHASE = L1 (gebruikt door piekbeperking + solar learner)
@@ -2303,10 +2308,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
         }
         if not use_sep:
-            schema[vol.Optional(CONF_GRID_SENSOR, description={"suggested_value": data.get(CONF_GRID_SENSOR) or None})] = _ent()
+            schema[vol.Optional(CONF_GRID_SENSOR, default=data.get(CONF_GRID_SENSOR) or vol.UNDEFINED)] = _ent()
         else:
-            schema[vol.Optional(CONF_IMPORT_SENSOR, description={"suggested_value": data.get(CONF_IMPORT_SENSOR) or None})] = _ent()
-            schema[vol.Optional(CONF_EXPORT_SENSOR, description={"suggested_value": data.get(CONF_EXPORT_SENSOR) or None})] = _ent()
+            schema[vol.Optional(CONF_IMPORT_SENSOR, default=data.get(CONF_IMPORT_SENSOR) or vol.UNDEFINED)] = _ent()
+            schema[vol.Optional(CONF_EXPORT_SENSOR, default=data.get(CONF_EXPORT_SENSOR) or vol.UNDEFINED)] = _ent()
         if phase_count == 3:
             for k in (CONF_MAX_CURRENT_L2, CONF_MAX_CURRENT_L3):
                 schema[vol.Optional(k, default=float(data.get(k, DEFAULT_MAX_CURRENT)))] = \
@@ -2321,18 +2326,18 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
         schema: dict = {}
         for k in [CONF_PHASE_SENSORS+"_L1", CONF_VOLTAGE_L1, CONF_POWER_L1]:
-            schema[vol.Optional(k, description={"suggested_value": data.get(k) or None})] = _ent()
+            schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
         if phase_count == 3:
             for k in [
                 CONF_PHASE_SENSORS+"_L2", CONF_VOLTAGE_L2, CONF_POWER_L2,
                 CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3,
             ]:
-                schema[vol.Optional(k, description={"suggested_value": data.get(k) or None})] = _ent()
+                schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
         # v1.15.0: DSMR5 per-phase export sensors (bidirectional meters)
         # Sommige slimme meters (DSMR5) meten teruglevering per fase apart.
         # Als geconfigureerd: netto_fase = import_fase − export_fase.
         for exp_key in ("power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"):
-            schema[vol.Optional(exp_key, description={"suggested_value": data.get(exp_key) or None})] = _ent()
+            schema[vol.Optional(exp_key, default=data.get(exp_key) or vol.UNDEFINED)] = _ent()
         return self.async_show_form(
             step_id="phase_sensors",
             data_schema=vol.Schema(schema),
@@ -2350,9 +2355,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
         return self.async_show_form(
             step_id="solar_ev_opts",
             data_schema=vol.Schema({
-                vol.Optional(CONF_SOLAR_SENSOR, description={"suggested_value": data.get(CONF_SOLAR_SENSOR) or None}): _ent(),
-                vol.Optional(CONF_BATTERY_SENSOR, description={"suggested_value": data.get(CONF_BATTERY_SENSOR) or None}): _ent(),
-                vol.Optional(CONF_EV_CHARGER_ENTITY, description={"suggested_value": data.get(CONF_EV_CHARGER_ENTITY) or None}): _ent(["number","input_number"]),
+                vol.Optional(CONF_SOLAR_SENSOR, default=data.get(CONF_SOLAR_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_BATTERY_SENSOR, default=data.get(CONF_BATTERY_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_EV_CHARGER_ENTITY, default=data.get(CONF_EV_CHARGER_ENTITY) or vol.UNDEFINED): _ent(["number","input_number"]),
                 # Note: zonnebegrenzing (solar dimmer) wordt per omvormer ingesteld in de
                 # 🔆 Omvormers sectie — niet meer als globale schakelaar hier.
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
@@ -2381,13 +2386,13 @@ class CloudEMSOptionsFlow(_OptionsBase):
         return self.async_show_form(
             step_id="gas_opts",
             data_schema=vol.Schema({
-                vol.Optional(CONF_GAS_SENSOR, description={"suggested_value": data.get(CONF_GAS_SENSOR) or None}): _ent(),
-                vol.Optional(CONF_GAS_PRICE_SENSOR, description={"suggested_value": data.get(CONF_GAS_PRICE_SENSOR) or None}): _ent(),
+                vol.Optional(CONF_GAS_SENSOR, default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_SENSOR, default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
                 vol.Optional(CONF_GAS_PRICE_FIXED, default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
                 vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
                 vol.Optional(CONF_HEAT_PUMP_COP, default=float(data.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=8.0)),
-                vol.Optional(CONF_HEAT_PUMP_ENTITY, description={"suggested_value": data.get(CONF_HEAT_PUMP_ENTITY) or None}): _ent(),
-                vol.Optional(CONF_HEAT_PUMP_THERMAL_ENTITY, description={"suggested_value": data.get(CONF_HEAT_PUMP_THERMAL_ENTITY) or None}): _ent(),
+                vol.Optional(CONF_HEAT_PUMP_ENTITY, default=data.get(CONF_HEAT_PUMP_ENTITY) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_HEAT_PUMP_THERMAL_ENTITY, default=data.get(CONF_HEAT_PUMP_THERMAL_ENTITY) or vol.UNDEFINED): _ent(),
             }),
         )
 
@@ -2868,7 +2873,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             step_id="inverter_detail_opts",
             data_schema=vol.Schema({
                 vol.Required("inv_sensor", default=existing.get("entity_id", vol.UNDEFINED)): _ent(),
-                vol.Optional("inv_control", description={"suggested_value": existing.get("control_entity") or None}): _ent(["switch", "number"]),
+                vol.Optional("inv_control", default=existing.get("control_entity") or vol.UNDEFINED): _ent(["switch", "number"]),
                 vol.Optional("inv_label",   default=existing.get("label", f"Inverter {i}")): str,
                 vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
                 vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
@@ -3264,12 +3269,12 @@ class CloudEMSOptionsFlow(_OptionsBase):
             step_id="battery_detail_opts",
             data_schema=vol.Schema({
                 vol.Required("bat_power_sensor", default=existing.get("power_sensor", vol.UNDEFINED)): _ent(),
-                vol.Optional("bat_soc_sensor", description={"suggested_value": existing.get("soc_sensor")}): _ent(),
+                vol.Optional("bat_soc_sensor", default=existing.get("soc_sensor") or vol.UNDEFINED): _ent(),
                 vol.Optional("bat_capacity_kwh", default=float(existing.get("capacity_kwh", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=1000)),
                 vol.Optional("bat_max_charge_w", default=float(existing.get("max_charge_w", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("bat_max_discharge_w", default=float(existing.get("max_discharge_w", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
-                vol.Optional("bat_charge_entity", description={"suggested_value": existing.get("charge_entity") or None}): _ent(["number", "input_number"]),
-                vol.Optional("bat_discharge_entity", description={"suggested_value": existing.get("discharge_entity") or None}): _ent(["number", "input_number"]),
+                vol.Optional("bat_charge_entity", default=existing.get("charge_entity") or vol.UNDEFINED): _ent(["number", "input_number"]),
+                vol.Optional("bat_discharge_entity", default=existing.get("discharge_entity") or vol.UNDEFINED): _ent(["number", "input_number"]),
                 vol.Optional("bat_label", default=existing.get("label", f"Batterij {i}")): str,
             }),
             description_placeholders={
@@ -3436,6 +3441,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "morning_open_time": user_input.get("shutter_morning_open", "07:30"),
                 "default_setpoint":  float(user_input.get("shutter_default_setpoint", 20.0)),
                 "smoke_sensor":    user_input.get("shutter_smoke_sensor") or "",
+                "schedule_learning": user_input.get("shutter_schedule_learning", True),
             })
             self._shutter_step += 1
             if self._shutter_step < self._shutter_count:
@@ -3480,10 +3486,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("shutter_default_setpoint", default=existing.get("default_setpoint", 20.0)):   vol.Coerce(float),
                 vol.Optional(
                     "shutter_smoke_sensor",
-                    description={"suggested_value": existing.get("smoke_sensor", "")},
+                    default=existing.get("smoke_sensor", "") or vol.UNDEFINED,
                 ): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="binary_sensor", device_class="smoke", multiple=False)
                 ),
+                vol.Optional("shutter_schedule_learning", default=existing.get("schedule_learning", True)): bool,
             }),
             description_placeholders={
                 "shutter_num":  str(i),
@@ -3781,6 +3788,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
     async def async_step_boiler_group_edit(self, user_input=None):
         """Bewerk een bestaande cascade-groep: naam, modus en units beheren."""
+        # v4.6.174: laad altijd uit _data() zodat bestaande config niet verloren gaat
+        # als _opts nog niet gevuld is met boiler_groups (bijv. bij directe edit-navigatie)
+        if CONF_BOILER_GROUPS not in self._opts:
+            self._opts[CONF_BOILER_GROUPS] = list(self._data().get(CONF_BOILER_GROUPS, []))
         groups = list(self._opts.get(CONF_BOILER_GROUPS, []))
         idx    = int(self._opts.get("_bg_edit_idx", 0))
         group  = groups[idx] if idx < len(groups) else {}
@@ -4010,6 +4021,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
     async def async_step_boiler_unit_edit(self, user_input=None):
         """Bewerk een bestaande boiler-unit — pre-filled met huidige waarden."""
+        # v4.6.174: zorg dat boiler_groups altijd aanwezig zijn in _opts
+        if CONF_BOILER_GROUPS not in self._opts:
+            self._opts[CONF_BOILER_GROUPS] = list(self._data().get(CONF_BOILER_GROUPS, []))
         groups  = list(self._opts.get(CONF_BOILER_GROUPS, []))
         g_idx   = int(self._opts.get("_bg_edit_idx", 0))
         u_idx   = int(self._opts.get("_bg_unit_edit_idx", 0))
@@ -4103,11 +4117,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 )
             ),
             vol.Optional("bu_temp_sensor",
-                         description={"suggested_value": unit.get("temp_sensor", "")}): selector.EntitySelector(
+                         default=unit.get("temp_sensor", "") or vol.UNDEFINED): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
             ),
             vol.Optional("bu_energy_sensor",
-                         description={"suggested_value": unit.get("energy_sensor", "")}): selector.EntitySelector(
+                         default=unit.get("energy_sensor", "") or vol.UNDEFINED): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class=["power", "energy"])
             ),
             vol.Optional("bu_label", default=unit.get("label", f"Boiler {u_idx+1}")): str,
@@ -4121,7 +4135,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             # (bijv. number.ariston_max_setpoint_temperature). Altijd zichtbaar zodat ook
             # gebruikers van bekende merken dit veld kunnen invullen.
             vol.Optional("bu_max_setpoint_entity",
-                         description={"suggested_value": unit.get("max_setpoint_entity", "")}): selector.EntitySelector(
+                         default=unit.get("max_setpoint_entity") or vol.UNDEFINED): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="number")
             ),
         }

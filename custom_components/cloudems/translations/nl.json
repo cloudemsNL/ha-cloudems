@@ -347,7 +347,8 @@
           "shutter_group": "Groepnaam (optioneel, bijv. 'Woonkamer')",
           "shutter_auto_thermal": "Automatisch sluiten bij oververhitting",
           "shutter_auto_solar_gain": "Automatisch openen voor zonnewarmte",
-          "shutter_auto_overheat": "Oververhitting voorkomen (prioriteit)"
+          "shutter_auto_overheat": "Oververhitting voorkomen (prioriteit)",
+          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)"
         }
       },
       "prices": {
@@ -824,7 +825,8 @@
           "shutter_temp_sensor": "Temperatuursensor (optioneel, voor oriëntatie leren)",
           "shutter_night_close": "Rolluik sluiten om (bijv. 23:00)",
           "shutter_morning_open": "Vroegste openingstijd (bijv. 07:30)",
-          "shutter_default_setpoint": "Standaard setpoint °C (geen klimaat → 20)"
+          "shutter_default_setpoint": "Standaard setpoint °C (geen klimaat → 20)",
+          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)"
         },
         "data_description": {
           "shutter_night_close": "Tijdstip waarop het rolluik 's avonds sluit.",

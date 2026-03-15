@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v2.0.0
 
-const SHUTTER_VERSION = "2.0.1";
+const SHUTTER_VERSION = "2.2.3";
 const SHUTTER_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -79,14 +79,16 @@ class CloudemsShutterCard extends HTMLElement {
     // Hash only meaningful shutter data — NOT last_updated/timer countdowns
     const shutterData=st?.attributes?.shutters??{};
     const shutters=shutterData.shutters??[];
-    const shutterHash=shutters.map(s=>`${s.entity_id}:${s.position}:${s.last_action}:${s.auto_enabled}:${s.override_active}`).join("|");
+    const shutterHash=shutters.map(s=>`${s.entity_id}:${s.position}:${s.last_action}:${s.auto_enabled}:${s.override_active}:${s.schedule_learning}`).join("|");
+    // Also track learning switch states
+    const learnHash=Object.keys(h.states).filter(k=>k.startsWith("switch.cloudems_shutter_")&&k.endsWith("_learning")).map(k=>h.states[k].state).sort().join("|");
     // For override timers: only re-render when a timer appears/disappears (not every tick)
     const ovActive=Object.keys(h.states).filter(k=>
       k.startsWith("sensor.cloudems_rolluik_")&&k.endsWith("_override_restant")&&
       h.states[k].state&&h.states[k].state!=="00:00:00"&&
       h.states[k].state!=="unavailable"&&h.states[k].state!=="unknown"
     ).sort().join(",");
-    const j=JSON.stringify([shutterHash,sw?.state,st?.state,ovActive]);
+    const j=JSON.stringify([shutterHash,learnHash,sw?.state,st?.state,ovActive]);
     if(j!==this._prev){this._prev=j;this._render();}
   }
   _render(){
@@ -133,25 +135,96 @@ class CloudemsShutterCard extends HTMLElement {
       const shadowReason=s.shadow_reason||"";
       const autoEnabled=s.auto_enabled!==false;
       const overrideActive=s.override_active||false;
+      const openToday=s.schedule_open_today||"08:00";
+      const closeToday=s.schedule_close_today||"20:00";
+      const needsData=s.schedule_needs_data||0;
+      const isLearned=needsData===0 && s.schedule_learning!==false;
       const label=s.label||s.entity_id||`Rolluik ${i+1}`;
+      const scheduleLearning=s.schedule_learning!==false;
+      const scheduleData=s.schedule_learned||{};
 
       // Auto badge
       const autoCls=!autoEnabled?"off":overrideActive?"ov":"on";
       const autoLabel=!autoEnabled?"🔴 UIT":overrideActive?"🟠 Override":"🤖 AAN";
+      // Learning switch state
+      const safeName=s.entity_id.split(".").pop().replace(/-/g,"_");
+      const learnSwitchId=`switch.cloudems_shutter_${safeName}_learning`;
+      const learnProgSensorId=`sensor.cloudems_rolluik_${safeName}_leer_voortgang`;
+      const learnSwitchState=h.states[learnSwitchId];
+      const learnProgState=h.states[learnProgSensorId];
+      const learningEnabled=learnSwitchState?learnSwitchState.state==="on":scheduleLearning;
+      const needsDataFinal=learnProgState&&learnProgState.state!=='unavailable'&&learnProgState.state!=='unknown'?parseInt(learnProgState.state)||0:needsData;
 
       // Action chip
       const actChipCls=act==="open"?"action-open":act==="close"?"action-close":"action-idle";
       const actIcon=act==="open"?"🔼":act==="close"?"🔽":"⏸";
 
       // Blind visual — slats showing position
-      const closedPct=pos>=0?(100-pos):50; // pos=100 = open, pos=0 = closed
+      const closedPct=pos>=0?(100-pos):50;
       const nSlats=5;
       const slatsHtml=Array.from({length:nSlats},()=>`<div class="slat"></div>`).join("");
+
+      // Learned schedule section
+      let schedHtml="";
+      if(c.show_learning!==false && s.schedule_learning!==false){
+        if(needsDataFinal>0){
+          // First-time hint
+          schedHtml=`<div style="margin:6px 0 0;padding:6px 8px;background:rgba(255,200,0,0.08);border-radius:8px;border:1px solid rgba(255,200,0,0.2)">
+            <div style="font-size:10px;color:rgba(255,200,0,0.8)">📅 Tijdleren: bedien dit rolluik nog ~${needsDataFinal}× op je gewenste tijd</div>
+            <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px">Starttijden: 🔼 ${openToday} · 🔽 ${closeToday}</div>
+          </div>`;
+        } else {
+          // Today times prominent + per-day table
+          const openData=scheduleData.open||{};
+          const closeData=scheduleData.close||{};
+          const dayKeys=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+          const dayNames=["Ma","Di","Wo","Do","Vr","Za","Zo"];
+          const tableRows=dayKeys.map((dk,di)=>{
+            const od=openData[dk]||{};
+            const cd=closeData[dk]||{};
+            const oConf=od.confidence||0;
+            const cConf=cd.confidence||0;
+            const oApplied=od.applied||od.learned||"08:00";
+            const cApplied=cd.applied||cd.learned||"20:00";
+            const oColor=oConf>=0.8?"var(--s-green)":oConf>=0.5?"var(--s-amber)":"var(--s-muted)";
+            const cColor=cConf>=0.8?"var(--s-green)":cConf>=0.5?"var(--s-amber)":"var(--s-muted)";
+            const oSamples=Math.round(od.effective_samples||od.samples||0);
+            const cSamples=Math.round(cd.effective_samples||cd.samples||0);
+            return `<tr>
+              <td style="color:var(--s-muted);padding:2px 5px;font-size:10px">${dayNames[di]}</td>
+              <td style="color:${oColor};padding:2px 5px;font-size:10px;font-family:monospace">🔼 ${oApplied}</td>
+              <td style="color:var(--s-muted);padding:2px 2px;font-size:9px">${oSamples>0?Math.round(oConf*100)+"%":"-"}</td>
+              <td style="color:${cColor};padding:2px 5px;font-size:10px;font-family:monospace">🔽 ${cApplied}</td>
+              <td style="color:var(--s-muted);padding:2px 2px;font-size:9px">${cSamples>0?Math.round(cConf*100)+"%":"-"}</td>
+            </tr>`;
+          }).join("");
+          schedHtml=`<div style="margin:6px 0 0">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div style="flex:1;font-size:11px;color:var(--s-green)">🔼 ${openToday}</div>
+              <div style="flex:1;font-size:11px;color:rgba(180,120,255,0.9)">🔽 ${closeToday}</div>
+              <span style="font-size:9px;color:var(--s-muted)">${isLearned?"🧠 geleerd":"📅 standaard"}</span>
+            </div>
+            <details style="padding:0">
+              <summary style="font-size:9px;color:var(--s-muted);cursor:pointer;list-style:none">
+                📅 Per dag <span style="opacity:.6">(klik voor details)</span>
+              </summary>
+              <table style="width:100%;border-collapse:collapse;margin-top:4px">${tableRows}</table>
+              <button onclick="this.getRootNode().host._resetSchedule('${s.entity_id}')"
+                style="margin-top:6px;font-size:9px;padding:3px 8px;background:rgba(255,80,80,0.15);border:1px solid rgba(255,80,80,0.3);border-radius:6px;color:rgba(255,120,120,0.9);cursor:pointer">
+                🗑️ Leerdata wissen
+              </button>
+            </details>
+          </div>`;
+        }
+      } else if(s.schedule_learning===false){
+        schedHtml=`<div style="font-size:9px;color:var(--s-muted);padding:3px 0;opacity:.5">📅 Tijdleren uit · 🔼 ${openToday} · 🔽 ${closeToday}</div>`;
+      }
 
       return `<div class="shutter-row" style="animation-delay:${i*.07}s">
         <div class="shutter-top">
           <span class="shutter-name">${esc(label)}</span>
           <span class="auto-badge ${autoCls}">${autoLabel}</span>
+          <span class="auto-badge ${learningEnabled?'on':'off'}" title="${learningEnabled?'Tijdleren aan — CloudEMS leert je open/sluit tijden':'Tijdleren uit — vaste tijden uit config'}" style="cursor:pointer;margin-left:4px;" onclick="this.getRootNode().host._toggleLearning('${learnSwitchId}','${learnSwitchState?learnSwitchState.state:'on'}')">🧠 ${learningEnabled?'Leert':'Vast'}</span>
         </div>
         <div class="blind-wrap">
           <div class="blind-closed" style="width:${Math.min(closedPct,100)}%">
@@ -165,6 +238,7 @@ class CloudemsShutterCard extends HTMLElement {
           ${reason?`<span class="meta-chip">${esc(reason.length>40?reason.slice(0,40)+"…":reason)}</span>`:""}
         </div>
         ${shadow&&shadow!==act&&!autoEnabled?`<div class="shadow-hint">🤖 <span>Automaat zou: <strong>${esc(shadow)}</strong>${shadowReason?" — "+esc(shadowReason):""}</span></div>`:""}
+        ${schedHtml}
       </div>`;
     }).join("");
 
@@ -209,6 +283,25 @@ class CloudemsShutterCard extends HTMLElement {
       <div class="shutters-section">${rows}</div>
       ${ovHtml}
     </div>`;
+  }
+  _toggleLearning(switchEntityId, currentState){
+    if(!this._hass) return;
+    const newState = currentState === 'on' ? 'off' : 'on';
+    const service = newState === 'on' ? 'turn_on' : 'turn_off';
+    this._hass.callService('switch', service, {entity_id: switchEntityId})
+      .catch(e => console.warn('CloudEMS: toggle learning failed', e));
+  }
+  _resetSchedule(entityId){
+    if(!this._hass) return;
+    if(!confirm(`Leerdata wissen voor ${entityId}?\nDit kan niet ongedaan worden.`)) return;
+    this._hass.callService('cloudems','reset_shutter_schedule',{entity_id: entityId})
+      .catch(()=>{
+        // Fallback: call via persistent notification
+        this._hass.callService('persistent_notification','create',{
+          message: `Reset shutter schedule voor ${entityId} via CloudEMS instellingen.`,
+          title: 'CloudEMS'
+        });
+      });
   }
   static getStubConfig(){ return {title:"Rolluiken",show_learning:true}; }
   getCardSize(){ return 6; }

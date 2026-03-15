@@ -15,7 +15,7 @@
  *   show_cancel_button: true            # show cancel-all-delays button (default: true)
  */
 
-const CARD_VERSION = "1.0.1";
+const CARD_VERSION = "1.0.2";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const STYLES = `

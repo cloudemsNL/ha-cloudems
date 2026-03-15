@@ -72,6 +72,7 @@ async def async_setup_entry(
         if cover_id:
             label = sc.get("label") or cover_id.split(".")[-1].replace("_", " ").title()
             entities.append(CloudEMSShutterAutoSwitch(coordinator, entry, cover_id, label))
+            entities.append(CloudEMSShutterLearnSwitch(coordinator, entry, cover_id, label))
 
     async_add_entities(entities, update_before_add=False)
 
@@ -883,4 +884,45 @@ class CloudEMSShutterAutoSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         sc = getattr(self.coordinator, "_shutter_ctrl", None)
         if sc:
             sc.set_auto_enabled(self._cover_id, False)
+        self.async_write_ha_state()
+
+
+class CloudEMSShutterLearnSwitch(CoordinatorEntity, SwitchEntity):
+    """Per-rolluik schakelaar voor tijdschema-leren (v4.6.157).
+    Aan = CloudEMS leert open/sluit tijden van gebruikspatroon.
+    Uit = vaste tijden uit configuratie.
+    """
+
+    _attr_icon = "mdi:school"
+
+    def __init__(self, coordinator, entry, cover_entity_id: str, label: str):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._cover_id = cover_entity_id
+        safe = cover_entity_id.split(".")[-1].replace("-", "_")
+        self._attr_unique_id = f"{entry.entry_id}_shutter_{safe}_learning"
+        self._attr_name = f"CloudEMS Tijdleren {label}"
+        self.entity_id = f"switch.cloudems_shutter_{safe}_learning"
+
+    @property
+    def device_info(self):
+        return sub_device_info(self._entry, SUB_SHUTTER)
+
+    @property
+    def is_on(self) -> bool:
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc is None:
+            return True
+        return sc.get_schedule_learning(self._cover_id)
+
+    async def async_turn_on(self, **kwargs):
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc:
+            sc.set_schedule_learning(self._cover_id, True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc:
+            sc.set_schedule_learning(self._cover_id, False)
         self.async_write_ha_state()

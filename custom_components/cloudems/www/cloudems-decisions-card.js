@@ -4,7 +4,7 @@
  * v4.6.104
  */
 
-const CARD_VERSION = "4.6.144";
+const CARD_VERSION = "4.6.171";
 
 const CAT_CONFIG = {
   battery:           { icon: "🔋", label: "Batterij",     color: "#4caf50" },

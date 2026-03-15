@@ -347,7 +347,8 @@
           "shutter_group": "Group name (optional, e.g. 'Living room')",
           "shutter_auto_thermal": "Automatically close when overheating",
           "shutter_auto_solar_gain": "Automatically open for solar heat gain",
-          "shutter_auto_overheat": "Prevent overheating (priority)"
+          "shutter_auto_overheat": "Prevent overheating (priority)",
+          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)"
         }
       },
       "prices": {
@@ -819,7 +820,8 @@
           "shutter_temp_sensor": "Temperature sensor (optional)",
           "shutter_night_close": "Close shutter at (e.g. 23:00)",
           "shutter_morning_open": "Earliest opening time (e.g. 07:30)",
-          "shutter_default_setpoint": "Default setpoint °C (no climate → 20)"
+          "shutter_default_setpoint": "Default setpoint °C (no climate → 20)",
+          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)"
         },
         "data_description": {
           "shutter_night_close": "Time at which the shutter closes automatically in the evening.",

@@ -64,8 +64,9 @@ class ShutterConfig:
     max_position: int = 100                 # maximale openstand (%)
 
     # Tijdschema
-    night_close_time: str = "23:00"         # tijdstip waarop rolluik 's nachts sluit
-    morning_open_time: str = "07:30"        # vroegste tijdstip voor automatisch openen
+    night_close_time: str = "20:00"         # start default, learned schedule takes over
+    morning_open_time: str = "08:00"        # start default, learned schedule takes over
+    schedule_learning: bool = True          # v4.6.153: learn open/close times from observations
     default_setpoint: float = 20.0          # fallback setpoint als geen klimaat beschikbaar
     smoke_sensor: str = ""                  # optioneel: binary_sensor per rolluik/ruimte
 
@@ -166,6 +167,10 @@ class ShutterController:
         # Grace period: als positie verandert binnen N seconden na CloudEMS-commando → géén externe detectie
         self._EXTERNAL_GRACE_S = 15
 
+        # v4.6.153: Schedule learner
+        from .shutter_learner import ShutterScheduleLearner
+        self._schedule_learner = ShutterScheduleLearner()
+
     # ── Setup ────────────────────────────────────────────────────────────────
 
     def _parse_configs(self, raw: list[dict]) -> None:
@@ -188,6 +193,7 @@ class ShutterController:
                 morning_open_time=c.get("morning_open_time", DEFAULT_SHUTTER_MORNING_OPEN),
                 default_setpoint=float(c.get("default_setpoint", DEFAULT_SHUTTER_SETPOINT)),
                 smoke_sensor=c.get("smoke_sensor", ""),
+                schedule_learning=c.get("schedule_learning", True),
                 pid_kp=float(c.get("pid_kp", 15.0)),
                 pid_ki=float(c.get("pid_ki", 0.5)),
                 pid_kd=float(c.get("pid_kd", 2.0)),
@@ -301,6 +307,9 @@ class ShutterController:
             label, entity_id, old_pos, new_pos, old_st, new_st,
         )
         self.set_auto_enabled(entity_id, False, hours=4.0)
+
+        # v4.6.153: Learn from this external action
+        self._learn_from_state_change(entity_id, new_pos, new_st, old_pos, old_st, source="external")
 
         # Forceer coordinator refresh zodat switch-entities direct updaten
         if self._coordinator is not None:
@@ -526,7 +535,7 @@ class ShutterController:
         await asyncio.gather(*tasks)
 
     async def async_load_timers(self) -> None:
-        """Laad gepersisteerde timers na herstart."""
+        """Load persisted timers and learned schedules after restart."""
         try:
             data = await self._store.async_load()
             if not data:
@@ -546,6 +555,12 @@ class ShutterController:
                     if until and dt_util.now() < until:
                         state.override_until = until
                         _LOGGER.info("CloudEMS Shutters: override hersteld voor %s tot %s", eid, until)
+            # v4.6.153: load learned schedules
+            learned = data.get("learned_schedules")
+            if learned:
+                from .shutter_learner import ShutterScheduleLearner
+                self._schedule_learner = ShutterScheduleLearner.from_dict(learned)
+                _LOGGER.info("CloudEMS ShutterLearner: loaded %d schedules", len(learned))
         except Exception as exc:
             _LOGGER.warning("CloudEMS Shutters: kon timers niet laden: %s", exc)
 
@@ -554,7 +569,7 @@ class ShutterController:
         self.hass.async_create_task(self._async_save_timers())
 
     async def _async_save_timers(self) -> None:
-        """Sla auto_disabled_until en override_until op."""
+        """Sla auto_disabled_until, override_until en learned schedules op."""
         auto_disabled = {}
         overrides = {}
         for eid, state in self._states.items():
@@ -562,10 +577,14 @@ class ShutterController:
                 auto_disabled[eid] = state.auto_disabled_until.isoformat()
             if state.override_until:
                 overrides[eid] = state.override_until.isoformat()
-        await self._store.async_save({
+        payload: dict = {
             "auto_disabled_until": auto_disabled,
             "override_until": overrides,
-        })
+        }
+        # v4.6.153: save learned schedules if dirty
+        if self._schedule_learner.dirty:
+            payload["learned_schedules"] = self._schedule_learner.to_dict()
+        await self._store.async_save(payload)
 
     def set_auto_enabled(self, entity_id: str, enabled: bool, hours: float = 0.0) -> None:
         """Schakel automaat in of uit. hours>0 = tijdelijk uitschakelen."""
@@ -589,6 +608,30 @@ class ShutterController:
                 state.auto_disabled_until = None
                 _LOGGER.info("CloudEMS Shutters: automaat %s automatisch hervat", entity_id)
         return state.auto_enabled
+
+    def reset_schedule(self, entity_id: str) -> int:
+        """v4.6.154: Reset learned schedule for a shutter. Returns cleared count."""
+        cleared = self._schedule_learner.reset(entity_id)
+        if cleared:
+            self._schedule_save_timers()
+            _LOGGER.info("CloudEMS ShutterLearner: reset %d schedules for %s", cleared, entity_id)
+        return cleared
+
+    def set_schedule_learning(self, entity_id: str, enabled: bool) -> None:
+        """v4.6.157: Zet tijdschema-leren aan of uit voor een rolluik."""
+        for cfg in self._configs:
+            if cfg.entity_id == entity_id:
+                cfg.schedule_learning = enabled
+                _LOGGER.info("CloudEMS ShutterLearner: leren %s voor %s",
+                             "ingeschakeld" if enabled else "uitgeschakeld", entity_id)
+                return
+
+    def get_schedule_learning(self, entity_id: str) -> bool:
+        """v4.6.157: Geef terug of tijdschema-leren aan is voor een rolluik."""""
+        for cfg in self._configs:
+            if cfg.entity_id == entity_id:
+                return cfg.schedule_learning
+        return True
 
     def get_auto_disabled_until(self, entity_id: str):
         """Geef datetime waarop automaat hervat, of None."""
@@ -666,14 +709,74 @@ class ShutterController:
         return self._read_input_number(cfg, suffix, fallback)
 
     def _night_close(self, cfg: ShutterConfig) -> str:
-        return self._read_input_text(cfg, "night_close", cfg.night_close_time)
+        """Return close time — learned time takes priority if confident and learning enabled."""
+        manual = self._read_input_text(cfg, "night_close", cfg.night_close_time)
+        if cfg.schedule_learning:
+            from .shutter_learner import EVENT_CLOSE
+            now = dt_util.now()
+            learned = self._schedule_learner.get_learned_time(
+                cfg.entity_id, EVENT_CLOSE, now.weekday(), month=now.month)
+            if learned is not None:
+                return learned.strftime("%H:%M")
+        return manual
 
     def _morning_open(self, cfg: ShutterConfig) -> str:
-        """Openingstijd: helper > 00:00 = zonsopgang > config default."""
+        """Open time: learned > helper > sunrise > config default."""
+        if cfg.schedule_learning:
+            from .shutter_learner import EVENT_OPEN
+            now = dt_util.now()
+            learned = self._schedule_learner.get_learned_time(
+                cfg.entity_id, EVENT_OPEN, now.weekday(), month=now.month)
+            if learned is not None:
+                return learned.strftime("%H:%M")
         val = self._read_input_text(cfg, "morning_open", cfg.morning_open_time)
         if val == "00:00":
             return self._sunrise_open_time(cfg)
         return val
+
+    def _learn_from_state_change(
+        self,
+        entity_id: str,
+        new_pos: Optional[int],
+        new_st: str,
+        old_pos: Optional[int],
+        old_st: str,
+        source: str = "external",
+    ) -> None:
+        """Determine action from state change and record a learning observation."""
+        # Respect per-shutter learning toggle
+        cfg = self._cfg_by_id.get(entity_id)
+        if cfg and not cfg.schedule_learning:
+            return
+
+        from .shutter_learner import EVENT_OPEN, EVENT_CLOSE
+        now = dt_util.now()
+
+        # Determine action: closing (pos goes down or state=closed) or opening
+        action = None
+        if new_st == "closed" and old_st != "closed":
+            action = EVENT_CLOSE
+        elif new_st in ("open", "opening") and old_st not in ("open", "opening"):
+            action = EVENT_OPEN
+        elif new_pos is not None and old_pos is not None:
+            if new_pos < old_pos - 10:
+                action = EVENT_CLOSE
+            elif new_pos > old_pos + 10:
+                action = EVENT_OPEN
+
+        if action is None:
+            return
+
+        self._schedule_learner.observe(entity_id, action, now, source=source)
+        cfg = self._cfg_by_id.get(entity_id)
+        label = cfg.label if cfg else entity_id
+        conf = self._schedule_learner.get_confidence(entity_id, action, now.weekday())
+        _LOGGER.info(
+            "ShutterLearner: observed %s %s on %s at %02d:%02d "
+            "(source=%s, confidence=%.0f%%)",
+            label, action, now.strftime("%A"),
+            now.hour, now.minute, source, conf * 100,
+        )
 
     def _sunrise_open_time(self, cfg: ShutterConfig) -> str:
         """Bereken openingstijd op basis van zonsopgang (sun.sun) + offset."""
@@ -1145,6 +1248,14 @@ class ShutterController:
                 blocking=False,
             )
 
+        # v4.6.153: learn from CloudEMS-initiated schedule actions (night_close / morning_open)
+        if action in (SHUTTER_ACTION_CLOSE, SHUTTER_ACTION_OPEN) and "schema" in reason.lower():
+            from .shutter_learner import EVENT_OPEN, EVENT_CLOSE
+            learn_action = EVENT_CLOSE if action == SHUTTER_ACTION_CLOSE else EVENT_OPEN
+            self._schedule_learner.observe(entity_id, learn_action, dt_util.now(), source="cloudems")
+            if self._schedule_learner.dirty:
+                self._schedule_save_timers()
+
         if state:
             state.last_action = action
             state.last_reason = reason
@@ -1206,6 +1317,13 @@ class ShutterController:
                     and getattr(self._learner._rooms.get(cfg.area_id), "orientation_confident", False)
                     if self._learner and cfg.area_id else False
                 ),
+                # v4.6.153: learned schedule status
+                "schedule_learning": cfg.schedule_learning,
+                "schedule_learned": self._schedule_learner.get_status(cfg.entity_id) if cfg.schedule_learning else {},
+                # v4.6.154: today's active times and first-time hint
+                "schedule_open_today":  self._morning_open(cfg),
+                "schedule_close_today": self._night_close(cfg),
+                "schedule_needs_data":  self._schedule_learner.needs_more_data(cfg.entity_id) if cfg.schedule_learning else 0,
             })
         # Learner voortgang per kamer
         learner_status = self._learner.get_status() if self._learner else []

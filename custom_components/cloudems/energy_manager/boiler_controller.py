@@ -3049,10 +3049,8 @@ class BoilerController:
              "active_setpoint_c": b.active_setpoint_c,  # gecapped op hw-max; None vóór eerste cyclus
              # current_power_w kan None zijn voor de eerste _read_sensors() cyclus.
              # Fallback: als de boiler nu aan staat, gebruik b.power_w als schatting.
-             "power_w": b.current_power_w if b.current_power_w is not None
-                        else (b.power_w if self._is_on(b.entity_id, b) else 0.0),
-             "current_power_w": b.current_power_w if b.current_power_w is not None
-                        else (b.power_w if self._is_on(b.entity_id, b) else 0.0),
+             "power_w": b.current_power_w,
+             "current_power_w": b.current_power_w,
              "cycle_kwh": round(b.cycle_kwh, 3),
              "thermal_loss_c_h": b.thermal_loss_c_h, "control_mode": b.control_mode,
              "boiler_type": b.boiler_type, "has_gas_heating": b.has_gas_heating,

@@ -4,7 +4,7 @@
 
 /**
  * CloudEMS Custom Card Bundle
- * Version: 1.6.0
+ * Version: 1.6.3
  * 
  * Cards:
  *   cloudems-chip-card    — status chip met template rendering (vervangt mushroom-template-card)
@@ -598,17 +598,22 @@
 
     // ── Extra flow helpers ────────────────────────────────────────────────────
 
-    _getBoilerPower() {
-      if (!this._hass) return 0;
+    _getBoilerNodes() {
+      if (!this._hass) return [];
       const e = this._config.entities || {};
-      if (e.boiler) return Math.max(0, this._getVal(e.boiler));
-      // Lees uit cloudems_boiler_status — som van alle boilers (max 9), current_power_w is al 0 als uit
+      if (e.boiler) return [{ label: e.boiler.name || 'Boiler', power_w: Math.max(0, this._getVal(e.boiler)) }];
       const st = this._hass.states['sensor.cloudems_boiler_status'];
       if (st) {
         const boilers = st.attributes?.boilers || [];
-        return boilers.reduce((s, b) => s + (b.power_w || 0), 0);
+        if (boilers.length > 0) return boilers.map(b => ({
+          label:   b.label || 'Boiler',
+          power_w: Math.max(0, b.power_w ?? b.current_power_w ?? 0),
+        }));
       }
-      return 0;
+      return [];
+    }
+    _getBoilerPower() {
+      return this._getBoilerNodes().reduce((s, b) => s + b.power_w, 0);
     }
 
     _getEvPower() {
@@ -775,8 +780,9 @@
       const home       = this._getVal(e.home);
       const solarNodes = this._getSolarNodes();
       const battNodes  = this._getBatteryNodes();
+      const boilerNodes = this._getBoilerNodes();
       const cloudCover = this._getCloudCover();
-      const boiler     = this._getBoilerPower();
+      const boiler     = boilerNodes.reduce((s, b) => s + b.power_w, 0);
       const ev         = this._getEvPower();
       const ebike      = this._getEbikePower();
       const pool       = this._getPoolPower();
@@ -813,8 +819,8 @@
       //
       const W = 500;
       const COL_LEFT = 78, COL_HUB = 250, COL_R = 430;
-      const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 70;
-      const R_EV    = 122, R_HUB   = 172, R_BOI  = 180;
+      const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 110;
+      const R_EV    = 122, R_HUB   = 172, R_BOI  = 230;
       const R_EBIKE = 232, R_POOL  = 302;
       const R_HOME  = 400, R_L2    = 480, R_L3   = 556;
       const hasL3 = subs.some(s => s.children.length > 0);
@@ -827,12 +833,25 @@
       const batt0   = battNodes[0];
       const batt_pw = batt0?.power_w || 0;
       const batt_ch = batt_pw < -10;
-      const bp1x = hub_r, bp1y = R_HUB, bp2x = COL_R - 38, bp2y = R_BATT;
-      const [bfx1, bfy1, bfx2, bfy2] = batt_ch ? [bp1x,bp1y,bp2x,bp2y] : [bp2x,bp2y,bp1x,bp1y];
+      // Multi-batt spread: horizontaal gespreid rond COL_R, SOM pill op (COL_R, R_BATT)
+      const nBatt = Math.min(battNodes.length, 3);
+      const battXs = nBatt === 1 ? [COL_R - 38]
+                   : nBatt === 2 ? [COL_R - 68, COL_R - 8]
+                   :               [COL_R - 78, COL_R - 38, COL_R + 2];
+      const battSomX = COL_R - 38, battSomY = R_BATT;
+      const bp2x = battSomX, bp2y = battSomY;
+      const bp1x = COL_HUB, bp1y = R_HUB;
+      const totalBattPw = battNodes.reduce((s, b) => s + b.power_w, 0);
+      const anyBattCh   = battNodes.some(b => b.power_w < -10);
+      const [bfx1, bfy1, bfx2, bfy2] = anyBattCh ? [bp1x,bp1y,bp2x,bp2y] : [bp2x,bp2y,bp1x,bp1y];
 
-      // Boiler pipe: diagonal hub top-right → boiler bottom-left
-      const bol1x = hub_r - 4, bol1y = hub_t + 4;
+      // Boiler: horizontaal gespreid, SOM pill op (COL_R-34, R_BOI+17)
+      const nBoiler = Math.min(boilerNodes.length, 3);
+      const boilerSpreads = nBoiler === 1 ? [0]
+                          : nBoiler === 2 ? [-38, 2]
+                          :                 [-55, -18, 18];
       const bol2x = COL_R - 34, bol2y = R_BOI + 17;
+      const bol1x = hub_r - 4, bol1y = hub_t + 4;
 
       // Solar X positions centered above hub
       const solarXs = nSolar === 1 ? [COL_HUB]
@@ -850,7 +869,12 @@
       // Init dots
       const pipeKeys = [
         'grid', 'home', 'batt', 'boiler', 'ev', 'ebike', 'pool',
+        ...battNodes.slice(0,3).map((_, i) => `batt${i}`),
+        ...(nBatt > 1 ? ['batt_sum'] : []),
+        ...boilerNodes.slice(0,3).map((_, i) => `boiler${i}`),
+        ...(nBoiler > 1 ? ['boiler_sum'] : []),
         ...solarTop3.map((_, i) => `solar${i}`),
+        ...(nSolar > 1 ? ['solar_sum'] : []),
         ...layer2.map((_, i) => `l2_${i}`),
         ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
       ];
@@ -880,7 +904,7 @@
 
       const pipe = (x1, y1, x2, y2, color, on) =>
         `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-          stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="${on ? .32 : .09}"/>`;
+          stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="${on ? .32 : .15}"/>`;
 
       const arw = (x1, y1, x2, y2, color, on) => {
         if (!on) return '';
@@ -892,6 +916,14 @@
         const px = -uy*3.5, py = ux*3.5;
         return `<polygon points="${bx.toFixed(1)},${by.toFixed(1)} ${(ax+px).toFixed(1)},${(ay+py).toFixed(1)} ${(ax-px).toFixed(1)},${(ay-py).toFixed(1)}"
           fill="${color}" opacity="0.8"/>`;
+      };
+
+      // Bereken het snijpunt van een lijn (van fx,fy naar hub centrum) met de hub-cirkel
+      const hubEdge = (fx, fy, inset=26) => {
+        const dx = COL_HUB - fx, dy = R_HUB - fy;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) return [COL_HUB, R_HUB];
+        return [COL_HUB - dx/len*inset, R_HUB - dy/len*inset];
       };
 
       const nodeBox = (cx, cy, bw, bh, color, on, label, val, sub2, sk) => {
@@ -1044,14 +1076,43 @@
       let h = '';
 
       // Pipes
-      h += pipe(COL_LEFT+44, R_GRID, COL_HUB-25, R_HUB, gc, gridActive);
-      solarTop3.forEach((s, i) => h += pipe(solarXs[i], R_SUN+46, COL_HUB, hub_t, C.solar, s.w>T));
-      h += pipe(bp1x, bp1y, bp2x, bp2y, bfc, battActive);
-      h += pipe(bol1x, bol1y, bol2x, bol2y, C.boiler, boilerActive);
-      h += pipe(COL_HUB, hub_b, COL_HUB, R_HOME-17, C.home, homeActive);
-      h += pipe(COL_LEFT+44, R_EV,    hub_l, R_HUB-10, C.ev,    ev>T);
-      h += pipe(COL_LEFT+44, R_EBIKE, hub_l, R_HUB+4,  C.ebike, ebike>T);
-      h += pipe(COL_LEFT+44, R_POOL,  hub_l, R_HUB+16, C.pool,  pool>T);
+      h += pipe(COL_LEFT+44, R_GRID, ...hubEdge(COL_LEFT+44, R_GRID), gc, gridActive);
+      if (nSolar === 1) {
+        solarTop3.forEach((s, i) => { const [hx,hy]=hubEdge(solarXs[i], R_SUN+46); h += pipe(solarXs[i], R_SUN+46, hx, hy, C.solar, s.w>T); });
+      } else {
+        // Meerdere omvormers: elk → SOM pill, SOM pill → hub
+        const somPipeY = R_SUN + 74;
+        solarTop3.forEach((s, i) => h += pipe(solarXs[i], R_SUN+46, COL_HUB, somPipeY - 10, C.solar, s.w>T));
+        { const [_sx,_sy]=hubEdge(COL_HUB,somPipeY+10); h += pipe(COL_HUB,somPipeY+10, _sx,_sy, C.solar, totalSolar>T); }
+      }
+      // Batt pipes — multi of single
+      if (nBatt === 1) {
+        const [_bhxSP,_bhySP]=hubEdge(bp2x,bp2y);
+        const [_bp1x,_bp1y,_bp2x,_bp2y] = anyBattCh ? [_bhxSP,_bhySP,bp2x,bp2y] : [bp2x,bp2y,_bhxSP,_bhySP];
+        h += pipe(_bp1x,_bp1y, _bp2x,_bp2y, bfc, battActive);
+      } else {
+        battXs.forEach((bx, i) => {
+          const b = battNodes[i]; const bc = b.power_w < -10 ? C.bc : C.bd;
+          h += pipe(bx, R_BATT, battSomX, battSomY - 20, bc, Math.abs(b.power_w) > T);
+        });
+        const [_bhxM,_bhyM]=hubEdge(bp2x,bp2y); h += pipe(_bhxM,_bhyM, bp2x,bp2y, bfc, battActive);
+      }
+      // Boiler pipes — multi of single
+      const boilerSomCX = bol2x + 34, boilerSomPY = R_BOI - 12;
+      if (nBoiler === 1) {
+        const [_bspx,_bspy]=hubEdge(bol2x+34,bol2y); h += pipe(_bspx,_bspy, bol2x+34,bol2y, C.boiler, boilerActive);
+      } else {
+        // Hub → SOM pill (boven)
+        const [_bhbx,_bhby]=hubEdge(boilerSomCX, boilerSomPY); h += pipe(_bhbx,_bhby, boilerSomCX, boilerSomPY-10, C.boiler, boilerActive);
+        // SOM pill → elke box (onder)
+        boilerSpreads.forEach((dx, i) => {
+          h += pipe(boilerSomCX, boilerSomPY + 10, bol2x + dx + 34, R_BOI + 5, C.boiler, boilerNodes[i].power_w > T);
+        });
+      }
+      h += pipe(...hubEdge(COL_HUB,R_HOME), COL_HUB, R_HOME-17, C.home, homeActive);
+      h += pipe(COL_LEFT+44, R_EV,    ...hubEdge(COL_LEFT+44, R_EV),    C.ev,    ev>T);
+      h += pipe(COL_LEFT+44, R_EBIKE, ...hubEdge(COL_LEFT+44, R_EBIKE), C.ebike, ebike>T);
+      h += pipe(COL_LEFT+44, R_POOL,  ...hubEdge(COL_LEFT+44, R_POOL),  C.pool,  pool>T);
       layer2.forEach((node, i) =>
         h += pipe(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
       subs.forEach((s, si) => {
@@ -1063,15 +1124,38 @@
 
       // Arrows
       h += grid>T
-        ? arw(COL_LEFT+44, R_GRID, COL_HUB-25, R_HUB, gc, true)
-        : arw(COL_HUB-25, R_HUB, COL_LEFT+44, R_GRID, gc, gridActive);
-      solarTop3.forEach((s, i) => h += arw(solarXs[i], R_SUN+46, COL_HUB, hub_t, C.solar, s.w>T));
-      h += arw(bfx1, bfy1, bfx2, bfy2, bfc, battActive);
-      h += arw(bol1x, bol1y, bol2x, bol2y, C.boiler, boilerActive);
-      h += arw(COL_HUB, hub_b, COL_HUB, R_HOME-17, C.home, homeActive);
-      h += arw(hub_l, R_HUB-10, COL_LEFT+44, R_EV,    C.ev,    ev>T);
-      h += arw(hub_l, R_HUB+4,  COL_LEFT+44, R_EBIKE, C.ebike, ebike>T);
-      h += arw(hub_l, R_HUB+16, COL_LEFT+44, R_POOL,  C.pool,  pool>T);
+        ? arw(COL_LEFT+44, R_GRID, ...hubEdge(COL_LEFT+44, R_GRID), gc, true)
+        : arw(...hubEdge(COL_LEFT+44, R_GRID), COL_LEFT+44, R_GRID, gc, gridActive);
+      if (nSolar === 1) {
+        solarTop3.forEach((s, i) => { const [hx,hy]=hubEdge(solarXs[i], R_SUN+46); h += arw(solarXs[i], R_SUN+46, hx, hy, C.solar, s.w>T); });
+      } else {
+        const somPipeY = R_SUN + 74;
+        solarTop3.forEach((s, i) => h += arw(solarXs[i], R_SUN+46, COL_HUB, somPipeY - 10, C.solar, s.w>T));
+        { const [_sx,_sy]=hubEdge(COL_HUB,somPipeY+10); h += arw(COL_HUB,somPipeY+10, _sx,_sy, C.solar, totalSolar>T); }
+      }
+      if (nBatt === 1) {
+        const [_bhxS,_bhyS]=hubEdge(bp2x,bp2y);
+        const [_ba1x,_ba1y,_ba2x,_ba2y] = anyBattCh ? [_bhxS,_bhyS,bp2x,bp2y] : [bp2x,bp2y,_bhxS,_bhyS];
+        h += arw(_ba1x,_ba1y, _ba2x,_ba2y, bfc, battActive);
+      } else {
+        battXs.forEach((bx, i) => {
+          const b = battNodes[i]; const bc = b.power_w < -10 ? C.bc : C.bd;
+          h += arw(bx, R_BATT, battSomX, battSomY - 20, bc, Math.abs(b.power_w) > T);
+        });
+        h += arw(_bhxM,_bhyM, bp2x,bp2y, bfc, battActive);
+      }
+      if (nBoiler === 1) {
+        const [_bax,_bay]=hubEdge(bol2x+34,bol2y); h += arw(_bax,_bay, bol2x+34,bol2y, C.boiler, boilerActive);
+      } else {
+        const [_bahx,_bahy]=hubEdge(boilerSomCX, boilerSomPY); h += arw(_bahx,_bahy, boilerSomCX, boilerSomPY-10, C.boiler, boilerActive);
+        boilerSpreads.forEach((dx, i) => {
+          h += arw(boilerSomCX, boilerSomPY + 10, bol2x + dx + 34, R_BOI + 5, C.boiler, boilerNodes[i].power_w > T);
+        });
+      }
+      h += arw(...hubEdge(COL_HUB,R_HOME), COL_HUB, R_HOME-17, C.home, homeActive);
+      h += arw(...hubEdge(COL_LEFT+44, R_EV),    COL_LEFT+44, R_EV,    C.ev,    ev>T);
+      h += arw(...hubEdge(COL_LEFT+44, R_EBIKE), COL_LEFT+44, R_EBIKE, C.ebike, ebike>T);
+      h += arw(...hubEdge(COL_LEFT+44, R_POOL),  COL_LEFT+44, R_POOL,  C.pool,  pool>T);
       layer2.forEach((node, i) =>
         h += arw(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
       subs.forEach(s => {
@@ -1082,8 +1166,23 @@
 
       h += `<g id="dots-layer"></g>`;
 
-      // Nodes
+      // Nodes — solar top3 + SOM pill wanneer meerdere omvormers
       solarTop3.forEach((s, i) => h += solarNode(solarXs[i], R_SUN, s.label, s.w, s.w>T));
+      if (nSolar > 1) {
+        const somActive = totalSolar > T;
+        const somColor  = somActive ? C.solar : 'rgba(255,255,255,0.15)';
+        const somTextC  = somActive ? '#0d1117' : 'rgba(255,255,255,0.25)';
+        const somFill   = somActive ? C.solar : 'rgba(255,255,255,0.06)';
+        const somStroke = somActive ? C.solar : 'rgba(255,255,255,0.12)';
+        const somY      = R_SUN + 74;
+        const somW      = 78, somH = 20;
+        h += `<g>
+          <rect x="${COL_HUB - somW/2}" y="${somY - somH/2}" width="${somW}" height="${somH}"
+            rx="10" fill="${somFill}" stroke="${somStroke}" stroke-width="1"/>
+          <text x="${COL_HUB}" y="${somY + 4}" text-anchor="middle" font-size="10" font-weight="700"
+            fill="${somTextC}" letter-spacing="0.04em">⚡ ${this._fmt(totalSolar)}</text>
+        </g>`;
+      }
       h += hubSvg();
       const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
       const gridSub2  = grid > T ? 'import' : 'export';
@@ -1091,8 +1190,47 @@
       h += nodeBox(COL_LEFT, R_EV,    88, 38, C.ev,    ev>T,    '🚗 EV LADER', this._fmt(ev),    null, 'ev');
       h += nodeBox(COL_LEFT, R_EBIKE, 88, 38, C.ebike, ebike>T, '🚲 E-BIKE',   this._fmt(ebike), null, 'ebike');
       h += nodeBox(COL_LEFT, R_POOL,  88, 38, C.pool,  pool>T,  '🏊 ZWEMBAD',  this._fmt(pool),  null, 'pool');
-      h += nodeBox(COL_R, R_BOI, 72, 38, C.boiler, boilerActive, '🚿 BOILER', this._fmt(boiler), null, 'boiler');
-      h += battBox(COL_R, R_BATT, batt0);
+      // Boiler nodes
+      if (nBoiler === 1) {
+        h += nodeBox(bol2x + 34, R_BOI + 17, 72, 38, C.boiler, boilerActive, '🚿 BOILER', this._fmt(boiler), null, 'boiler');
+      } else {
+        // SOM pill BOVEN de boxes
+        const somOn = boilerActive;
+        const boilerSomCX = bol2x + 34;
+        const boilerSomY  = R_BOI - 12;
+        h += `<g>
+          <rect x="${boilerSomCX - 39}" y="${boilerSomY - 10}" width="78" height="20"
+            rx="10" fill="${somOn?'rgba(230,126,34,0.18)':'rgba(255,255,255,0.04)'}"
+            stroke="${somOn?C.boiler:'rgba(255,255,255,0.12)'}" stroke-width="1"/>
+          <text x="${boilerSomCX}" y="${boilerSomY + 4}" text-anchor="middle" font-size="10" font-weight="700"
+            fill="${somOn?C.boiler:'rgba(255,255,255,0.2)'}">🚿 ${this._fmt(boiler)}</text>
+        </g>`;
+        // Boiler boxes ONDER de SOM pill
+        boilerSpreads.forEach((dx, i) => {
+          const b = boilerNodes[i]; const on = b.power_w > T;
+          const lbl = b.label.length > 7 ? b.label.slice(0,6)+'…' : b.label;
+          h += nodeBox(bol2x + dx + 34, R_BOI + 22, 68, 34, C.boiler, on, '🚿 ' + lbl.toUpperCase(), this._fmt(b.power_w), null, `boiler${i}`);
+        });
+      }
+      // Batt nodes
+      if (nBatt === 1) {
+        h += battBox(battSomX, battSomY, batt0);
+      } else {
+        battNodes.slice(0,3).forEach((b, i) => {
+          h += battBox(battXs[i], R_BATT - 30, b);
+        });
+        // SOM pill
+        const totalBattAbs = Math.abs(totalBattPw);
+        const somBattOn = totalBattAbs > T;
+        const somBfc = anyBattCh ? C.bc : C.bd;
+        h += `<g>
+          <rect x="${battSomX - 39}" y="${battSomY + 10}" width="78" height="20"
+            rx="10" fill="${somBattOn?`${somBfc}22`:'rgba(255,255,255,0.04)'}"
+            stroke="${somBattOn?somBfc:'rgba(255,255,255,0.12)'}" stroke-width="1"/>
+          <text x="${battSomX}" y="${battSomY + 24}" text-anchor="middle" font-size="10" font-weight="700"
+            fill="${somBattOn?somBfc:'rgba(255,255,255,0.2)'}">⚡ ${this._fmt(totalBattAbs)}</text>
+        </g>`;
+      }
       const homeName = (e.home||{}).name || 'Thuis';
       h += nodeBox(COL_HUB, R_HOME, 64, 38, C.home, homeActive, homeName.toUpperCase(), this._fmt(home), null, 'home');
       layer2.forEach((node, i) => {
@@ -1102,19 +1240,50 @@
       subs.forEach(s => (s._cxs||[]).forEach((cx, ci) => h += nilmBox(cx, R_L3, s.children[ci])));
 
       // Store pipe definitions for dot animation
+      // Bereken alle hubEdge punten eenmalig voor gebruik in pipeDefs
+      const [_heGrid_x,  _heGrid_y ] = hubEdge(COL_LEFT+44, R_GRID);
+      const [_heEv_x,    _heEv_y   ] = hubEdge(COL_LEFT+44, R_EV);
+      const [_heEbike_x, _heEbike_y] = hubEdge(COL_LEFT+44, R_EBIKE);
+      const [_hePool_x,  _hePool_y ] = hubEdge(COL_LEFT+44, R_POOL);
       this._pipeDefs = [
         { key:'grid',   color:gc,      on:gridActive,   pw:Math.abs(grid),
-          x1:grid>T?COL_LEFT+44:COL_HUB-25, y1:grid>T?R_GRID:R_HUB,
-          x2:grid>T?COL_HUB-25:COL_LEFT+44, y2:grid>T?R_HUB:R_GRID },
-        ...solarTop3.map((s, i) => ({
-          key:`solar${i}`, color:C.solar, on:s.w>T, pw:s.w,
-          x1:solarXs[i], y1:R_SUN+46, x2:COL_HUB, y2:hub_t })),
-        { key:'home',   color:C.home,   on:homeActive,   pw:home,   x1:COL_HUB, y1:hub_b, x2:COL_HUB, y2:R_HOME-17 },
-        { key:'batt',   color:bfc,      on:battActive,   pw:Math.abs(batt_pw), x1:bfx1, y1:bfy1, x2:bfx2, y2:bfy2 },
-        { key:'boiler', color:C.boiler, on:boilerActive, pw:boiler,  x1:bol1x, y1:bol1y, x2:bol2x, y2:bol2y },
-        { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:hub_l, y1:R_HUB-10, x2:COL_LEFT+44, y2:R_EV },
-        { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:hub_l, y1:R_HUB+4,  x2:COL_LEFT+44, y2:R_EBIKE },
-        { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:hub_l, y1:R_HUB+16, x2:COL_LEFT+44, y2:R_POOL },
+          x1:grid>T?COL_LEFT+44:_heGrid_x, y1:grid>T?R_GRID:_heGrid_y,
+          x2:grid>T?_heGrid_x:COL_LEFT+44, y2:grid>T?_heGrid_y:R_GRID },
+        ...(nSolar === 1
+          ? solarTop3.map((s, i) => {
+              const [_hsx,_hsy]=hubEdge(solarXs[i],R_SUN+46);
+              return { key:`solar${i}`, color:C.solar, on:s.w>T, pw:s.w,
+                x1:solarXs[i], y1:R_SUN+46, x2:_hsx, y2:_hsy };
+            })
+          : [
+              ...solarTop3.map((s, i) => ({
+                key:`solar${i}`, color:C.solar, on:s.w>T, pw:s.w,
+                x1:solarXs[i], y1:R_SUN+46, x2:COL_HUB, y2:R_SUN+64 })),
+              { key:'solar_sum', color:C.solar, on:totalSolar>T, pw:totalSolar,
+                x1:COL_HUB, y1:R_SUN+84, x2:COL_HUB, y2:hub_t },
+            ]),
+        (() => { const [_hmx,_hmy]=hubEdge(COL_HUB,R_HOME); return { key:'home', color:C.home, on:homeActive, pw:home, x1:_hmx, y1:_hmy, x2:COL_HUB, y2:R_HOME-17 }; })(),
+        ...(nBatt === 1
+          ? (() => { const [_hbx,_hby]=hubEdge(bp2x,bp2y); const [_ba1x,_ba1y,_ba2x,_ba2y]=anyBattCh?[_hbx,_hby,bp2x,bp2y]:[bp2x,bp2y,_hbx,_hby]; return [{ key:'batt', color:bfc, on:battActive, pw:Math.abs(batt_pw), x1:_ba1x, y1:_ba1y, x2:_ba2x, y2:_ba2y }]; })()
+          : [
+              ...battNodes.slice(0,3).map((b,i) => {
+                const bc = b.power_w < -10 ? C.bc : C.bd;
+                return { key:`batt${i}`, color:bc, on:Math.abs(b.power_w)>T, pw:Math.abs(b.power_w),
+                  x1:battXs[i], y1:R_BATT-30, x2:battSomX, y2:battSomY-20 };
+              }),
+              { key:'batt_sum', color:bfc, on:battActive, pw:Math.abs(totalBattPw), x1:bfx1, y1:bfy1, x2:bfx2, y2:bfy2 },
+            ]),
+        ...(nBoiler === 1
+          ? (() => { const [_bpx,_bpy]=hubEdge(bol2x+34,bol2y); return [{ key:'boiler', color:C.boiler, on:boilerActive, pw:boiler, x1:_bpx, y1:_bpy, x2:bol2x+34, y2:bol2y }]; })()
+          : [
+              ...boilerNodes.slice(0,3).map((b,i) => ({
+                key:`boiler${i}`, color:C.boiler, on:b.power_w>T, pw:b.power_w,
+                x1:boilerSomCX, y1:boilerSomPY+10, x2:bol2x+boilerSpreads[i]+34, y2:R_BOI+5 })),
+              (() => { const [_bsx,_bsy]=hubEdge(boilerSomCX,boilerSomPY); return { key:'boiler_sum', color:C.boiler, on:boilerActive, pw:boiler, x1:_bsx, y1:_bsy, x2:boilerSomCX, y2:boilerSomPY-10 }; })(),
+            ]),
+        { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:_heEv_x,    y1:_heEv_y,    x2:COL_LEFT+44, y2:R_EV },
+        { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:_heEbike_x, y1:_heEbike_y, x2:COL_LEFT+44, y2:R_EBIKE },
+        { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:_hePool_x,  y1:_hePool_y,  x2:COL_LEFT+44, y2:R_POOL },
         ...layer2.map((node, i) => ({
           key:`l2_${i}`, color:node.isSub?C.sub:node.color,
           on:node.power_w>T, pw:node.power_w,

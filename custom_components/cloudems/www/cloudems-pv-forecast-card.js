@@ -23,7 +23,7 @@
  *   power_sensor: "sensor.mijn_omvormer"   (override live PV sensor)
  */
 
-const PV_CARD_VERSION = "1.0.1";
+const PV_CARD_VERSION = "1.0.2";
 
 // ── Stijlen ───────────────────────────────────────────────────────────────────
 const PV_STYLES = `

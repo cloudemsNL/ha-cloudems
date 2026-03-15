@@ -122,6 +122,8 @@ views:
         entity: sensor.cloudems_grid_net_power
         name: Net
         invert_state: false
+      solar_system:
+        entity: sensor.cloudems_solar_system
       solar:
         entity: sensor.cloudems_solar_system_intelligence
         name: Zonne-energie
@@ -146,7 +148,17 @@ views:
       {%- set import_w  = states('sensor.cloudems_grid_import_power')  | float(0) | round(0) | int -%}
       {%- set export_w  = states('sensor.cloudems_grid_export_power')  | float(0) | round(0) | int -%}
       {%- set pv_w      = states('sensor.cloudems_solar_system_intelligence') | float(0) | round(0) | int -%}
-      {%- set dagtype   = states('sensor.cloudems_dag_type_classificatie') -%}
+      {%- set _dagtype_raw = states('sensor.cloudems_dag_type_classificatie') -%}
+      {%- set _dagtype_map = {
+            'work_home':    '🏠 Thuis werken',
+            'work_away':    '🏢 Werken (buitenshuis)',
+            'weekend':      '🌤️ Weekend',
+            'holiday':      '🎉 Feestdag',
+            'vacation':     '✈️ Vakantie',
+            'night':        '🌙 Nacht',
+            'unknown':      '❓ Onbekend'
+          } -%}
+      {%- set dagtype = _dagtype_map.get(_dagtype_raw, _dagtype_raw) -%}
       {%- set flex_kw   = states('sensor.cloudems_flexibel_vermogen')  | float(0) | round(2) -%}
       {%- set thuis     = states('binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom') -%}
       {%- set prijs     = states('sensor.cloudems_energy_price_current_hour') | float(none) -%}
@@ -5632,7 +5644,7 @@ views:
       {%- set vboiler_sp = state_attr(vboiler_eid, 'temperature') %}
       {%- set override_sp = state_attr(vboiler_eid, 'override_setpoint_c') %}
       {%- set setpoint = (override_sp or vboiler_sp or b.get('active_setpoint_c') or b.get('setpoint_c', 60)) | round(0) | int %}
-      {%- set power = b.get('current_power_w', b.get('power_w', 0)) | float %}
+      {%- set power = (b.get('current_power_w') or states('sensor.cloudems_boiler_' + label_slug + '_power') | float(0)) | float(0) %}
       {%- set cop = b.get('cop_at_current_temp') %}
       {%- set label = b.get('label', '?') %}
       {%- set is_on = b.get('is_on', false) %}
@@ -7425,6 +7437,30 @@ views:
       sort:
         method: friendly_name
 
+    - type: custom:cloudems-entity-list
+      show_empty: false
+      card:
+        type: entities
+        title: 🧠 Tijdschema leren
+        show_header_toggle: false
+      filter:
+        include:
+          - entity_id: "switch.cloudems_shutter_*_learning"
+      sort:
+        method: friendly_name
+
+    - type: custom:cloudems-entity-list
+      show_empty: false
+      card:
+        type: entities
+        title: 📊 Leer voortgang
+        show_header_toggle: false
+      filter:
+        include:
+          - entity_id: "sensor.cloudems_rolluik_*_leer_voortgang"
+      sort:
+        method: friendly_name
+
     - type: markdown
       title: "🧭 Oriëntatie & temperatuurleren"
       content: |
@@ -9071,7 +9107,7 @@ views:
       🟢 **Alle sensoren OK**
       {% endif %}
 
-      {% if summ %}> {{ summ }}{% endif %}
+      {% if summ and summ != 'Alle sensoren OK' and summ != 'All sensors OK' %}> {{ summ }}{% endif %}
 
       {% if issues %}
       | Sensor | Probleem | Ernst |
@@ -10096,6 +10132,53 @@ views:
         }
         ha-markdown-element a { text-decoration: none !important; }
         ha-markdown-element a:hover { opacity: 0.85 !important; }
+
+  - type: markdown
+    title: ⚡ Systeembelasting
+    content: |
+      {%- set mode  = states('sensor.cloudems_performance') -%}
+      {%- set avg   = state_attr('sensor.cloudems_performance', 'avg_ms') | float(0) | round(0) -%}
+      {%- set p95   = state_attr('sensor.cloudems_performance', 'p95_ms') | float(0) | round(0) -%}
+      {%- set maxms = state_attr('sensor.cloudems_performance', 'max_ms') | float(0) | round(0) -%}
+      {%- set ivl   = state_attr('sensor.cloudems_performance', 'interval_s') | int(10) -%}
+      {%- set nilm  = state_attr('sensor.cloudems_performance', 'nilm_enabled') -%}
+      {%- set learn = state_attr('sensor.cloudems_performance', 'nilm_learning') -%}
+      {%- set rec   = state_attr('sensor.cloudems_performance', 'recovery_progress') | int(0) -%}
+      {%- set recn  = state_attr('sensor.cloudems_performance', 'recovery_needed') | int(5) -%}
+      {%- set color = '🟢' if mode == 'NORMAL' else ('🟡' if mode == 'REDUCED' else ('🟠' if mode == 'MINIMAL' else '🔴')) -%}
+
+      {{ color }} **{{ mode }}** — cyclus interval {{ ivl }}s
+
+      | Meting | Waarde |
+      |--------|--------|
+      | Gemiddeld | **{{ avg }} ms** |
+      | P95 | {{ p95 }} ms |
+      | Maximum | {{ maxms }} ms |
+      | Interval | {{ ivl }} s |
+      | NILM | {{ '✅ aan' if nilm else '⏸ gepauzeerd' }} |
+      | Leren | {{ '✅ aan' if learn else '⏸ gepauzeerd' }} |
+      {%- if mode != 'NORMAL' %}
+      | Herstel | {{ rec }}/{{ recn }} cycli |
+      {%- endif %}
+
+      {%- if mode == 'CRITICAL' %}
+
+      🔴 **Kritieke belasting** — CloudEMS heeft de werklast gereduceerd om HA stabiel te houden.
+      {%- elif mode == 'MINIMAL' %}
+
+      🟠 **Hoge belasting** — NILM gepauzeerd, interval verlengd naar {{ ivl }}s.
+      {%- elif mode == 'REDUCED' %}
+
+      🟡 **Verhoogde belasting** — NILM leren gepauzeerd.
+      {%- endif %}
+    card_mod:
+      style: |
+        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,200,0,0.2) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color: rgb(163,163,163); --card-background-color: transparent; --ha-card-border-color: transparent; }
+        .card-header { background: transparent !important; border-bottom: 1px solid rgba(255,200,0,0.15) !important; color: rgb(255,200,0) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
+        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
+        ha-markdown-element th { background: rgba(255,200,0,0.08) !important; color: rgb(255,200,0) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }
+        ha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }
+        ha-markdown-element strong { color: rgb(255,255,255) !important; }
 
 - title: Configuratie
   path: cloudems-config

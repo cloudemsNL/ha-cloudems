@@ -48,6 +48,7 @@ LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VER
 LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
 LOVELACE_PRIJSVERLOOP_URL   = f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}"
+LOVELACE_PRICE_URL          = f"/local/cloudems/cloudems-price-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -64,6 +65,7 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_ZELFCONS_URL,     "cloudems-zelfconsumptie-card.js"),
     (LOVELACE_DECISIONS_URL,    "cloudems-decisions-card.js"),
     (LOVELACE_PRIJSVERLOOP_URL, "cloudems-prijsverloop-card.js"),
+    (LOVELACE_PRICE_URL,        "cloudems-price-card.js"),
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -544,6 +546,7 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
                 {"url": f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}", "type": "module"},
                 {"url": f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}",      "type": "module"},
                 {"url": f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}",   "type": "module"},
+                {"url": f"/local/cloudems/cloudems-price-card.js?v={VERSION}",          "type": "module"},
             ]
 
             # Registreer in sidebar als nog niet aanwezig
@@ -1014,6 +1017,22 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             vol.Required("device_id"): str,
             vol.Optional("label", default=""): str,
         }))
+
+    # ── v4.6.154: Shutter schedule reset ────────────────────────────────────
+
+    async def reset_shutter_schedule(call: ServiceCall):
+        """Reset learned schedule for a shutter cover entity."""
+        entity_id = call.data.get("entity_id", "")
+        ctrl = getattr(coordinator, "_shutter_ctrl", None)
+        if ctrl is None:
+            _LOGGER.warning("reset_shutter_schedule: rolluik controller niet actief")
+            return
+        cleared = ctrl.reset_schedule(entity_id)
+        coordinator.async_update_listeners()
+        _LOGGER.info("reset_shutter_schedule: %d schedules gewist voor %s", cleared, entity_id)
+
+    hass.services.async_register(DOMAIN, "reset_shutter_schedule", reset_shutter_schedule,
+        schema=vol.Schema({vol.Required("entity_id"): str}))
 
     # ── v4.5.51: Meter topologie services ──────────────────────────────────
 

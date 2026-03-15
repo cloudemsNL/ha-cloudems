@@ -17,7 +17,7 @@
  *   title: "Warm water"
  */
 
-const BOILER_CARD_VERSION = "1.0.3";
+const BOILER_CARD_VERSION = "1.1.2";
 
 // ── Design tokens ────────────────────────────────────────────────────────────
 const S = `
@@ -369,52 +369,71 @@ function buildDonut(pct, color, bg = 'rgba(255,255,255,0.05)') {
 }
 
 // ── Mini bar chart (48h temps) ───────────────────────────────────────────────
-function buildTempBars(history /* [{t, v}] */, setpoint) {
+function buildTempLine(history /* [{t, v}] */, setpoint, currentVal) {
+  const W = 320, H = 60;
   if (!history || !history.length) {
-    return '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Geen history beschikbaar</div>';
+    return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block"><text x="${W/2}" y="${H/2}" text-anchor="middle" fill="#444" font-size="10">Geen history beschikbaar</text></svg>`;
   }
-  const vals = history.map(h => h.v);
-  const max = Math.max(...vals, setpoint + 5);
-  const min = Math.max(0, Math.min(...vals) - 5);
+  // Add current value at the end if available
+  const pts = currentVal != null ? [...history, {t: 'nu', v: currentVal}] : history;
+  const vals = pts.map(h => h.v);
+  const max = Math.max(...vals, setpoint + 3);
+  const min = Math.max(0, Math.min(...vals) - 3);
   const range = max - min || 1;
-
-  return `<div class="temp-chart">` + history.map((h, i) => {
-    const pct = ((h.v - min) / range) * 100;
-    const col = tempToColor(h.v);
-    const isLast = i === history.length - 1;
-    return `
-      <div class="bar-wrap">
-        <div class="bar" style="height:${pct}%;background:${isLast ? col : col + '88'}">
-          ${isLast ? `<span class="bar-tip">${h.v.toFixed(0)}°</span>` : ''}
-        </div>
-        ${i % 8 === 0 ? `<span class="bar-lbl">${h.t}</span>` : '<span class="bar-lbl"></span>'}
-      </div>`;
-  }).join('') + `</div>`;
+  const pad = 4;
+  const xs = pts.map((_, i) => pad + (i / Math.max(pts.length - 1, 1)) * (W - pad * 2));
+  const ys = pts.map(h => H - pad - ((h.v - min) / range) * (H - pad * 2));
+  const spLine = xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const spFill = spLine + ` L${xs[xs.length-1].toFixed(1)},${H} L${xs[0].toFixed(1)},${H} Z`;
+  // Setpoint line
+  const spY = (H - pad - ((setpoint - min) / range) * (H - pad * 2)).toFixed(1);
+  const lastX = xs[xs.length - 1], lastY = ys[ys.length - 1];
+  const lastCol = tempToColor(pts[pts.length - 1].v);
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+    <defs><linearGradient id="tg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${lastCol}" stop-opacity="0.3"/><stop offset="100%" stop-color="${lastCol}" stop-opacity="0.02"/></linearGradient></defs>
+    <path d="${spFill}" fill="url(#tg)"/>
+    <line x1="${pad}" y1="${spY}" x2="${W - pad}" y2="${spY}" stroke="rgba(255,200,0,0.3)" stroke-width="1" stroke-dasharray="3,3"/>
+    <path d="${spLine}" fill="none" stroke="${lastCol}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" fill="${lastCol}"/>
+    <text x="${lastX.toFixed(1)}" y="${(lastY - 6).toFixed(1)}" text-anchor="middle" fill="${lastCol}" font-size="9" font-weight="600">${pts[pts.length-1].v.toFixed(0)}°</text>
+    ${pts.filter((_,i) => i % Math.max(1, Math.floor(pts.length/4)) === 0).map((_,i,arr) => {
+      const origI = Math.round(i * pts.length / arr.length);
+      return `<text x="${xs[origI].toFixed(1)}" y="${H}" text-anchor="middle" fill="#444" font-size="8">${pts[origI].t}</text>`;
+    }).join('')}
+  </svg>`;
 }
 
-// ── Tank SVG ─────────────────────────────────────────────────────────────────
-// ── Power bar chart ───────────────────────────────────────────────────────────
-function buildPowerBars(history /* [{t, v}] */, maxPower) {
+function buildPowerLine(history /* [{t, v}] */, currentVal, maxPower) {
+  const W = 320, H = 60;
   if (!history || !history.length) {
-    return '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Geen data</div>';
+    if (currentVal != null && currentVal > 0) {
+      // No history yet but we have live value - show single point
+      return `<div style="text-align:center;padding:8px;color:#ffd600;font-size:11px">⚡ ${Math.round(currentVal)}W live — grafiek beschikbaar na eerste uur</div>`;
+    }
+    return `<div style="text-align:center;padding:8px;color:#444;font-size:10px">Wacht op data…</div>`;
   }
-  const vals = history.map(h => h.v);
+  const pts = currentVal != null ? [...history, {t: 'nu', v: currentVal}] : history;
+  const vals = pts.map(h => h.v);
   const maxV = Math.max(...vals, maxPower || 100, 1);
-  return `<div class="temp-chart">` + history.map((h, i) => {
-    const pct  = clamp(h.v / maxV, 0, 1);
-    const isOn = h.v > 50;
-    const col  = isOn
-      ? `hsl(${40 - pct * 30},90%,${40 + pct * 20}%)`
-      : 'rgba(255,255,255,0.07)';
-    const ht   = Math.max(pct * 60, 3);
-    const isLast = i === history.length - 1;
-    return `<div class="bar-wrap">
-      <div class="bar power-bar" style="height:${ht}px;background:${col}">
-        ${isLast ? `<span class="bar-tip">${h.v > 0 ? Math.round(h.v) + 'W' : ''}</span>` : ''}
-      </div>
-      ${i % Math.max(1, Math.floor(history.length / 4)) === 0 ? `<span class="bar-lbl">${h.t}</span>` : '<span class="bar-lbl"> </span>'}
-    </div>`;
-  }).join('') + `</div>`;
+  const pad = 4;
+  const xs = pts.map((_, i) => pad + (i / Math.max(pts.length - 1, 1)) * (W - pad * 2));
+  const ys = pts.map(h => H - pad - (clamp(h.v / maxV, 0, 1)) * (H - pad * 2));
+  const spLine = xs.map((x, i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ');
+  const spFill = spLine + ` L${xs[xs.length-1].toFixed(1)},${H} L${xs[0].toFixed(1)},${H} Z`;
+  const lastV = pts[pts.length - 1].v;
+  const lastCol = lastV > 50 ? '#ffd600' : 'rgba(255,255,255,0.2)';
+  const lastX = xs[xs.length - 1], lastY = ys[ys.length - 1];
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible">
+    <defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffd600" stop-opacity="0.25"/><stop offset="100%" stop-color="#ffd600" stop-opacity="0.02"/></linearGradient></defs>
+    <path d="${spFill}" fill="url(#pg)"/>
+    <path d="${spLine}" fill="none" stroke="#ffd600" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="3" fill="${lastCol}"/>
+    ${lastV > 0 ? `<text x="${lastX.toFixed(1)}" y="${(lastY - 6).toFixed(1)}" text-anchor="middle" fill="#ffd600" font-size="9" font-weight="600">${Math.round(lastV)}W</text>` : ''}
+    ${pts.filter((_,i) => i % Math.max(1, Math.floor(pts.length/4)) === 0).map((_,i,arr) => {
+      const origI = Math.round(i * pts.length / arr.length);
+      return `<text x="${xs[origI].toFixed(1)}" y="${H}" text-anchor="middle" fill="#444" font-size="8">${pts[origI].t}</text>`;
+    }).join('')}
+  </svg>`;
 }
 
 // ── Decisions log per boiler ──────────────────────────────────────────────────
@@ -749,7 +768,12 @@ class CloudemsBoilerCard extends HTMLElement {
     const vbSetpoint = vboilerSt?.attributes?.temperature ?? null;
     const setpoint   = vbSetpoint ?? b.active_setpoint_c ?? b.setpoint_c ?? 60;
     const maxSp    = b.max_setpoint_boost_c || Math.max(setpoint, b.setpoint_c || 60);
-    const powerW   = b.current_power_w ?? b.power_w ?? 0;
+    // v4.6.170: gebruik recorder sensor als current_power_w niet beschikbaar is
+    // NOOIT b.power_w (nominaal vermogen) gebruiken — dat toont bijv. 2500W als de boiler uit staat
+    const recorderPowerSt = hass.states[`sensor.cloudems_boiler_${labelSlugT}_power`];
+    const recorderPower = recorderPowerSt && recorderPowerSt.state !== 'unavailable' && recorderPowerSt.state !== 'unknown'
+      ? parseFloat(recorderPowerSt.state) : null;
+    const powerW = b.current_power_w ?? (isNaN(recorderPower) ? null : recorderPower) ?? 0;
     const mode     = (b.actual_mode || '').toLowerCase();
     const isOn     = b.is_on ?? false;
     const isHeating = b.is_heating ?? (powerW > 50);
@@ -882,13 +906,11 @@ class CloudemsBoilerCard extends HTMLElement {
             <div class="dual-graph">
               <div class="graph-panel">
                 <div class="graph-title">🌡️ Temperatuur (4u)</div>
-                ${hist ? buildTempBars(hist, setpoint) :
-                  '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Wacht op recorder…</div>'}
+                ${buildTempLine(hist, setpoint, b.temp_c ?? null)}
               </div>
               <div class="graph-panel">
                 <div class="graph-title">⚡ Vermogen (4u)</div>
-                ${histPower ? buildPowerBars(histPower, powerW) :
-                  '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Wacht op recorder…</div>'}
+                ${buildPowerLine(histPower, powerW, powerW)}
               </div>
             </div>
 

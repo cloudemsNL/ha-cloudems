@@ -40,6 +40,7 @@ from .const import (
     CONF_NILM_PRUNE_MIN_DAYS, DEFAULT_NILM_PRUNE_MIN_DAYS,
 )
 from .sub_devices import sub_device_info, SUB_SOLAR, SUB_ZONE_CLIMATE, SUB_NILM, SUB_BOILER, SUB_PRICE, SUB_LAMP, SUB_SHUTTER, SUB_BATTERY, SUB_GRID
+from .performance_monitor import AdaptiveForceUpdateMixin
 from .coordinator import CloudEMSCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -284,7 +285,10 @@ async def async_setup_entry(
     # Zone climate cost sensor (sensor.cloudems_zone_klimaat_kosten_vandaag)
     entities.append(CloudEMSZoneClimateCostSensor(coordinator, entry))
 
-    async_add_entities(entities, update_before_add=False)
+    # v4.6.152: Adaptive performance monitor sensor
+    entities.append(CloudEMSPerformanceSensor(coordinator, entry))
+
+    async_add_entities(entities, update_before_add=True)
 
     # Pre-populate registered sets from the HA entity registry so that on HA
     # restart, already-known dynamic entities are not re-added (which causes
@@ -299,9 +303,9 @@ async def async_setup_entry(
     # Dynamically add NILM device sensors when detected + prune orphaned ones
     registered_nilm_ids: set = set(_existing_uids)
 
-    # v4.6.129: one-time startup cleanup — remove NILM entities beyond cap of 200
-    # Triggered when user has >200 NILM sensors (e.g. 6000+) from accumulated learning
-    _MAX_NILM_STARTUP = 200
+    # v4.6.158: one-time startup cleanup — remove NILM entities beyond cap
+    # Cap verhoogd van 200 → 500 (v4.6.158) — grote installaties met veel devices
+    _MAX_NILM_STARTUP = 500
     _nilm_pfx = f"{entry.entry_id}_nilm_"
     _static_suf = frozenset({"db","stats","running","running_power","diag","input","schedule","overzicht","review_current"})
     _all_nilm_dynamic = sorted(
@@ -343,8 +347,8 @@ async def async_setup_entry(
         _er = er.async_get(hass)
 
         # ── Stap 1: toevoegen van nieuwe NILM-sensoren ────────────────────
-        # v4.6.129: hard cap op 200 NILM device-sensoren — voorkomt HA-traagheid
-        MAX_NILM_DEVICE_SENSORS = 200
+        # v4.6.158: hard cap op 500 NILM device-sensoren — verhoogd van 200
+        MAX_NILM_DEVICE_SENSORS = 500
         new_ents = []
         active_uids: set = set()
         # Tel huidige NILM device sensors (niet statische sensors)
@@ -360,10 +364,12 @@ async def async_setup_entry(
             active_uids.add(uid)
             if uid not in registered_nilm_ids:
                 if _current_dynamic_count >= MAX_NILM_DEVICE_SENSORS:
+                    if not getattr(_nilm_cap_warned := True, '__class__', False):
+                        pass  # suppress UnboundLocalError
                     _LOGGER.warning(
-                        "CloudEMS NILM: entity cap bereikt (%d) — sensor voor '%s' niet aangemaakt. "
-                        "Verwijder ongebruikte NILM-apparaten via het dashboard.",
-                        MAX_NILM_DEVICE_SENSORS, dev.name,
+                        "CloudEMS NILM: entity cap bereikt (%d actief) — sensor voor '%s' (id=%s) overgeslagen. "
+                        "Verwijder ongebruikte apparaten via NILM-tab → Overzicht → prullenbak.",
+                        _current_dynamic_count, dev.name, dev.device_id,
                     )
                     continue
                 new_ents.append(CloudEMSNILMDeviceSensor(coordinator, entry, dev))
@@ -572,6 +578,14 @@ async def async_setup_entry(
         ]
         if shutter_override_entities:
             async_add_entities(shutter_override_entities, update_before_add=False)
+        # v4.6.157: leer-voortgang sensoren (1 per rolluik)
+        shutter_learn_entities = [
+            CloudEMSShutterLearnProgressSensor(coordinator, entry, sc)
+            for sc in shutter_cfgs
+            if sc.get("entity_id")
+        ]
+        if shutter_learn_entities:
+            async_add_entities(shutter_learn_entities, update_before_add=False)
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -594,8 +608,8 @@ def main_device_info(entry: ConfigEntry) -> DeviceInfo:
 # Core sensors
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CloudEMSPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     _attr_name = "CloudEMS Grid · Net Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -631,8 +645,8 @@ class CloudEMSPowerSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSHomeLoadSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSHomeLoadSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """Berekend huisverbruik — solar + grid_import - grid_export ± batterij.
 
     Gebruikt CloudEMS-eigen EMA-gefilterde waarden zodat vertraagde cloud-batterij
@@ -720,9 +734,21 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         d = self.coordinator.data or {}
+        # v4.6.169: gebruik coordinator house_power (Kirchhoff-balancer) als die beschikbaar is.
+        # De sensor deed voorheen een eigen herberekening die negatief kon worden (→ 0)
+        # bij grote batterijlading, ook als het huisverbruik reëel was.
+        house_w = d.get("house_power")
+        if house_w is not None:
+            # Trek beheerde apparaten eraf zodat "rest" = onbeheerd verbruik
+            rest = float(house_w) \
+                   - self._boiler_w(d) \
+                   - self._ev_w(d) \
+                   - self._ebike_w(d) \
+                   - self._pool_w(d)
+            return round(max(0.0, rest), 1)
+        # Fallback als balancer nog niet beschikbaar is (eerste seconden na herstart)
         solar_w = float(d.get("solar_power_w", 0) or 0)
-        grid_w  = float(d.get("grid_power_w",  0) or 0)   # positief=import, negatief=export
-        # Som van alle batterijen — positief=laden, negatief=ontladen
+        grid_w  = float(d.get("grid_power_w",  0) or 0)
         bat_w   = sum(float(b.get("power_w") or 0) for b in (d.get("batteries") or []))
         rest = solar_w + grid_w - bat_w \
                - self._boiler_w(d) \
@@ -865,7 +891,6 @@ class CloudEMSDecisionLogSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
     """Sensor: boiler/socket controller status."""
-    _attr_force_update = True
     _attr_name = "CloudEMS Boiler · Status"
     _attr_icon = "mdi:water-boiler"
 
@@ -908,8 +933,8 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSBoilerTempSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSBoilerTempSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """v4.6.89: Per-boiler temperatuursensor — opgeslagen in recorder voor grafieken.
 
     entity_id: sensor.cloudems_boiler_<slug>_temp
@@ -988,12 +1013,15 @@ class CloudEMSBoilerPowerSensor(CoordinatorEntity, SensorEntity):
         b = self._get_boiler()
         if b is None:
             return self._last_nonzero_w  # Ariston 429 — toon laatste bekende waarde
-        v = b.get("current_power_w") if b.get("current_power_w") is not None else b.get("power_w")
+        # v4.6.170: gebruik ALLEEN current_power_w (echte meting).
+        # power_w is het geleerde nominale vermogen — dat nooit tonen als huidig vermogen.
+        v = b.get("current_power_w")
         if v is None:
+            # Geen meting beschikbaar — toon laatste bekende waarde uit cache
             return self._last_nonzero_w
         val = round(float(v), 0)
         if val > 0:
-            self._last_nonzero_w = val  # cache bijwerken
+            self._last_nonzero_w = val  # cache bijwerken voor volgende unavailable periode
         return val
 
 
@@ -1030,8 +1058,8 @@ class CloudEMSBuitenTempSensor(CoordinatorEntity, SensorEntity):
         return None
 
 
-class CloudEMSPoolWaterTempSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSPoolWaterTempSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """v4.6.89: Zwembad watertemperatuur — eigen recorder-sensor.
 
     entity_id: sensor.cloudems_pool_water_temp
@@ -1058,8 +1086,8 @@ class CloudEMSPoolWaterTempSensor(CoordinatorEntity, SensorEntity):
         return round(float(v), 1) if v is not None else None
 
 
-class CloudEMSEVPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSEVPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """v4.6.89: Actueel EV-laadvermogen — eigen recorder-sensor.
 
     entity_id: sensor.cloudems_ev_laad_power
@@ -1319,8 +1347,8 @@ class CloudEMSPhaseBalanceSensor(CoordinatorEntity, SensorEntity):
 # NEW v1.4.1 — Per-inverter sensor (peak power + clipping)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CloudEMSInverterSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSInverterSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """
     Shows current PV output, learned peak power, clipping status,
     estimated Wp, utilisation — for each inverter.
@@ -1948,7 +1976,6 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -2087,8 +2114,8 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSP1Sensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     _attr_name = "CloudEMS P1 Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2160,8 +2187,8 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSGridImportPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """Current grid import power in Watt (Energieverbruik)."""
     _attr_name = "CloudEMS Grid · Import Power"
     _attr_device_class = SensorDeviceClass.POWER
@@ -2202,8 +2229,8 @@ class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
         }
 
 
-class CloudEMSGridExportPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSGridExportPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """Current grid export power in Watt (Energieproductie)."""
     _attr_name = "CloudEMS Grid · Export Power"
     _attr_device_class = SensorDeviceClass.POWER
@@ -2304,8 +2331,8 @@ class CloudEMSGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 # Per-phase import / export power sensors
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSPhaseImportPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """Per-phase import power in Watt — zero when exporting (Energieverbruik Fase Lx)."""
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2350,8 +2377,8 @@ class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
         return None
 
 
-class CloudEMSPhaseExportPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSPhaseExportPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """Per-phase export power in Watt — zero when importing (Energieproductie Fase Lx)."""
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2678,7 +2705,6 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """
     State = total power of all detected running devices (W).
     Attributes contain a per-device power breakdown — suitable for
@@ -4072,7 +4098,6 @@ class CloudEMSHomeBaselineSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSStandbyHunterSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """
     State = estimated always-on standby load (W).
     Attributes list individual appliances that appear to never switch off
@@ -4458,7 +4483,6 @@ class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """Beschikbaar flexibel vermogen in kW."""
     _attr_name = "CloudEMS Flexibel Vermogen"
     _attr_native_unit_of_measurement = "kW"
@@ -5592,7 +5616,6 @@ class CloudEMSRoomMeterOverviewSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSRoomMeterSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """Per-kamer stroomverbruik sensor — dynamisch aangemaakt per ontdekte kamer.
 
     State  = huidig verbruik (W)
@@ -6279,7 +6302,6 @@ class CloudEMSSlaapstandSensor(CoordinatorEntity, SensorEntity):
 # ── v2.6: Capaciteits-piek sensor ──────────────────────────────────────────
 
 class CloudEMSKwartierPiekSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """Toont het 15-minuten gemiddelde vermogen en maandpiek (v2.6)."""
     _attr_device_class   = SensorDeviceClass.POWER
     _attr_state_class    = SensorStateClass.MEASUREMENT
@@ -6930,8 +6952,8 @@ class CloudEMSDecisionsHistorySensor(CoordinatorEntity, SensorEntity):
 
 # ── Eigen recorder-sensoren: energie & batterij ──────────────────────────────
 
-class CloudEMSBatterijSOCSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSBatterijSOCSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 1
     """sensor.cloudems_batterij_soc — batterij laadtoestand (%)."""
     _attr_device_class  = SensorDeviceClass.BATTERY
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -6967,8 +6989,8 @@ class CloudEMSBatterijSOCSensor(CoordinatorEntity, SensorEntity):
         return round(float(soc), 1) if soc is not None else None
 
 
-class CloudEMSNetVermogenSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSNetVermogenSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 2
     """sensor.cloudems_net_vermogen — netlevering/afname (W, positief = afname)."""
     _attr_device_class  = SensorDeviceClass.POWER
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -6992,8 +7014,8 @@ class CloudEMSNetVermogenSensor(CoordinatorEntity, SensorEntity):
         return round(float(v), 1) if v is not None else None
 
 
-class CloudEMSZonVermogenSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSZonVermogenSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 2
     """sensor.cloudems_zon_vermogen — totaal PV vermogen (W)."""
     _attr_device_class  = SensorDeviceClass.POWER
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -7017,8 +7039,8 @@ class CloudEMSZonVermogenSensor(CoordinatorEntity, SensorEntity):
         return round(float(v), 1) if v is not None else None
 
 
-class CloudEMSBoilerSetpointSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
+class CloudEMSBoilerSetpointSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
+    _force_update_priority = 2
     """sensor.cloudems_boiler_setpoint — actueel setpoint van de primaire boiler (°C)."""
     _attr_device_class  = SensorDeviceClass.TEMPERATURE
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -7068,7 +7090,6 @@ class CloudEMSBoilerSetpointSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSSliderLeverenSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """sensor.cloudems_slider_leveren — Zonneplan 'leveren aan huis' slider waarde (W)."""
     _attr_device_class  = SensorDeviceClass.POWER
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -7095,7 +7116,6 @@ class CloudEMSSliderLeverenSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSSliderZonladenSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """sensor.cloudems_slider_zonladen — Zonneplan 'zonneladen' slider waarde (W)."""
     _attr_device_class  = SensorDeviceClass.POWER
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -7485,7 +7505,6 @@ class CloudEMSBoilerPlanningsSensor(CoordinatorEntity, SensorEntity):
 # ── Anomalie grid sensor met notificatie ─────────────────────────────────────
 
 class CloudEMSAnomalieGridSensor(CoordinatorEntity, SensorEntity):
-    _attr_force_update  = True
     """
     sensor.cloudems_anomalie_grid
     Detecteert structureel afwijkend netverbruik t.o.v. geleerd patroon.
@@ -7705,4 +7724,126 @@ class CloudEMSTelemetrySensor(CoordinatorEntity, SensorEntity):
             "gdpr_info":        "Alleen anonieme metrics. Geen persoonlijke data. Opt-in.",
             "data_bevat":       "versie, beslissingstypes, foutcodes, cyclusduur, boilercycli",
             "backend":          "Firebase Firestore",
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v4.6.152 — Performance Monitor Sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSPerformanceSensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_performance
+
+    Shows current performance mode (NORMAL/REDUCED/MINIMAL/CRITICAL)
+    and cycle timing statistics. Used on the diagnostics dashboard.
+    """
+    _attr_icon       = "mdi:speedometer"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "ms"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Performance"
+        self._attr_unique_id = f"{entry.entry_id}_performance"
+        self.entity_id       = "sensor.cloudems_performance"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> float:
+        """Returns average cycle time in ms."""
+        perf = getattr(self.coordinator, "_perf", None)
+        if perf is None:
+            return 0.0
+        return perf.avg_ms
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        perf = getattr(self.coordinator, "_perf", None)
+        if perf is None:
+            return {}
+        return perf.get_status_dict()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v4.6.157 — Shutter Schedule Learning Progress Sensor (per rolluik)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSShutterLearnProgressSensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_rolluik_<safe>_leer_voortgang
+
+    State:
+      • 0        — leren voltooid (genoeg data voor alle dagen)
+      • N (int)  — nog N waarnemingen nodig
+      • None     — leren uitgeschakeld of controller niet beschikbaar
+
+    Attributes:
+      • needs_data       — zelfde als state (int)
+      • learning_enabled — bool
+      • open_confidence  — gem. confidence open-tijden (0.0–1.0)
+      • close_confidence — gem. confidence sluit-tijden (0.0–1.0)
+      • open_today       — vandaag toegepaste opentijd
+      • close_today      — vandaag toegepaste sluittijd
+    """
+
+    _attr_icon = "mdi:school-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = None
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator, entry, shutter_cfg: dict):
+        super().__init__(coordinator)
+        self._entry      = entry
+        self._shutter_id = shutter_cfg.get("entity_id", "")
+        label            = shutter_cfg.get("label") or self._shutter_id.split(".")[-1]
+        safe             = self._shutter_id.split(".")[-1].replace("-", "_")
+        self._attr_name      = f"CloudEMS Tijdleren Voortgang {label}"
+        self._attr_unique_id = f"{entry.entry_id}_shutter_learn_progress_{safe}"
+        self.entity_id       = f"sensor.cloudems_rolluik_{safe}_leer_voortgang"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SHUTTER)
+
+    def _shutter_status(self) -> dict:
+        """Haal de status dict van dit rolluik op uit coordinator data."""
+        d = self.coordinator.data or {}
+        shutters = (d.get("shutters") or {}).get("shutters", [])
+        for s in shutters:
+            if s.get("entity_id") == self._shutter_id:
+                return s
+        return {}
+
+    @property
+    def native_value(self):
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc is None:
+            return None
+        if not sc.get_schedule_learning(self._shutter_id):
+            return None
+        s = self._shutter_status()
+        return s.get("schedule_needs_data", None)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc is None:
+            return {}
+        learning = sc.get_schedule_learning(self._shutter_id)
+        s = self._shutter_status()
+        schedule = s.get("schedule_learned", {})
+        # Gemiddelde confidence open / sluit over alle dagen
+        def avg_conf(action: str) -> float:
+            vals = [v.get("confidence", 0.0) for v in schedule.get(action, {}).values()]
+            return round(sum(vals) / len(vals), 2) if vals else 0.0
+        return {
+            "needs_data":       s.get("schedule_needs_data", 0),
+            "learning_enabled": learning,
+            "open_confidence":  avg_conf("open"),
+            "close_confidence": avg_conf("close"),
+            "open_today":       s.get("schedule_open_today"),
+            "close_today":      s.get("schedule_close_today"),
         }

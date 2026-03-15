@@ -1,3 +1,4 @@
+/** @version 4.6.155
 /**
  * CloudEMS Price Card — cloudems-price-card
  * Vervangt: 💶 Uurprijzen + 📊 Prijsverloop + 🕐 Goedkoopste uren
@@ -216,10 +217,15 @@ class CloudemsPrijsverloopCard extends HTMLElement {
   _buildHash(hass) {
     const ep = hass.states['sensor.cloudems_energy_epex_today'];
     const bat = hass.states['sensor.cloudems_batterij_epex_schema'];
+    // Use price data content, NOT last_updated (which changes every 10s coordinator cycle)
+    const prices = ep?.attributes?.today_prices || [];
+    const currentHour = new Date().getHours();
     return [
-      ep?.last_updated,
-      bat?.last_updated,
-      new Date().getHours(),
+      prices.length,
+      prices[currentHour]?.price || '',
+      ep?.attributes?.tomorrow_available,
+      bat?.attributes?.schedule_summary || bat?.state,
+      currentHour,
     ].join('|');
   }
 

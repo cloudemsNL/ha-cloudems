@@ -166,7 +166,7 @@ from .energy_manager.absence_detector import AbsenceDetector
 from .energy_manager.zone_presence import ZonePresenceManager
 from .energy_manager.climate_preheat import ClimatePreHeatAdvisor
 from .energy_manager.pv_accuracy import PVForecastAccuracyTracker
-from .energy_manager.heat_pump_cop import HeatPumpCOPLearner
+from .energy_manager.heat_pump_cop import HeatPumpCOPLearner, COPReport
 # v2.6: nieuwe features
 from .energy_manager.sleep_detector import SleepDetector
 from .energy_manager.device_lifespan import enrich_devices_with_wear
@@ -336,6 +336,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._session = None  # v4.0.9: HA aiohttp_client sessie
         # v4.0.9: EntityProvider abstractielaag
         self._provider: HAEntityProvider = HAEntityProvider(hass)
+
+        # v4.6.152: Adaptive performance monitor
+        from .performance_monitor import PerformanceMonitor
+        self._perf = PerformanceMonitor()
 
         # Vroeg initialiseren zodat async_shutdown nooit AttributeError geeft
         # ook als __init__ later crasht voordat deze attrs normaal gezet worden
@@ -1002,8 +1006,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
     @property
     def learning_frozen(self) -> bool:
-        """True als de simulator actief is — leerprocessen overslaan."""
-        return getattr(self, "_simulator", None) is not None and self._simulator.active
+        """True if simulator active OR performance monitor says learning should pause."""
+        if getattr(self, "_simulator", None) is not None and self._simulator.active:
+            return True
+        # v4.6.152: pause learning when performance is degraded
+        perf = getattr(self, "_perf", None)
+        if perf is not None and not perf.nilm_learning_enabled:
+            return True
+        return False
 
     # ── v1.5: Helpers ─────────────────────────────────────────────────────────
 
@@ -2663,15 +2673,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._nilm._bayes_callback = self._bayes
             _LOGGER.info("CloudEMS NILM Bayesian classifier actief")
 
-        # v4.5.11: startup-samenvatting naar high log met versie + actieve modules
-        import json as _json_mf, pathlib as _pl_mf
-        _mf_version = "onbekend"
-        try:
-            _mf_version = _json_mf.loads(
-                (_pl_mf.Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
-            ).get("version", "onbekend")
-        except Exception as _exc_ignored:
-            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
+        # v4.6.170: gebruik VERSION uit const.py — voorkomt blocking I/O in event loop
+        from .const import VERSION as _mf_version
         _active_modules = []
         if getattr(self, "_nilm_active", False):             _active_modules.append("NILM")
         if getattr(self, "_hybrid_nilm_active", False):      _active_modules.append("HybridNILM")
@@ -2793,6 +2796,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Dict:
         try:
             self._coordinator_tick = getattr(self, "_coordinator_tick", 0) + 1
+            # v4.6.152: start cycle timer
+            self._perf.start_cycle()
             # Lazy init decisions_history
             if self._decisions_history is None:
                 from .decisions_history import DecisionsHistory
@@ -4614,7 +4619,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     thermal_w     = hp_thermal_w,
                     w_per_k       = wk_val,
                     indoor_temp_c = indoor_c,
-                ) if not self.learning_frozen else {}
+                ) if not self.learning_frozen else COPReport(
+                    cop_current=None, cop_at_7c=None, cop_at_2c=None,
+                    cop_at_minus5c=None, defrost_today=0,
+                    defrost_threshold_c=0.0, outdoor_temp_c=None,
+                    reliable=False, method="frozen", curve={},
+                )
                 from .energy_manager.heat_pump_cop import MIN_SAMPLES_RELIABLE as _COP_NEEDED
                 _cop_buckets = getattr(self._hp_cop, "_buckets", {})
                 _cop_total   = sum(b.samples for b in _cop_buckets.values())
@@ -6508,9 +6518,31 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 try:
                     _gas_m3_val = (
                         self._p1_reader.latest.gas_m3
-                        if self._p1_reader and self._p1_reader.latest
+                        if self._p1_reader and self._p1_reader.latest and self._p1_reader.latest.gas_m3
                         else self._read_gas_sensor()
                     ) or 0.0
+                    # v4.6.154: also try p1_data gas_m3_total (set by DSMR/HomeWizard integrations)
+                    if _gas_m3_val <= 0:
+                        _p1d = self._data.get("p1_data", {}) if self._data else {}
+                        _gas_m3_val = float(_p1d.get("gas_m3_total") or _p1d.get("gas_m3") or 0.0)
+                    # v4.6.154: auto-detect common gas sensor entity_ids if still 0
+                    if _gas_m3_val <= 0:
+                        for _auto_eid in (
+                            "sensor.gas_meterstand",
+                            "sensor.homewizard_gas_m3",
+                            "sensor.p1_gas_m3",
+                            "sensor.dsmr_reading_extra_device_delivered",
+                        ):
+                            _auto_st = self._safe_state(_auto_eid)
+                            if _auto_st and _auto_st.state not in ("unavailable", "unknown", ""):
+                                try:
+                                    _auto_val = float(_auto_st.state)
+                                    if _auto_val > 0:
+                                        _gas_m3_val = _auto_val
+                                        _LOGGER.debug("GasAnalyzer: auto-detected gas sensor %s = %.3f m³", _auto_eid, _auto_val)
+                                        break
+                                except (ValueError, TypeError):
+                                    pass
                     _outside_t = outside_temp_c_val if outside_temp_c_val is not None else 10.0
                     if _gas_m3_val > 0:
                         self._gas_analysis.tick(
@@ -7113,6 +7145,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     await self._telemetry.async_tick()
                 except Exception as _tel_err:
                     _LOGGER.debug("CloudEMS telemetry tick fout: %s", _tel_err)
+
+            # v4.6.152: end cycle, measure time, adapt interval if needed
+            _cycle_ms = self._perf.end_cycle()
+            _new_interval = self._perf.interval_s
+            if self.update_interval.seconds != _new_interval:
+                self.update_interval = timedelta(seconds=_new_interval)
+            # Expose performance data in coordinator data
+            self._data["performance"] = self._perf.get_status_dict()
+
+            # Log performance every 10 cycles to normal log
+            if self._coordinator_tick % 10 == 0:
+                _perf_status = self._perf.get_status_dict()
+                _bk_perf = getattr(self, "_learning_backup", None)
+                if _bk_perf:
+                    import asyncio as _aio_perf
+                    _aio_perf.ensure_future(_bk_perf.async_log_normal("performance", _perf_status))
 
             return self._data
 
