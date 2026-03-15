@@ -191,10 +191,14 @@ class PerformanceMonitor:
 # Returns the minimum priority level that still gets force_update=True
 # Priority 1 = most critical, 3 = least critical
 FORCE_UPDATE_PRIORITY_BY_MODE = {
-    MODE_NORMAL:   3,   # all sensors
-    MODE_REDUCED:  2,   # priority 1+2 only
-    MODE_MINIMAL:  1,   # priority 1 only
-    MODE_CRITICAL: 0,   # none
+    # v4.6.187: force_update=True veroorzaakt state_changed events ook als waarde
+    # niet veranderd is — dit overbelast tablets (4096 pending messages).
+    # Verlaagd: alleen kritieke input-sensoren (prio 1) krijgen force_update in NORMAL.
+    # CoordinatorEntity schrijft bij force_update=False alleen als native_value wijzigt.
+    MODE_NORMAL:   1,   # alleen prio 1 (kritieke input sensoren)
+    MODE_REDUCED:  1,   # idem
+    MODE_MINIMAL:  1,   # idem
+    MODE_CRITICAL: 0,   # geen
 }
 
 

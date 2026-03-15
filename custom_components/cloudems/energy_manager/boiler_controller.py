@@ -2278,13 +2278,21 @@ class BoilerController:
     async def _switch_smart(self, entity_id: str, on: bool,
                              boiler: Optional[BoilerState] = None,
                              solar_surplus_w: float = 0.0) -> None:
-        if boiler and boiler.control_mode == "acrouter":
-            await self._acrouter_set(boiler, on, solar_surplus_w)
-            return
-        if on and boiler and boiler.control_mode == "dimmer" and boiler.dimmer_proportional:
-            await self._switch_dimmer_prop(entity_id, boiler, solar_surplus_w)
-            return
-        await self._switch(entity_id, on, boiler)
+        try:
+            if boiler and boiler.control_mode == "acrouter":
+                await self._acrouter_set(boiler, on, solar_surplus_w)
+                return
+            if on and boiler and boiler.control_mode == "dimmer" and boiler.dimmer_proportional:
+                await self._switch_dimmer_prop(entity_id, boiler, solar_surplus_w)
+                return
+            await self._switch(entity_id, on, boiler)
+        except Exception as _sw_exc:
+            # v4.6.186: vang cloud-fouten op (bijv. Ariston 429) zodat de coordinator
+            # cyclus niet crasht. De boiler houdt zijn huidige toestand tot de volgende cyclus.
+            _LOGGER.warning(
+                "BoilerController [%s]: schakelcommando mislukt (%s → %s), overgeslagen: %s",
+                boiler.label if boiler else entity_id, entity_id, "AAN" if on else "UIT", _sw_exc,
+            )
 
     async def _switch_dimmer_prop(self, entity_id: str, boiler: BoilerState,
                                    solar_surplus_w: float) -> None:

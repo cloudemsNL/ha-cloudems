@@ -1662,9 +1662,27 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         self._charge_kwh        = 0.0
         self._discharge_kwh     = 0.0
         self._last_day: int | None = None
+        # v4.6.190: persistent store zodat kWh niet reset bij reload
+        from homeassistant.helpers.storage import Store
+        self._store = Store(coord.hass, 1, "cloudems_battery_kwh_today_v1")
+        self._store_loaded = False
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
+
+    async def async_added_to_hass(self) -> None:
+        """Herstel kWh na herstart vanuit persistent storage."""
+        await super().async_added_to_hass()
+        from homeassistant.util import dt as dt_util
+        try:
+            saved = await self._store.async_load()
+            if saved and saved.get("day") == dt_util.now().day:
+                self._charge_kwh    = float(saved.get("charge_kwh", 0))
+                self._discharge_kwh = float(saved.get("discharge_kwh", 0))
+                self._last_day      = saved["day"]
+        except Exception:
+            pass
+        self._store_loaded = True
 
     def _accumulate(self, total_w: float) -> None:
         """Accumuleer kWh op basis van 10s-interval. Reset om middernacht."""
@@ -1679,6 +1697,15 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
             self._charge_kwh    += kwh
         elif total_w < -50:
             self._discharge_kwh += kwh
+        # Sla elke minuut op (elke 6e cyclus van 10s)
+        if not hasattr(self, '_save_tick'): self._save_tick = 0
+        self._save_tick += 1
+        if self._save_tick % 6 == 0 and self._store_loaded:
+            self.coordinator.hass.async_create_task(self._store.async_save({
+                "day": today,
+                "charge_kwh": round(self._charge_kwh, 4),
+                "discharge_kwh": round(self._discharge_kwh, 4),
+            }))
 
     @property
     def native_value(self):

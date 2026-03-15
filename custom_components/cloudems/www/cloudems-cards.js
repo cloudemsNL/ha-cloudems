@@ -4,7 +4,7 @@
 
 /**
  * CloudEMS Custom Card Bundle
- * Version: 1.6.3
+ * Version: 1.6.5
  * 
  * Cards:
  *   cloudems-chip-card    — status chip met template rendering (vervangt mushroom-template-card)
@@ -581,6 +581,7 @@
     // Als geen CloudEMS solar_system beschikbaar: fallback op solar/solar2/solar3 entities
     _getSolarNodes() {
       const invs = this._getInverters();
+      console.debug('[CloudEMS flow] _getSolarNodes: invs=', invs.length, invs.map(i=>i.label));
       if (invs.length > 0) return invs;
       const e = this._config.entities || {};
       const nodes = [];
@@ -1259,8 +1260,7 @@
               ...solarTop3.map((s, i) => ({
                 key:`solar${i}`, color:C.solar, on:s.w>T, pw:s.w,
                 x1:solarXs[i], y1:R_SUN+46, x2:COL_HUB, y2:R_SUN+64 })),
-              { key:'solar_sum', color:C.solar, on:totalSolar>T, pw:totalSolar,
-                x1:COL_HUB, y1:R_SUN+84, x2:COL_HUB, y2:hub_t },
+              (() => { const somPipeY2=R_SUN+74; const [_ssx,_ssy]=hubEdge(COL_HUB,somPipeY2+10); return { key:'solar_sum', color:C.solar, on:totalSolar>T, pw:totalSolar, x1:COL_HUB, y1:somPipeY2+10, x2:_ssx, y2:_ssy }; })(),
             ]),
         (() => { const [_hmx,_hmy]=hubEdge(COL_HUB,R_HOME); return { key:'home', color:C.home, on:homeActive, pw:home, x1:_hmx, y1:_hmy, x2:COL_HUB, y2:R_HOME-17 }; })(),
         ...(nBatt === 1
