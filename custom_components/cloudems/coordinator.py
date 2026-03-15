@@ -670,6 +670,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._pv_forecast       = None
         self._peak_shaving      = None
         self._boiler_ctrl       = None
+        self._decisions_history = None
+        self._storage_backend   = None
+        self._telemetry         = None
         self._pool_ctrl         = None
         self._lamp_circulation  = None  # v1.25.9: intelligente lampenbeveiliging
         self._shutter_ctrl      = None  # v3.9.0: rolluiken controller
@@ -957,8 +960,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             try:
                                 import asyncio
                                 asyncio.ensure_future(zone.async_release_devices())
-                            except Exception:
-                                pass
+                            except Exception as _exc_ignored:
+                                _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
                     _LOGGER.info("CloudEMS: klimaatbeheer uitgeschakeld — apparaten vrijgegeven")
             if "boiler_enabled" in data:
                 self._boiler_enabled          = data["boiler_enabled"]
@@ -1035,8 +1038,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     if slot_hour == prev_h:
                         prev = float(s["price"])
                         break
-        except Exception:
-            pass
+        except Exception as _exc_ignored:
+            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
         # Rank of current price among today's hours (1 = cheapest)
         rank = None
@@ -1550,8 +1553,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 loop.create_task(self._nilm.async_save())
-        except Exception:
-            pass
+        except Exception as _exc_ignored:
+            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
     # ── v2.4.14: NILM review queue ────────────────────────────────────────────
 
@@ -2667,8 +2670,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             _mf_version = _json_mf.loads(
                 (_pl_mf.Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
             ).get("version", "onbekend")
-        except Exception:
-            pass
+        except Exception as _exc_ignored:
+            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
         _active_modules = []
         if getattr(self, "_nilm_active", False):             _active_modules.append("NILM")
         if getattr(self, "_hybrid_nilm_active", False):      _active_modules.append("HybridNILM")
@@ -2690,10 +2693,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         )
         if hasattr(self, "_learning_backup") and self._learning_backup:
             import asyncio as _aio_su
+            _boiler_config_log = []
+            if self._boiler_ctrl:
+                for _bg in getattr(self._boiler_ctrl, "_groups", []):
+                    for _bu in getattr(_bg, "boilers", []):
+                        _boiler_config_log.append({
+                            "label": _bu.label,
+                            "entity_id": _bu.entity_id,
+                            "energy_sensor": _bu.energy_sensor or "(leeg)",
+                            "temp_sensor": _bu.temp_sensor or "(leeg)",
+                            "control_mode": _bu.control_mode,
+                        })
+                for _bu in getattr(self._boiler_ctrl, "_boilers", []):
+                    _boiler_config_log.append({
+                        "label": _bu.label,
+                        "entity_id": _bu.entity_id,
+                        "energy_sensor": _bu.energy_sensor or "(leeg)",
+                        "temp_sensor": _bu.temp_sensor or "(leeg)",
+                        "control_mode": _bu.control_mode,
+                    })
             _aio_su.ensure_future(self._learning_backup.async_log_high("coordinator_startup", {
                 "version":         _mf_version,
                 "active_modules":  _active_modules,
                 "ha_version":      str(getattr(getattr(self.hass, "data", {}), "get", lambda k, d="": d)("homeassistant", "")),
+                "boiler_config":   _boiler_config_log,
             }))
 
     # ── Update loop ───────────────────────────────────────────────────────────
@@ -2770,6 +2793,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Dict:
         try:
             self._coordinator_tick = getattr(self, "_coordinator_tick", 0) + 1
+            # Lazy init decisions_history
+            if self._decisions_history is None:
+                from .decisions_history import DecisionsHistory
+                self._decisions_history = DecisionsHistory(self.hass.config.config_dir)
+            if self._storage_backend is None:
+                from .storage_backend import init_storage_backend
+                self._storage_backend = init_storage_backend(self.hass.config.config_dir)
+            if self._telemetry is None:
+                from .telemetry import CloudEMSTelemetry
+                _manifest = {}
+                try:
+                    import json as _j, os as _os
+                    _mp = _os.path.join(_os.path.dirname(__file__), "manifest.json")
+                    _manifest = _j.load(open(_mp))
+                except Exception:
+                    pass
+                self._telemetry = CloudEMSTelemetry(
+                    self.hass,
+                    self.hass.config.config_dir,
+                    version=_manifest.get("version", "4.6"),
+                    firebase_project_id=self._config.get("telemetry_firebase_project", ""),
+                    firebase_api_key=self._config.get("telemetry_firebase_key", ""),
+                )
+                self._telemetry.set_enabled(bool(self._config.get("telemetry_enabled", False)))
             # v4.0.5: Watchdog update gestart
             if hasattr(self, "_watchdog") and self._watchdog:
                 self._watchdog.report_update_started()
@@ -2852,8 +2899,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                     _batt_pre_found = True
                     if _batt_pre_found:
                         _batt_pre_w = _batt_pre_total
-                except Exception:
-                    pass
+                except Exception as _exc_ignored:
+                    _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
                 # v4.5.15: spike-filter op ruwe batterijmeting.
                 # Zonneplan Nexus en andere cloud-batterijen kunnen incidenteel een
@@ -2894,8 +2941,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         _b_st2 = self.hass.states.get(_b_eid)
                         if _b_st2 and hasattr(_b_st2, "last_changed") and _b_st2.last_changed:
                             _batt_age_s = (_dt_util.utcnow() - _b_st2.last_changed).total_seconds()
-                except Exception:
-                    pass
+                except Exception as _exc_ignored:
+                    _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
                 _batt_is_stale = _batt_age_s > 90
 
                 _bal = self._energy_balancer.reconcile(
@@ -3178,8 +3225,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _h = datetime.fromtimestamp(entry["ts"], tz=timezone.utc).hour
                             if _h >= now_h:
                                 future_hours_price[_h] = float(entry.get("price", 0) or 0)
-                        except Exception:
-                            pass
+                        except Exception as _exc_ignored:
+                            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
                     all_hours = set(future_hours_pv.keys()) | set(future_hours_price.keys())
                     if all_hours:
@@ -3831,8 +3878,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     _nilm_devs = self._nilm.get_devices_for_ha() if self._nilm else []
                     if _nilm_devs:
                         self._boiler_ctrl.update_power_from_nilm(_nilm_devs)
-                except Exception:
-                    pass
+                except Exception as _exc_ignored:
+                    _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
             # Pool controller (zwembad filter + warmtepomp)
             pool_data: dict = {}
@@ -4302,8 +4349,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     for _spe_s in self._power_estimator.get_all_states():
                         if _spe_s.get("confidence") == "high":
                             _spe_high_eids.add(_spe_s.get("entity_id", ""))
-                except Exception:
-                    pass
+                except Exception as _exc_ignored:
+                    _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
             # Fasevermogen per fase uit de baselines van de NILM-detector
             _phase_baselines = getattr(self._nilm, "_baseline_power", {})
@@ -5153,8 +5200,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     if _bsl_ref_early and _bat_eid_early:
                         _diag_early = _bsl_ref_early.get_diagnostics(_bat_eid_early)
                         _eff_bat_cap = float(_diag_early.get("est_capacity_kwh") or 10.0)
-                except Exception:
-                    pass
+                except Exception as _exc_ignored:
+                    _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
             if _eff_bat_cap <= 0:
                 _eff_bat_cap = 10.0
             if self._battery_scheduler:
@@ -5277,8 +5324,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             self._config.get("battery_sensor", ""))
                         if _bsl_eid:
                             _bsl_diag = _bsl_ref.get_diagnostics(_bsl_eid)
-                    except Exception:
-                        pass
+                    except Exception as _exc_ignored:
+                        _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
                 # Geconfigureerde waarden hebben voorrang; geleerde waarden vullen aan
                 _bde_cap   = float(cfg.get("battery_capacity_kwh", 0)) or \
@@ -5367,8 +5414,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         _bde_result.confidence = round(
                             max(0.30, min(1.0, _bde_result.confidence * _hw)), 3
                         )
-                    except Exception:
-                        pass
+                    except Exception as _exc_ignored:
+                        _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
                 # v4.0.4: feedback loop — registreer beslissing
                 if _bde_result:
@@ -6731,6 +6778,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             _self_supplied_w = _self_use_w + min(_discharge_w, max(0.0, _house_w_final - _self_use_w))
             _selfsuff_pct  = round((_self_supplied_w / _house_w_final * 100) if _house_w_final > 10 else 0.0, 1)
 
+            # v4.6.141: debug logging verwijderd uit hot path — ensure_future elke 10s
+            # verstoorde de coordinator net als eerder (fase sensoren → 0A).
+            # Boiler power wordt nu gelogd via bestaand decision_boiler log.
+
             self._data = {
                 "grid_power_w":         grid_power_w,
                 "power_w":              grid_power_w,
@@ -7052,6 +7103,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _edl_err:
                     _LOGGER.debug("EntityDeviceLog tick fout: %s", _edl_err)
 
+            # Flush decisions history naar JSON (periodiek, alleen als dirty)
+            if self._decisions_history:
+                self._decisions_history.flush_if_dirty()
+
+            # Telemetry: uur-upload tick
+            if self._telemetry:
+                try:
+                    await self._telemetry.async_tick()
+                except Exception as _tel_err:
+                    _LOGGER.debug("CloudEMS telemetry tick fout: %s", _tel_err)
+
             return self._data
 
         except Exception as exc:
@@ -7071,12 +7133,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "type":  type(exc).__name__,
                         "trace": _tb.format_exc(limit=8),
                     }))
-            except Exception:
-                pass
+            except Exception as _exc_ignored:
+                _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
             # Watchdog: update mislukt — logt, slaat op, herstart indien nodig
             if self._watchdog:
                 await self._watchdog.report_failure(exc)
                 self._data["watchdog"] = self._watchdog.get_data()
+            # Flush decisions history ook bij fouten
+            if self._decisions_history:
+                self._decisions_history.flush_if_dirty()
             raise UpdateFailed(str(exc)) from exc
 
     # ── Data gathering ────────────────────────────────────────────────────────
@@ -7408,8 +7473,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     if _bpx2.is_available:
                         try:
                             _bsl_mode = _bpx2.read_state().active_mode
-                        except Exception:
-                            pass
+                        except Exception as _exc_ignored:
+                            _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
                         break
             _bsl = getattr(self, "_battery_soc_learner", None)
             _bsl_result = None
@@ -7751,7 +7816,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         for ph in phases:
             amp_key, volt_key, pwr_key = phase_conf[ph]
-            raw_a = self._read_state(cfg.get(amp_key,""))
+            _amp_eid = cfg.get(amp_key, "")
+            raw_a = self._read_state(_amp_eid)
+            _LOGGER.debug(
+                "CloudEMS fase [%s]: amp_entity='%s' raw_a=%s",
+                ph, _amp_eid, raw_a,
+            )
             # Guard: never use a CloudEMS own derived sensor as external voltage input.
             # If the user (re-)configured a cloudems entity as voltage sensor, treat it
             # as "not configured" so resolve_phase falls back to the mains-voltage default.
@@ -7765,7 +7835,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Fallback 1: use P1 per-phase current when no dedicated current sensor
             if raw_a is None and p1_data:
                 p1_a = p1_data.get(p1_phase_current[ph])
-                if p1_a and p1_a > 0:
+                # v4.6.130: gebruik is not None — p1_a=0.0 is geldige waarde (geen stroom)
+                # Voorheen: "if p1_a and p1_a > 0" → 0.0 werd als "geen data" behandeld
+                if p1_a is not None:
                     raw_a = float(p1_a)
 
             # Fallback voltage: P1 spanning (DSMR5) → anders omvormer/device autodiscovery
@@ -7795,8 +7867,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         exp_w = self._calc.to_watts(exp_eid, raw_exp)
                         imp_w = self._calc.to_watts(pwr_key, raw_p)
                         raw_p = imp_w - exp_w   # netto (negative = export)
-                    except Exception:
-                        pass
+                    except Exception as _exc_ignored:
+                        _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
 
             resolved = self._calc.resolve_phase(
                 ph,
@@ -7809,6 +7881,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             )
 
             # FIX: pass current_a and voltage_v separately — don't let limiter recalculate
+            _resolved_a = resolved.get("current_a")
+            _LOGGER.debug(
+                "CloudEMS fase [%s]: resolved current_a=%s → update_phase met %.3fA",
+                ph, _resolved_a, _resolved_a or 0.0,
+            )
             self._limiter.update_phase(
                 phase       = ph,
                 current_a   = resolved.get("current_a") or 0.0,
@@ -8069,6 +8146,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._decision_log.appendleft(entry)
         _LOGGER.debug("CloudEMS decision [%s]: %s", category, message)
 
+        # Telemetry: anonieme beslissing registreren (geen entity_id/label)
+        _tel = getattr(self, "_telemetry", None)
+        if _tel is not None:
+            _tel.record_decision(
+                category=category,
+                action=_p.get("action", category),
+                reason=_p.get("reason", "")[:50],
+            )
+
+        # Schrijf naar DecisionsHistory ring buffer (JSON + sensor attribuut)
+        # Alle categorieën worden opgeslagen — JS card filtert per categorie.
+        # Uitgesloten: interne/technische categorieën die geen gebruikerswaarde hebben.
+        _HISTORY_EXCLUDE = {"clipping", "solar_dim", "ev_pid", "p1_update"}
+        _hist = getattr(self, "_decisions_history", None)
+        if _hist is not None and category not in _HISTORY_EXCLUDE:
+            _hist.add(
+                category=category,
+                action=_p.get("action", category),
+                reason=_p.get("reason", _p.get("human_reason", message)),
+                message=message,
+                extra={
+                    "solar_w":    _ctx["solar_w"],
+                    "grid_w":     _ctx["grid_w"],
+                    "soc_pct":    _ctx["soc_pct"],
+                    "price_eur":  _ctx["price_all_in_eur_kwh"],
+                    "label":      _p.get("label", _p.get("entity_id", "")),
+                    "action_raw": _p.get("action", ""),
+                }
+            )
+
         # Schrijf naar cloudems_decisions.log (+ mirror naar high log)
         _bk = getattr(self, "_learning_backup", None)
         if _bk is not None:
@@ -8198,8 +8305,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             {"entity_id": full_id, "value": data.get("initial", "")},
                             blocking=False,
                         )
-                    except Exception:
-                        pass  # entity bestaat nog niet, skip silently
+                    except Exception as _exc_ignored:
+                        _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)  # entity bestaat nog niet, skip silently
 
         # Uitvoeren na volledige HA-opstart zodat storage collections beschikbaar zijn
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED

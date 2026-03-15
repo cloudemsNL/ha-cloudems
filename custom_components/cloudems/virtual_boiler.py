@@ -290,10 +290,12 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
                 ctrl.update_setpoint(self._boiler.entity_id, self._original_setpoint)
         elif operation_mode == OP_ECO:
             # ECO = pauzeer BOOST voor 4 uur → CloudEMS blijft in GREEN/ECO
+            # v4.6.90: clear_manual_override zodat controller niet geblokkeerd blijft
             self._override_until    = 0.0
             self._override_setpoint = None
             self._current_op        = OP_ECO
             if ctrl:
+                ctrl.clear_manual_override(self._boiler.entity_id)
                 ctrl.pause_boost(self._boiler.entity_id, seconds=4 * 3600)
         elif operation_mode == OP_MANUAL:
             if self._override_until == 0.0:
@@ -301,8 +303,10 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
             self._override_until = time.time() + MANUAL_OVERRIDE_S
             self._current_op     = OP_MANUAL
             # v4.6.26: direct commando sturen zodat de echte boiler meteen reageert
+            # v4.6.89: ook set_manual_override aanroepen zodat controller _manual_override_until kent
             if ctrl:
-                sp = self._override_setpoint or self._boiler.setpoint_c
+                sp = self._override_setpoint if self._override_setpoint is not None else (self._boiler.setpoint_c or 53.0)
+                ctrl.set_manual_override(self._boiler.entity_id, sp, MANUAL_OVERRIDE_S)
                 async def _send_now_safe_op():
                     try:
                         await ctrl.send_now(self._boiler.entity_id, True, sp)
@@ -341,8 +345,11 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
                 self.hass.async_create_task(_send_leg())
         elif operation_mode == OP_STALL:
             # STALL = reset stall-detectie en stuur boiler opnieuw aan
-            self._current_op = OP_AUTO
+            # v4.6.89: wis ook manual override zodat controller niet blijft blokkeren
+            self._current_op     = OP_AUTO
+            self._override_until = 0.0
             if ctrl:
+                ctrl.clear_manual_override(self._boiler.entity_id)
                 ctrl.force_stall_reset(self._boiler.entity_id)
                 async def _send_stall():
                     try:
@@ -359,11 +366,14 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
         self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        # v4.6.90: ook clear_manual_override zodat controller niet geblokkeerd blijft
         ctrl = getattr(self.coordinator, "_boiler_ctrl", None)
         self._override_until    = 0.0
         self._override_setpoint = None
         self._current_op        = OP_AUTO
         if ctrl:
+            ctrl.clear_manual_override(self._boiler.entity_id)
+            ctrl.resume_boost(self._boiler.entity_id)
             ctrl.update_setpoint(self._boiler.entity_id, self._original_setpoint)
         self.async_write_ha_state()
 
@@ -372,6 +382,7 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
             "CloudEMS VirtualBoiler [%s]: handmatig uitgeschakeld (24u override)",
             self._boiler.label,
         )
+        # v4.6.90: ook set_manual_override zodat controller 24u geblokkeerd wordt
         ctrl = getattr(self.coordinator, "_boiler_ctrl", None)
         if self._override_until == 0.0:
             self._original_setpoint = self._boiler.setpoint_c
@@ -379,6 +390,7 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
         self._override_setpoint = self._boiler.min_temp_c
         self._current_op        = OP_MANUAL
         if ctrl:
+            ctrl.set_manual_override(self._boiler.entity_id, self._boiler.min_temp_c, 24 * 3600)
             ctrl.update_setpoint(self._boiler.entity_id, self._boiler.min_temp_c)
         self.async_write_ha_state()
 

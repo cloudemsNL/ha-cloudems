@@ -1,10 +1,12 @@
+from __future__ import annotations
+from homeassistant.core import callback
+import re
 # -*- coding: utf-8 -*-
 # Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 # All rights reserved. Unauthorized copying, redistribution, or commercial
 # use of this file is strictly prohibited. See LICENSE for full terms.
 
 """CloudEMS sensor + binary_sensor platform — v1.5.0."""
-from __future__ import annotations
 import logging
 import time as _time_mod
 
@@ -157,6 +159,25 @@ async def async_setup_entry(
         CloudEMSDecisionLogSensor(coordinator, entry),
         CloudEMSBoilerStatusSensor(coordinator, entry),
         CloudEMSPoolStatusSensor(coordinator, entry),
+        # v4.6.89: eigen recorder-sensoren voor waarden die anders alleen uit externe
+        # entities komen — altijd beschikbaar ook als cloud/device tijdelijk offline is
+        CloudEMSBuitenTempSensor(coordinator, entry),
+        CloudEMSPoolWaterTempSensor(coordinator, entry),
+        CloudEMSEVPowerSensor(coordinator, entry),
+        CloudEMSDecisionsHistorySensor(coordinator, entry),  # v4.6.104: beslissingsgeschiedenis
+        # v4.6.104: energie & batterij recorder-sensoren
+        CloudEMSBatterijSOCSensor(coordinator, entry),
+        CloudEMSNetVermogenSensor(coordinator, entry),
+        CloudEMSZonVermogenSensor(coordinator, entry),
+        CloudEMSBoilerSetpointSensor(coordinator, entry),
+        CloudEMSSliderLeverenSensor(coordinator, entry),
+        CloudEMSSliderZonladenSensor(coordinator, entry),
+        CloudEMSGoedkoopstelaadmomentSensor(coordinator, entry),
+        # v4.6.106: nieuwe feature sensoren
+        CloudEMSSeizoensvergelijkingSensor(coordinator, entry),
+        CloudEMSBoilerPlanningsSensor(coordinator, entry),
+        CloudEMSBoilerEfficiencyV2Sensor(coordinator, entry),
+        CloudEMSTelemetrySensor(coordinator, entry),
         CloudEMSEntityLogSensor(coordinator, entry),    # v4.6.13: entity/device log
         CloudEMSLampCirculationSensor(coordinator, entry),
         # v1.5: AI / NILM status sensor
@@ -278,6 +299,35 @@ async def async_setup_entry(
     # Dynamically add NILM device sensors when detected + prune orphaned ones
     registered_nilm_ids: set = set(_existing_uids)
 
+    # v4.6.129: one-time startup cleanup — remove NILM entities beyond cap of 200
+    # Triggered when user has >200 NILM sensors (e.g. 6000+) from accumulated learning
+    _MAX_NILM_STARTUP = 200
+    _nilm_pfx = f"{entry.entry_id}_nilm_"
+    _static_suf = frozenset({"db","stats","running","running_power","diag","input","schedule","overzicht","review_current"})
+    _all_nilm_dynamic = sorted(
+        [e for e in er.async_entries_for_config_entry(_er, entry.entry_id)
+         if e.unique_id and e.unique_id.startswith(_nilm_pfx)
+         and e.domain == "sensor"
+         and e.unique_id[len(_nilm_pfx):] not in _static_suf
+         and not e.unique_id[len(_nilm_pfx):].startswith("__")
+         and not e.unique_id[len(_nilm_pfx):].startswith("top_")
+         and not e.unique_id[len(_nilm_pfx):].startswith("confirm_")
+         and not e.unique_id[len(_nilm_pfx):].startswith("reject_")],
+        key=lambda e: e.unique_id
+    )
+    if len(_all_nilm_dynamic) > _MAX_NILM_STARTUP:
+        _to_remove = _all_nilm_dynamic[_MAX_NILM_STARTUP:]
+        _LOGGER.warning(
+            "CloudEMS NILM: %d NILM-sensoren gevonden, cap is %d — verwijder %d oudste orphaned sensoren bij startup.",
+            len(_all_nilm_dynamic), _MAX_NILM_STARTUP, len(_to_remove),
+        )
+        for _orphan in _to_remove:
+            try:
+                _er.async_remove(_orphan.entity_id)
+                registered_nilm_ids.discard(_orphan.unique_id)
+            except Exception:
+                pass
+
     # Pruning safety: only remove entiteiten die CloudEMS zelf heeft aangemaakt
     # (unique_id begint met "{entry_id}_nilm_") en nooit power sockets of andere
     # HA-entiteiten aanraken. Extra bescherming: wacht minimaal 2 coordinator-cycli
@@ -293,14 +343,32 @@ async def async_setup_entry(
         _er = er.async_get(hass)
 
         # ── Stap 1: toevoegen van nieuwe NILM-sensoren ────────────────────
+        # v4.6.129: hard cap op 200 NILM device-sensoren — voorkomt HA-traagheid
+        MAX_NILM_DEVICE_SENSORS = 200
         new_ents = []
         active_uids: set = set()
+        # Tel huidige NILM device sensors (niet statische sensors)
+        _nilm_uid_prefix_check = f"{entry.entry_id}_nilm_"
+        _static_suffixes = frozenset({"db","stats","running","running_power","diag","input","schedule","overzicht","review_current"})
+        _current_dynamic_count = sum(
+            1 for uid in registered_nilm_ids
+            if uid.startswith(_nilm_uid_prefix_check)
+            and uid[len(_nilm_uid_prefix_check):] not in _static_suffixes
+        )
         for dev in coordinator.nilm.get_devices():
             uid = f"{entry.entry_id}_nilm_{dev.device_id}"
             active_uids.add(uid)
             if uid not in registered_nilm_ids:
+                if _current_dynamic_count >= MAX_NILM_DEVICE_SENSORS:
+                    _LOGGER.warning(
+                        "CloudEMS NILM: entity cap bereikt (%d) — sensor voor '%s' niet aangemaakt. "
+                        "Verwijder ongebruikte NILM-apparaten via het dashboard.",
+                        MAX_NILM_DEVICE_SENSORS, dev.name,
+                    )
+                    continue
                 new_ents.append(CloudEMSNILMDeviceSensor(coordinator, entry, dev))
                 registered_nilm_ids.add(uid)
+                _current_dynamic_count += 1
         if new_ents:
             async_add_entities(new_ents)
 
@@ -457,6 +525,40 @@ async def async_setup_entry(
 
     coordinator.async_add_listener(_zone_climate_updated)
 
+    # ── v4.6.89: Per-boiler temperatuursensoren (recorder-opgeslagen) ─────────
+    # sensor.cloudems_boiler_<slug>_temp — gebruikt door JS boiler card voor grafieken
+    _registered_boiler_temp_ids: set = set(_existing_uids)
+
+    @callback
+    def _boiler_temps_updated():
+        new_ents = []
+        data = coordinator.data or {}
+        all_boilers = list(data.get("boiler_status", []))
+        for g in data.get("boiler_groups_status", []):
+            all_boilers.extend(g.get("boilers", []))
+        seen = set()
+        for b in all_boilers:
+            eid   = b.get("entity_id", "")
+            label = b.get("label", eid.split(".")[-1])
+            if not eid or eid in seen:
+                continue
+            seen.add(eid)
+            slug_eid   = eid.split(".")[-1].replace("-", "_")
+            slug_label = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")
+            uid_temp  = f"{entry.entry_id}_boiler_temp_{slug_eid}"
+            uid_power = f"{entry.entry_id}_boiler_power_{slug_label}"
+            if uid_temp not in _registered_boiler_temp_ids:
+                new_ents.append(CloudEMSBoilerTempSensor(coordinator, entry, eid, label))
+                _registered_boiler_temp_ids.add(uid_temp)
+            if uid_power not in _registered_boiler_temp_ids:
+                new_ents.append(CloudEMSBoilerPowerSensor(coordinator, entry, eid, label))
+                _registered_boiler_temp_ids.add(uid_power)
+        if new_ents:
+            async_add_entities(new_ents)
+
+    coordinator.async_add_listener(_boiler_temps_updated)
+    _boiler_temps_updated()  # meteen registreren als boilers al bekend zijn
+
     # ── v4.3.6: Shutter override countdown sensoren (1 per rolluik) ──────────
     _cfg_all2 = {**entry.data, **entry.options}
     shutter_cfgs = _cfg_all2.get("shutter_configs", [])
@@ -481,12 +583,19 @@ def _device_info(entry: ConfigEntry) -> DeviceInfo:
         suggested_area="CloudEMS",
     )
 
+# Alias voor gebruik door nieuwe sensoren
+def main_device_info(entry: ConfigEntry) -> DeviceInfo:
+    """Hoofd-device (CloudEMS integratie)."""
+    return _device_info(entry)
+# sub_device_info is geïmporteerd uit sub_devices.py
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Core sensors
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CloudEMSPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     _attr_name = "CloudEMS Grid · Net Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -523,6 +632,7 @@ class CloudEMSPowerSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSHomeLoadSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Berekend huisverbruik — solar + grid_import - grid_export ± batterij.
 
     Gebruikt CloudEMS-eigen EMA-gefilterde waarden zodat vertraagde cloud-batterij
@@ -755,6 +865,7 @@ class CloudEMSDecisionLogSensor(CoordinatorEntity, SensorEntity):
 
 class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
     """Sensor: boiler/socket controller status."""
+    _attr_force_update = True
     _attr_name = "CloudEMS Boiler · Status"
     _attr_icon = "mdi:water-boiler"
 
@@ -770,7 +881,10 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         boilers = (self.coordinator.data or {}).get("boiler_status", [])
         on_count = sum(1 for b in boilers if b.get("is_on"))
-        return f"{on_count}/{len(boilers)} aan"
+        # Voeg temp toe aan state zodat HA altijd een WebSocket update stuurt
+        temps = [round(b["temp_c"], 1) for b in boilers if b.get("temp_c") is not None]
+        temp_str = f" · {temps[0]}°C" if temps else ""
+        return f"{on_count}/{len(boilers)} aan{temp_str}"
 
     @property
     def extra_state_attributes(self):
@@ -790,7 +904,191 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
             "log":            [(d["ts"], d["message"]) for d in
                                data.get("decision_log", [])
                                if d.get("category") == "boiler"][:5],
+            "_seq":           getattr(self.coordinator, "_coordinator_tick", 0),
         }
+
+
+class CloudEMSBoilerTempSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """v4.6.89: Per-boiler temperatuursensor — opgeslagen in recorder voor grafieken.
+
+    entity_id: sensor.cloudems_boiler_<slug>_temp
+    Gebruik: JS boiler card haalt history op via /api/history op deze sensor.
+    """
+    _attr_device_class  = SensorDeviceClass.TEMPERATURE
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "°C"
+    _attr_icon = "mdi:thermometer-water"
+
+    def __init__(self, coord, entry, boiler_entity_id: str, boiler_label: str):
+        super().__init__(coord)
+        self._entry          = entry
+        self._boiler_eid     = boiler_entity_id
+        slug = re.sub(r"[^a-z0-9]+", "_", boiler_label.lower()).strip("_")
+        self._attr_name       = f"CloudEMS Boiler · {boiler_label} · Temperatuur"
+        self._attr_unique_id  = f"{entry.entry_id}_boiler_temp_{slug}"
+        self.entity_id        = f"sensor.cloudems_boiler_{slug}_temp"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self):
+        boilers = (self.coordinator.data or {}).get("boiler_status", [])
+        for b in boilers:
+            if b.get("entity_id") == self._boiler_eid:
+                v = b.get("temp_c")
+                return round(float(v), 1) if v is not None else None
+        # Ook in groepen zoeken
+        for g in (self.coordinator.data or {}).get("boiler_groups_status", []):
+            for b in g.get("boilers", []):
+                if b.get("entity_id") == self._boiler_eid:
+                    v = b.get("temp_c")
+                    return round(float(v), 1) if v is not None else None
+        return None
+
+
+
+class CloudEMSBoilerPowerSensor(CoordinatorEntity, SensorEntity):
+    """v4.6.89: Per-boiler vermogensensor — opgeslagen in recorder voor grafieken.
+
+    entity_id: sensor.cloudems_boiler_<slug>_power
+    """
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(self, coord, entry, boiler_entity_id: str, boiler_label: str):
+        super().__init__(coord)
+        self._entry      = entry
+        self._boiler_eid = boiler_entity_id
+        self._last_nonzero_w: float | None = None  # cache laatste bekende vermogen
+        slug = re.sub(r"[^a-z0-9]+", "_", boiler_label.lower()).strip("_")
+        self._attr_name       = f"CloudEMS Boiler · {boiler_label} · Vermogen"
+        self._attr_unique_id  = f"{entry.entry_id}_boiler_power_{slug}"
+        self.entity_id        = f"sensor.cloudems_boiler_{slug}_power"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    def _get_boiler(self) -> dict | None:
+        data = self.coordinator.data or {}
+        for b in data.get("boiler_status", []):
+            if b.get("entity_id") == self._boiler_eid:
+                return b
+        for g in data.get("boiler_groups_status", []):
+            for b in g.get("boilers", []):
+                if b.get("entity_id") == self._boiler_eid:
+                    return b
+        return None
+
+    @property
+    def native_value(self):
+        b = self._get_boiler()
+        if b is None:
+            return self._last_nonzero_w  # Ariston 429 — toon laatste bekende waarde
+        v = b.get("current_power_w") if b.get("current_power_w") is not None else b.get("power_w")
+        if v is None:
+            return self._last_nonzero_w
+        val = round(float(v), 0)
+        if val > 0:
+            self._last_nonzero_w = val  # cache bijwerken
+        return val
+
+
+
+class CloudEMSBuitenTempSensor(CoordinatorEntity, SensorEntity):
+    """v4.6.89: Buitentemperatuur — eigen recorder-sensor zodat data altijd beschikbaar
+    blijft ook als de externe weer-entity tijdelijk unavailable is.
+
+    entity_id: sensor.cloudems_buiten_temp
+    Waarde: gelezen uit thermal_model.last_outside_temp_c (coordinator cached waarde).
+    """
+    _attr_name        = "CloudEMS Buitentemperatuur"
+    _attr_device_class  = SensorDeviceClass.TEMPERATURE
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "°C"
+    _attr_icon = "mdi:thermometer"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_buiten_temp"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        t = (self.coordinator.data or {}).get("thermal_model", {})
+        v = t.get("last_outside_temp_c")
+        if v is not None:
+            return round(float(v), 1)
+        # thermal_model is de enige betrouwbare bron — outdoor_temp_c bestaat
+        # niet in boiler_groups_status boiler dicts, dus geen fallback nodig.
+        return None
+
+
+class CloudEMSPoolWaterTempSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """v4.6.89: Zwembad watertemperatuur — eigen recorder-sensor.
+
+    entity_id: sensor.cloudems_pool_water_temp
+    Alleen actief als zwembad geconfigureerd is.
+    """
+    _attr_name        = "CloudEMS Zwembad · Watertemperatuur"
+    _attr_device_class  = SensorDeviceClass.TEMPERATURE
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "°C"
+    _attr_icon = "mdi:pool-thermometer"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pool_water_temp"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        pool = (self.coordinator.data or {}).get("pool", {})
+        v = pool.get("water_temp_c")
+        return round(float(v), 1) if v is not None else None
+
+
+class CloudEMSEVPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """v4.6.89: Actueel EV-laadvermogen — eigen recorder-sensor.
+
+    entity_id: sensor.cloudems_ev_laad_power
+    Waarde: ev_power uit coordinator data (W, positief = laden).
+    """
+    _attr_name        = "CloudEMS EV · Laadvermogen"
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:ev-station"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ev_laad_power"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        ev = data.get("ev_session", {}) or {}
+        # session_current_a × 230V — zelfde berekening als _ev_w() in CostSensor
+        # session_phases bestaat niet in ev_session_learner output
+        if ev.get("session_active"):
+            amps = float(ev.get("session_current_a") or 0)
+            return round(amps * 230.0, 0)
+        return 0.0
 
 
 class CloudEMSPoolStatusSensor(CoordinatorEntity, SensorEntity):
@@ -1022,6 +1320,7 @@ class CloudEMSPhaseBalanceSensor(CoordinatorEntity, SensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CloudEMSInverterSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """
     Shows current PV output, learned peak power, clipping status,
     estimated Wp, utilisation — for each inverter.
@@ -1649,6 +1948,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSNILMDeviceSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfPower.WATT
@@ -1788,6 +2088,7 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSP1Sensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     _attr_name = "CloudEMS P1 Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -1860,6 +2161,7 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Current grid import power in Watt (Energieverbruik)."""
     _attr_name = "CloudEMS Grid · Import Power"
     _attr_device_class = SensorDeviceClass.POWER
@@ -1901,6 +2203,7 @@ class CloudEMSGridImportPowerSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSGridExportPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Current grid export power in Watt (Energieproductie)."""
     _attr_name = "CloudEMS Grid · Export Power"
     _attr_device_class = SensorDeviceClass.POWER
@@ -2002,6 +2305,7 @@ class CloudEMSGridExportEnergySensor(CoordinatorEntity, SensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Per-phase import power in Watt — zero when exporting (Energieverbruik Fase Lx)."""
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2047,6 +2351,7 @@ class CloudEMSPhaseImportPowerSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSPhaseExportPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Per-phase export power in Watt — zero when importing (Energieproductie Fase Lx)."""
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2373,6 +2678,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """
     State = total power of all detected running devices (W).
     Attributes contain a per-device power breakdown — suitable for
@@ -3244,7 +3550,10 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return (self.coordinator.data or {}).get("battery_schedule", {}).get("action", "idle")
+        data = self.coordinator.data or {}
+        bs   = data.get("battery_schedule", {})
+        # _seq in state zodat HA altijd een WebSocket event stuurt
+        return bs.get("action", "idle")
 
     @property
     def extra_state_attributes(self):
@@ -3337,10 +3646,12 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
                 "has_sliders":         _has_sliders,
                 "has_control_mode":    zp.get("has_control_mode", False),
                 "active_mode":         zp_state.get("active_mode") or zp.get("saved_mode") or (
-                    # Fallback: lees direct van de HA select entity
-                    self.coordinator.hass.states.get(
-                        _zp_eid("control_mode") or ""
-                    ).state if _zp_eid("control_mode") and self.coordinator.hass.states.get(_zp_eid("control_mode")) else None
+                    # Fallback: lees direct van de HA select entity — filter unavailable/unknown
+                    _cm_st.state if (
+                        _zp_eid("control_mode") and
+                        (_cm_st := self.coordinator.hass.states.get(_zp_eid("control_mode"))) and
+                        _cm_st.state not in ("unavailable", "unknown", "none", "")
+                    ) else None
                 ),
                 "tariff_group":        zp_state.get("tariff_group"),
                 "override_since_min":  zp.get("override_since_min"),
@@ -3396,9 +3707,8 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             ] if bats else None,
             "zonneplan":            zonneplan_info,
             "battery_providers":    bp,  # volledige registry info incl. providers list & warnings
+            "_seq":           getattr(self.coordinator, "_coordinator_tick", 0),
         }
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # v1.10.2 — Solar Intelligence: per-inverter profile + system overview
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3696,14 +4006,51 @@ class CloudEMSHomeBaselineSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         return self._bl.get("deviation_w", 0.0)
 
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_home_baseline"
+        self._anomaly_start_ts = 0.0
+        self._last_notify_ts   = 0.0
+
     @property
     def extra_state_attributes(self):
-        b = self._bl
+        import time
+        b       = self._bl
+        anomaly = b.get("anomaly", False)
+        dev_w   = b.get("deviation_w", 0.0) or 0.0
+        exp_w   = b.get("expected_w", 0.0) or 0.0
+        cur_w   = b.get("current_w", 0.0) or 0.0
+        now     = time.time()
+
+        if anomaly:
+            if self._anomaly_start_ts == 0:
+                self._anomaly_start_ts = now
+            duration_min = round((now - self._anomaly_start_ts) / 60)
+            if duration_min >= 15 and (now - self._last_notify_ts) > 3600:
+                self._last_notify_ts = now
+                try:
+                    self.coordinator.hass.components.persistent_notification.async_create(
+                        message=(
+                            f"⚠️ Ongewoon hoog netverbruik al **{duration_min} minuten**.\n\n"
+                            f"Verwacht: {round(exp_w)} W · Huidig: {round(cur_w)} W\n"
+                            f"Afwijking: **+{round(dev_w)} W**\n\n"
+                            "Controleer of er een apparaat aan staat dat dat niet hoort."
+                        ),
+                        title="CloudEMS — Anomalie netverbruik",
+                        notification_id="cloudems_anomalie_grid",
+                    )
+                except Exception:
+                    pass
+        else:
+            self._anomaly_start_ts = 0.0
+            duration_min = 0
+
         return {
-            "anomaly":           b.get("anomaly", False),
-            "current_w":         b.get("current_w"),
-            "expected_w":        b.get("expected_w"),
-            "deviation_w":       b.get("deviation_w"),
+            "anomaly":           anomaly,
+            "current_w":         cur_w,
+            "expected_w":        exp_w,
+            "deviation_w":       dev_w,
             "sigma_w":           b.get("sigma_w"),
             "sigma_threshold":   b.get("sigma_threshold", 2.5),
             "standby_w":         b.get("standby_w"),
@@ -3714,12 +4061,18 @@ class CloudEMSHomeBaselineSensor(CoordinatorEntity, SensorEntity):
             "total_slots":       168,
             "training_pct":      round(b.get("trained_slots", 0) / 168 * 100, 0),
             "standby_hunters":   b.get("standby_hunters", []),
+            "aanhoudend_min":    duration_min,
+            "status": (
+                f"⚠️ +{round(dev_w)}W boven normaal ({duration_min} min)"
+                if anomaly else "✅ Normaal verbruik"
+            ),
         }
 
 
 
 
 class CloudEMSStandbyHunterSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """
     State = estimated always-on standby load (W).
     Attributes list individual appliances that appear to never switch off
@@ -4105,6 +4458,7 @@ class CloudEMSThermalModelSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Beschikbaar flexibel vermogen in kW."""
     _attr_name = "CloudEMS Flexibel Vermogen"
     _attr_native_unit_of_measurement = "kW"
@@ -5238,6 +5592,7 @@ class CloudEMSRoomMeterOverviewSensor(CoordinatorEntity, SensorEntity):
 
 
 class CloudEMSRoomMeterSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Per-kamer stroomverbruik sensor — dynamisch aangemaakt per ontdekte kamer.
 
     State  = huidig verbruik (W)
@@ -5924,6 +6279,7 @@ class CloudEMSSlaapstandSensor(CoordinatorEntity, SensorEntity):
 # ── v2.6: Capaciteits-piek sensor ──────────────────────────────────────────
 
 class CloudEMSKwartierPiekSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
     """Toont het 15-minuten gemiddelde vermogen en maandpiek (v2.6)."""
     _attr_device_class   = SensorDeviceClass.POWER
     _attr_state_class    = SensorStateClass.MEASUREMENT
@@ -6535,4 +6891,818 @@ class CloudEMSEntityLogSensor(CoordinatorEntity, SensorEntity):
             "pruned_ever": log.get("pruned",  0),
             "by_source":   by_source,
             "orphans":     orphan_list,
+        }
+
+
+# ── Beslissingsgeschiedenis sensor ───────────────────────────────────────────
+
+class CloudEMSDecisionsHistorySensor(CoordinatorEntity, SensorEntity):
+    """Sensor die de beslissingsgeschiedenis van CloudEMS exposeert als attribuut."""
+
+    _attr_icon       = "mdi:history"
+    _attr_state_class = None  # Geen numerieke waarde
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Beslissingen Geschiedenis"
+        self._attr_unique_id = f"{entry.entry_id}_decisions_history"
+        self.entity_id       = "sensor.cloudems_decisions_history"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        hist = getattr(self.coordinator, "_decisions_history", None)
+        if hist is None:
+            return "0"
+        return str(len(hist.get_recent(limit=99999)))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        hist = getattr(self.coordinator, "_decisions_history", None)
+        if hist is None:
+            return {"decisions": [], "total_24h": 0}
+        return hist.sensor_attributes()
+
+
+# ── Eigen recorder-sensoren: energie & batterij ──────────────────────────────
+
+class CloudEMSBatterijSOCSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_batterij_soc — batterij laadtoestand (%)."""
+    _attr_device_class  = SensorDeviceClass.BATTERY
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:battery"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Batterij SOC"
+        self._attr_unique_id = f"{entry.entry_id}_batterij_soc"
+        self.entity_id       = "sensor.cloudems_batterij_soc"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        # Probeer uit battery_providers data
+        zp = data.get("zonneplan") or {}
+        soc = zp.get("soc_pct")
+        if soc is None:
+            # Uit battery_providers attribuut van EPEX sensor
+            for bat in data.get("batteries", []):
+                soc = bat.get("soc_pct")
+                if soc is not None:
+                    break
+        # Fallback: uit coordinator _last_soc_pct
+        if soc is None:
+            soc = getattr(self.coordinator, "_last_soc_pct", None)
+        return round(float(soc), 1) if soc is not None else None
+
+
+class CloudEMSNetVermogenSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_net_vermogen — netlevering/afname (W, positief = afname)."""
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:transmission-tower"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Net Vermogen"
+        self._attr_unique_id = f"{entry.entry_id}_net_vermogen"
+        self.entity_id       = "sensor.cloudems_net_vermogen"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        v = getattr(self.coordinator, "_last_grid_w", None)
+        return round(float(v), 1) if v is not None else None
+
+
+class CloudEMSZonVermogenSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_zon_vermogen — totaal PV vermogen (W)."""
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:solar-power"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Zon Vermogen"
+        self._attr_unique_id = f"{entry.entry_id}_zon_vermogen"
+        self.entity_id       = "sensor.cloudems_zon_vermogen"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        v = getattr(self.coordinator, "_last_solar_w", None)
+        return round(float(v), 1) if v is not None else None
+
+
+class CloudEMSBoilerSetpointSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_boiler_setpoint — actueel setpoint van de primaire boiler (°C)."""
+    _attr_device_class  = SensorDeviceClass.TEMPERATURE
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "°C"
+    _attr_icon = "mdi:thermometer-water"
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Boiler Setpoint"
+        self._attr_unique_id = f"{entry.entry_id}_boiler_setpoint"
+        self.entity_id       = "sensor.cloudems_boiler_setpoint"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self):
+        # Lees eerst van virtual thermostat entity (heeft override setpoint bij manual/boost)
+        ctrl = getattr(self.coordinator, "_boiler_ctrl", None)
+        if ctrl:
+            all_b = list(getattr(ctrl, "_boilers", [])) + [
+                b for g in getattr(ctrl, "_groups", []) for b in g.boilers
+            ]
+            if all_b:
+                import re as _re
+                b0 = all_b[0]
+                slug = _re.sub(r"[^a-z0-9]+", "_", (b0.label or "").lower()).strip("_")
+                vb_st = self.coordinator.hass.states.get(f"water_heater.cloudems_boiler_{slug}")
+                if vb_st:
+                    t = vb_st.attributes.get("temperature")
+                    if t is not None:
+                        return round(float(t), 1)
+        # Fallback: uit boiler_status
+        data = self.coordinator.data or {}
+        for b in data.get("boiler_status", []):
+            sp = b.get("active_setpoint_c") or b.get("setpoint_c")
+            if sp:
+                return round(float(sp), 1)
+        for g in data.get("boiler_groups_status", []):
+            for b in g.get("boilers", []):
+                sp = b.get("active_setpoint_c") or b.get("setpoint_c")
+                if sp:
+                    return round(float(sp), 1)
+        return None
+
+
+class CloudEMSSliderLeverenSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_slider_leveren — Zonneplan 'leveren aan huis' slider waarde (W)."""
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:home-export-outline"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Slider Leveren aan Huis"
+        self._attr_unique_id = f"{entry.entry_id}_slider_leveren"
+        self.entity_id       = "sensor.cloudems_slider_leveren"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        zp = data.get("zonneplan") or {}
+        v = zp.get("deliver_to_home_w")
+        return round(float(v), 0) if v is not None else None
+
+
+class CloudEMSSliderZonladenSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """sensor.cloudems_slider_zonladen — Zonneplan 'zonneladen' slider waarde (W)."""
+    _attr_device_class  = SensorDeviceClass.POWER
+    _attr_state_class   = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_icon = "mdi:solar-power"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Slider Zonneladen"
+        self._attr_unique_id = f"{entry.entry_id}_slider_zonladen"
+        self.entity_id       = "sensor.cloudems_slider_zonladen"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        zp = data.get("zonneplan") or {}
+        v = zp.get("solar_charge_w")
+        return round(float(v), 0) if v is not None else None
+
+
+class CloudEMSBoilerEfficiencySensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_boiler_efficiency — boiler efficiëntiescore (0-100).
+    Berekend als: (graden gestegen × tank_liter × 1.163) / kWh_verbruikt
+    Vergeleken met theoretisch maximum → percentage.
+    Detecteert vroege slijtage bij consistent lage score.
+    """
+    _attr_icon       = "mdi:water-boiler"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_suggested_display_precision = 0
+
+    # Theoretisch: 1 kWh verwarmt 860 liter water 1°C (waterspecifieke warmte)
+    # In praktijk: 85-95% efficiënt voor een goede boiler
+    _THEORETICAL_WH_PER_LITER_PER_DEGREE = 1.163  # Wh/(L·°C)
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Boiler Efficiëntie"
+        self._attr_unique_id = f"{entry.entry_id}_boiler_efficiency"
+        self.entity_id       = "sensor.cloudems_boiler_efficiency"
+        self._samples: list[dict] = []  # rolling window van heating cycles
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        boilers = data.get("boiler_status", [])
+        if not boilers:
+            for g in data.get("boiler_groups_status", []):
+                boilers = g.get("boilers", [])
+                if boilers:
+                    break
+        if not boilers:
+            return None
+
+        b = boilers[0]
+        temp_c    = b.get("temp_c")
+        setpoint  = b.get("active_setpoint_c") or b.get("setpoint_c", 55)
+        power_w   = b.get("current_power_w") or b.get("power_w", 0)
+        cycle_kwh = b.get("cycle_kwh", 0)
+        tank_l    = b.get("tank_liters", 80)
+        is_on     = b.get("is_on", False)
+
+        if temp_c is None or cycle_kwh <= 0:
+            return None
+
+        # Bereken efficiëntie op basis van huidige verwarmingscyclus
+        # temp_rise = verschil tussen huidige temp en start van cyclus
+        # We schatten start als (setpoint - temp_deficit)
+        temp_deficit = b.get("temp_deficit_c")
+        if temp_deficit is None:
+            return None
+
+        temp_rise = max(0, setpoint - temp_c - temp_deficit + temp_deficit)
+        # Eenvoudiger: bereken op basis van totaal kWh en temp
+        if setpoint > temp_c:
+            temp_rise = setpoint - temp_c
+        else:
+            temp_rise = 5.0  # boiler is op temp, kleine maintenance warmte
+
+        theoretical_kwh = (temp_rise * tank_l * self._THEORETICAL_WH_PER_LITER_PER_DEGREE) / 1000
+        if theoretical_kwh <= 0 or cycle_kwh <= 0:
+            return None
+
+        efficiency = min(100, round((theoretical_kwh / max(cycle_kwh, theoretical_kwh * 0.5)) * 100))
+        return efficiency
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+        boilers = data.get("boiler_status", [])
+        if not boilers:
+            return {}
+        b = boilers[0]
+        return {
+            "cycle_kwh":     b.get("cycle_kwh", 0),
+            "temp_c":        b.get("temp_c"),
+            "setpoint_c":    b.get("active_setpoint_c") or b.get("setpoint_c"),
+            "tank_liters":   b.get("tank_liters", 80),
+            "interpretatie": self._interpret(),
+        }
+
+    def _interpret(self) -> str:
+        v = self.native_value
+        if v is None:   return "Geen data"
+        if v >= 90:     return "Uitstekend"
+        if v >= 75:     return "Goed"
+        if v >= 60:     return "Matig — controleer isolatie"
+        return "Slecht — mogelijk slijtage of kalkafzetting"
+
+
+class CloudEMSGoedkoopstelaadmomentSensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_goedkoopste_laadmoment
+    Toont het goedkoopste laadmoment in de komende 8 uur.
+    Stuurt HA-notificatie als de huidige prijs >30% hoger is dan het goedkoopste moment.
+    """
+    _attr_icon       = "mdi:clock-star-four-points"
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Goedkoopste Laadmoment"
+        self._attr_unique_id = f"{entry.entry_id}_goedkoopste_laadmoment"
+        self.entity_id       = "sensor.cloudems_goedkoopste_laadmoment"
+        self._last_notify_ts = 0.0
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str | None:
+        info = self._get_info()
+        if not info:
+            return None
+        return info["best_hour_label"]
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        info = self._get_info()
+        if not info:
+            return {}
+        return info
+
+    def _get_info(self) -> dict | None:
+        import time
+        data = self.coordinator.data or {}
+        # Lees prijsforecast uit _last_price_info.next_hours
+        price_info    = getattr(self.coordinator, "_last_price_info", None) or {}
+        next_hours    = price_info.get("next_hours", [])
+        current_price = getattr(self.coordinator, "_last_known_price", None)
+        if not next_hours or current_price is None:
+            return None
+
+        # Goedkoopste moment in komende 8 uur
+        import datetime
+        now_h = datetime.datetime.now().hour
+        window = [h for h in next_hours if h.get("price") is not None][:8]
+        if not window:
+            return None
+
+        best = min(window, key=lambda h: h.get("price", 999))
+        best_price = best.get("price", 0)
+        best_label = best.get("label", f"{best.get('hour', 0):02d}:00")
+
+        saving_pct = round((current_price - best_price) / max(current_price, 0.001) * 100)
+
+        # Notificatie als besparing > 30% en nog niet recent gestuurd (max 1x per 2u)
+        if saving_pct >= 30 and (time.time() - self._last_notify_ts) > 7200:
+            self._last_notify_ts = time.time()
+            self._send_notification(best_label, best_price, current_price, saving_pct)
+
+        return {
+            "best_hour":       best_label,
+            "best_hour_label": best_label,
+            "best_price_ct":   round(best_price * 100, 1),
+            "current_price_ct": round(current_price * 100, 1),
+            "saving_pct":      saving_pct,
+            "advies":          f"Wacht tot {best_label} — {saving_pct}% goedkoper" if saving_pct > 10 else "Nu laden is gunstig",
+        }
+
+    def _send_notification(self, best_hour: str, best_price: float,
+                           current_price: float, saving_pct: int) -> None:
+        """Stuur HA persistent notificatie."""
+        try:
+            self.coordinator.hass.components.persistent_notification.async_create(
+                message=(
+                    f"💡 Over een uur is stroom **{saving_pct}% goedkoper**.\n\n"
+                    f"Goedkoopste moment: **{best_hour}** "
+                    f"({round(best_price*100,1)} ct/kWh)\n"
+                    f"Nu: {round(current_price*100,1)} ct/kWh\n\n"
+                    f"Overweeg boiler of EV-lading uit te stellen."
+                ),
+                title="CloudEMS — Goedkoper laadmoment",
+                notification_id="cloudems_goedkoopste_laadmoment",
+            )
+        except Exception:
+            pass
+
+
+# ── Seizoensvergelijking sensor ───────────────────────────────────────────────
+
+class CloudEMSSeizoensvergelijkingSensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_seizoensvergelijking
+    Vergelijkt huidige maand met vorige maand en vorig jaar.
+    Data komt uit solar_learner (PV) + cost_forecaster (verbruik) + coordinator accumulators.
+    """
+    _attr_icon       = "mdi:calendar-compare"
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Seizoensvergelijking"
+        self._attr_unique_id = f"{entry.entry_id}_seizoensvergelijking"
+        self.entity_id       = "sensor.cloudems_seizoensvergelijking"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        import datetime
+        return datetime.datetime.now().strftime("%Y-%m")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        import datetime, time
+        data  = self.coordinator.data or {}
+        now   = datetime.datetime.now()
+        MONTHS = ["","Jan","Feb","Mrt","Apr","Mei","Jun","Jul","Aug","Sep","Okt","Nov","Dec"]
+
+        # Huidige maand accumulatoren uit coordinator
+        cost_month    = getattr(self.coordinator, "_cost_month_eur", 0.0) or 0.0
+        solar_learner = getattr(self.coordinator, "_solar_learner", None)
+
+        # PV data per inverter uit solar_learner
+        pv_peak_w = 0.0
+        pv_confident = False
+        if solar_learner:
+            try:
+                for inv_data in solar_learner._profiles.values():
+                    pv_peak_w += getattr(inv_data, "peak_power_w", 0) or 0
+                    if getattr(inv_data, "confident", False):
+                        pv_confident = True
+            except Exception as _err:
+                pass
+
+        # Cost forecaster seizoensdata
+        cf = getattr(self.coordinator, "_cost_forecaster", None)
+        seasonal = cf.get_seasonal_summary() if cf else {}
+
+        # Huidige maand vs vorige maand (uit cost_forecaster patterns)
+        this_month_daily = 0.0
+        prev_month_daily = 0.0
+        if cf and hasattr(cf, "_patterns"):
+            try:
+                daily_total = sum(p.avg_kwh for p in cf._patterns.values())
+                this_month_daily = round(daily_total, 2)
+                # Vorige maand: simpele benadering via patterns (zelfde model, andere seizoensfactor)
+                prev_month_daily = this_month_daily  # TODO: per-maand opslag in toekomstige versie
+            except Exception:
+                pass
+
+        return {
+            "huidige_maand":        MONTHS[now.month],
+            "huidig_jaar":          now.year,
+            "vorige_maand":         MONTHS[now.month - 1] if now.month > 1 else MONTHS[12],
+            "cost_month_eur":       round(cost_month, 2),
+            "daily_avg_kwh":        seasonal.get("daily_avg_kwh", 0),
+            "peak_consumption_hour": seasonal.get("peak_consumption_hour"),
+            "model_trained":        seasonal.get("model_trained", False),
+            "pv_peak_wp":           round(pv_peak_w, 0),
+            "pv_confident":         pv_confident,
+            "vergelijking_beschikbaar": seasonal.get("model_trained", False),
+            "tip": self._get_tip(now.month, seasonal.get("daily_avg_kwh", 0)),
+        }
+
+    def _get_tip(self, month: int, daily_kwh: float) -> str:
+        if month in (11, 12, 1, 2):
+            return "Wintermaand — verwarmingsvraag hoog, minimale PV. Overweeg nachttarief voor boiler."
+        if month in (3, 4, 9, 10):
+            return "Overgangsmaand — PV neemt toe/af. Goede periode om setpoints te optimaliseren."
+        return "Zomermaand — maximale PV. Boiler en EV zoveel mogelijk op zonne-energie laden."
+
+
+# ── Boiler planning sensor ────────────────────────────────────────────────────
+
+class CloudEMSBoilerPlanningsSensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_boiler_planning
+    Voorspelt wanneer de boiler de volgende keer moet opwarmen op basis van:
+    - Huidige temperatuur
+    - Geleerde thermisch verlies (°C/uur)
+    - Geconfigureerd setpoint en hysterese
+    """
+    _attr_icon       = "mdi:water-boiler-auto"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "min"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Boiler Planning"
+        self._attr_unique_id = f"{entry.entry_id}_boiler_planning"
+        self.entity_id       = "sensor.cloudems_boiler_planning"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self) -> float | None:
+        info = self._get_info()
+        return info.get("min_tot_trigger") if info else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._get_info() or {}
+
+    def _get_info(self) -> dict | None:
+        data = self.coordinator.data or {}
+        boilers = data.get("boiler_status", [])
+        if not boilers:
+            for g in data.get("boiler_groups_status", []):
+                boilers = g.get("boilers", [])
+                if boilers:
+                    break
+        if not boilers:
+            return None
+
+        b = boilers[0]
+        temp_c       = b.get("temp_c")
+        setpoint     = b.get("active_setpoint_c") or b.get("setpoint_c", 55)
+        loss_c_h     = b.get("thermal_loss_c_h", 0)
+        hysteresis   = 3.0  # standaard CloudEMS hysterese
+
+        if temp_c is None or loss_c_h <= 0:
+            return {
+                "status": "Onbekend — thermisch verlies nog niet geleerd",
+                "min_tot_trigger": None,
+                "loss_c_h": loss_c_h,
+            }
+
+        trigger_temp = setpoint - hysteresis
+        if temp_c <= trigger_temp:
+            return {
+                "status": "Nu actief of wacht op trigger",
+                "min_tot_trigger": 0,
+                "temp_c": temp_c,
+                "trigger_temp": trigger_temp,
+                "loss_c_h": loss_c_h,
+            }
+
+        delta_to_trigger = temp_c - trigger_temp
+        hours_until = delta_to_trigger / loss_c_h
+        min_until = round(hours_until * 60)
+
+        import datetime
+        trigger_at = datetime.datetime.now() + datetime.timedelta(hours=hours_until)
+
+        return {
+            "status": f"Trigger over {min_until} min ({trigger_at.strftime('%H:%M')})",
+            "min_tot_trigger":  min_until,
+            "trigger_om":       trigger_at.strftime("%H:%M"),
+            "temp_nu_c":        round(temp_c, 1),
+            "trigger_temp_c":   round(trigger_temp, 1),
+            "setpoint_c":       round(setpoint, 1),
+            "loss_c_h":         round(loss_c_h, 3),
+            "label":            b.get("label", "Boiler 1"),
+        }
+
+
+# ── Anomalie grid sensor met notificatie ─────────────────────────────────────
+
+class CloudEMSAnomalieGridSensor(CoordinatorEntity, SensorEntity):
+    _attr_force_update  = True
+    """
+    sensor.cloudems_anomalie_grid
+    Detecteert structureel afwijkend netverbruik t.o.v. geleerd patroon.
+    Stuurt HA notificatie bij aanhoudende anomalie (>15 min).
+    Gebouwd bovenop de bestaande HomeBaselineLearner.
+    """
+    _attr_icon       = "mdi:transmission-tower-export"
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "W"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry              = entry
+        self._attr_name          = "CloudEMS Anomalie Netverbruik"
+        self._attr_unique_id     = f"{entry.entry_id}_anomalie_grid"
+        self.entity_id           = "sensor.cloudems_anomalie_grid"
+        self._anomaly_start_ts   = 0.0
+        self._last_notify_ts     = 0.0
+        self._notify_threshold_s = 15 * 60  # 15 minuten aanhoudend
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> float:
+        bl = (self.coordinator.data or {}).get("baseline", {})
+        return bl.get("deviation_w", 0.0) or 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        import time
+        bl       = (self.coordinator.data or {}).get("baseline", {})
+        anomaly  = bl.get("anomaly", False)
+        dev_w    = bl.get("deviation_w", 0.0) or 0.0
+        exp_w    = bl.get("expected_w", 0.0) or 0.0
+        cur_w    = bl.get("current_w", 0.0) or 0.0
+
+        # Track aanhoudende anomalie
+        now = time.time()
+        if anomaly:
+            if self._anomaly_start_ts == 0:
+                self._anomaly_start_ts = now
+            duration_min = round((now - self._anomaly_start_ts) / 60)
+            # Stuur notificatie na drempel, max 1x per uur
+            if duration_min >= 15 and (now - self._last_notify_ts) > 3600:
+                self._last_notify_ts = now
+                self._send_notification(dev_w, exp_w, cur_w, duration_min)
+        else:
+            self._anomaly_start_ts = 0.0
+            duration_min = 0
+
+        return {
+            "anomalie":         anomaly,
+            "afwijking_w":      round(dev_w, 0),
+            "verwacht_w":       round(exp_w, 0),
+            "huidig_w":         round(cur_w, 0),
+            "aanhoudend_min":   duration_min if anomaly else 0,
+            "model_gereed":     bl.get("model_ready", False),
+            "getrainde_slots":  bl.get("trained_slots", 0),
+            "status": (
+                f"⚠️ +{round(dev_w)}W boven normaal ({duration_min} min)" if anomaly
+                else "✅ Normaal verbruik"
+            ),
+        }
+
+    def _send_notification(self, dev_w: float, exp_w: float,
+                           cur_w: float, duration_min: int) -> None:
+        try:
+            self.coordinator.hass.components.persistent_notification.async_create(
+                message=(
+                    f"⚠️ Ongewoon hoog netverbruik al **{duration_min} minuten**.\n\n"
+                    f"Verwacht: {round(exp_w)} W · Huidig: {round(cur_w)} W\n"
+                    f"Afwijking: **+{round(dev_w)} W**\n\n"
+                    f"Controleer of er een apparaat aan staat dat dat niet hoort."
+                ),
+                title="CloudEMS — Anomalie netverbruik",
+                notification_id="cloudems_anomalie_grid",
+            )
+        except Exception:
+            pass
+
+
+# ── Boiler efficiency verbeterd met rolling average ──────────────────────────
+
+class CloudEMSBoilerEfficiencyV2Sensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_boiler_efficiency_avg
+    Rolling average efficiency over de laatste 5 verwarmingscycli.
+    Detecteert slijtage als de trend daalt over meerdere cycli.
+    """
+    _attr_icon       = "mdi:water-boiler"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_suggested_display_precision = 0
+
+    _THEORETICAL_WH_PER_LITER_PER_DEGREE = 1.163
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Boiler Efficiëntie Gemiddeld"
+        self._attr_unique_id = f"{entry.entry_id}_boiler_efficiency_avg"
+        self.entity_id       = "sensor.cloudems_boiler_efficiency_avg"
+        self._samples:   list[float] = []   # laatste 10 cyclus-efficiënties
+        self._last_cycle_kwh = 0.0
+        self._last_temp_c    = None
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
+
+    @property
+    def native_value(self) -> float | None:
+        self._maybe_record_sample()
+        if not self._samples:
+            return None
+        return round(sum(self._samples) / len(self._samples))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        samples = list(self._samples)
+        if not samples:
+            return {"status": "Wacht op verwarmingscycli"}
+        avg = round(sum(samples) / len(samples))
+        # Trend: vergelijk eerste helft met tweede helft
+        mid = len(samples) // 2
+        if mid > 0:
+            trend_old = sum(samples[:mid]) / mid
+            trend_new = sum(samples[mid:]) / len(samples[mid:])
+            trend = round(trend_new - trend_old, 1)
+        else:
+            trend = 0.0
+
+        return {
+            "gemiddeld_pct":   avg,
+            "samples":         len(samples),
+            "laatste_5":       [round(s) for s in samples[-5:]],
+            "trend":           trend,
+            "trend_label":     "📈 Verbeterend" if trend > 2 else ("📉 Verslechterend — check kalk/slijtage" if trend < -5 else "➡️ Stabiel"),
+            "interpretatie":   self._interpret(avg),
+        }
+
+    def _maybe_record_sample(self) -> None:
+        """Sla efficiëntie op bij het einde van een verwarmingscyclus."""
+        data = self.coordinator.data or {}
+        boilers = data.get("boiler_status", [])
+        if not boilers:
+            return
+
+        b        = boilers[0]
+        is_on    = b.get("is_on", False)
+        temp_c   = b.get("temp_c")
+        setpoint = b.get("active_setpoint_c") or b.get("setpoint_c", 55)
+        cycle_kwh = b.get("cycle_kwh", 0)
+        tank_l   = b.get("tank_liters", 80)
+
+        # Cyclus klaar: boiler was aan en is net uit + heeft kWh verbruikt
+        if (not is_on and self._last_cycle_kwh > 0.1
+                and temp_c is not None and self._last_temp_c is not None):
+            temp_rise = max(0, temp_c - self._last_temp_c)
+            if temp_rise > 2:
+                theoretical = (temp_rise * tank_l * self._THEORETICAL_WH_PER_LITER_PER_DEGREE) / 1000
+                eff = min(100, (theoretical / self._last_cycle_kwh) * 100)
+                self._samples.append(round(eff, 1))
+                if len(self._samples) > 10:
+                    self._samples.pop(0)
+
+        if is_on:
+            self._last_cycle_kwh = cycle_kwh
+            self._last_temp_c    = temp_c or self._last_temp_c
+        else:
+            self._last_cycle_kwh = 0.0
+
+    def _interpret(self, avg: float) -> str:
+        if avg >= 90: return "Uitstekend"
+        if avg >= 75: return "Goed"
+        if avg >= 60: return "Matig — controleer isolatie of kalkafzetting"
+        return "Slecht — mogelijke slijtage, aanbevolen onderhoud"
+
+
+class CloudEMSTelemetrySensor(CoordinatorEntity, SensorEntity):
+    """
+    sensor.cloudems_telemetry
+    Toont telemetry status: opt-in staat, installatie-ID (kort), laatste upload.
+    Gebruiker kan opt-in aan/uitzetten via CloudEMS instellingen.
+    """
+    _attr_icon  = "mdi:cloud-upload"
+    _attr_state_class = None
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Telemetrie"
+        self._attr_unique_id = f"{entry.entry_id}_telemetry"
+        self.entity_id       = "sensor.cloudems_telemetry"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        tel = getattr(self.coordinator, "_telemetry", None)
+        if tel is None:
+            return "niet actief"
+        return "actief" if tel._enabled else "opt-out"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        tel = getattr(self.coordinator, "_telemetry", None)
+        if tel is None:
+            return {}
+        return {
+            "installation_id":  tel.installation_id_short,
+            "enabled":          tel._enabled,
+            "geconfigureerd":   tel.is_configured,
+            "gdpr_info":        "Alleen anonieme metrics. Geen persoonlijke data. Opt-in.",
+            "data_bevat":       "versie, beslissingstypes, foutcodes, cyclusduur, boilercycli",
+            "backend":          "Firebase Firestore",
         }

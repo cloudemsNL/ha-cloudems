@@ -40,6 +40,7 @@ class _PhaseState:
     battery_w:     float = 0.0
     limited:       bool  = False
     last_limit_ts: float = 0.0
+    has_data:      bool  = False          # reserved
 
 
 class CurrentLimiter:
@@ -98,6 +99,7 @@ class CurrentLimiter:
         p.current_a    = current_a
         p.power_w      = power_w
         p.derived_from = derived_from
+        p.has_data     = True
         p.solar_w      = solar_w
         p.battery_w    = battery_w
         # EMA spanning (α=0.15 ≈ ~13 samples tijdconstante bij 10s polling)

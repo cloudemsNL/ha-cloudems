@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "0.0.0"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "4.6.133"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "0.0.0"  # manifest.json ongeldig
+    VERSION = "4.6.133"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -1027,3 +1027,5 @@ PROVIDER_VATTENFALL    = "vattenfall"
 PROVIDER_ESSENT        = "essent"
 PROVIDER_ANWB_ENERGIE  = "anwb_energie"
 PROVIDER_NIEUWESTROOM  = "nieuwestroom"
+
+CONF_TELEMETRY_ENABLED = "telemetry_enabled"

@@ -244,6 +244,7 @@ class BoilerState:
     last_on_ts:          float = 0.0
     last_off_ts:         float = 0.0
     current_temp_c:      Optional[float] = None
+    _last_known_temp_c:  Optional[float] = None   # cache — nooit None na eerste succesvolle lezing
     current_power_w:     Optional[float] = None
     cycle_kwh:           float = 0.0
     active_setpoint_c:   float = 0.0
@@ -329,6 +330,7 @@ class BoilerState:
     _manual_override_until: float = field(default=0.0, repr=False)
     # v4.6.52: gecachede max_setpoint_entity (voorkomt entity-registry scan elke 10s)
     _cached_max_setpoint_entity: str = field(default="", repr=False)
+    _cached_power_entity: str = field(default="", repr=False)  # auto-detected power sensor
 
     # v4.6.60: Cloud verify/retry — Ariston cloud is onbetrouwbaar, settings komen
     # niet altijd aan. Na elke send slaan we het gewenste doel op en controleren
@@ -1026,6 +1028,8 @@ class BoilerController:
         self._power_store = Store(hass, 1, "cloudems_boiler_learned_power_v1")
         self._power_dirty = False
         self._power_last_save = 0.0
+        # v4.6.125: persisteer laatste bekende temp per boiler — overleeft herstart + Ariston 429
+        self._temp_store = Store(hass, 1, "cloudems_boiler_last_temp_v1")
 
     def _build_boiler(self, cfg: dict) -> BoilerState:
         # v4.6.16: brand-veld → auto-defaults voor bekende merken.
@@ -1189,6 +1193,19 @@ class BoilerController:
         """Laad eerder geleerde vermogens uit opslag."""
         import time as _time
         saved = await self._power_store.async_load() or {}
+
+        # Laad persistente temp cache — herstel last_known_temp_c voor alle boilers
+        _saved_temps = await self._temp_store.async_load() or {}
+        for b in list(self._boilers) + [b for g in self._groups for b in g.boilers]:
+            _t = _saved_temps.get(b.entity_id)
+            if _t is not None:
+                try:
+                    _tv = float(_t)
+                    if 5.0 <= _tv <= 95.0:
+                        b._last_known_temp_c = _tv
+                        b.current_temp_c = _tv
+                except (ValueError, TypeError):
+                    pass
         all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
         for b in all_b:
             stored_w = saved.get(b.entity_id)
@@ -1200,6 +1217,15 @@ class BoilerController:
                 )
         if saved:
             _LOGGER.info("BoilerController: vermogensgeheugen geladen (%d boilers)", len(saved))
+
+    async def _save_temp(self, entity_id: str, temp_c: float) -> None:
+        """Sla laatste bekende temperatuur op — overleeft herstart + Ariston 429."""
+        try:
+            existing = await self._temp_store.async_load() or {}
+            existing[entity_id] = round(temp_c, 1)
+            await self._temp_store.async_save(existing)
+        except Exception:
+            pass
 
     async def _async_save_power(self) -> None:
         """Sla geleerde vermogens op — max 1x per 5 minuten."""
@@ -1933,10 +1959,16 @@ class BoilerController:
             _entity_temp_c: float | None = None
             _boiler_state = self._hass.states.get(b.entity_id)
             if _boiler_state:
+                # Lees current_temperature ook bij "unavailable" state —
+                # cloud-integraties (Ariston, 429) bewaren attributes na tijdelijk falen.
+                # Alleen overslaan bij volledig ontbrekende state (None entity).
                 _cur_t = _boiler_state.attributes.get("current_temperature")
                 if _cur_t is not None:
                     try:
-                        _entity_temp_c = float(_cur_t)
+                        _candidate = float(_cur_t)
+                        # Saniteitscheck: geldige watertemperatuur 5-95°C
+                        if 5.0 <= _candidate <= 95.0:
+                            _entity_temp_c = _candidate
                     except (ValueError, TypeError):
                         pass
 
@@ -1971,6 +2003,33 @@ class BoilerController:
             elif _entity_temp_c is not None:
                 b.current_temp_c = _entity_temp_c
 
+            # v4.6.94: update cache bij elke succesvolle lezing
+            if b.current_temp_c is not None:
+                b._last_known_temp_c = b.current_temp_c
+                # v4.6.125: persist naar storage zodat temp herstart overleeft
+                # v4.6.129: gebruik hass.async_create_task ipv ensure_future (correct HA patroon)
+                try:
+                    self._hass.async_create_task(self._save_temp(b.entity_id, b.current_temp_c))
+                except Exception:
+                    pass
+            elif b._last_known_temp_c is not None:
+                # Entiteit tijdelijk unavailable (bijv. Ariston cloud write) — gebruik cache
+                b.current_temp_c = b._last_known_temp_c
+            elif b._last_known_temp_c is None:
+                # v4.6.121: eerste cyclus na herstart — lees uit recorder sensor als fallback
+                import re as _re
+                _slug = _re.sub(r"[^a-z0-9]+", "_", (b.label or "").lower()).strip("_")
+                _rec_eid = f"sensor.cloudems_boiler_{_slug}_temp"
+                try:
+                    _rec_st = self._hass.states.get(_rec_eid)
+                    if _rec_st and _rec_st.state not in ("unavailable", "unknown", "None", ""):
+                        _rec_val = float(_rec_st.state)
+                        if 5.0 <= _rec_val <= 95.0:
+                            b._last_known_temp_c = _rec_val
+                            b.current_temp_c = _rec_val
+                except Exception:
+                    pass
+
             # Laatste fallback: boiler aan maar trekt geen vermogen → al op temperatuur
             if b.current_temp_c is None and b.current_power_w is not None:
                 _is_on = self._is_on(b.entity_id, b)
@@ -1979,6 +2038,11 @@ class BoilerController:
 
             if b.energy_sensor:
                 s = self._hass.states.get(b.energy_sensor)
+                _s_state = s.state if s else "ENTITY_NOT_FOUND"
+                _LOGGER.debug(
+                    "BoilerController [%s]: energy_sensor='%s' state='%s'",
+                    b.label, b.energy_sensor, _s_state,
+                )
                 if s and s.state not in ("unavailable", "unknown", ""):
                     try:
                         val  = float(s.state)
@@ -2010,13 +2074,84 @@ class BoilerController:
                             if prev_ts is not None:
                                 b.cycle_kwh += val * ((now - prev_ts) / 3_600_000)
                         b._energy_ts_last = now
-                    except (ValueError, TypeError):
-                        pass
+                        _LOGGER.debug(
+                            "BoilerController [%s]: energy_sensor gelezen → current_power_w=%.1f W",
+                            b.label, b.current_power_w or 0.0,
+                        )
+                    except (ValueError, TypeError) as _e:
+                        _LOGGER.warning(
+                            "BoilerController [%s]: energy_sensor '%s' parse fout: %s (state='%s')",
+                            b.label, b.energy_sensor, _e, s.state if s else "?",
+                        )
             else:
-                # Geen energiesensor: gebruik huidige schakelaarstatus als schatting
-                # current_power_w = power_w als aan, 0 als uit (voor dashboardweergave)
-                is_currently_on = self._is_on(b.entity_id, b)
-                b.current_power_w = b.power_w if is_currently_on else 0.0
+                # Geen energiesensor geconfigureerd — probeer auto-detectie op hetzelfde HA-device
+                # (bijv. Ariston Lydos Hybrid heeft sensor.*_electric_power of sensor.*_power_w)
+                _auto_power_read = False
+                if not b._cached_power_entity:
+                    try:
+                        from homeassistant.helpers import entity_registry as _er_mod
+                        _er = _er_mod.async_get(self._hass)
+                        _entry = _er.async_get(b.entity_id)
+                        if _entry and _entry.device_id:
+                            # Sla per-fase en stroom-sensoren over (Ariston heeft bijv. Fase L1/L2/L3)
+                            # Sla per-fase, stroom en energietellers over.
+                            # "energy"/"kwh" NIET skippen — device_class=power check voorkomt kWh-sensoren al.
+                            # Ariston heeft bijv. sensor.*_electric_power die "energy" niet bevat maar
+                            # ook sensors die het wel bevatten.
+                            _SKIP_KW = ("fase", "_l1", "_l2", "_l3", "phase",
+                                        "current", "average", "import", "export",
+                                        "tariff", "tari")
+                            _best: tuple = (0.0, "")  # (power_w, entity_id)
+                            for _e in _er.entities.values():
+                                if _e.device_id != _entry.device_id or _e.domain != "sensor":
+                                    continue
+                                _eid_low = _e.entity_id.lower()
+                                if any(kw in _eid_low for kw in _SKIP_KW):
+                                    continue
+                                _st = self._hass.states.get(_e.entity_id)
+                                if not _st or _st.state in ("unavailable", "unknown", ""):
+                                    continue
+                                _dc = (_st.attributes.get("device_class") or "").lower()
+                                if _dc != "power":
+                                    continue
+                                try:
+                                    _pw = float(_st.state)
+                                    _unit = (_st.attributes.get("unit_of_measurement") or "").lower()
+                                    if "kw" in _unit and "kwh" not in _unit:
+                                        _pw *= 1000.0
+                                    # Kies sensor met hoogste vermogen = meest waarschijnlijk totaal
+                                    if _pw > _best[0]:
+                                        _best = (_pw, _e.entity_id)
+                                except (ValueError, TypeError):
+                                    pass
+                            if _best[1]:
+                                b._cached_power_entity = _best[1]
+                                _LOGGER.debug(
+                                    "BoilerController [%s]: auto-detected power_entity='%s' (%.0fW)",
+                                    b.label, _best[1], _best[0],
+                                )
+                    except Exception:
+                        pass
+
+                if b._cached_power_entity:
+                    _ps = self._hass.states.get(b._cached_power_entity)
+                    if _ps and _ps.state not in ("unavailable", "unknown", ""):
+                        try:
+                            _pw = float(_ps.state)
+                            _unit = (_ps.attributes.get("unit_of_measurement") or "").lower()
+                            if "kw" in _unit and "kwh" not in _unit:
+                                _pw *= 1000.0
+                            b.current_power_w = round(_pw, 1)
+                            if _pw > 50:
+                                b.power_w = round(b.power_w * 0.9 + _pw * 0.1, 0)
+                            _auto_power_read = True
+                        except (ValueError, TypeError):
+                            pass
+
+                if not _auto_power_read:
+                    # Laatste fallback: schakelaarstatus als schatting
+                    is_currently_on = self._is_on(b.entity_id, b)
+                    b.current_power_w = b.power_w if is_currently_on else 0.0
 
             if b.flow_sensor:
                 s = self._hass.states.get(b.flow_sensor)

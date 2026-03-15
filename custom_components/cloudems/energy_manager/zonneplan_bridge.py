@@ -299,6 +299,9 @@ class ZonneplanProvider(BatteryProvider):
         self._last_state = BatteryProviderState(
             provider_id=self.PROVIDER_ID, provider_label=self.PROVIDER_LABEL
         )
+        # Hysterese voor offline-melding: alleen 'offline' tonen na 3 opeenvolgende
+        # cycli zonder data. Voorkomt valse melding bij tijdelijk unavailable entity.
+        self._offline_count: int = 0
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -563,6 +566,16 @@ class ZonneplanProvider(BatteryProvider):
         mode = _MODE_NORMALIZE.get(
             (mode_raw or "").lower().strip(), mode_raw
         ) if mode_raw else None
+
+        # v4.6.136: hysterese — alleen 'offline' na 3 opeenvolgende cycli zonder data.
+        # Voorkomt valse offline-melding bij tijdelijk unavailable entity (split-second).
+        _has_data = soc is not None or power is not None or mode is not None
+        if _has_data:
+            self._offline_count = 0
+        else:
+            self._offline_count = getattr(self, "_offline_count", 0) + 1
+        _is_online = _has_data or self._offline_count < 3
+
         self._last_state = BatteryProviderState(
             provider_id    = self.PROVIDER_ID,
             provider_label = self.PROVIDER_LABEL,
@@ -572,7 +585,7 @@ class ZonneplanProvider(BatteryProvider):
             is_discharging = (power or 0) < -20,
             active_mode    = mode,
             available_modes= [m["id"] for m in _AVAILABLE_MODES],
-            is_online      = soc is not None,
+            is_online      = _is_online,
             raw = {
                 "battery_state":        _s("state"),
                 "control_mode":         mode,

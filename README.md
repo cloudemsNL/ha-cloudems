@@ -300,6 +300,21 @@ Supported integrations: Bosch eBike via [hass-bosch-ebike](https://github.com/..
 
 ## Sensors & entities
 
+### Design principle — always own your data
+
+CloudEMS follows a strict rule: **every physical value that CloudEMS uses internally must also exist as its own `sensor.cloudems_*` entity**, recorded by Home Assistant's built-in recorder.
+
+This means:
+
+- If a cloud integration (Ariston, Growatt, Zonneplan) is temporarily offline, CloudEMS still has the last known value in its own sensor history.
+- Automations and dashboards built on `sensor.cloudems_*` entities never break when the source device changes or is replaced.
+- History graphs in the UI always work — they read from CloudEMS sensors, not from third-party entities that may return `unavailable` or non-numeric states.
+- Long-term statistics are under CloudEMS control: no data gaps caused by upstream integration issues.
+
+**Rule for contributors:** if you add a new data source that CloudEMS reads every cycle, add a corresponding `sensor.cloudems_*` entity. Never build a history graph or automation targeting an external entity directly.
+
+### Sensor overview
+
 CloudEMS exposes 100+ sensors. Key examples:
 
 | Domain | Sensor | Description |
@@ -314,14 +329,20 @@ CloudEMS exposes 100+ sensors. Key examples:
 | Price | `energy_cost_forecast_today` | Predicted total cost today (€) |
 | Bill | `bill_simulator_saving_vs_fixed` | € saved vs fixed tariff this year |
 | NILM | `nilm_running_devices` | Count of detected active appliances |
+| Solar | `solar_<label>` | Per-inverter actual PV power (W) — own sensor per omvormer |
 | Solar | `solar_pv_forecast_today` | Predicted PV yield today (kWh) |
 | Solar | `pv_forecast_accuracy` | MAPE 14d/30d + bias factor |
 | Solar | `clipping_loss_today` | Lost kWh to inverter clipping |
 | Solar | `clipping_forecast_tomorrow` | Expected clipping losses tomorrow |
 | Solar | `pv_health` | Panel health status |
 | Solar | `pv_opbrengst_terugverdientijd` | Annual yield estimate + payback period |
+| Battery | `battery_soc` | Battery state of charge (%) — own sensor |
+| Battery | `battery_power` | Total battery charge/discharge power (W) — own sensor |
 | Battery | `battery_epex_schedule` | Current charge/discharge action |
 | Battery | `battery_soh` | State of Health (%) |
+| Boiler | `boiler_<slug>_temp` | Per-boiler water temperature (°C) — own recorder sensor |
+| Boiler | `boiler_<slug>_power` | Per-boiler heating power (W) — own recorder sensor |
+| EV | `ev_laad_power` | Actual EV charge power (W) — own recorder sensor |
 | EV | `ev_session_kwh` | Energy delivered in current session |
 | EV | `ere_certificaten` | ERE certificates earned + quarterly report |
 | Heat pump | `heat_pump_cop_current` | Current measured COP |
@@ -331,10 +352,13 @@ CloudEMS exposes 100+ sensors. Key examples:
 | Presence | `absence_detector` | home / away / sleeping / vacation + confidence |
 | Lamps | `lamp_circulation_status` | Circulation mode + active lamps |
 | Pool | `pool_status` | Filter + heater state + water temp |
+| Pool | `pool_water_temp` | Pool water temperature (°C) — own recorder sensor |
+| Weather | `buiten_temp` | Outside temperature (°C) — own recorder sensor, persists when weather integration is unavailable |
 | House | `thermal_w_per_k` | Thermal loss coefficient (W/°C) |
 | House | `anomaly_detected` | Unusual consumption (adaptive threshold) |
 | House | `energy_insights` | Weekly summary: savings, trends, recommendations |
 | Micro | `micro_mobiliteit` | E-bike/scooter session tracking + vehicle profiles |
+| Gas | `gasstand` | Gas meter reading (m³) — own recorder sensor |
 | Gas | `gasanalyse` | Gas efficiency vs HDD benchmark + winter forecast |
 | Costs | `energy_budget_status` | Budget tracking (on track / overspend) |
 | Diag | `sensor_sanity` | Sensor health: critical/warning flags |

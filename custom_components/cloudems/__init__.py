@@ -46,6 +46,8 @@ LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={
 LOVELACE_OVERVIEW_URL       = f"/local/cloudems/cloudems-overview-card.js?v={VERSION}"
 LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VERSION}"
 LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
+LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
+LOVELACE_PRIJSVERLOOP_URL   = f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -60,6 +62,8 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_OVERVIEW_URL,     "cloudems-overview-card.js"),
     (LOVELACE_SWITCHES_URL,     "cloudems-switches-card.js"),
     (LOVELACE_ZELFCONS_URL,     "cloudems-zelfconsumptie-card.js"),
+    (LOVELACE_DECISIONS_URL,    "cloudems-decisions-card.js"),
+    (LOVELACE_PRIJSVERLOOP_URL, "cloudems-prijsverloop-card.js"),
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -538,6 +542,8 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
                 {"url": f"/local/cloudems/cloudems-overview-card.js?v={VERSION}",  "type": "module"},
                 {"url": f"/local/cloudems/cloudems-switches-card.js?v={VERSION}",  "type": "module"},
                 {"url": f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}", "type": "module"},
+                {"url": f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}",      "type": "module"},
+                {"url": f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}",   "type": "module"},
             ]
 
             # Registreer in sidebar als nog niet aanwezig

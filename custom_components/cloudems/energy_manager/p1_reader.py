@@ -212,9 +212,9 @@ class P1Telegram:
     power_l3_export_w:     float = 0.0
 
     # ── Per-fase stroom (A) ──────────────────────────────────────────────────
-    current_l1:            float = 0.0
-    current_l2:            float = 0.0
-    current_l3:            float = 0.0
+    current_l1:            Optional[float] = None  # None = veld niet in telegram
+    current_l2:            Optional[float] = None
+    current_l3:            Optional[float] = None
 
     # ── Per-fase spanning (V) ────────────────────────────────────────────────
     voltage_l1:            float = 0.0
@@ -290,9 +290,9 @@ class P1Telegram:
             "power_l1_w":           round(self.power_l1_w, 0),
             "power_l2_w":           round(self.power_l2_w, 0),
             "power_l3_w":           round(self.power_l3_w, 0),
-            "current_l1":           round(self.current_l1, 2),
-            "current_l2":           round(self.current_l2, 2),
-            "current_l3":           round(self.current_l3, 2),
+            "current_l1":           round(self.current_l1, 2) if self.current_l1 is not None else None,
+            "current_l2":           round(self.current_l2, 2) if self.current_l2 is not None else None,
+            "current_l3":           round(self.current_l3, 2) if self.current_l3 is not None else None,
             "voltage_l1":           round(self.voltage_l1, 1),
             "voltage_l2":           round(self.voltage_l2, 1),
             "voltage_l3":           round(self.voltage_l3, 1),
@@ -453,9 +453,9 @@ def parse_telegram(raw: str) -> P1Telegram:
     t.power_l3_export_w = (_get("power_l3_export") or 0.0) * 1000
 
     # ── Stroom ───────────────────────────────────────────────────────────────
-    t.current_l1 = _get("current_l1") or 0.0
-    t.current_l2 = _get("current_l2") or 0.0
-    t.current_l3 = _get("current_l3") or 0.0
+    t.current_l1 = _get("current_l1")  # None als veld ontbreekt in telegram (DSMR4)
+    t.current_l2 = _get("current_l2")
+    t.current_l3 = _get("current_l3")
 
     # ── Spanning ─────────────────────────────────────────────────────────────
     t.voltage_l1 = _get("voltage_l1") or 0.0

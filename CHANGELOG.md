@@ -1,3 +1,419 @@
+## [4.6.140] - 2026-03-14
+### Debug
+- **Boiler vermogen WARNING log** — Elke coordinator-cyclus logt een WARNING in `cloudems_high.log`: `CloudEMS boiler [Boiler 1]: sensor_state=XXW → status.current_power_w=YYW`. Geen DEBUG-mode nodig. Hiermee is exact zichtbaar of `_read_sensors()` de waarde ophaalt maar `get_status()` hem niet doorgeeft, of omgekeerd.
+
+## [4.6.139] - 2026-03-14
+### Debug
+- **Boiler config in startup log** — `coordinator_startup` logt nu voor elke boiler: `label`, `entity_id`, `energy_sensor`, `temp_sensor`, `control_mode`. Zichtbaar in `cloudems_high.log` direct na herstart — geen DEBUG niveau nodig.
+
+## [4.6.138] - 2026-03-14
+### Fixed
+- **Inverter `control_entity` gewist bij bewerken** — zelfde patroon als boiler `energy_sensor`: optionele entity-selector stuurde lege string als gebruiker het veld niet aanraakte. Fix: behoud bestaande waarde als user_input leeg is.
+- **Batterij `charge_entity` en `discharge_entity` gewist bij bewerken** — zelfde fix toegepast. Ook `power_sensor` en `soc_sensor` vallen nu terug op bestaande waarde.
+
+## [4.6.137] - 2026-03-14
+### Fixed
+- **Boiler energy_sensor gewist bij unit bewerken** — `boiler_unit_edit` in de options flow overschreef `energy_sensor` (en `temp_sensor`) met een lege string als de gebruiker de entity-selector niet aanraakte. Dit is de directe oorzaak van "Vermogen: 0W" na het doorlopen van boiler-opties. Nu behouden deze velden hun waarde tenzij de gebruiker expliciet een andere sensor kiest.
+
+## [4.6.136] - 2026-03-14
+### Fixed
+- **Config-opties wissen fase-sensoren** — `_save()` in options flow overschreef bestaande sensor-config met lege strings als een veld leeg was in de huidige stap. Nu worden lege waarden gefilterd zodat bestaande configuratie behouden blijft.
+- **Zonneplan offline-melding** — is_online hysterese: pas na 3 opeenvolgende cycli zonder data wordt "offline" getoond. Voorkomt valse melding bij tijdelijk unavailable entity.
+
+## [4.6.135] - 2026-03-14
+### Debug
+- **Fase stroom debug** — `_process_power_data()` logt nu per fase: welke stroomsensor entiteit, ruwe waarde, en wat `resolve_phase` oplevert. Filter op `custom_components.cloudems` op DEBUG niveau.
+
+## [4.6.134] - 2026-03-14
+### Debug
+- **Boiler vermogen debug logging** — `_read_sensors()` logt nu op DEBUG niveau voor elke boiler: welke `energy_sensor` geconfigureerd is, de ruwe sensor state, en de uiteindelijke `current_power_w`. Parse-fouten worden nu als WARNING gelogd i.p.v. stil geslikt. Filter in HA Logboek op `cloudems.energy_manager.boiler_controller` op niveau DEBUG.
+
+## [4.6.133] - 2026-03-14
+### Fixed
+- **Fase stroom 0A na 4.6.132** — `P1Telegram.to_dict()` riep `round(self.current_l1, 2)` aan terwijl het veld nu `Optional[float] = None` is (gewijzigd in 4.6.131). `round(None, 2)` gooit een `TypeError`, de hele P1 data verwerking faalde stil elke cyclus → `p1_data` leeg → `raw_a = None` → `current_a = 0`. Fix: None-guard toegevoegd.
+
+## [4.6.132] - 2026-03-14
+### Fixed
+- **Alle real-time meetwaarden opgelost in één keer** — systematische audit van alle 138 CoordinatorEntity sensoren. 30 sensoren met `device_class` POWER/CURRENT/VOLTAGE/TEMPERATURE/BATTERY en `state_class=MEASUREMENT` kregen `_attr_force_update = True`. HA's state deduplicatie onderdrukte anders WebSocket updates als de waarde stabiel bleef, waardoor dashboards 0 bleven tonen. Inclusief: fase-sensoren (L1/L2/L3), grid import/export, huisverbruik, boiler temp/vermogen, PV omvormers, NILM apparaten, batterij SOC, EV vermogen, pool temp en alle overige vermogenssensoren.
+
+## [4.6.131] - 2026-03-14
+### Fixed
+- **Fase stroom/spanning/vermogen sensoren tonen 0 na verloop van tijd** — alle 6 fase-sensoren (L1/L2/L3 stroom, spanning, vermogen, import, export, balans) kregen `_attr_force_update = True`. HA's state deduplicatie onderdrukte updates als de waarde stabiel bleef → dashboard toonde 0 terwijl er wel stroom liep.
+- **P1 reader current default** — `current_l1/l2/l3` default was `0.0` (onbekend vs geen stroom niet te onderscheiden). Nu `None`. In coordinator: check is nu `is not None` ipv `if p1_a and p1_a > 0` — echte 0A waarden werden hierdoor weggegooid.
+- **Zonneplan offline melding** (uit 4.6.130) — gecachede `_last_state` gebruikt ipv live `read_state()`.
+
+## [4.6.130] - 2026-03-14
+### Fixed
+- **Zonneplan offline melding** — `get_setup_warnings()` gebruikte gecachede `_last_state` ipv `read_state()` opnieuw aanroepen. Voorkomt valse offline-melding bij tijdelijk unavailable SOC entity.
+
+## [4.6.129] - 2026-03-14
+### Fixed
+- **Fase/grid sensoren 0W na update** — de `_handle_coordinator_update` override op BoilerStatus en BatterySchedule sensoren riep elke 10s `async_write_ha_state()` aan buiten de normale HA-cyclus. BatteryScheduleSensor heeft enorme attributen (volledige Zonneplan info) — dit floodde de HA state machine en recorder elke 10s → HA-vertraging → P1 telegrams misten → fase-sensoren 0W. Fix: overrides verwijderd. Beide sensoren gebruiken nu `coordinator._coordinator_tick` als `_seq` attribuut — HA detecteert de attribuutwijziging automatisch en stuurt een WebSocket event, zonder forced state writes.
+- **NILM 6000+ entiteiten** (#22) — hard cap 200 dynamische NILM-sensoren + one-time cleanup bij startup
+- **Boiler vermogen auto-detect pakte Ariston fase-sensoren** — skip nu sensoren met fase/l1/l2/l3/current/energy in de entity_id, kiest sensor met hoogste vermogen als totaal
+- **asyncio.ensure_future → hass.async_create_task** in boiler temp persistentie
+- **Zonneplan offline/modus** — is_online checkt nu SOC OR vermogen OR modus; active_mode filtert unavailable/unknown
+- **JS kaarten** — decisions-card en prijsverloop-card toegevoegd aan `_do_storage_work()` resources
+
+## [4.6.129] - 2026-03-14
+### Fixed
+- **Boiler vermogen auto-detect verkeerde sensor** — `_power_keywords` matching kon Ariston per-fase energiesensoren (`Energieverbruik Fase L3`, `L1 Current Average`) oppakken. Nu wordt `device_class == power` gebruikt — enkel echte vermogenssensoren worden gevonden
+- **asyncio.ensure_future → hass.async_create_task** — `ensure_future()` buiten HA event loop context kan `RuntimeWarning` geven en fase/coordinator updates verstoren. Vervangen door `hass.async_create_task()` (correct HA patroon)
+- **Batterij kaart update niet automatisch** (#25) — `_seq` counter + `_handle_coordinator_update` override toegevoegd aan `CloudEMSBatteryScheduleSensor`, identiek aan de boiler fix
+- **NILM 6000+ entiteiten** (#22) — Hard cap van 200 dynamische NILM-sensoren in `_nilm_updated()`. One-time startup cleanup verwijdert bestaande orphaned NILM-entiteiten boven de cap
+- **Bevat alle fixes uit v4.6.127 en v4.6.128**
+
+## [4.6.128] - 2026-03-14
+### Fixed
+- **Boiler vermogen altijd 0W** — als geen `energy_sensor` geconfigureerd is, detecteert de controller nu automatisch een vermogenssensor op hetzelfde HA-device (bijv. `sensor.ariston_*_electric_power`). Sensor wordt gecacht na eerste detectie. Fallback naar schakelaarstatus blijft als geen sensor gevonden wordt.
+- Bevat ook alle fixes uit v4.6.127 (JS kaarten, boiler auto-update, Zonneplan offline/modus)
+
+## [4.6.127] - 2026-03-14
+### Fixed
+- **JS kaarten niet geladen** — `cloudems-decisions-card.js` en `cloudems-prijsverloop-card.js` stonden niet in `_do_storage_work()` resources-lijst in `__init__.py`; HA Storage-mode negeert de `resources:` sectie in de YAML
+- **Boiler kaart update niet automatisch** — `_seq` counter toegevoegd aan `extra_state_attributes` zodat HA altijd een attribuut-wijziging ziet en een WebSocket event naar de frontend stuurt, ook als temp en vermogen stabiel zijn
+- **Zonneplan "geconfigureerd maar offline"** — `is_online` checkte alleen of SOC beschikbaar was; nu checkt het SOC OF vermogen OF modus — als één van de drie beschikbaar is, is de integratie online
+- **Zonneplan "Modus: Unavailable"** — fallback in `sensor.py` las de raw `.state` van de HA select entity zonder te filteren op `unavailable`/`unknown`; nu correct gefilterd
+
+## v4.6.126
+- Fix: boiler temperatuur overleeft herstart niet — laatste bekende temp wordt nu opgeslagen in .storage/cloudems_boiler_last_temp_v1 en bij herstart direct hersteld, zodat ook bij Ariston 429 altijd de juiste waarde getoond wordt.
+
+## v4.6.125
+- Fix: cloudems-decisions-card.js en cloudems-prijsverloop-card.js stonden NIET in _ALL_JS_RESOURCES in __init__.py — daardoor werden ze nooit gekopieerd naar /local/cloudems/ en gaf HA "Configuratiefout". Beide bestanden nu correct geregistreerd.
+- Fix: boiler_status sensor state was altijd "0/1 aan" (nooit veranderend) → HA stuurde geen WebSocket update naar browser. Temperatuur toegevoegd aan state ("0/1 aan · 45.0°C") zodat elke temp-wijziging een browser update triggert.
+
+## v4.6.124
+- Fix: ts timestamp verwijderd uit boiler_status attributen — veroorzaakte elke 10s een recorder write wat performance problemen geeft.
+- Diagnose: boiler niet-updaten wordt veroorzaakt door watchdog die na 3 coordinator failures de integratie herlaadt. Upload cloudems_high.log na installatie voor exacte foutmelding.
+
+## v4.6.123
+- Fix: boiler_status sensor ververst niet automatisch — CoordinatorEntity roept async_write_ha_state() standaard alleen aan als coordinator succesvol was, maar HA kan updates onderdrukken als state onveranderd lijkt. Override van _handle_coordinator_update() toegevoegd die altijd direct async_write_ha_state() aanroept, zodat alle kaarten elke coordinator cyclus (~10s) updaten.
+
+## v4.6.122
+- Fix: cloudems-prijsverloop-card toonde "Configuratiefout" — customElements.define verwees nog naar oude klassenaam CloudemsPriceCard i.p.v. CloudemsPrijsverloopCard.
+- Fix: Boiler toont streepje na herstart — boiler_controller leest nu bij eerste cyclus de waarde van sensor.cloudems_boiler_{slug}_temp (recorder) als fallback, zodat de laatste bekende temperatuur direct beschikbaar is zonder te wachten op Ariston.
+
+## v4.6.121
+- Fix: Boiler status sensor (en alle kaarten die erop lezen) update niet automatisch — HA onderdrukt state-writes als waarde onveranderd is. Opgelost met `_attr_force_update = True` op CloudEMSBoilerStatusSensor: HA schrijft nu altijd naar de state machine, ook als temp en vermogen gelijk zijn.
+
+## v4.6.120
+- Fix: card_mod hersteld op Beslissingen tab (CloudEMS heeft eigen cloudems-card-mod.js).
+- Fix: Boiler JS card update nooit automatisch — sensor.cloudems_boiler_status krijgt nu een `ts` timestamp in de attributen die elke coordinator cyclus wijzigt. HA detecteert daardoor altijd een state change en de JS card rendert opnieuw.
+
+## v4.6.119
+- Fix: Beslissingen tab "Configuratiefout" — card_mod op view-niveau niet ondersteund zonder lovelace-card-mod. Verwijderd.
+- Fix: Boiler JS card update nooit automatisch — change detection uitgebreid met last_changed timestamp én water_heater setpoint states, zodat elke coordinator cyclus een re-render triggert.
+- Fix: Boiler temp toont streepje na herstart — valt nu terug op sensor.cloudems_boiler_{slug}_temp (recorder sensor) als Ariston temp_c null geeft.
+
+## v4.6.118
+- Fix: cloudems-price-card bestond al in cloudems-cards.js (de grote ENERGIEPRIJS kaart). Nieuwe prijsverloop kaart hernoemd naar cloudems-prijsverloop-card om conflict te vermijden.
+- Fix: Oude cloudems-price-card verwijderd uit cloudems-cards.js.
+- Dashboard gebruikt nu: type: custom:cloudems-prijsverloop-card
+
+## v4.6.117
+- Fix: Beslissingen tab toonde "Configuratiefout" door verkeerde inspringing (4 spaties i.p.v. 2). Gecorrigeerd.
+
+## v4.6.116
+- Nieuw: `cloudems-price-card.js` — volledige JS card vervangt 3 oude kaarten (💶 Uurprijzen, 📊 Prijsverloop, 🕐 Goedkoopste uren).
+- Features: 4 blok-strips per rij, laden-animatie, gouden gloed goedkoopste uur, PV werkelijk/verwacht (3px balk), planning-iconen (accu/EV/boiler/pool/surplus), Vandaag/Morgen tab, prijs in ct/kWh.
+- Modules-aware: planning-iconen alleen zichtbaar als betreffende module ingeschakeld is.
+
+## v4.6.115
+- UX: "Goedkoopste Warmtebron" (gas vs elektriciteit vergelijking) verplaatst naar de boiler JS card. Toont gas/elektrisch prijs per kWh warmte met aanbeveling, direct onder de setpoint/vermogen rijen.
+
+## v4.6.114
+- Fix: "Error adding entity" voor alle nieuwe sensoren — `main_device_info()` bestond niet. Toegevoegd als alias voor `_device_info()`. Conflicterende `sub_device_info()` definitie verwijderd (was al geïmporteerd uit `sub_devices.py`).
+
+## v4.6.113
+- Fix: `NameError: DecisionsHistory is not defined` — lazy import ontbrak in coordinator. Zelfde fix voor `init_storage_backend`.
+- Fix: `SyntaxError: from __future__ imports must occur at the beginning of the file` — sensor.py en 4 nieuwe modules (decisions_history, storage_backend, telemetry, utils) hadden `from __future__ import annotations` niet als eerste regel.
+
+## v4.6.112
+- Nieuw: `docs/ARCHITECTURE.md` — volledige technische documentatie (515 regels): bestandsstructuur, kern-architectuur, coordinator data dict, sensor register, energy manager modules, JS cards, configuratie opties, beslissingsflow, persistente opslag, telemetrie, refactor backlog, bekende issues, en ontwikkelworkflow.
+
+## v4.6.111
+- Nieuw: `docs/TELEMETRY_BEHEERDER.md` — volledige handleiding voor Firebase setup, security rules, API key ophalen, CloudEMS configuratie, data lezen als beheerder, GDPR toelichting en kostenraming.
+
+## v4.6.110
+- Wijziging: telemetry backend gewijzigd van Google Drive naar Firebase Firestore REST API. Geen SDK of OAuth nodig — alleen een Firebase project_id en API key in CloudEMS instellingen.
+- Werkt voor alle gebruikers ongeacht Google account — elke installatie schrijft naar hetzelfde Firebase project via zijn eigen UUID.
+- Firestore structuur: `cloudems_telemetry/<installation_id>/hours/<YYYYMMDDTHH00>`
+- Configuratie: `telemetry_enabled: true`, `telemetry_firebase_project: <id>`, `telemetry_firebase_key: <key>`
+
+## v4.6.109
+- Nieuw: `telemetry.py` — opt-in anonieme diagnostiek naar Google Drive. Elk uur één entry met: versie, uptime, beslissingstypes (geen entity_id/label), foutcodes, boilercycli, coordinator cyclus prestatie (avg/max/p95 ms). GDPR-veilig: geen persoonlijke data, geen energiewaarden, geen locatie.
+- Nieuw: `sensor.cloudems_telemetry` — toont telemetrie status en anonieme installatie-ID (eerste 8 chars).
+- Bestanden in Drive: `cloudems_telemetry/<installation_id>.json`, rolling 7 dagen.
+- Opt-in via CloudEMS instellingen (`telemetry_enabled`). Standaard UIT.
+
+## v4.6.108
+- Refactor plan gedocumenteerd in CLAUDE_INSTRUCTIONS.md: `_async_update_data` (4325 regels) wordt over 10 releases opgesplitst in `_gather_sensor_data()`, `_fetch_prices()`, `_evaluate_ev()`, `_evaluate_battery_data()`, `_evaluate_solar()`, `_evaluate_boiler()`, `_evaluate_shutters()`, `_evaluate_prices_costs()`, `_evaluate_intelligence()`, `_build_data_dict()`. Eén stap per release, elke stap apart testbaar. Status wordt bijgehouden in CLAUDE_INSTRUCTIONS.md.
+
+## v4.6.107
+- Fix: `sensor.cloudems_goedkoopste_laadmoment` gebruikte niet-bestaande `price_forecast` key — leest nu correct uit `_last_price_info.next_hours`.
+- Fix: `CloudEMSAnomalieGridSensor` was duplicaat van bestaande `CloudEMSHomeBaselineSensor` — verwijderd. Notificatie (>15 min anomalie) toegevoegd aan bestaande sensor.
+- Fix: `sensor.cloudems_seizoensvergelijking` gebruikte `solar_learner._inverters` — heet `._profiles`. Crashte anders.
+- Fix: `decisions_history.py` schrijft nu via `StorageBackend` (met directe JSON fallback) — klaar voor cloud-migratie.
+- Nieuw: `utils.py` — centrale `slugify()`, `slugify_entity_id()`, `format_duration()`, `clamp()`. Vervangt 19 losse slug-implementaties.
+- Fix: 16 bare `except Exception: pass` in coordinator nu gelogd op DEBUG niveau.
+- Fix: Efficiency v1 sensor-registratie verwijderd (v2 met rolling average blijft).
+- Fix: f-string syntax error in anomalie notificatie tekst.
+- Fix: Beslissingen tab achtergrondstijl in lijn met rest dashboard.
+
+## v4.6.106
+- Nieuw: `sensor.cloudems_seizoensvergelijking` — huidige maand vs vorige maand, PV piek, verbruiksprofiel en seizoenstip.
+- Nieuw: `sensor.cloudems_boiler_planning` — voorspelt over hoeveel minuten de boiler de volgende keer opwarmt op basis van geleerd thermisch verlies (°C/uur) en hysterese.
+- Nieuw: `sensor.cloudems_anomalie_grid` — detecteert aanhoudend afwijkend netverbruik (>15 min boven geleerd patroon) en stuurt HA notificatie met afwijking in Watt.
+- Nieuw: `sensor.cloudems_boiler_efficiency_avg` — rolling average efficiëntie over laatste 10 verwarmingscycli met trend analyse (verbeterend/stabiel/verslechterend) en onderhoudswaarschuwing.
+
+## v4.6.105
+- Nieuw: Beslissingen tab in dashboard (na Overzicht) met cloudems-decisions-card.
+- Fix: Boiler setpoint sensor leest nu van virtual thermostat entity (override waarde) i.p.v. coordinator setpoint.
+- Fix: History throttle boiler JS card: 30s bij eerste load, 5 minuten daarna.
+- Nieuw: `storage_backend.py` — abstractie-laag voor persistente opslag (LocalFileBackend nu, CloudBackend later bij migratie).
+- Nieuw: `suggested_display_precision` op alle nieuwe energie/vermogen sensoren.
+- Nieuw: `sensor.cloudems_boiler_efficiency` — efficiëntiescore (0-100%) met interpretatie (Uitstekend/Goed/Matig/Slecht).
+- Nieuw: `sensor.cloudems_goedkoopste_laadmoment` — toont goedkoopste moment in 8u, stuurt HA notificatie als besparing >30%.
+
+## v4.6.104
+- Nieuw: `decisions_history.py` — ring buffer voor alle CloudEMS beslissingen (24u), schrijft naar `cloudems_decisions_history.json` en overleeft herstart.
+- Nieuw: `sensor.cloudems_decisions_history` — exposeert laatste 60 beslissingen als attribuut voor JS card.
+- Nieuw: `cloudems-decisions-card.js` — tijdlijn kaart met filter per categorie (batterij, boiler, EV, rolluiken), klikken toont volledige tekst + energie-context.
+- Nieuw recorder-sensoren (overleven herstart, beschikbaar voor cloud-migratie):
+  - `sensor.cloudems_batterij_soc` — batterij SOC (%)
+  - `sensor.cloudems_net_vermogen` — netlevering/afname (W)
+  - `sensor.cloudems_zon_vermogen` — totaal PV vermogen (W)
+  - `sensor.cloudems_boiler_setpoint` — actueel boiler setpoint (°C)
+  - `sensor.cloudems_slider_leveren` — Zonneplan 'leveren aan huis' slider (W)
+  - `sensor.cloudems_slider_zonladen` — Zonneplan 'zonneladen' slider (W)
+
+## v4.6.103
+- Fix: CloudEMSBoilerTempSensor en CloudEMSBoilerPowerSensor gebruikten entity_id-slug ("ariston") als entity_id maar de rest van het systeem (virtual_boiler, JS card, history fetch) verwacht label-slug ("boiler_1"). Sensoren heten nu correct `sensor.cloudems_boiler_boiler_1_temp` en `sensor.cloudems_boiler_boiler_1_power`. Let op: bestaande recorder-data voor de old entity_id gaat verloren (die was toch leeg).
+
+## v4.6.102
+- Fix: Temperatuurverloop en vermogengrafiek toonden "Wacht op recorder" omdat de history fetch entity_id-slug gebruikte ("ariston") maar de recorder-sensoren label-slug hebben ("boiler_1"). Nu wordt label-slug gebruikt met entity_id-slug als fallback.
+
+## v4.6.101
+- Fix: JS boiler card temperatuur en vermogen werden alleen bijgewerkt bij plugin-reload. De `set hass` trigger vergeleek alleen `state` en `last_updated` van de boiler_status sensor, maar temp_c en power_w zitten in de attributen. Nu worden ook `temp_c`, `current_power_w`, `is_on` en `active_setpoint_c` per boiler meegenomen in de change-detectie → automatische update elke coordinator-cyclus (~10s).
+
+## v4.6.100
+- Fix: Markdown Live status kaart gebruikte `regex_replace` filter (bestaat niet in HA Jinja2) voor slug-berekening. Vervangen door `replace(' ', '_')` — werkt correct voor labels als "Boiler 1" → "boiler_1". Nu ook `override_setpoint_c` als eerste bron (override heeft voorrang boven vboiler temperature).
+
+## v4.6.99
+- Fix: `current_temperature` van boiler entity (bijv. Ariston) werd overgeslagen bij state "unavailable". Cloud-integraties bewaren attributes ook na een 429/timeout — nu worden de attributes altijd uitgelezen, met saniteitcheck (5–95°C). De `_last_known_temp_c` cache vult zich daardoor ook na een herstart zodra de eerste 429-response binnenkomt die nog attributes heeft.
+- Fix: Markdown Live status kaart toonde setpoint uit `boiler_status` (53°C GREEN cap) i.p.v. de actuele virtual thermostat override waarde. Nu gelijk aan JS card.
+
+## v4.6.98
+- Fix: CLAUDE_INSTRUCTIONS.md en virtual_boiler.py (root) hersteld — zip moet altijd compleet blijven.
+
+## v4.6.98
+- Fix: CLAUDE_INSTRUCTIONS.md en virtual_boiler.py (root) toegevoegd — ontbraken onterecht sinds 4.6.89.
+
+## v4.6.97
+- Fix: tariffs.json ontbrak in zip (was aanwezig in 4.6.88). Hersteld.
+- CLAUDE_INSTRUCTIONS.md en losse virtual_boiler.py in root niet hersteld — waren geen onderdeel van de installatie.
+
+## v4.6.96
+- Fix: JS boiler card toonde vermogen alleen bij is_heating=true. Nu altijd zichtbaar (ook bij 0 W). Kleur en balk dimmen bij 0W.
+
+## v4.6.95
+- Fix: `current_temperature` van de boiler entity (bijv. `water_heater.ariston`) werd gelezen ook als de entity state "unavailable" was — Ariston levert dan geen attributen mee, waardoor `current_temp_c = None`. Nu wordt de entity state eerst gecontroleerd op "unavailable"/"unknown" (zelfde check als bij de optionele temp_sensor). De geconfigureerde temperatuursensor is daarmee echt optioneel.
+
+## v4.6.94
+- Fix: `current_temp_c` bleef `None` wanneer `water_heater.ariston` tijdelijk unavailable was tijdens een cloud write-operatie (bijv. bij BOOST/manual setpoint wijziging). Nieuw: `_last_known_temp_c` cache in `BoilerState` — na de eerste succesvolle lezing wordt de temperatuur nooit meer `None`, ook niet bij korte Ariston cloud onderbrekingen.
+
+## v4.6.93
+- Fix: JS boiler card setpoint gebruikte entity_id-slug (bijv. "ariston") maar virtual_boiler gebruikt label-slug (bijv. "boiler_1") — mismatch waardoor vboilerSt altijd null was en setpoint altijd 53°C toonde.
+- Dashboard: "🚿 Boilers — Live status" markdown kaart tijdelijk terug gezet voor betrouwbare temperatuur/vermogen weergave.
+
+## v4.6.92
+- Fix: JS boiler card toonde setpoint uit `boiler_status` (bijv. 53°C GREEN-max) in plaats van de actuele override waarde. Nu wordt `target_temperature` van `water_heater.cloudems_boiler_<slug>` gelezen — de virtual thermostat entity heeft altijd het echte setpoint (ook bij manual/boost override).
+- Fix: `maxSp` was `max_setpoint_boost_c || setpoint` — bij manual override met hoog setpoint kon de bar overschieten. Nu `Math.max(setpoint, setpoint_c)` als basis.
+
+## v4.6.91
+- Fix: `BoilerPowerSensor.native_value` retourneerde `0` als boiler niet gevonden of vermogen `None` — nu `None` zodat recorder geen onjuist 0W wegschrijft.
+- Fix: `BuitenTempSensor` fallback-loop zocht `outdoor_temp_c` in `boiler_groups_status` maar dat veld bestaat niet in die dict — fallback verwijderd.
+- Fix: JS boiler card `_fetchHistory` werd elke ~10s getriggerd bij elke sensor state-update → recorder API bombardement. Nu 5-minuten throttle. `_historyPower` geïnitialiseerd in constructor.
+- Audit: gehele codebase gecontroleerd — boiler_controller.py public API, coordinator data flow, alle JS cards, alle 204 dashboard cards, unique_id conflicts (geen gevonden), device_info/state_class aanwezig op alle nieuwe sensoren.
+
+## v4.6.90
+## v4.6.90
+- Fix: `async_turn_on` riep `clear_manual_override` en `resume_boost` niet aan → controller bleef tot 4u geblokkeerd na "Aan" in UI.
+- Fix: `async_turn_off` riep `set_manual_override` niet aan → controller negeerde de 24u-uit-override en zette boiler na 10s gewoon weer aan.
+- Fix: `OP_ECO` riep `clear_manual_override` niet aan → bij wisseling van MANUAL naar ECO bleef controller geblokkeerd voor resterende MANUAL-timer.
+- Fix: `OP_MANUAL` sp-berekening gebruikte `or`-operator — bij `setpoint_c=0.0` vóór eerste cyclus werd 0°C gestuurd. Nu expliciete `is not None` check met fallback 53°C.
+- Fix: `CloudEMSEVPowerSensor` gebruikte niet-bestaand `session_phases` veld — vereenvoudigd naar `session_current_a × 230V` (identiek aan `_ev_w()` helper).
+- Fix: `CloudEMSBoilerPowerSensor.native_value` retourneerde `0` als boiler niet gevonden of vermogen `None` is — nu `None` zodat recorder geen onjuist 0W wegschrijft.
+- Fix: `CloudEMSBuitenTempSensor` fallback-loop zocht `outdoor_temp_c` in `boiler_groups_status` maar dat veld bestaat niet — misleidende fallback verwijderd.
+- Fix: JS boiler card `_fetchHistory` werd elke ~10s aangeroepen (bij elke sensor state-update) → recorder API bombardement. Nu throttle van 5 minuten. `_historyPower` geïnitialiseerd in constructor.
+
+## v4.6.89
+- Fix: Virtual thermostat manual modus stuurde geen `set_manual_override` naar de controller — boiler bleef in `hold_off` steken als OP_MANUAL werd geactiveerd zonder setpoint-wijziging.
+- Fix: OP_STALL reset wiste `_manual_override_until` niet — na boost/legionella bleef controller blokkeren. Nu wordt `clear_manual_override` aangeroepen bij stall-reset.
+- Nieuw: `CloudEMSBoilerTempSensor` — per boiler `sensor.cloudems_boiler_<slug>_temp` (device_class: temperature, recorder). Dynamisch geregistreerd zodra boilers bekend zijn.
+- Nieuw: `CloudEMSBoilerPowerSensor` — per boiler `sensor.cloudems_boiler_<slug>_power` (device_class: power, recorder).
+- Nieuw: `CloudEMSBuitenTempSensor` — `sensor.cloudems_buiten_temp` (°C, recorder). Persists als externe weer-entity tijdelijk unavailable is.
+- Nieuw: `CloudEMSPoolWaterTempSensor` — `sensor.cloudems_pool_water_temp` (°C, recorder).
+- Nieuw: `CloudEMSEVPowerSensor` — `sensor.cloudems_ev_laad_power` (W, recorder). Berekend via session_current_a × 230V × fasen.
+- Fix: JS boiler card temperatuurgraaf haalt history op van `sensor.cloudems_boiler_<slug>_temp` i.p.v. `water_heater.*` — die had geen numerieke state (altijd "Geen history beschikbaar").
+- JS boiler card: dual grafiek temperatuur + vermogen naast elkaar, 4 uur venster.
+- JS boiler card: beslissingslog per boiler toegevoegd (max 8 unieke regels, duplicaten samengevouwen).
+- Dashboard: "Boilers — Live status", "Beslissingen", "Sturing & triggers", Dimmer/COP conditionele kaarten verwijderd van boiler-tab.
+- Dashboard: "Leerdata wissen (alle groepen)" knop verplaatst naar Leerdata Beheer grid.
+- README: "Own your data" ontwerpprincipe gedocumenteerd — alle fysieke waarden die CloudEMS intern gebruikt moeten een eigen `sensor.cloudems_*` entity hebben.
+
+## v4.6.85
+- Fix: Na verwijderen van het CloudEMS dashboard via de HA UI en integratie herladen, werd het dashboard niet opnieuw aangemaakt. Na schrijven van de storage files wordt nu ook lovelace systeem reload geforceerd.
+- Nieuwe cloudems-zelfconsumptie-card.js — toont nooit meer "Entiteit niet gevonden".
+
+## v4.6.83
+- Fix: Zelfconsumptie kaart toonde 4x "Entiteit niet gevonden". HA `type: attribute` rows tonen deze fout wanneer de sensor `unavailable` is — dit is HA gedrag dat niet omzeild kan worden met een entities card. Vervangen door `type: template` rows die altijd `—` tonen als de waarde ontbreekt, ongeacht de sensor state.
+
+## v4.6.82
+- Fix: Beheer card (Alles tab) stretchte niet volledig over de breedte. `:host` had geen `display:block` waardoor het element als inline gedroeg. Toegevoegd: `display:block; width:100%` op `:host` + `getLayoutOptions()` met `grid_columns:4` zodat HA de card de volledige kolombreedte geeft.
+
+## v4.6.81
+- Fix: Boiler, shutter en beheer cards onterecht van prod naar dev verplaatst — die werkten gewoon. Alleen solar-card en battery-card naar dev dashboard (die tonen nog fouten). Prod dashboard hersteld.
+- Dev dashboard aangemaakt (`cloudems-dashboard-dev.yaml`) met solar-card en battery-card voor verdere tests.
+
+## v4.6.80
+- Fix: `SolarLearner`, `PVForecast` en `SolarDimmer` ontbraken in de `coordinator_startup` log (`active_modules`). Hierdoor was niet te zien of de solar modules actief waren na herstart. Nu gelogd als `SolarLearner`, `PVForecast`, `SolarDimmer` in het opstartrapport.
+- Analyse GitHub issue #21: gebruiker heeft nooit werkende PV gehad ondanks geconfigureerde omvormer. Oorzaak: `SolarLearner` initialiseerde niet. Oplossing voor gebruiker: CloudEMS opties → Omvormers → opnieuw configureren → opslaan → HA herstarten. De logging fix in deze versie maakt dit soort problemen direct zichtbaar in de toekomst.
+
+## v4.6.79
+- Intern: CLAUDE_INSTRUCTIONS bijgewerkt met verplichte GUI editor regel (bij elke nieuwe/bijgewerkte card) en correcte sensor mapping tabel (welke data van welke sensor komt).
+
+## v4.6.78
+- Nieuw: GUI editors voor alle 7 custom cards — "Visuele editor niet ondersteund" melding verdwijnt:
+  - `cloudems-battery-card`: titel
+  - `cloudems-solar-card`: titel
+  - `cloudems-shutter-card`: titel, toon leervoortgang (checkbox)
+  - `cloudems-boiler-card`: titel, tank inhoud, koud water temp, douchetemperatuur, liter/min, douchetijd
+  - `cloudems-beheer-card`: titel, max beslissingen
+  - `cloudems-pv-forecast-card`: titel, toon morgen forecast, EPEX overlay, onzekerheidsband (checkboxes)
+  - `cloudems-switches-card`: had al editor (titel, acties, annuleer-knop)
+  Elke editor stuurt `config-changed` events zodat HA de kaart direct opslaat.
+
+## v4.6.77
+- Fix KRITISCH: Beheer card las alle data van de verkeerde sensor. `sensor.cloudems_status` heeft alleen `system`, `guardian`, `watchdog` en `shutters` — geen `version`, `battery_decision`, `decision_log`, `boiler_status` of `inverter_data`. Correcte sensor mapping:
+  - `version` → `sensor.cloudems_watchdog.attributes.cloudems_version`
+  - `decision_log` → `sensor.cloudems_watchdog.attributes.last_10`
+  - `battery_decision` → `sensor.cloudems_batterij_epex_schema.attributes`
+  - `boilers` → `sensor.cloudems_boiler_status.attributes.boilers`
+  - `soc_pct` → `sensor.cloudems_batterij_epex_schema.attributes.soc_pct` (Zonneplan fallback)
+  - `shutters` → `sensor.cloudems_status.attributes.shutters.shutters` (was al correct)
+- Fix: Beheer card `hass` setter watchte verkeerde sensoren en miste updates van batterij/solar.
+- Test: 20/20 geautomatiseerde tests groen voor release.
+
+## v4.6.76
+- Fix KRITISCH: Battery card re-renderde nooit na cold start. De `hass` setter watchte `sensor.cloudems_battery_schedule` (oude naam, bestaat niet) en `sensor.cloudems_battery_so_c` (altijd unavailable bij Zonneplan). Nu worden ook `sensor.cloudems_batterij_epex_schema`, de `soc_pct` attribuut, en `sensor.cloudems_battery_power` gewatcht — SoC-wijzigingen van Zonneplan triggeren nu correct een re-render.
+- Fix: Solar card `hass` setter watchte niet `switch.cloudems_module_solar_learner` — als de module aanging zonder dat de sensoren veranderden, bleef de card op "Laden..." staan. Nu ook module-switch en `inverter_data` count gewatcht.
+- Fix: Beheer card (Alles tab) te smal. Card heeft nu `width:100%` en de module-grid gebruikt `auto-fill` met `minmax(160px,1fr)` voor responsive kolommen op elke breedte.
+- Test: 18/18 geautomatiseerde tests groen voor release.
+
+## v4.6.75
+- Revert: Zelfconsumptie kaart teruggezet naar `type: entities` (was onterecht omgezet naar markdown in 4.6.74). De onderliggende bugs (verkeerde entity ID + dode code) zijn al gefixed in 4.6.64 en 4.6.69. De entities kaart werkt correct met `sensor.cloudems_self_consumption`.
+
+## v4.6.74
+- Fix: Solar sensor `native_value` retourneerde `None` bij cold start (coordinator.data nog leeg) waardoor solar card bleef tonen "Geen omvormer geconfigureerd". Nu retourneert de sensor alleen `None` als `coordinator.data is None`, anders altijd `0.0` of hoger.
+- Fix: Solar JS card toont bij unavailable + module ON geen "geen omvormer" meer maar een neutrale laadstate. Toont alleen "geen omvormer geconfigureerd" als de module UIT staat EN er geen inverter data aanwezig is.
+- Fix: Zelfconsumptie kaart vervangen van `type: entities` (met `type: attribute` rijen die crashen bij unavailable sensor) naar een `markdown` card die graceful degradeert — toont "Laden..." bij unavailable en de actuele data zodra de sensor beschikbaar is.
+- Geverifieerd: `sensor.cloudems_self_consumption` valt buiten alle pruner-prefixen — orphan pruner verwijdert deze sensor nooit.
+
+## v4.6.73
+- Fix: Shutter card crash bij render — `Object.values(h.states)` gaf state-objecten zonder `entity_id` property terug (normaal HA gedrag). `e.entity_id.startsWith(...)` crashte met TypeError. Gefix met optional chaining: `e?.entity_id?.startsWith(...)`.
+- Test: 20 geautomatiseerde tests gedraaid in Node.js simulator voor battery, solar, shutter en beheer card. Alle 20 groen vóór het zippen.
+
+## v4.6.72
+- Fix: Interactieve beheerkaart (Alles tab) toonde nog steeds de kleine flow-card. Oorzaak: `cloudems-cards.js` definieert zelf ook al een `cloudems-overview-card` element (de compacte hero-kaart), waardoor de nieuwe interactieve card altijd verloor. Interactieve card hernoemd naar `cloudems-beheer-card` — geen naamconflict meer.
+- Fix: Solar card toonde "Geen omvormer geconfigureerd" ook als er wel omvormers zijn maar de sensor `unavailable` is (bijv. 's nachts door de 0W→None bug). Card valt nu terug op het `inverters` attribuut als dat beschikbaar is, ook bij unavailable state.
+
+## v4.6.71
+- Fix: Alles tab toonde de kleine cloudems-flow-card (4 waarden) in plaats van de interactieve beheerkaart. Oorzaak: de nieuwe card was geregistreerd als `cloudems-control-card` maar het dashboard vroeg `custom:cloudems-overview-card`. Het bestand heet `cloudems-overview-card.js` maar de `customElements.define()` gebruikte de verkeerde naam. Gefix: element heet nu `cloudems-overview-card`, alias `cloudems-control-card` voor compatibiliteit.
+
+## v4.6.70
+- Fix: Shutter card flikkerde elke seconde. De `hass` setter keek naar `st?.last_updated` en de volledige state van override-restant sensoren (HH:MM:SS countdown). Die veranderen elke seconde → re-render elke seconde → visuele flicker. Nu wordt alleen gehasht op inhoudelijke data: rolluikposities, last_action, auto_enabled, override_active, module aan/uit. Override timers triggeren alleen een re-render als een timer verschijnt of verdwijnt — niet bij elke afteltik.
+
+## v4.6.69
+- Fix: Solar card toonde "Geen omvormer geconfigureerd" 's avonds en 's nachts. `CloudEMSSolarSystemSensor.native_value` deed `round(...) or None` — in Python is `0.0 or None = None`, dus bij 0W productie werd de sensor `unavailable`. De solar card interpreteert `unavailable` als "niet geconfigureerd". Fix: sensor geeft nu altijd een waarde terug (ook 0.0) zolang er omvormers geconfigureerd zijn.
+- Fix: Zelfconsumptie entities-kaart toonde "Entiteit niet gevonden" voor alle attribute-rijen. `CloudEMSSelfConsumptionSensor.native_value` had dode code: een tweede `return`-statement met de attributen die nooit bereikt werd (Python stopt bij de eerste `return`). De attributen `best_solar_hour`, `monthly_saving_eur`, `advice` etc. zijn verplaatst naar `extra_state_attributes`. Dashboard hersteld naar de originele attributen.
+
+## v4.6.68
+- Fix: Batterij card toonde "Geen batterij geconfigureerd" terwijl Zonneplan Nexus wél actief is. `sensor.cloudems_battery_so_c` geeft `null` terug wanneer de batteries-array leeg is (Zonneplan gebruikt een ander data-pad). Fallback toegevoegd: card leest SoC nu ook uit `sensor.cloudems_batterij_epex_schema` attributen (`soc_pct`).
+- Fix: Zelfconsumptie entities-kaart toonde "Entiteit niet gevonden" voor 4 attribute-rijen. Attributen `best_solar_hour` en `monthly_saving_eur` bestaan niet in de sensor. Vervangen door de bestaande attributen: `self_covered_kwh`, `total_consumption_kwh`, `grid_import_kwh`, `advice`.
+- Fix: CloudEMS Control Card (Alles tab) re-renderde elke seconde door `new Date().toLocaleTimeString()` in de HTML. `sh.innerHTML !== html` was altijd `true` door de veranderende timestamp, waardoor tabs en interactie niet werkten. Timestamp verwijderd uit de render-string.
+- Fix: Boiler card — temperatuur/liters/douche-tellers begonnen altijd bij 0 bij elke update, waardoor de animatie telkens opnieuw optelde. Nu worden de tellers geanimeerd van de vorige weergegeven waarde naar de nieuwe waarde — alleen zichtbaar verschil als de waarde echt verandert.
+
+## v4.6.67
+- Fix KRITISCH: JS-cards werden niet geladen via de Lovelace resources API. `_async_register_panel()` registreerde alleen `cloudems-cards.js` en `cloudems-card-mod.js`. Nu worden alle 9 JS-resources geregistreerd via `_ALL_JS_RESOURCES` constante in `__init__.py` — dit is de enige plek die HA Storage-mode dashboards gebruikt voor custom element loading.
+- Nieuw: `cloudems-overview-card` v2.0 — volledig interactieve beheerkaart met 5 tabs: Overzicht (energiestroom + beslissingen), Modules (15 tiles, klik om aan/uit te zetten), Rolluiken (open/stop/sluit per rolluik + automaat toggle), Boiler (modus kiezen + setpoint instellen per boiler), Batterij (SoC ring, vermogen, laden/ontladen/auto knoppen voor Zonneplan). Klaar voor gebruik als enige kaart op de Alles tab.
+
+## v4.6.66
+- Fix: Template crash op batterij-tab — `zp.get('probe_current_w', 0) | int` en `zp.get('probe_confirmed_w', 0) | int` crashen als de key bestaat maar `None` als waarde heeft (dict `.get()` default geldt alleen bij ontbrekende key). Vervangen door `| int(0)` (Jinja2 default bij None/fout). Zelfde fix voor `lmd | int` en `lms | int` in de Zonneplan max-vermogen templates.
+
+## v4.6.65
+- Fix KRITISCH: alle nieuwe JS-kaarten (battery, solar, boiler, shutter, pv-forecast, overview, switches) werden nooit geladen. In `__init__.py` werden de Lovelace storage-resources overschreven met alleen `cloudems-cards.js` en `cloudems-card-mod.js` — de `resources:` sectie uit de YAML wordt door HA Storage-mode genegeerd. Alle 9 JS-resources worden nu programmatisch geregistreerd bij iedere HA-herstart. Na installatie + HA-herstart laden alle custom cards correct.
+
+## v4.6.64
+- Fix: `sensor.cloudems_pv_zelfconsumptiegraad` was een verkeerde entity ID — alle 7 verwijzingen vervangen door de correcte `sensor.cloudems_self_consumption` (expliciete entity_id in sensor.py). Dit veroorzaakte Configuratiefout op de Solar tab.
+- Fix: Boiler tab — `type: thermostat` in cloudems-entity-list werkt alleen met `climate.*` entities, niet met `water_heater.*`. Vervangen door `type: entities` met titel "Virtuele thermostaten". Dit veroorzaakte twee Configuratiefout kaarten bovenaan de Warm Water tab.
+- Fix: Cache busters bijgewerkt naar v=4.6.64 in alle JS resource-URLs.
+
+## v4.6.63
+- Nieuw: `cloudems-overview-card.js` v1.0 — alles-in-één kaart met energiestroom (solar/grid/batterij/huis), module-status tiles (15 modules, AAN/UIT + detail), NILM actieve apparaten, rolluiken samenvatting, boiler status, recente beslissingen log.
+- Nieuw: Dashboard tab "Alles" (path: cloudems-alles) met de overview card — volledig overzicht van heel CloudEMS op één tab.
+- Fix: Rolluiken tab — `cloudems-shutter-card` v2.0 nu als primaire kaart boven de legacy markdown. Beslissingen en shadow-hints zichtbaar in de JS card.
+- Fix: Cache busters bijgewerkt van 4.6.61 naar 4.6.63 in alle JS resource-URLs — HA laadt voortaan de juiste versies.
+
+## v4.6.62
+- Nieuw: cloudems-battery-card v2.0 — SoC arc animatie, schema-tijdlijn (24u), live vermogen flow-bar, multi-batterij rijen, kWh vandaag, Ariston verify/retry badge, beslissingsreden.
+- Nieuw: cloudems-solar-card v2.0 — live vermogen, forecast vandaag/morgen, uurlijkse yield-barchart, omvormer rijen met utilisation bar, oriëntatie/fase/clipping chips, forecast nauwkeurigheid.
+- Nieuw: cloudems-shutter-card v2.0 — animated blind-visualisatie per rolluik (positie als gesloten slats), summary strip, auto/override/open badges, shadow-hint bij uitgeschakelde automaat, override-timers sectie. Fix: triggert nu ook op last_updated zodat unavailable→available overgang altijd opvangt.
+- Fix: Boiler tab — kapotte entities-kaart (sensor.cloudems_goedkoopste_warmtebron bestaat niet) vervangen door werkende markdown. Redundante "Setpoint instellen" tekst-only kaart verwijderd.
+- Nieuw: Boiler tab kolom 2 — cloudems-entity-list kaart met alle water_heater.cloudems_* entiteiten (virtuele thermostaten) plus sturing & triggers markdown.
+- Fix: cloudems-dashboard.yaml niet in zip-root geplaatst.
+
+## v4.6.61
+- Nieuw: `cloudems-battery-card.js` — volledig nieuwe custom card voor de batterij-tab. Toont: SoC-ring met kleurcodering (groen/amber/rood), live vermogen met bidirectionele powerbar, kWh geladen/ontladen vandaag, actie-badge (Laden/Ontladen/Idle/Gestopt), reden van beslissing, en per-batterij rijen bij meerdere batterijen.
+- Nieuw: `cloudems-solar-card.js` — volledig nieuwe custom card voor de zon-tab. Toont: huidig totaalvermogen, forecast vandaag/morgen, uur-voor-uur forecast barchart, per-omvormer rij met utilisation-bar, azimuth/tilt/fase/clipping badges, en forecast nauwkeurigheidsindicator.
+- Fix: Boiler-tab — verwijderd de kapotte `entities` kaart met `sensor.cloudems_goedkoopste_warmtebron` (sensor bestaat niet → toonde 2× Configuratiefout). Vervangen door werkende `⚡ Sturing & triggers` markdown met EPEX prijs, PV forecast en per-boiler modus.
+- Nieuw: Boiler-tab — virtuele thermostaat `water_heater.cloudems_*` entiteiten getoond via `cloudems-entity-list`.
+- Nieuw: `cloudems-solar-card.js` toegevoegd aan dashboard resources.
+
+## v4.6.61
+- Nieuw: cloudems-boiler-card.js — tank SVG, liters, douches, 24u grafiek, donut, COP, multi-boiler tabs
+- Fix: Configuratiefout kaarten verwijderd (sensor.cloudems_goedkoopste_warmtebron bestaat niet)
+- Fix: Overbodige Setpoint instellen markdown verwijderd
+- Nieuw: Virtuele thermostaat kaart op boiler-tab via cloudems-entity-list water_heater.cloudems_*
+- Dashboard: JS resources geupdate naar v4.6.61 cache-buster
+## v4.6.60
+- Nieuw: Ariston cloud verify/retry systeem. Na elke preset-commando naar de fysieke boiler wordt de gewenste state opgeslagen als `_pending`. Bij elke coordinator-cyclus (~10s) checkt `async_verify_pending()` of de Ariston de setting ook echt heeft verwerkt door de actuele `operation_mode` en `temperature` te vergelijken. Bij mismatch → retry met backoff (15s, 30s, 60s, 120s). Max 4 retries, daarna waarschuwing in logs.
+- Nieuw: 429 rate-limit detectie — bij een HTTP 429 response wacht CloudEMS automatisch 3 minuten voor de volgende poging (`ARISTON_RATE_LIMIT_S = 180`).
+- Nieuw: Constanten voor tuning: `ARISTON_VERIFY_DELAY_S` (15s), `ARISTON_RETRY_BACKOFF` ([15,30,60,120]s), `ARISTON_MAX_RETRIES` (4), `ARISTON_RATE_LIMIT_S` (180s), `ARISTON_TEMP_TOLERANCE` (±1°C).
+- Nieuw: Verify logt `✓ Ariston cloud verify OK` zodra de state overeenkomt, inclusief het aantal retries dat nodig was.
+
+## v4.6.59
+- Fix: Virtuele boiler — operatiemodi `boost`, `legionella` en `stall` deden niets (vielen in de `else`-tak die alleen een debug log schreef). Alle drie afgehandeld:
+  - `boost`: roept `force_boost_once()` aan en stuurt direct `send_now` met `max_setpoint_boost_c` als setpoint (4u override).
+  - `legionella`: roept `force_legionella()` aan en stuurt direct `send_now` met ≥65°C setpoint (2u override).
+  - `stall`: reset stall-detectie via `force_stall_reset()` en stuurt boiler opnieuw aan met huidig setpoint.
+- Fix: Override-verloopadres breidt nu ook `clear_manual_override()` aan zodat na BOOST/LEGIONELLA de coordinator het setpoint correct overneemt.
+- Nieuw: `force_boost_once()`, `force_legionella()`, `force_stall_reset()` methodes toegevoegd aan `BoilerController`.
+
+## v4.6.58
+- Fix: Rolluiken tab — Status & Beslissing kaart toonde lege inhoud. Oorzaak: de `---`, `####`, `💬` en `🤖` regels stonden op kolom 0 in de YAML `|-` block scalar. YAML interpreteert `---` op kolom 0 als documentseparator waardoor de block scalar werd afgekapt vóór de eigenlijke output-regels. Jinja2 kreeg een onvolledige template (zonder `endfor`/`endif`) en renderde niets. Fix: alle output-regels ingesprongen naar 8 spaties.
+
+## v4.6.57
+- Fix: Boiler setpoint van virtuele thermostaat werd niet doorgezet naar fysieke boiler bij handmatige override. Oorzaak: bij BOOST-modus stuurde `_switch()` altijd `max_setpoint_boost_c` (bijv. 75°C) als setpoint, ook als de gebruiker een lagere waarde (bijv. 71°C) had ingesteld. Fix: als `_manual_override_until` actief is én `active_setpoint_c < max_setpoint_boost_c`, wordt het handmatige setpoint gebruikt.
+- Fix: Delays toegevoegd in de stuurvolgorde voor Ariston Lydos (preset-mode): 2s na `set_operation_mode` zodat cloud-sync verwerkt is vóór `set_value(max_setpoint)`, en 1s daarna vóór `set_temperature`. Voorkomt dat max_setpoint of setpoint genegeerd wordt door timing-issues.
+- Fix: `cloudems-dashboard.yaml` werd per ongeluk in de zip-root geplaatst. Dashboard YAML staat uitsluitend in `custom_components/cloudems/www/`.
+- Fix: `asyncio` toegevoegd als top-level import in `boiler_controller.py` (was alleen lokaal geïmporteerd).
+
+## v4.6.56
+- Fix: Alle ontbrekende vertaalsleutels toegevoegd aan nl/en/de/fr (189 sleutels — o.a. boiler_unit, boiler_brand, managed_battery, dsmr_source, price_provider, cheap_switches, phase_sensors, ai_config, ollama_config, features, peak_config). Config flow toont nu overal correcte labels.
+- Fix: cloudems-shutter-card triggert nu ook bij `last_updated` en `state` wijzigingen van sensor.cloudems_status (was alleen last_changed). Kaart bleef leeg na sensor-unavailable state.
+- Fix: cloudems-shutter-card toont nu een duidelijke foutmelding als sensor.cloudems_status unavailable/unknown is, i.p.v. een lege kaart.
+
 ## v4.5.130
 - Fix: Crash bij opstarten — `async_set_discharge`, `async_set_auto` en `get_wizard_hint` waren per ongeluk verwijderd tijdens de probe-cleanup in v4.5.128/129. Hersteld.
 
@@ -1652,3 +2068,4 @@ Vier bewakers die elke 60 seconden draaien:
 - Multi-omvormer ondersteuning uitgebreid
 - Solar power sommering voor modules zonder CONF_SOLAR_SENSOR
 - Diverse NILM en energiebeheer verbeteringen
+

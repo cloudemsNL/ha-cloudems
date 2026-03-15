@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v2.0.0
 
-const SHUTTER_VERSION = "2.0.0";
+const SHUTTER_VERSION = "2.0.1";
 const SHUTTER_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {

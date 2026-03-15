@@ -1,22 +1,24 @@
 title: ⚡ CloudEMS
 resources:
-  - url: /local/cloudems/cloudems-cards.js?v=4.6.88
+  - url: /local/cloudems/cloudems-cards.js?v=4.6.126
+  - url: /local/cloudems/cloudems-prijsverloop-card.js?v=4.6.126
     type: module
   - url: /local/cloudems/cloudems-card-mod.js
     type: module
-  - url: /local/cloudems/cloudems-boiler-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-decisions-card.js?v=4.6.126
+  - url: /local/cloudems/cloudems-boiler-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-battery-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-battery-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-shutter-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-shutter-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-solar-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-solar-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-pv-forecast-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-pv-forecast-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-zelfconsumptie-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-zelfconsumptie-card.js?v=4.6.126
     type: module
-  - url: /local/cloudems/cloudems-overview-card.js?v=4.6.88
+  - url: /local/cloudems/cloudems-overview-card.js?v=4.6.126
     type: module
 views:
 - title: Overzicht
@@ -479,6 +481,20 @@ views:
         ha-markdown-element hr { border-color: rgba(255,255,255,0.07) !important; margin: 10px 0 !important; }
         ha-markdown-element a { color: rgba(100,180,255,0.9) !important; text-decoration: none !important; font-size: 12px !important; }
 
+- title: Beslissingen
+  path: cloudems-beslissingen
+  type: masonry
+  max_columns: 1
+  icon: mdi:history
+  background: "radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent 60%), rgb(24,24,24)"
+  card_mod:
+    style: |
+      hui-masonry-view {
+        background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent 60%), rgb(24,24,24) !important;
+      }
+  cards:
+  - type: custom:cloudems-decisions-card
+
 - title: Prijzen & Kosten
   path: cloudems-prijzen
   type: masonry
@@ -489,335 +505,8 @@ views:
     style: |
       hui-view { padding: 12px 12px 24px !important; }
   cards:
-  - type: markdown
-    title: "💶 Uurprijzen"
-    content: |
-      {%- set ep   = 'sensor.cloudems_energy_epex_today' -%}
-      {%- set curr = state_attr(ep, 'current_price_display') | float(none) -%}
-      {%- set prev = state_attr(ep, 'prev_hour_price') | float(none) -%}
-      {%- set nxt_list = state_attr(ep, 'next_hours') or [] -%}
-      {%- set nxt  = nxt_list[0].price | float(none) if nxt_list | length > 0 else none -%}
-      {%- set mn   = state_attr(ep, 'min_today') | float(none) -%}
-      {%- set avg  = state_attr(ep, 'avg_today') | float(none) -%}
-      {%- set mx   = state_attr(ep, 'max_today') | float(none) -%}
-      {%- macro ct(v) -%}{{ (v * 100) | round(2) | string ~ ' ct/kWh' if v is not none else '—' }}{%- endmacro -%}
-      {%- macro arrow(a,b) -%}{{ '📈' if b is not none and a is not none and b > a else ('📉' if b is not none and a is not none and b < a else '') }}{%- endmacro -%}
-      {%- set price_lbl = state_attr(ep, 'price_label') or 'Prijs incl. belasting' -%}
-      | | {{ price_lbl }} | |
-      |---|---|---|
-      | 🕐 Vorig uur | {{ ct(prev) }} | |
-      | ⚡ **Nu** | **{{ ct(curr) }}** | {{ arrow(prev, curr) }} |
-      | 🕑 Volgend uur | {{ ct(nxt) }} | {{ arrow(curr, nxt) }} |
-      | | | |
-      | 📉 Min vandaag | {{ ct(mn) }} | |
-      | 📊 Gem vandaag | {{ ct(avg) }} | |
-      | 📈 Max vandaag | {{ ct(mx) }} | |
-    card_mod:
-      style: |
-        ha-card {
-          background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.06) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(255,255,255);
-          --secondary-text-color: rgb(163,163,163);
-          --primary-color: rgb(0,177,64);
-          --card-background-color: transparent;
-          --ha-card-border-color: transparent;
-        }
-        ha-card:hover {
-          border-color: rgba(0,177,64,0.5) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;
-          transform: translateY(-1px) !important;
-        }
-        .card-header {
-          background: transparent !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          letter-spacing: 0.04em !important;
-          padding: 14px 16px 12px !important;
-        }
-        ha-markdown-element table { width: 100% !important; }
-        ha-markdown-element td, ha-markdown-element th {
-          padding: 6px 8px !important;
-          border-bottom: 1px solid rgba(255,255,255,0.06) !important;
-          font-size: 13px !important;
-        }
-        ha-markdown-element th { color: rgb(163,163,163) !important; font-weight: 600 !important; }
-  - type: conditional
-    conditions:
-    - condition: numeric_state
-      entity: sensor.cloudems_energy_price_current_hour
-      above: 0.3
-    card:
-      type: markdown
-      content: |
-        ⚠️ **Hoge prijs alert!** Huidige EPEX prijs is {{ states('sensor.cloudems_energy_price_current_hour') }} €/kWh — boven de ingestelde drempel.
-        Overweeg verbruik te verschuiven naar goedkopere uren.
-      style: |
-        ha-card {
-          background: linear-gradient(135deg, rgb(45,21,21) 0%, rgb(61,31,31) 100%);
-          border-left: 4px solid rgb(231,76,60);
-          border-radius: 10px;
-        }
-      card_mod:
-        style: |
-          ha-card {
-            background: rgb(34,34,34) !important;
-            border: 1px solid rgba(255,255,255,0.06) !important;
-            border-radius: 16px !important;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-            --primary-text-color: rgb(163,163,163);
-            --secondary-text-color: rgb(102,102,102);
-            --primary-color: rgb(0,177,64);
-            --card-background-color: transparent;
-            --ha-card-border-color: transparent;
-          }
-          ha-card:hover {
-            border-color: rgba(0,177,64,0.5) !important;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;
-            transform: translateY(-1px) !important;
-          }
-          .card-header {
-            background: transparent !important;
-            border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-            color: rgb(255,255,255) !important;
-            font-size: 12px !important;
-            font-weight: 600 !important;
-            padding: 14px 16px 12px !important;
-          }
-          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-          ha-markdown-element th {
-            background: rgba(0,177,64,0.1) !important;
-            color: rgb(0,212,78) !important;
-            font-size: 10px !important;
-            font-weight: 700 !important;
-            letter-spacing: 0.08em !important;
-            text-transform: uppercase !important;
-            padding: 8px 10px !important;
-            border-bottom: 1px solid rgba(0,177,64,0.2) !important;
-          }
-          ha-markdown-element td {
-            color: rgb(163,163,163) !important;
-            border-bottom: 1px solid rgba(255,255,255,0.05) !important;
-            padding: 7px 10px !important;
-          }
-          ha-markdown-element tr:hover td {
-            background: rgba(0,177,64,0.06) !important;
-            color: rgb(255,255,255) !important;
-          }
-          ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }
-          ha-markdown-element em { color: rgb(102,102,102) !important; }
-          ha-markdown-element code {
-            background: rgba(0,177,64,0.12) !important;
-            color: rgb(0,212,78) !important;
-            padding: 1px 6px !important;
-            border-radius: 4px !important;
-            font-size: 12px !important;
-          }
-          ha-markdown-element blockquote {
-            border-left: 3px solid rgb(0,177,64) !important;
-            background: rgba(0,177,64,0.07) !important;
-            padding: 8px 14px !important;
-            border-radius: 0 8px 8px 0 !important;
-            color: rgb(163,163,163) !important;
-          }
-  - type: conditional
-    conditions:
-    - condition: numeric_state
-      entity: sensor.cloudems_runtime_warnings
-      above: 0
-    card:
-      type: markdown
-      title: ⚠️ CloudEMS Waarschuwingen
-      content: |
-        {% set w = state_attr('sensor.cloudems_runtime_warnings', 'warnings') or [] %}
-        {% for item in w %}
-        {% if item.level == 'error' %}🔴{% else %}🟡{% endif %} **{{ item.message }}**
-        {% if item.detail %}*{{ item.detail }}*{% endif %}
-        {% endfor %}
-      card_mod:
-        style: |
-          ha-card {
-            background: rgb(40,30,20) !important;
-            border: 1px solid rgba(255,160,0,0.4) !important;
-            border-left: 3px solid rgb(255,160,0) !important;
-            border-radius: 16px !important;
-          }
+  - type: custom:cloudems-prijsverloop-card
 
-  - type: markdown
-    title: 📊 Prijsverloop
-    content: |
-      {%- set today     = state_attr('sensor.cloudems_energy_epex_today', 'today_prices') or [] -%}
-      {%- set tomorrow  = state_attr('sensor.cloudems_energy_epex_today', 'tomorrow_prices') or [] -%}
-      {%- set t_avail   = state_attr('sensor.cloudems_energy_epex_today', 'tomorrow_available') | default(false) -%}
-      {%- set cur_h     = now().hour -%}
-      {%- set all_p     = (today | map(attribute='price') | list) + (tomorrow | map(attribute='price') | list) -%}
-      {%- set max_p     = ([0.001] + all_p) | max -%}
-      {%- set avg_today = (all_p[:24] | sum / ([all_p[:24] | length, 1] | max)) | round(4) -%}
-      {%- if not today %}*EPEX prijsdata nog niet beschikbaar.*
-      {%- else %}
-      {%- set sorted_p = today | map(attribute='price') | list | sort -%}
-      {%- set n = sorted_p | length -%}
-      {%- set cheap_thresh = sorted_p[((n * 0.25) | int)] if n > 0 else 0 -%}
-      {%- set exp_thresh   = sorted_p[((n * 0.75) | int)] if n > 0 else 999 -%}
-      {%- set ns = namespace(cheap_hour=-1) -%}
-      {%- for p in today %}
-        {%- if p.hour | int > cur_h and (ns.cheap_hour == -1 or p.price | float(0) < (today | selectattr('hour','eq', ns.cheap_hour) | map(attribute='price') | first | float(999))) -%}
-          {%- set ns.cheap_hour = p.hour | int -%}
-        {%- endif -%}
-      {%- endfor -%}
-      **Vandaag** — gem. €{{ state_attr('sensor.cloudems_energy_epex_today', 'avg_today') | float(0) | round(4) }}/kWh{% if ns.cheap_hour >= 0 %} · ⏱ goedkoopst om **{{ '%02d:00' % ns.cheap_hour }}** (€{{ (today | selectattr('hour','equalto', ns.cheap_hour) | map(attribute='price') | first | float(0)) | round(4) }}){% elif t_avail and tomorrow %}{%- set sorted_tmr2 = tomorrow | sort(attribute='price') -%} · ⏱ morgen goedkoopst om **{{ '%02d:00' % (sorted_tmr2[0].hour | int) }}** (€{{ sorted_tmr2[0].price | float(0) | round(4) }}){% endif %}{% if t_avail %} · **Morgen ✅**{% endif %}
-
-      | Uur | Icon | €/kWh | Grafiek |
-      |---|:---:|---:|---|
-      {%- for p in today %}
-      {%- set h = p.hour | int -%}{%- set v = p.price | float(0) -%}
-      {%- set pct = ([0, ((v / max_p) * 20)] | max) | int -%}
-      {%- set bar_fill = '░' if v <= cheap_thresh else ('█' if v >= exp_thresh else '▓') -%}
-      {%- set bar = bar_fill * pct %}
-      | {% if h == cur_h %}**{{ '%02d:00' % h }} ◄**{% else %}{{ '%02d:00' % h }}{% endif %} | {% if v < 0 %}⚡{% elif v >= exp_thresh %}⚠️{% elif v <= cheap_thresh %}💚{% else %} {% endif %} | {% if v < 0 %}**{{ '%.4f' % v }}**{% else %}{{ '%.4f' % v }}{% endif %} | {{ bar }} |
-      {%- endfor %}
-      {%- if t_avail and tomorrow %}
-
-      **Morgen** — gem. €{{ (tomorrow | map(attribute='price') | list | sum / (tomorrow | length)) | round(4) }}/kWh
-
-      | Uur | Icon | €/kWh | Grafiek |
-      |---|:---:|---:|---|
-      {%- set avg_tmr = (tomorrow | map(attribute='price') | list | sum / (tomorrow | length)) | round(4) -%}
-      {%- set sorted_tmr = tomorrow | map(attribute='price') | list | sort -%}
-      {%- set nt = sorted_tmr | length -%}
-      {%- set cheap_t = sorted_tmr[((nt * 0.25) | int)] if nt > 0 else 0 -%}
-      {%- set exp_t   = sorted_tmr[((nt * 0.75) | int)] if nt > 0 else 999 -%}
-      {%- for p in tomorrow %}
-      {%- set h = p.hour | int -%}{%- set v = p.price | float(0) -%}
-      {%- set pct = ([0, ((v / max_p) * 20)] | max) | int -%}
-      {%- set bar_fill = '░' if v <= cheap_t else ('█' if v >= exp_t else '▓') -%}
-      {%- set bar = bar_fill * pct %}
-      | {{ '%02d:00' % h }} | {% if v < 0 %}⚡{% elif v >= exp_t %}⚠️{% elif v <= cheap_t %}💚{% else %} {% endif %} | {% if v < 0 %}**{{ '%.4f' % v }}**{% else %}{{ '%.4f' % v }}{% endif %} | {{ bar }} |
-      {%- endfor %}
-      {%- elif not t_avail %}
-      *Morgen-prijzen beschikbaar na ~13:00 uur.*
-      {%- endif %}
-      {%- endif %}
-    card_mod:
-      style: |
-        ha-card {
-          background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.06) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(163,163,163);
-          --primary-color: rgb(240,165,0);
-          --card-background-color: transparent;
-          --ha-card-border-color: transparent;
-        }
-        ha-card:hover {
-          border-color: rgba(240,165,0,0.5) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(240,165,0,0.12) !important;
-          transform: translateY(-1px) !important;
-        }
-        .card-header {
-          background: transparent !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          padding: 14px 16px 12px !important;
-        }
-        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-        ha-markdown-element th {
-          background: rgba(240,165,0,0.1) !important;
-          color: rgb(240,165,0) !important;
-          font-size: 10px !important;
-          font-weight: 700 !important;
-          letter-spacing: 0.08em !important;
-          text-transform: uppercase !important;
-          padding: 8px 10px !important;
-          border-bottom: 1px solid rgba(240,165,0,0.2) !important;
-        }
-        ha-markdown-element td {
-          color: rgb(163,163,163) !important;
-          border-bottom: 1px solid rgba(255,255,255,0.05) !important;
-          padding: 7px 10px !important;
-          font-family: 'Courier New', Courier, monospace !important;
-          font-size: 12px !important;
-          letter-spacing: 0 !important;
-        }
-        ha-markdown-element tr:hover td {
-          background: rgba(240,165,0,0.06) !important;
-          color: rgb(255,255,255) !important;
-        }
-        ha-markdown-element strong { color: rgb(240,165,0) !important; font-weight: 700 !important; }
-        ha-markdown-element code {
-          background: rgba(240,165,0,0.12) !important;
-          color: rgb(240,165,0) !important;
-          padding: 1px 4px !important;
-          border-radius: 3px !important;
-          font-size: 11px !important;
-        }
-  - type: entities
-    title: 🕐 Goedkoopste uren
-    entities:
-    - entity: binary_sensor.cloudems_energy_cheapest_1h
-      name: Goedkoopste uur nu
-      state_color: true
-    - entity: binary_sensor.cloudems_energy_cheapest_2h
-      name: Goedkoopste 2u-blok nu
-      state_color: true
-    - entity: binary_sensor.cloudems_energy_cheapest_3h
-      name: Goedkoopste 3u-blok nu
-      state_color: true
-    - entity: binary_sensor.cloudems_energy_cheapest_4h
-      name: Goedkoopste 4u-blok nu
-      state_color: true
-    - type: attribute
-      entity: sensor.cloudems_energy_epex_today
-      attribute: cheapest_2h_start
-      name: Goedkoopste 2u blok (start)
-    - type: attribute
-      entity: sensor.cloudems_energy_epex_today
-      attribute: cheapest_3h_start
-      name: Goedkoopste 3u blok (start)
-    - type: attribute
-      entity: sensor.cloudems_energy_epex_today
-      attribute: cheapest_4h_start
-      name: Goedkoopste 4u blok (start)
-    card_mod:
-      style: |
-        ha-card {
-          background: rgb(34,34,34) !important;
-          border: 1px solid rgba(255,255,255,0.06) !important;
-          border-radius: 16px !important;
-          box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;
-          --primary-text-color: rgb(255,255,255);
-          --secondary-text-color: rgb(163,163,163);
-          --state-active-color: rgb(0,177,64);
-          --state-inactive-color: rgb(68,68,68);
-          --state-unavailable-color: rgb(239,68,68);
-          --primary-color: rgb(0,177,64);
-          --accent-color: rgb(0,212,78);
-          --card-background-color: transparent;
-          --ha-card-border-color: transparent;
-          --divider-color: rgba(255,255,255,0.06);
-          --secondary-background-color: rgba(0,177,64,0.08);
-        }
-        ha-card:hover {
-          border-color: rgba(0,177,64,0.5) !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;
-          transform: translateY(-1px) !important;
-        }
-        .card-header {
-          background: transparent !important;
-          border-bottom: 1px solid rgba(255,255,255,0.07) !important;
-          color: rgb(255,255,255) !important;
-          font-size: 12px !important;
-          font-weight: 600 !important;
-          letter-spacing: 0.04em !important;
-          padding: 14px 16px 12px !important;
-        }
   - type: entities
     title: 💶 Energiekosten
     entities:
@@ -5933,104 +5622,35 @@ views:
     title: "🚿 Boilers — Live status"
     content: |
       {%- set all_boilers = (state_attr('sensor.cloudems_boiler_status', 'boilers') or []) -%}
-      {%- set groups      = (state_attr('sensor.cloudems_boiler_status', 'groups')  or []) -%}
-      {%- set log         = (state_attr('sensor.cloudems_boiler_status', 'log')     or []) -%}
-
       {%- if not all_boilers %}
-      *Geen boilers geconfigureerd. Voeg boilers toe via **Instellingen → CloudEMS → 🚿 Warm Water**.*
+      *Geen boilers geconfigureerd.*
       {%- else %}
-
       {%- for b in all_boilers %}
-      {%- set is_on        = b.get('is_on', false) %}
-      {%- set temp         = b.get('temp_c') %}
-      {%- set setpoint     = (b.get('active_setpoint_c') or b.get('setpoint_c', 60)) | round(0) | int %}
-      {%- set power        = b.get('current_power_w', b.get('power_w', 0)) | float %}
-      {%- set heat_rate    = b.get('heat_rate_c_h', 0) | float %}
-      {%- set loss_rate    = b.get('thermal_loss_c_h', 0) | float %}
-      {%- set btype        = b.get('boiler_type', 'resistive') %}
-      {%- set label        = b.get('label', b.get('entity_id', '?').split('.')[-1]) %}
-      {%- set control_mode = b.get('control_mode', 'switch') %}
-      {%- set legionella   = b.get('legionella_days') %}
-      {%- set scale_score  = b.get('scale_score_pct') %}
-      {%- set cop          = b.get('cop_at_current_temp') %}
-
-      {%- set type_icon = '🔌' if btype == 'resistive' else ('♨️' if btype == 'heat_pump' else ('🔀' if btype == 'hybrid' else '📊')) %}
-      {%- set status_icon = '🟢' if is_on else '⚫' %}
-
-      {# ── Cascade positie ── #}
-      {%- set cascade_pos = '' %}
-      {%- for g in groups %}
-        {%- for gb in g.get('boilers', []) %}
-          {%- if gb.get('entity_id') == b.get('entity_id') %}
-            {%- if gb.get('is_delivery', false) %}
-              {%- set cascade_pos = ' · 🥇 leveringsboiler' %}
-            {%- elif g.get('boiler_count', 1) > 1 %}
-              {%- set cascade_pos = ' · #' ~ loop.index ~ ' in ' ~ g.get('name', 'groep') %}
-            {%- endif %}
-          {%- endif %}
-        {%- endfor %}
-      {%- endfor %}
-
-      {# ── Temperatuur: sensor of schatting ── #}
-      {%- if temp is not none %}
-        {%- set temp_display = temp | round(1) | string + '°C' %}
-        {%- set temp_label   = temp_display %}
-        {%- set temp_note    = '' %}
-      {%- elif is_on and heat_rate > 0 %}
-        {%- set on_since  = b.get('last_on_ts', 0) | float %}
-        {%- set now_ts    = now().timestamp() %}
-        {%- set on_min    = ((now_ts - on_since) / 60) | round(0) | int if on_since > 0 else 0 %}
-        {%- set est_temp  = [setpoint - heat_rate * (1 - on_min / 90), setpoint] | min | round(1) %}
-        {%- set temp_label = '~' + est_temp | string + '°C' %}
-        {%- set temp_note  = ' *(geschat)*' %}
-      {%- elif not is_on and loss_rate > 0 %}
-        {%- set temp_label = '~' + (setpoint - loss_rate * 0.5) | round(1) | string + '°C' %}
-        {%- set temp_note  = ' *(geschat)*' %}
-      {%- else %}
-        {%- set temp_label = '—' %}
-        {%- set temp_note  = '' %}
-      {%- endif %}
-
-      {# ── Reden uit beslissingslog ── #}
-      {%- set last_reason = '' %}
-      {%- for entry in log %}
-        {%- if entry[1] | string | lower | replace('🔌 ', '') | truncate(50, true, '') | lower is search(label | lower) or
-               entry[1] | string | lower is search(b.get('entity_id', '') | lower) %}
-          {%- if last_reason == '' %}
-            {%- set last_reason = entry[1] | string | replace('🔌 ', '') | replace('hold_on', '🟢 Aan houden') | replace('hold_off', '⚫ Uit houden') | replace('turn_on', '▶️ Aangezet') | replace('turn_off', '⏹️ Uitgezet') %}
-          {%- endif %}
-        {%- endif %}
-      {%- endfor %}
-
+      {%- set temp = b.get('temp_c') %}
+      {%- set label_slug = b.get('label', '') | lower | replace(' ', '_') | replace('-', '_') %}
+      {%- set vboiler_eid = 'water_heater.cloudems_boiler_' + label_slug %}
+      {%- set vboiler_sp = state_attr(vboiler_eid, 'temperature') %}
+      {%- set override_sp = state_attr(vboiler_eid, 'override_setpoint_c') %}
+      {%- set setpoint = (override_sp or vboiler_sp or b.get('active_setpoint_c') or b.get('setpoint_c', 60)) | round(0) | int %}
+      {%- set power = b.get('current_power_w', b.get('power_w', 0)) | float %}
+      {%- set cop = b.get('cop_at_current_temp') %}
+      {%- set label = b.get('label', '?') %}
+      {%- set is_on = b.get('is_on', false) %}
       ---
-      #### {{ status_icon }} {{ type_icon }} **{{ label }}**{{ cascade_pos }}
+      #### {{ '🟢' if is_on else '⚫' }} **{{ label }}**
       | | |
       |---|---|
-      | **Temperatuur** | {{ temp_label }}{{ temp_note }} |
-      | **Setpoint** | {{ setpoint | round(0) | int }}°C |
-      {%- if is_on and power < 50 and temp is none %}
-      | **Vermogen** | *max temp bereikt* |
-      {%- else %}
+      | **Temperatuur** | {{ temp | round(1) | string + '°C' if temp is not none else '—' }} |
+      | **Setpoint** | {{ setpoint }}°C |
       | **Vermogen** | {{ power | round(0) | int }} W |
-      {%- endif %}
       {%- if cop %}
       | **COP nu** | {{ cop | round(2) }} |
       {%- endif %}
-      {%- if legionella %}
-      | **Legionella** | {{ legionella }} dagen geleden |
-      {%- endif %}
-      {%- if scale_score and scale_score > 30 %}
-      | **Kalkaanslag** | {{ scale_score | round(0) | int }}% ⚠️ |
-      {%- endif %}
-      {%- if last_reason %}
-      | **Beslissing** | {{ last_reason | truncate(80, true, '…') }} |
-      {%- endif %}
-
       {%- endfor %}
       {%- endif %}
     card_mod:
       style: |
-        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }
+        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; }
         .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
         ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
         ha-markdown-element td { padding: 4px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.04) !important; font-size: 13px !important; }
@@ -6054,35 +5674,6 @@ views:
         - entity_id: "water_heater.cloudems_*"
     sort:
       method: friendly_name
-
-  - type: markdown
-    title: "⚡ Sturing & triggers"
-    content: |-
-      {%- set bs = state_attr('sensor.cloudems_boiler_status', 'boilers') or [] %}
-      {%- set gs = state_attr('sensor.cloudems_boiler_status', 'groups') or [] %}
-      {%- set price = states('sensor.cloudems_energy_price_current_hour') | float(0) %}
-      {%- set pv    = state_attr('sensor.cloudems_pv_forecast_today', 'forecast_kwh') | float(0) %}
-      {%- set all_b = [] %}
-      {%- for b in bs %}{%- set all_b = all_b + [b] %}{%- endfor %}
-      {%- for g in gs %}{%- for b in g.get('boilers',[]) %}{%- set all_b = all_b + [b] %}{%- endfor %}{%- endfor %}
-      | | |
-      |---|---|
-      | ⚡ **EPEX nu** | {{ price | round(4) }} €/kWh |
-      | ☀️ **PV vandaag** | {{ pv | round(1) }} kWh |
-      {%- for b in all_b %}
-      {%- set mode = b.get('actual_mode','') %}
-      {%- set mode_icon = '🔥' if mode | lower == 'boost' else ('🌿' if mode | lower in ('green','eco') else ('🦠' if mode | lower == 'legionella' else '💤')) %}
-      | {{ mode_icon }} **{{ b.get('label','?') }}** | {{ mode }} · {{ b.get('temp_c','—') }}°C → {{ (b.get('active_setpoint_c') or b.get('setpoint_c',0)) | round(0) | int }}°C |
-      {%- endfor %}
-      {%- if not all_b %}
-      *Geen boilers geconfigureerd.*
-      {%- endif %}
-    card_mod:
-      style: |
-        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; }
-        .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
-        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-        ha-markdown-element td { padding: 4px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.04) !important; font-size: 13px !important; }
 
   - type: markdown
     title: "🌡️ Thermisch verlies & voorspelling"
@@ -6178,62 +5769,6 @@ views:
         ha-markdown-element td, ha-markdown-element th { padding: 5px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; font-size: 13px !important; }
         ha-markdown-element th { color: rgba(255,255,255,0.5) !important; font-weight: 500 !important; }
 
-  - type: button
-    name: "Leerdata wissen (alle groepen)"
-    icon: mdi:broom
-    tap_action:
-      action: call-service
-      service: cloudems.wis_boiler_leerdata
-      confirmation:
-        text: "Weet je zeker dat je alle boiler leerdata wilt wissen?"
-    card_mod:
-      style: |
-        ha-card { background: rgba(255,80,80,0.08) !important; border: 1px solid rgba(255,80,80,0.25) !important; border-radius: 12px !important; }
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # KOLOM 3 — Beslissingslog & analyse
-  # ════════════════════════════════════════════════════════════════════════════
-
-  - type: markdown
-    title: "📋 Beslissingen"
-    content: |-
-      {%- set log = (state_attr('sensor.cloudems_boiler_status', 'log') or []) %}
-      {%- if not log %}
-      *Nog geen beslissingen gelogd.*
-      {%- else %}
-      {%- set ns = namespace(last_msg='', last_time='', count=0, shown=0) %}
-      {%- for entry in log %}
-        {%- set ts  = entry[0] | default('') %}
-        {%- set msg = entry[1] | default('') | string | replace('🔌 ', '') %}
-        {%- set tijdstip = ts | as_datetime | as_local | default(none) %}
-        {%- set tijd_str = tijdstip.strftime('%H:%M') if tijdstip else '—' %}
-        {%- set msg_norm = msg | replace('hold_on', 'aan gehouden') | replace('hold_off', 'uit gehouden') | replace('turn_on', 'aangezet') | replace('turn_off', 'uitgezet') %}
-        {%- set action_raw = msg | lower %}
-        {%- if 'turn_on' in action_raw or 'aangezet' in action_raw %}{%- set icon = '▶️' %}
-        {%- elif 'turn_off' in action_raw or 'uitgezet' in action_raw %}{%- set icon = '⏹️' %}
-        {%- elif 'hold_on' in action_raw %}{%- set icon = '🟢' %}
-        {%- elif 'hold_off' in action_raw %}{%- set icon = '⚫' %}
-        {%- else %}{%- set icon = '💤' %}
-        {%- endif %}
-        {%- if msg_norm != ns.last_msg and ns.shown < 8 %}
-          {%- if ns.count > 1 %} *({{ ns.count }}×)*{% endif %}
-      **{{ tijd_str }}** {{ icon }} {{ msg_norm | truncate(90, true, '…') }}
-          {%- set ns.last_msg = msg_norm %}
-          {%- set ns.last_time = tijd_str %}
-          {%- set ns.count = 1 %}
-          {%- set ns.shown = ns.shown + 1 %}
-        {%- elif msg_norm == ns.last_msg %}
-          {%- set ns.count = ns.count + 1 %}
-        {%- endif %}
-      {%- endfor %}
-      {%- if ns.count > 1 %} *({{ ns.count }}×)*{% endif %}
-      {%- endif %}
-    card_mod:
-      style: |
-        ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }
-        .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
-        ha-markdown-element p { font-size: 13px !important; line-height: 1.6 !important; margin: 4px 0 !important; }
-
   - type: markdown
     title: "📊 Warm water — gebruikspatroon per uur"
     content: |
@@ -6266,75 +5801,6 @@ views:
         ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }
         .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
         ha-markdown-element p, ha-markdown-element code { font-size: 12px !important; line-height: 1.5 !important; font-family: monospace !important; }
-
-  # ── Dimmer / proportioneel (alleen tonen als relevant) ───────────────────
-  - type: conditional
-    conditions:
-      - condition: template
-        value_template: >
-          {%- set groups = state_attr('sensor.cloudems_boiler_status', 'groups') or [] %}
-          {%- set boilers = state_attr('sensor.cloudems_boiler_status', 'boilers') or [] %}
-          {%- set all = [] %}
-          {%- for g in groups %}{% for b in g.get('boilers', []) %}{% set all = all + [b] %}{% endfor %}{% endfor %}
-          {%- set all = all + boilers %}
-          {{ all | selectattr('control_mode', 'in', ['dimmer', 'variable', 'proportional']) | list | length > 0 }}
-    card:
-      type: markdown
-      title: "🔌 Dimmer & proportionele sturing"
-      content: |
-        {%- set groups  = (state_attr('sensor.cloudems_boiler_status', 'groups')  or []) %}
-        {%- set boilers = (state_attr('sensor.cloudems_boiler_status', 'boilers') or []) %}
-        {%- set ns = namespace(all=[]) %}
-        {%- for g in groups %}{% for b in g.get('boilers', []) %}{% set ns.all = ns.all + [b | combine({'group': g.get('name', '')})] %}{% endfor %}{% endfor %}
-        {%- for b in boilers %}{% set ns.all = ns.all + [b | combine({'group': 'Enkelvoudig'})] %}{% endfor %}
-        {%- set dimmers = ns.all | selectattr('control_mode', 'in', ['dimmer', 'variable', 'proportional']) | list %}
-
-        | Boiler | Groep | Modus | Huidig vermogen |
-        |---|---|---|---|
-        {%- for b in dimmers %}
-        | {{ b.get('label', '?') }} | {{ b.get('group', '—') }} | `{{ b.get('control_mode') }}` | {{ b.get('power_w', '—') }} W |
-        {%- endfor %}
-      card_mod:
-        style: |
-          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; }
-          .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
-          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-          ha-markdown-element td, ha-markdown-element th { padding: 5px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; font-size: 13px !important; }
-
-  # ── WP COP (conditioneel) ─────────────────────────────────────────────────
-  - type: conditional
-    conditions:
-      - condition: template
-        value_template: >
-          {%- set boilers = state_attr('sensor.cloudems_boiler_status', 'boilers') or [] %}
-          {%- set groups  = state_attr('sensor.cloudems_boiler_status', 'groups')  or [] %}
-          {%- set ns = namespace(has_wp=false) %}
-          {%- for b in boilers %}{% if b.get('boiler_type') in ['heat_pump', 'hybrid'] %}{% set ns.has_wp = true %}{% endif %}{% endfor %}
-          {%- for g in groups %}{% for b in g.get('boilers', []) %}{% if b.get('boiler_type') in ['heat_pump', 'hybrid'] %}{% set ns.has_wp = true %}{% endif %}{% endfor %}{% endfor %}
-          {{ ns.has_wp }}
-    card:
-      type: markdown
-      title: "🌡️ Warmtepomp COP"
-      content: |
-        {%- set groups  = (state_attr('sensor.cloudems_boiler_status', 'groups')  or []) %}
-        {%- set boilers = (state_attr('sensor.cloudems_boiler_status', 'boilers') or []) %}
-        {%- set ns = namespace(all=[]) %}
-        {%- for g in groups %}{% for b in g.get('boilers', []) %}{% set ns.all = ns.all + [b] %}{% endfor %}{% endfor %}
-        {%- set ns.all = ns.all + boilers %}
-        {%- set wps = ns.all | selectattr('boiler_type', 'in', ['heat_pump', 'hybrid']) | list %}
-
-        | Boiler | Type | COP nu | Vermogen |
-        |---|---|---|---|
-        {%- for b in wps %}
-        {%- set cop = b.get('cop_at_current_temp') %}
-        | {{ b.get('label', '?') }} | {{ b.get('boiler_type') }} | {{ cop | round(2) if cop else '—' }} | {{ b.get('power_w', '—') }} W |
-        {%- endfor %}
-      card_mod:
-        style: |
-          ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; }
-          .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size: 14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
-          ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-          ha-markdown-element td, ha-markdown-element th { padding: 5px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; font-size: 13px !important; }
 
 
 - title: Klimaat
@@ -10820,6 +10286,19 @@ views:
             card_mod:
               style: |
                 ha-card { background: rgba(100,160,255,0.14) !important; border: 1px solid rgba(100,160,255,0.50) !important; border-radius: 12px !important; box-shadow: none !important; }
+
+          - type: button
+            name: "⚠️ Boiler leerdata"
+            icon: mdi:broom
+            label: Warm water leerdata wissen
+            tap_action:
+              action: call-service
+              service: cloudems.wis_boiler_leerdata
+              confirmation:
+                text: "Weet je zeker dat je alle boiler leerdata wilt wissen?"
+            card_mod:
+              style: |
+                ha-card { background: rgba(255,80,80,0.08) !important; border: 1px solid rgba(255,80,80,0.25) !important; border-radius: 12px !important; box-shadow: none !important; }
 
           - type: button
             name: "⚠️ Alle leerdata"

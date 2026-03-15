@@ -329,7 +329,9 @@ class BatteryProviderRegistry:
                     "action":   "open_options",
                 })
             elif p.is_available:
-                state = p.read_state()
+                # Gebruik gecachede _last_state — voorkomt race condition waarbij
+                # een tijdelijk unavailable entity een valse offline-melding geeft.
+                state = getattr(p, "_last_state", None) or p.read_state()
                 if not state.is_online:
                     warnings.append({
                         "type":     "provider_offline",

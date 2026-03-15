@@ -17,7 +17,7 @@
  *   title: "Warm water"
  */
 
-const BOILER_CARD_VERSION = "1.0.0";
+const BOILER_CARD_VERSION = "1.0.3";
 
 // ── Design tokens ────────────────────────────────────────────────────────────
 const S = `
@@ -255,6 +255,46 @@ const S = `
   }
   .tab:hover { color: #888; }
   .tab.active { color: #ff8040; border-bottom: 2px solid #ff8040; background: rgba(255,128,64,0.04); }
+
+  /* ── Dual graph: temp + power ── */
+  .dual-graph {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .graph-panel { }
+  .power-bar {
+    width: 100%; border-radius: 3px 3px 0 0;
+    min-height: 3px;
+    transition: height 0.8s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ── Beslissingslog ── */
+  .decisions {
+    padding: 14px 20px 20px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+  .decisions-title {
+    font-size: 11px; color: #444; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .decisions-title::after {
+    content: ''; flex: 1; height: 1px; background: rgba(255,255,255,0.05);
+  }
+  .dec-list { display: flex; flex-direction: column; gap: 5px; }
+  .dec-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 5px 8px; border-radius: 8px;
+    background: rgba(255,255,255,0.02);
+    font-size: 12px; line-height: 1.4;
+  }
+  .dec-row:first-child { background: rgba(255,255,255,0.04); }
+  .dec-time { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #555; flex-shrink: 0; }
+  .dec-icon { font-size: 12px; flex-shrink: 0; }
+  .dec-msg  { color: #888; flex: 1; }
+  .dec-cnt  { font-size: 10px; color: #444; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+  .dec-empty { font-size: 12px; color: #333; padding: 6px 8px; font-style: italic; }
 `;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -353,6 +393,106 @@ function buildTempBars(history /* [{t, v}] */, setpoint) {
 }
 
 // ── Tank SVG ─────────────────────────────────────────────────────────────────
+// ── Power bar chart ───────────────────────────────────────────────────────────
+function buildPowerBars(history /* [{t, v}] */, maxPower) {
+  if (!history || !history.length) {
+    return '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Geen data</div>';
+  }
+  const vals = history.map(h => h.v);
+  const maxV = Math.max(...vals, maxPower || 100, 1);
+  return `<div class="temp-chart">` + history.map((h, i) => {
+    const pct  = clamp(h.v / maxV, 0, 1);
+    const isOn = h.v > 50;
+    const col  = isOn
+      ? `hsl(${40 - pct * 30},90%,${40 + pct * 20}%)`
+      : 'rgba(255,255,255,0.07)';
+    const ht   = Math.max(pct * 60, 3);
+    const isLast = i === history.length - 1;
+    return `<div class="bar-wrap">
+      <div class="bar power-bar" style="height:${ht}px;background:${col}">
+        ${isLast ? `<span class="bar-tip">${h.v > 0 ? Math.round(h.v) + 'W' : ''}</span>` : ''}
+      </div>
+      ${i % Math.max(1, Math.floor(history.length / 4)) === 0 ? `<span class="bar-lbl">${h.t}</span>` : '<span class="bar-lbl"> </span>'}
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+// ── Decisions log per boiler ──────────────────────────────────────────────────
+function buildDecisionsHtml(log, label, entityId) {
+  if (!log || !log.length) {
+    return `<div class="dec-empty">Nog geen beslissingen gelogd.</div>`;
+  }
+
+  const labelLow  = (label || '').toLowerCase();
+  const entityLow = (entityId || '').toLowerCase();
+
+  // Filter entries belonging to this boiler
+  const mine = log.filter(entry => {
+    const msg = (entry[1] || '').toString().toLowerCase();
+    return msg.includes(labelLow) || msg.includes(entityLow);
+  });
+
+  if (!mine.length) {
+    return `<div class="dec-empty">Geen beslissingen gevonden voor ${esc(label)}.</div>`;
+  }
+
+  // Deduplicate consecutive identical messages, max 8 unique shown
+  const rows = [];
+  let lastMsg = '', count = 0;
+
+  for (const entry of mine) {
+    const ts  = entry[0] || '';
+    const raw = (entry[1] || '').toString()
+      .replace('🔌 ', '')
+      .replace('hold_on',  'aan gehouden')
+      .replace('hold_off', 'uit gehouden')
+      .replace('turn_on',  'aangezet')
+      .replace('turn_off', 'uitgezet');
+
+    const rawLow = raw.toLowerCase();
+    let icon = '💤';
+    if (rawLow.includes('aangezet'))    icon = '▶️';
+    else if (rawLow.includes('uitgezet')) icon = '⏹️';
+    else if (rawLow.includes('aan gehouden')) icon = '🟢';
+    else if (rawLow.includes('uit gehouden')) icon = '⚫';
+
+    // Parse time
+    let timeStr = '—';
+    try {
+      const d = new Date(ts);
+      if (!isNaN(d)) timeStr = d.toLocaleTimeString('nl-NL', {hour:'2-digit', minute:'2-digit'});
+    } catch(_) {}
+
+    // Strip boiler label prefix from message for cleaner display
+    const msgClean = raw
+      .replace(new RegExp(`boiler ?\\d*:?\\s*`, 'i'), '')
+      .replace(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':?\\s*', 'i'), '')
+      .trim();
+
+    const msgTrunc = msgClean.length > 70 ? msgClean.slice(0, 68) + '…' : msgClean;
+
+    if (msgTrunc === lastMsg) {
+      count++;
+      if (rows.length) rows[rows.length - 1].count = count;
+    } else {
+      if (rows.length >= 8) break;
+      lastMsg = msgTrunc;
+      count = 1;
+      rows.push({ timeStr, icon, msg: msgTrunc, count: 1 });
+    }
+  }
+
+  const html = rows.map(r => `
+    <div class="dec-row">
+      <span class="dec-time">${r.timeStr}</span>
+      <span class="dec-icon">${r.icon}</span>
+      <span class="dec-msg">${esc(r.msg)}</span>
+      ${r.count > 1 ? `<span class="dec-cnt">${r.count}×</span>` : ''}
+    </div>`).join('');
+
+  return `<div class="dec-list">${html}</div>`;
+}
+
 function buildTankSVG(fillPct, tempC) {
   const W = 52, H = 90, R = 8;
   const color = tempToColor(tempC);
@@ -418,8 +558,10 @@ class CloudemsBoilerCard extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._prevJson = '';
     this._activeTab = 0;
-    this._history = {}; // entity_id → [{t, v}]
+    this._history = {};        // entity_id → [{t, v}]
+    this._historyPower = {};   // entity_id → [{t, v}]
     this._historyLoading = {};
+    this._historyLastFetch = 0; // timestamp ms — throttle op 5 min
   }
 
   setConfig(cfg) {
@@ -438,19 +580,37 @@ class CloudemsBoilerCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     const st = hass.states['sensor.cloudems_boiler_status'];
+    // Include temp_c en power_w van alle boilers in de trigger-check —
+    // state verandert niet maar attributen wel elke coordinator-cyclus.
+    const boilers = st?.attributes?.boilers ?? [];
+    // Also watch water_heater entities for setpoint changes
+    const vboilerStates = boilers.map(b => {
+      const slug = (b.label||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/,'');
+      return hass.states[`water_heater.cloudems_boiler_${slug}`]?.attributes?.temperature;
+    });
     const json = JSON.stringify([
-      st?.last_changed,
       st?.last_updated,
+      st?.last_changed,
       st?.state,
+      boilers.map(b => [b.temp_c, b.current_power_w, b.is_on, b.active_setpoint_c]),
+      vboilerStates,
     ]);
     if (json !== this._prevJson) {
       this._prevJson = json;
       this._render();
-      this._fetchHistory();
+      // History throttle: max 1x per 5 minuten — recorder API niet elke 10s aanroepen
+      const now = Date.now();
+      // Eerste load: 30s throttle. Daarna: 5 minuten.
+      const throttleMs = this._historyLastFetch === 0 ? 30 * 1000 : 5 * 60 * 1000;
+      if (now - this._historyLastFetch > throttleMs) {
+        this._historyLastFetch = now;
+        this._fetchHistory();
+      }
     }
   }
 
   // ── Fetch temperature history from HA recorder ──────────────────────────
+  // ── Fetch temperature + power history from HA recorder ──────────────────
   async _fetchHistory() {
     if (!this._hass) return;
     const st = this._hass.states['sensor.cloudems_boiler_status'];
@@ -461,26 +621,81 @@ class CloudemsBoilerCard extends HTMLElement {
       if (this._historyLoading[eid]) continue;
       this._historyLoading[eid] = true;
       try {
-        const end = new Date();
-        const start = new Date(end - 24 * 3600 * 1000);
-        const url = `/api/history/period/${start.toISOString()}?filter_entity_id=${eid}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
-        const resp = await this._hass.callApi('GET', url.slice(5));
-        if (resp && resp[0]) {
-          const raw = resp[0].filter(s => s.state && !isNaN(parseFloat(s.state)));
-          // Sample 24 points
+        const end   = new Date();
+        const start = new Date(end - 4 * 3600 * 1000); // laatste 4 uur
+        // Sensoren gebruiken label-slug (bijv. "boiler_1"), niet entity_id-slug ("ariston")
+        const labelSlugH = (b.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+        const eidSlugH   = eid.split('.').pop().replace(/-/g, '_');
+        // Kies de slug waarvoor de sensor entity daadwerkelijk bestaat
+        const tempEidL  = `sensor.cloudems_boiler_${labelSlugH}_temp`;
+        const tempEidE  = `sensor.cloudems_boiler_${eidSlugH}_temp`;
+        const tempEid   = this._hass.states[tempEidL] ? tempEidL : tempEidE;
+        const powerEid  = `sensor.cloudems_boiler_${labelSlugH}_power`;
+        const eids = `${tempEid},${powerEid}`;
+        const url  = `history/period/${start.toISOString()}?filter_entity_id=${eids}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
+        const resp = await this._hass.callApi('GET', url);
+
+        const parseSeries = (arr) => {
+          if (!arr || !arr.length) return [];
+          const raw  = arr.filter(s => s.state && !isNaN(parseFloat(s.state)));
           const step = Math.max(1, Math.floor(raw.length / 24));
-          this._history[eid] = raw
-            .filter((_, i) => i % step === 0)
-            .slice(-24)
-            .map(s => ({
-              t: new Date(s.last_changed).getHours() + 'u',
-              v: parseFloat(s.state)
-            }));
+          return raw.filter((_, i) => i % step === 0).slice(-24).map(s => ({
+            t: new Date(s.last_changed).getHours() + ':' +
+               String(new Date(s.last_changed).getMinutes()).padStart(2,'0'),
+            v: parseFloat(s.state)
+          }));
+        };
+
+        if (resp && Array.isArray(resp)) {
+          this._historyPower = this._historyPower || {};
+          for (const series of resp) {
+            if (!series || !series.length) continue;
+            const firstEid = series[0]?.entity_id || '';
+            if (firstEid.endsWith('_temp')) {
+              this._history[eid] = parseSeries(series);
+            } else if (firstEid.endsWith('_power')) {
+              this._historyPower[eid] = parseSeries(series);
+            }
+          }
           this._render();
         }
       } catch (_) {}
       this._historyLoading[eid] = false;
     }
+  }
+
+  _renderWarmtebron(hass) {
+    const st = hass.states["sensor.cloudems_goedkoopste_warmtebron"];
+    if (!st) return "";
+    const state   = st.state;                          // "gas" | "elektriciteit" | "gelijk"
+    const elec    = st.attributes?.elec_price_kwh;
+    const gasCost = st.attributes?.gas_per_kwh_heat;
+    const elecB   = st.attributes?.elec_boiler_per_kwh_heat;
+    const rec     = st.attributes?.recommendation || "";
+    if (!gasCost && !elecB) return "";
+
+    const icon  = state === "gas" ? "🔥" : state === "elektriciteit" ? "⚡" : "≈";
+    const color = state === "gas" ? "#ff8040" : state === "elektriciteit" ? "#4caf50" : "#ffd600";
+    const label = state === "gas" ? "Gas goedkoper" : state === "elektriciteit" ? "Elektriciteit goedkoper" : "Gelijk";
+
+    const fmtC = v => v != null ? (v * 100).toFixed(1) + " ct" : "—";
+
+    return `
+      <div style="margin:6px 0 4px;padding:8px 12px;background:rgba(255,255,255,0.04);border-radius:10px;border:1px solid rgba(255,255,255,0.06)">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <span style="font-size:13px">${icon}</span>
+          <span style="font-size:11px;font-weight:700;color:${color}">${label}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:2px 10px;font-size:11px;color:rgba(255,255,255,0.6)">
+          <span>🔥 Gas (CV)</span>
+          <span style="text-align:right;color:${state==="gas"?"#ff8040":"inherit"}">${fmtC(gasCost)}/kWh warmte</span>
+          <span style="color:#4caf50">${state==="gas"?"✅":""}</span>
+          <span>⚡ Elektrisch</span>
+          <span style="text-align:right;color:${state==="elektriciteit"?"#4caf50":"inherit"}">${fmtC(elecB)}/kWh warmte</span>
+          <span style="color:#4caf50">${state==="elektriciteit"?"✅":""}</span>
+        </div>
+        ${rec ? `<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:5px;line-height:1.4">${this._esc ? this._esc(rec) : rec}</div>` : ""}
+      </div>`;
   }
 
   _render() {
@@ -519,9 +734,21 @@ class CloudemsBoilerCard extends HTMLElement {
     const b = allBoilers[idx];
 
     // ── Calculations ────────────────────────────────────────────────────────
-    const tempC    = b.temp_c ?? null;
-    const setpoint = (b.active_setpoint_c || b.setpoint_c || 60);
-    const maxSp    = b.max_setpoint_boost_c || setpoint;
+    // Fallback: als temp_c null is (bijv. Ariston 429), lees van recorder sensor
+    const labelSlugT = (b.label||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/,'');
+    const recorderTempSt = hass.states[`sensor.cloudems_boiler_${labelSlugT}_temp`];
+    const recorderTemp = recorderTempSt ? parseFloat(recorderTempSt.state) : null;
+    const tempC    = b.temp_c ?? (isNaN(recorderTemp) ? null : recorderTemp);
+    // v4.6.93: lees setpoint van de virtuele thermostaat entity.
+    // De virtual boiler gebruikt label-slug (bijv. "boiler_1"), NIET entity_id-slug.
+    const labelSlug  = (b.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/, '');
+    const eidSlug    = (b.entity_id || '').split('.').pop().replace(/-/g, '_');
+    // Probeer beide slugvarianten (label eerst, dan entity_id als fallback)
+    const vboilerSt  = hass.states[`water_heater.cloudems_boiler_${labelSlug}`]
+                    ?? hass.states[`water_heater.cloudems_boiler_${eidSlug}`];
+    const vbSetpoint = vboilerSt?.attributes?.temperature ?? null;
+    const setpoint   = vbSetpoint ?? b.active_setpoint_c ?? b.setpoint_c ?? 60;
+    const maxSp    = b.max_setpoint_boost_c || Math.max(setpoint, b.setpoint_c || 60);
     const powerW   = b.current_power_w ?? b.power_w ?? 0;
     const mode     = (b.actual_mode || '').toLowerCase();
     const isOn     = b.is_on ?? false;
@@ -562,7 +789,8 @@ class CloudemsBoilerCard extends HTMLElement {
     const spColor = tempToColor(setpoint);
 
     // History
-    const hist = this._history[b.entity_id];
+    const hist      = this._history[b.entity_id];
+    const histPower = (this._historyPower || {})[b.entity_id];
 
     // Tabs HTML (multi-boiler)
     const tabsHtml = allBoilers.length > 1 ? `
@@ -615,21 +843,22 @@ class CloudemsBoilerCard extends HTMLElement {
                 </div>
               </div>
 
-              ${isHeating ? `
               <div class="setpoint-row" style="border-color:rgba(255,180,0,0.2)">
                 <span class="sp-icon">⚡</span>
                 <div style="flex:1">
                   <div style="display:flex;justify-content:space-between">
                     <span class="sp-text">Vermogen</span>
-                    <span class="sp-val" style="color:#ffd600">${powerW.toFixed(0)} W</span>
+                    <span class="sp-val" style="color:${powerW > 50 ? '#ffd600' : 'rgba(255,255,255,0.4)'}">${powerW.toFixed(0)} W</span>
                   </div>
                   <div class="sp-bar-wrap">
-                    <div class="sp-bar" style="width:${clamp(powerW/3000*100,2,100)}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div>
+                    <div class="sp-bar" style="width:${powerW > 50 ? clamp(powerW/3000*100,2,100) : 0}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div>
                   </div>
                 </div>
-              </div>` : ''}
+              </div>
             </div>
           </div>
+
+          ${this._renderWarmtebron(hass)}
 
           <div class="metrics">
             <div class="metric">
@@ -650,9 +879,18 @@ class CloudemsBoilerCard extends HTMLElement {
           </div>
 
           <div class="graphs">
-            <div class="graph-title">📈 Temperatuurverloop (24u)</div>
-            ${hist ? buildTempBars(hist, setpoint) :
-              '<div style="height:60px;display:flex;align-items:center;justify-content:center"><span class="spinner"></span></div>'}
+            <div class="dual-graph">
+              <div class="graph-panel">
+                <div class="graph-title">🌡️ Temperatuur (4u)</div>
+                ${hist ? buildTempBars(hist, setpoint) :
+                  '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Wacht op recorder…</div>'}
+              </div>
+              <div class="graph-panel">
+                <div class="graph-title">⚡ Vermogen (4u)</div>
+                ${histPower ? buildPowerBars(histPower, powerW) :
+                  '<div style="height:60px;display:flex;align-items:center;justify-content:center;color:#333;font-size:11px">Wacht op recorder…</div>'}
+              </div>
+            </div>
 
             <div class="donut-row" style="margin-top:20px">
               <div>
@@ -694,6 +932,11 @@ class CloudemsBoilerCard extends HTMLElement {
             ${cop ? `<span class="chip chip-cop">COP ${cop.toFixed(2)}</span>` : ''}
             ${legDays != null ? `<span class="chip ${legDays < 5 ? 'chip-leg-ok' : 'chip-leg-warn'}">🦠 Leg. ${legDays.toFixed(0)}d geleden</span>` : ''}
             ${stall ? `<span class="chip chip-verify">⚠️ Stall</span>` : ''}
+          </div>
+
+          <div class="decisions">
+            <div class="decisions-title">📋 Beslissingen</div>
+            ${buildDecisionsHtml(statusSensor.attributes?.log ?? [], label, b.entity_id)}
           </div>
         </div>
       </div>`;

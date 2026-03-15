@@ -2240,7 +2240,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
         entry = getattr(self, "config_entry", self._entry)
         # Bouw altijd op vanuit data + options zodat ook keys die nog nooit in
         # options stonden (alleen in entry.data) correct worden meegenomen.
-        merged = {**entry.data, **entry.options, **extra}
+        # v4.6.136: Filter lege strings uit extra — een leeg veld in een stap
+        # mag een bestaande geconfigureerde waarde NIET overschrijven.
+        extra_clean = {k: v for k, v in extra.items() if v not in (None, "")}
+        merged = {**entry.data, **entry.options, **extra_clean}
 
         # ── Afgeleide velden ───────────────────────────────────────────────────
         # CONF_MAX_CURRENT_PER_PHASE = L1 (gebruikt door piekbeperking + solar learner)
@@ -2844,9 +2847,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
         if user_input is not None:
+            _inv_keep = lambda k_ui, k_ex: user_input.get(k_ui) or existing.get(k_ex, "")
             self._opts[CONF_INVERTER_CONFIGS].append({
                 "entity_id":      user_input.get("inv_sensor"),
-                "control_entity": user_input.get("inv_control", ""),
+                "control_entity": _inv_keep("inv_control", "control_entity"),
                 "label":          user_input.get("inv_label", f"Inverter {i}"),
                 "priority":       i,
                 "min_power_pct":  float(user_input.get("inv_min_pct", 0.0)),
@@ -3237,15 +3241,16 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
         if user_input is not None:
+            _bat_keep = lambda k_ui, k_ex: user_input.get(k_ui) or existing.get(k_ex, "")
             self._opts[CONF_BATTERY_CONFIGS].append({
                 "battery_type":     "manual",
-                "power_sensor":     user_input.get("bat_power_sensor"),
-                "soc_sensor":       user_input.get("bat_soc_sensor"),
+                "power_sensor":     user_input.get("bat_power_sensor") or existing.get("power_sensor"),
+                "soc_sensor":       user_input.get("bat_soc_sensor")   or existing.get("soc_sensor"),
                 "capacity_kwh":     float(user_input.get("bat_capacity_kwh", 0.0)),
                 "max_charge_w":     float(user_input.get("bat_max_charge_w", 0.0)),
                 "max_discharge_w":  float(user_input.get("bat_max_discharge_w", 0.0)),
-                "charge_entity":    user_input.get("bat_charge_entity", ""),
-                "discharge_entity": user_input.get("bat_discharge_entity", ""),
+                "charge_entity":    _bat_keep("bat_charge_entity",    "charge_entity"),
+                "discharge_entity": _bat_keep("bat_discharge_entity", "discharge_entity"),
                 "label":            user_input.get("bat_label", f"Batterij {i}"),
                 "priority":         i,
             })
@@ -4020,10 +4025,16 @@ class CloudEMSOptionsFlow(_OptionsBase):
             _is_known = brand_key not in ("unknown", "generic_resistive", "generic_heatpump")
 
             updated = dict(unit)
+            # v4.6.136: entity-selector velden zijn Optional met suggested_value.
+            # HA stuurt ze als lege string als de gebruiker ze wist. Filter deze
+            # leeg-overschrijvingen zodat bestaande sensor-config behouden blijft.
+            def _keep(key_ui: str, key_unit: str, fallback: str = "") -> str:
+                v = user_input.get(key_ui, "")
+                return v if v else unit.get(key_unit, fallback)
             updated.update({
                 "entity_id":            user_input.get("bu_entity",           unit.get("entity_id", "")),
-                "temp_sensor":          user_input.get("bu_temp_sensor",      unit.get("temp_sensor", "")),
-                "energy_sensor":        user_input.get("bu_energy_sensor",    unit.get("energy_sensor", "")),
+                "temp_sensor":          _keep("bu_temp_sensor",    "temp_sensor"),
+                "energy_sensor":        _keep("bu_energy_sensor",  "energy_sensor"),
                 "label":                user_input.get("bu_label",            unit.get("label", f"Boiler {u_idx+1}")),
                 # boiler_type/control_mode/preset: bij known brand altijd uit preset overnemen
                 # (velden niet getoond), tenzij generic → dan uit user_input
