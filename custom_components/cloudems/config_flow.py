@@ -1848,7 +1848,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         existing_groups: list = data.get(CONF_BOILER_GROUPS, [])
 
         if user_input is not None:
-            # Altijd activeren — enabled-toggle verwijderd uit wizard (Fix 22)
+            # v4.6.271: Als gebruiker geen boiler heeft, direct door naar mail (issue #28 feedback)
+            if not user_input.get(CONF_BOILER_GROUPS_ENABLED, False):
+                self._config[CONF_BOILER_GROUPS_ENABLED] = False
+                return await self.async_step_mail()
             self._config[CONF_BOILER_GROUPS_ENABLED] = True
             self._boiler_group_index = 0
             self._boiler_groups_tmp  = list(existing_groups)
@@ -1863,12 +1866,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="boiler_groups",
             description_placeholders={
                 "info": (
-                    "Koppel warmwaterboilers, elektrische geysers of accumulatortanks. "
-                    "CloudEMS stuurt ze automatisch op basis van PV-surplus, "
-                    "goedkope EPEX-uren en netcongestie.\n\n"
-                    "Elke groep kan sequentieel (1 per keer) of parallel (allemaal tegelijk) "
-                    "werken. Je koppelt gewoon bestaande HA-entiteiten — "
-                    "switch, climate of water_heater."
+                    "**Heb je een warmwaterboiler, elektrische geyser of accumulatortank?**\n"
+                    "Schakel deze stap in om CloudEMS automatisch te laten sturen op basis van "
+                    "PV-surplus, goedkope EPEX-uren en netcongestie.\n\n"
+                    "**Geen boiler?** Laat de schakelaar UIT staan en klik op Volgende — "
+                    "je slaat deze configuratie volledig over.\n\n"
+                    "Je koppelt gewoon bestaande HA-entiteiten (switch, climate of water_heater). "
+                    "Meerdere boilers in groepen zijn mogelijk."
                 ),
             },
             data_schema=vol.Schema({

@@ -16,7 +16,11 @@ class CloudEMSGasCard extends HTMLElement {
     this._prev = '';
   }
 
-  setConfig(c) { this._config = c || {}; }
+  setConfig(c) {
+    this._config = c || {};
+    // Startup timer: force render after 3s in case state hasn't changed
+    setTimeout(() => { this._prev = ''; this._render(); }, 3000);
+  }
 
   set hass(h) {
     this._hass = h;
@@ -42,6 +46,10 @@ class CloudEMSGasCard extends HTMLElement {
       this._s(wb)?.state,
       this._a(gs, 'dag_m3'),
       this._a(gs, 'week_m3'),
+      this._a(gs, 'maand_m3'),
+      this._a(gs, 'dag_eur'),
+      this._a(wb, 'gas_per_kwh_heat'),
+      this._a(wb, 'elec_price_kwh'),
     ].join('|');
     if (sig === this._prev) return;
     this._prev = sig;
@@ -75,14 +83,16 @@ class CloudEMSGasCard extends HTMLElement {
 
     const periodeRows = periodes.map(p => {
       const barW = Math.min(100, Math.round(p.pct * 100));
+      // Show 0.00 if gas module is active but no usage yet, — if module/sensor missing
+      const gasActive = stand !== null && stand > 0;
       const hasData = p.m3 > 0;
       return `<div class="prow">
         <span class="plabel">${p.label}</span>
         <div class="pbar-wrap">
           ${hasData ? `<div class="pbar" style="width:${barW}%"></div>` : ''}
         </div>
-        <span class="pval">${hasData ? p.m3.toFixed(2) + ' m³' : '—'}</span>
-        <span class="peur">${hasData ? '€' + p.eur.toFixed(2) : '—'}</span>
+        <span class="pval">${gasActive ? p.m3.toFixed(2) + ' m³' : '—'}</span>
+        <span class="peur">${gasActive ? '€' + p.eur.toFixed(2) : '—'}</span>
       </div>`;
     }).join('');
 

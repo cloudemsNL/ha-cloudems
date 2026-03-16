@@ -1,4 +1,250 @@
+## [4.6.284] - 2026-03-16
+### Fix — Boiler vermogen grafiek heeft nooit gewerkt
+- **Rootcause:** De history API werd aangeroepen met `minimal_response=true` en twee entity IDs gecombineerd. Met minimal_response gebruiken entries het formaat `{s, lc}` in plaats van `{state, last_changed, entity_id}`. Daardoor was `series[0]?.entity_id` altijd leeg → temp en power konden niet onderscheiden worden → beide grafieken bleven leeg.
+- **Fix:** Temp en power worden nu in twee aparte API-calls opgehaald (parallel via `Promise.all`). Parser herkent beide formaten (`s/lc` én `state/last_changed`).
+
+### Feature — Virtuele thermostaat in boiler card
+- De 'Virtuele thermostaten' kaart is verwerkt in de cloudems-boiler-card. Toont: huidig setpoint met −/+ knoppen (stap 1°C), snelknoppen Nacht (45°C) / Normaal / PV-boost (hardware max), actieve modus en huidige temperatuur.
+
+## [4.6.283] - 2026-03-16
+
+### Fix
+- **Boiler tab: 'Boilers — Live status' kaart verwijderd** — De simpele markdown tabel met Temperatuur/Setpoint/Vermogen/COP was overbodig geworden nu de cloudems-boiler-card dezelfde info beter toont.
+
+### Feature — Topology → NILM exclusie
+- **`auto_exclude_by_entity_ids()`** — Topology-bekende infra-sensoren (grid, battery, solar, SoC uit config) worden doorgegeven aan NILM. Smart plug apparaten waarvan `source_entity_id` matcht worden automatisch uitgesloten van de energiebalans.
+
+### Feature — Forecast zelfconsumptie
+- **`forecast_self_consumption(pv_forecast_hourly)`** toegevoegd aan `SelfConsumptionTracker`. Combineert het geleerde uurverbruiksprofiel met de PV-forecast voor morgen → voorspelt hoeveel procent zelfverbruikt wordt. Basis voor sensor-attribuut en dashboard weergave.
+
+### Feature — NILM correlatie + balans detectie (v4.6.282 afgerond)
+- Alle drie detectielagen actief: naam, balans-overschrijding, vermogenscorrelatie.
+
+## [4.6.282] - 2026-03-16
+
+### Feature — Automatische infra-detectie via balans en vermogenscorrelatie
+- **Balans-overschrijding:** Als NILM-som consistent > huis-vermogen + 25% marge over ≥60 seconden, zoekt CloudEMS de smart plug wiens vermogen de overrun verklaart en markeert die als `exclude_from_balance=auto_balance`. Nooit bevestigde apparaten.
+- **Vermogenscorrelatie:** Elke 10 minuten berekent CloudEMS de Pearson-correlatie (vereenvoudigd) tussen elk actief smart plug apparaat en `battery_power_w` + `solar_power_w`. Correlatie > 0.85 over ≥10 metingen = infrastructuur → automatisch uitgesloten. Zo worden Zendure Accu 1/2 herkend ook als de naam-detectie ze mist.
+- Reden `auto_balance` zichtbaar in detail panel.
+
+## [4.6.281] - 2026-03-16
+
+### Fix
+- **Flow kaart: batterij en boiler node niet uitgelijnd** — battX en bolX stonden op verschillende X-posities (COL_R-38 vs COL_R+0). Beide nu op COL_R-20 zodat ze verticaal uitgelijnd zijn.
+- **Flow kaart: sparkline nauwelijks zichtbaar** — stroke-width 0.9 + opacity 0.28 was te fijn. Nu: stroke-width 1.4 + opacity 0.70 voor de lijn, plus een gevuld gebied eronder (opacity 0.12) zodat de trend direct leesbaar is.
+
+## [4.6.284] - 2026-03-16
+### Fix — Boiler vermogen grafiek heeft nooit gewerkt
+- **Rootcause:** De history API werd aangeroepen met `minimal_response=true` en twee entity IDs gecombineerd. Met minimal_response gebruiken entries het formaat `{s, lc}` in plaats van `{state, last_changed, entity_id}`. Daardoor was `series[0]?.entity_id` altijd leeg → temp en power konden niet onderscheiden worden → beide grafieken bleven leeg.
+- **Fix:** Temp en power worden nu in twee aparte API-calls opgehaald (parallel via `Promise.all`). Parser herkent beide formaten (`s/lc` én `state/last_changed`).
+
+### Feature — Virtuele thermostaat in boiler card
+- De 'Virtuele thermostaten' kaart is verwerkt in de cloudems-boiler-card. Toont: huidig setpoint met −/+ knoppen (stap 1°C), snelknoppen Nacht (45°C) / Normaal / PV-boost (hardware max), actieve modus en huidige temperatuur.
+
+## [4.6.283] - 2026-03-16
+
+### Fix
+- **Boiler tab: 'Boilers — Live status' kaart verwijderd** — De simpele markdown tabel met Temperatuur/Setpoint/Vermogen/COP was overbodig geworden nu de cloudems-boiler-card dezelfde info beter toont.
+
+### Feature — Topology → NILM exclusie
+- **`auto_exclude_by_entity_ids()`** — Topology-bekende infra-sensoren (grid, battery, solar, SoC uit config) worden doorgegeven aan NILM. Smart plug apparaten waarvan `source_entity_id` matcht worden automatisch uitgesloten van de energiebalans.
+
+### Feature — Forecast zelfconsumptie
+- **`forecast_self_consumption(pv_forecast_hourly)`** toegevoegd aan `SelfConsumptionTracker`. Combineert het geleerde uurverbruiksprofiel met de PV-forecast voor morgen → voorspelt hoeveel procent zelfverbruikt wordt. Basis voor sensor-attribuut en dashboard weergave.
+
+### Feature — NILM correlatie + balans detectie (v4.6.282 afgerond)
+- Alle drie detectielagen actief: naam, balans-overschrijding, vermogenscorrelatie.
+
+## [4.6.282] - 2026-03-16
+
+### Feature — Automatische infra-detectie via balans en vermogenscorrelatie
+- **Balans-overschrijding:** Als NILM-som consistent > huis-vermogen + 25% marge over ≥60 seconden, zoekt CloudEMS de smart plug wiens vermogen de overrun verklaart en markeert die als `exclude_from_balance=auto_balance`. Nooit bevestigde apparaten.
+- **Vermogenscorrelatie:** Elke 10 minuten berekent CloudEMS de Pearson-correlatie (vereenvoudigd) tussen elk actief smart plug apparaat en `battery_power_w` + `solar_power_w`. Correlatie > 0.85 over ≥10 metingen = infrastructuur → automatisch uitgesloten. Zo worden Zendure Accu 1/2 herkend ook als de naam-detectie ze mist.
+- Reden `auto_balance` zichtbaar in detail panel.
+
+## [4.6.281] - 2026-03-16
+
+### Fix — Batterijen en SolarFlow nooit als NILM apparaat tonen (issue #29)
+- **Rootcause:** Accu 1/2, SolarFlow, Zendure Manager verschenen als NILM apparaten onder de Thuis node. Dit is fundamenteel onjuist: batterijen zijn direct aan de hub gekoppeld (worden apart gepland) en SolarFlow/Zendure zijn PV+batterij infrastructuur, geen verbruiksapparaten.
+- **Fix `_isDedicatedNode()`** — uitgebreid met: batterij-namen (accu, battery, batterij, powerwall, pylontech, BYD, ...), PV-infra namen (solarflow, omvormer, growatt, goodwe, zendure manager, ...) en apparaten met `exclude_from_balance=True`. Deze verschijnen nooit meer onder Thuis in de flow.
+
+### Feature — EPEX prijsdetail bij klik op Netwerk node
+- Klik op de Netwerk node in de flow → volledig EPEX barchart met uurprijzen vandaag, huidige prijs, min/gem/max, en toggle **incl. / excl. belasting**.
+
+### Feature — Mini prijswidget (cloudems-mini-price-card)
+- Nieuwe standalone kaart: compact EPEX prijsoverzicht met barchart + incl/excl toggle. Staat bovenaan alle 19 dashboard tabs. Altijd weten wat stroom kost.
+
+### Feature — NILM auto-merge dubbele apparaatnamen
+- Apparaten met dezelfde naam maar op verschillende fases (bijv. twee keer 'Vaatwasser') worden automatisch samengevoegd elke 10 minuten. Winner = bevestigd > meeste on_events. Smart plugs worden nooit samengevoegd (elk is een echt fysiek apparaat).
+
+## [4.6.280] - 2026-03-16
+
+
+### Fix
+- **Flow kaart: NILM apparaat klik toonde Huisverbruik** — Klikken op een NILM device node (Vaatwasser, SolarFlow, etc.) in de flow opende altijd het Huisverbruik detail panel. Nu opent het een volledig device-specifiek panel met: vermogen, fase, type, kamer, betrouwbaarheids­balk, bevestigd/lerend status, en de volledige actie-set (Bevestigen / Afwijzen / Negeren / Uitsluiten van balans / Opnemen in balans). Automatisch uitgesloten apparaten tonen de reden.
+
+## [4.6.279] - 2026-03-16
+
+### Fix — Dubbele entiteiten (issue #29)
+- **Automatische dubbeltelling-detectie** — CloudEMS scant elke 10 minuten alle HA entiteiten op bekende batterij/omvormer integraties (Zendure, SolarFlow, Victron, Growatt, GoodWe, SolarEdge, Enphase, Huawei, Sungrow, Fronius, Foxess, EcoFlow, Anker SOLIX, Pylontech — 15+ merken). Smart plug NILM apparaten die al worden beheerd door zo'n integratie worden automatisch gemarkeerd als `exclude_from_balance=True`. Dubbeltelling is daarmee onmogelijk — geen handmatige actie nodig.
+- **NilmDevice.exclude_from_balance** — Nieuw veld op elk NILM apparaat. Wordt opgeslagen en hersteld bij herstart. Reden (`auto_integration` of `user`) wordt bijgehouden.
+- **Klikbaar detail overal** — NILM apparaat detail panel toont nu altijd een ⊗/✓ knop om de balans-uitsluiting handmatig aan/uit te zetten. Apparaten uitgesloten door auto-detectie tonen een badge met de reden.
+- **Visuele feedback** — Uitgesloten apparaten tonen ⊗ badge in de NILM rij en worden gedimmed weergegeven.
+- **Service `cloudems.set_balance_exclude`** — Handmatige override: `{device_name, exclude, reason}`.
+
+## [4.6.278] - 2026-03-16
+
+### Feature — Solar card v2.1: alle secties compleet
+- **Benutting & Clipping-drempel** — Per omvormer benutting-balk met clipping-drempel markering. Toont clipping advies en verlies per jaar als relevant.
+- **PV samenvatting** — PV nu, vandaag, morgen, zelfconsumptie %, piekuur vandaag.
+- **Zelfconsumptie detail** — PV productie, zelf verbruikt, teruggeleverd, beste zonuur, besparing per maand.
+- **Structurele Schaduwdetectie** — Samenvatting, geschat verlies per dag, per-omvormer details.
+- Alle sensor ID fallbacks (oude + nieuwe naam) voor forecast, accuracy en shadow sensoren.
+
+## [4.6.284] - 2026-03-16
+### Fix — Boiler vermogen grafiek heeft nooit gewerkt
+- **Rootcause:** De history API werd aangeroepen met `minimal_response=true` en twee entity IDs gecombineerd. Met minimal_response gebruiken entries het formaat `{s, lc}` in plaats van `{state, last_changed, entity_id}`. Daardoor was `series[0]?.entity_id` altijd leeg → temp en power konden niet onderscheiden worden → beide grafieken bleven leeg.
+- **Fix:** Temp en power worden nu in twee aparte API-calls opgehaald (parallel via `Promise.all`). Parser herkent beide formaten (`s/lc` én `state/last_changed`).
+
+### Feature — Virtuele thermostaat in boiler card
+- De 'Virtuele thermostaten' kaart is verwerkt in de cloudems-boiler-card. Toont: huidig setpoint met −/+ knoppen (stap 1°C), snelknoppen Nacht (45°C) / Normaal / PV-boost (hardware max), actieve modus en huidige temperatuur.
+
+## [4.6.283] - 2026-03-16
+
+### Fix
+- **Boiler tab: 'Boilers — Live status' kaart verwijderd** — De simpele markdown tabel met Temperatuur/Setpoint/Vermogen/COP was overbodig geworden nu de cloudems-boiler-card dezelfde info beter toont.
+
+### Feature — Topology → NILM exclusie
+- **`auto_exclude_by_entity_ids()`** — Topology-bekende infra-sensoren (grid, battery, solar, SoC uit config) worden doorgegeven aan NILM. Smart plug apparaten waarvan `source_entity_id` matcht worden automatisch uitgesloten van de energiebalans.
+
+### Feature — Forecast zelfconsumptie
+- **`forecast_self_consumption(pv_forecast_hourly)`** toegevoegd aan `SelfConsumptionTracker`. Combineert het geleerde uurverbruiksprofiel met de PV-forecast voor morgen → voorspelt hoeveel procent zelfverbruikt wordt. Basis voor sensor-attribuut en dashboard weergave.
+
+### Feature — NILM correlatie + balans detectie (v4.6.282 afgerond)
+- Alle drie detectielagen actief: naam, balans-overschrijding, vermogenscorrelatie.
+
+## [4.6.282] - 2026-03-16
+
+### Feature — Automatische infra-detectie via balans en vermogenscorrelatie
+- **Balans-overschrijding:** Als NILM-som consistent > huis-vermogen + 25% marge over ≥60 seconden, zoekt CloudEMS de smart plug wiens vermogen de overrun verklaart en markeert die als `exclude_from_balance=auto_balance`. Nooit bevestigde apparaten.
+- **Vermogenscorrelatie:** Elke 10 minuten berekent CloudEMS de Pearson-correlatie (vereenvoudigd) tussen elk actief smart plug apparaat en `battery_power_w` + `solar_power_w`. Correlatie > 0.85 over ≥10 metingen = infrastructuur → automatisch uitgesloten. Zo worden Zendure Accu 1/2 herkend ook als de naam-detectie ze mist.
+- Reden `auto_balance` zichtbaar in detail panel.
+
+## [4.6.281] - 2026-03-16
+
+### Fix
+- **Flow kaart: batterij en boiler node niet uitgelijnd** — battX en bolX stonden op verschillende X-posities (COL_R-38 vs COL_R+0). Beide nu op COL_R-20 zodat ze verticaal uitgelijnd zijn.
+- **Flow kaart: sparkline nauwelijks zichtbaar** — stroke-width 0.9 + opacity 0.28 was te fijn. Nu: stroke-width 1.4 + opacity 0.70 voor de lijn, plus een gevuld gebied eronder (opacity 0.12) zodat de trend direct leesbaar is.
+
+## [4.6.284] - 2026-03-16
+### Fix — Boiler vermogen grafiek heeft nooit gewerkt
+- **Rootcause:** De history API werd aangeroepen met `minimal_response=true` en twee entity IDs gecombineerd. Met minimal_response gebruiken entries het formaat `{s, lc}` in plaats van `{state, last_changed, entity_id}`. Daardoor was `series[0]?.entity_id` altijd leeg → temp en power konden niet onderscheiden worden → beide grafieken bleven leeg.
+- **Fix:** Temp en power worden nu in twee aparte API-calls opgehaald (parallel via `Promise.all`). Parser herkent beide formaten (`s/lc` én `state/last_changed`).
+
+### Feature — Virtuele thermostaat in boiler card
+- De 'Virtuele thermostaten' kaart is verwerkt in de cloudems-boiler-card. Toont: huidig setpoint met −/+ knoppen (stap 1°C), snelknoppen Nacht (45°C) / Normaal / PV-boost (hardware max), actieve modus en huidige temperatuur.
+
+## [4.6.283] - 2026-03-16
+
+### Fix
+- **Boiler tab: 'Boilers — Live status' kaart verwijderd** — De simpele markdown tabel met Temperatuur/Setpoint/Vermogen/COP was overbodig geworden nu de cloudems-boiler-card dezelfde info beter toont.
+
+### Feature — Topology → NILM exclusie
+- **`auto_exclude_by_entity_ids()`** — Topology-bekende infra-sensoren (grid, battery, solar, SoC uit config) worden doorgegeven aan NILM. Smart plug apparaten waarvan `source_entity_id` matcht worden automatisch uitgesloten van de energiebalans.
+
+### Feature — Forecast zelfconsumptie
+- **`forecast_self_consumption(pv_forecast_hourly)`** toegevoegd aan `SelfConsumptionTracker`. Combineert het geleerde uurverbruiksprofiel met de PV-forecast voor morgen → voorspelt hoeveel procent zelfverbruikt wordt. Basis voor sensor-attribuut en dashboard weergave.
+
+### Feature — NILM correlatie + balans detectie (v4.6.282 afgerond)
+- Alle drie detectielagen actief: naam, balans-overschrijding, vermogenscorrelatie.
+
+## [4.6.282] - 2026-03-16
+
+### Feature — Automatische infra-detectie via balans en vermogenscorrelatie
+- **Balans-overschrijding:** Als NILM-som consistent > huis-vermogen + 25% marge over ≥60 seconden, zoekt CloudEMS de smart plug wiens vermogen de overrun verklaart en markeert die als `exclude_from_balance=auto_balance`. Nooit bevestigde apparaten.
+- **Vermogenscorrelatie:** Elke 10 minuten berekent CloudEMS de Pearson-correlatie (vereenvoudigd) tussen elk actief smart plug apparaat en `battery_power_w` + `solar_power_w`. Correlatie > 0.85 over ≥10 metingen = infrastructuur → automatisch uitgesloten. Zo worden Zendure Accu 1/2 herkend ook als de naam-detectie ze mist.
+- Reden `auto_balance` zichtbaar in detail panel.
+
+## [4.6.281] - 2026-03-16
+
+### Fix — Batterijen en SolarFlow nooit als NILM apparaat tonen (issue #29)
+- **Rootcause:** Accu 1/2, SolarFlow, Zendure Manager verschenen als NILM apparaten onder de Thuis node. Dit is fundamenteel onjuist: batterijen zijn direct aan de hub gekoppeld (worden apart gepland) en SolarFlow/Zendure zijn PV+batterij infrastructuur, geen verbruiksapparaten.
+- **Fix `_isDedicatedNode()`** — uitgebreid met: batterij-namen (accu, battery, batterij, powerwall, pylontech, BYD, ...), PV-infra namen (solarflow, omvormer, growatt, goodwe, zendure manager, ...) en apparaten met `exclude_from_balance=True`. Deze verschijnen nooit meer onder Thuis in de flow.
+
+### Feature — EPEX prijsdetail bij klik op Netwerk node
+- Klik op de Netwerk node in de flow → volledig EPEX barchart met uurprijzen vandaag, huidige prijs, min/gem/max, en toggle **incl. / excl. belasting**.
+
+### Feature — Mini prijswidget (cloudems-mini-price-card)
+- Nieuwe standalone kaart: compact EPEX prijsoverzicht met barchart + incl/excl toggle. Staat bovenaan alle 19 dashboard tabs. Altijd weten wat stroom kost.
+
+### Feature — NILM auto-merge dubbele apparaatnamen
+- Apparaten met dezelfde naam maar op verschillende fases (bijv. twee keer 'Vaatwasser') worden automatisch samengevoegd elke 10 minuten. Winner = bevestigd > meeste on_events. Smart plugs worden nooit samengevoegd (elk is een echt fysiek apparaat).
+
+## [4.6.280] - 2026-03-16
+
+
+### Fix
+- **Flow kaart: NILM apparaat klik toonde Huisverbruik** — Klikken op een NILM device node (Vaatwasser, SolarFlow, etc.) in de flow opende altijd het Huisverbruik detail panel. Nu opent het een volledig device-specifiek panel met: vermogen, fase, type, kamer, betrouwbaarheids­balk, bevestigd/lerend status, en de volledige actie-set (Bevestigen / Afwijzen / Negeren / Uitsluiten van balans / Opnemen in balans). Automatisch uitgesloten apparaten tonen de reden.
+
+## [4.6.279] - 2026-03-16
+
+### Fix — Dubbele entiteiten (issue #29)
+- **Automatische dubbeltelling-detectie** — CloudEMS scant elke 10 minuten alle HA entiteiten op bekende batterij/omvormer integraties (Zendure, SolarFlow, Victron, Growatt, GoodWe, SolarEdge, Enphase, Huawei, Sungrow, Fronius, Foxess, EcoFlow, Anker SOLIX, Pylontech — 15+ merken). Smart plug NILM apparaten die al worden beheerd door zo'n integratie worden automatisch gemarkeerd als `exclude_from_balance=True`. Dubbeltelling is daarmee onmogelijk — geen handmatige actie nodig.
+- **NilmDevice.exclude_from_balance** — Nieuw veld op elk NILM apparaat. Wordt opgeslagen en hersteld bij herstart. Reden (`auto_integration` of `user`) wordt bijgehouden.
+- **Klikbaar detail overal** — NILM apparaat detail panel toont nu altijd een ⊗/✓ knop om de balans-uitsluiting handmatig aan/uit te zetten. Apparaten uitgesloten door auto-detectie tonen een badge met de reden.
+- **Visuele feedback** — Uitgesloten apparaten tonen ⊗ badge in de NILM rij en worden gedimmed weergegeven.
+- **Service `cloudems.set_balance_exclude`** — Handmatige override: `{device_name, exclude, reason}`.
+
+## [4.6.278] - 2026-03-16
+
+### Fix
+- **Solar JS kaart: missende secties** — Benutting & Clipping-drempel, PV Samenvatting, Zelfconsumptie en Schaduwdetectie waren aanwezig in de code maar werden niet gerenderd door een variabelenaamconflict na een eerdere refactor. Opgelost.
+- **Gas kaart: periodes tonen streepjes** — Dag/week/maand/jaar verbruik toonde `—` zodra m³=0, ook als de gas module actief is en de sensor werkt. Nu toont de kaart `0.00 m³` als de gasmeter een geldig getal rapporteert. Startup timer toegevoegd zodat data altijd verschijnt na laden.
+
+## [4.6.277] - 2026-03-16
+
+
+### Fix
+- **Solar JS kaart toont 0 kWh forecast** — Zelfde rootcause als de solar system sensor: HA entity registry bewaart de oude entity ID `sensor.cloudems_solar_pv_forecast_today` terwijl de huidige code `sensor.cloudems_pv_forecast_today` genereert. JS kaart probeert nu eerst de oude naam, dan fallback naar de nieuwe. Zelfde fix voor tomorrow en accuracy sensor. Ook flow kaart detail panel gefixed.
+
+## [4.6.276] - 2026-03-16
+
+### Feature — AdaptiveHome koppeling (infrastructuur)
+- **adaptivehome_bridge.py** — Nieuwe koppellaag tussen CloudEMS en AdaptiveHome. Onzichtbaar voor bestaande gebruikers — geen UI-wijzigingen.
+- **Events CloudEMS → AdaptiveHome** (HA event bus): `cloudems_state_update` (10s), `cloudems_nilm_update` (30s), `cloudems_price_update` (5min), `cloudems_presence_update` (30s).
+- **Events AdaptiveHome → CloudEMS**: `adaptivehome_occupancy`, `adaptivehome_mode`, `adaptivehome_scene`.
+- **Services**: `cloudems.ah_get_status` (status opvragen via event-respons), `cloudems.ah_set_mode` (huismodus zetten: home/away/sleep/vacation).
+- Bridge setup/shutdown volledig geïntegreerd in coordinator lifecycle — geen crash als AH niet aanwezig is.
+- Placeholder voor toekomstige hosted variant (`async_push_to_hosted`).
+
+## [4.6.275] - 2026-03-16
+
+### Fix
+- **Flow kaart: startup re-render** — Na setConfig wordt na 3s een forced re-render getriggerd zodat PV-data altijd snel zichtbaar is, ook als sensoren al waarden hadden vóór de kaart laadde.
+
+### Feature
+- **Solar tab: cloudems-solar-card naar productie** — Nieuwe JS kaart bovenaan de solar tab geplaatst (module-uit waarschuwing + cloudems-solar-card). Bestaande markdown kaarten blijven staan (DTAP).
+
+## [4.6.274] - 2026-03-16
+
+### Fix
+- **Solar en batterij kaart: trage eerste weergave** — De dirty-check vergelijkt `last_changed` van sensoren. Bij opstarten is de sensor al beschikbaar maar verandert `last_changed` niet → kaart wacht op de volgende echte update. Fix: twee timeouts (3s en 8s) forceren een re-render na setConfig zodat data altijd snel zichtbaar is. Solar kaart kijkt ook naar inverter vermogenswaarden als extra trigger.
+
+## [4.6.273] - 2026-03-16
+
+### Fix — Ariston Lydos Hybrid schakelt BOOST bij dure stroom terwijl GREEN voldoende is
+- **Oorzaak:** `_above_green_max` werd berekend als `current_temp >= max_setpoint_green_c - 1.0`. Bij een Ariston Lydos Hybrid met `max_setpoint_green_c=53°C` en actuele temp=52°C geeft dit `52 >= 52` = True → BOOST verplicht, ook al kan GREEN het setpoint (53°C) wél bereiken. De -1.0 marge triggert BOOST 1 graad te vroeg.
+- **Fix:** BOOST verplicht alleen als het **actieve setpoint** boven `max_setpoint_green_c` uitkomt (`active_setpoint_c > max_setpoint_green_c`). Geldt voor zowel `heat_pump` als `hybrid` boiler types.
+- **Effect:** Bij setpoint=53°C en green_max=53°C blijft de boiler in GREEN (warmtepomp, COP≈3.6) totdat het setpoint daadwerkelijk hoger gezet wordt.
+
+## [4.6.272] - 2026-03-16
+
+### Fix — Issue #28 feedback: boiler niet overslaan was niet duidelijk
+- **Boiler stap nu echt optioneel** — Als `Warm water cascade activeren` uitstaat en gebruiker klikt Volgende, gaat de wizard direct door naar de volgende stap. Voorheen activeerde de stap altijd de boiler-wizard ongeacht de schakelaar (comment `# Altijd activeren — enabled-toggle verwijderd uit wizard (Fix 22)`).
+- **Betere beschrijving boiler stap** — Duidelijk aangegeven: geen boiler → schakelaar UIT → Volgende → stap wordt overgeslagen. In alle 4 talen (NL/EN/DE/FR) bijgewerkt.
+
 ## [4.6.271] - 2026-03-16
+
 ### Fix — Issue #28: PV toevoegen geeft TypeError crash
 - **Oorzaak:** `float(cfg.get(f'max_current_{phase.lower()}', DEFAULT_MAX_CURRENT))` crasht als de config-key bestaat maar expliciet `None` als waarde heeft. In dat geval geeft `.get(key, default)` de default NIET terug — alleen als de key ontbreekt. Resultaat: `float(None)` → `TypeError: float() argument must be a string or a real number, not 'NoneType'` → integratie start niet op.
 - **Fix:** Vervangen door `cfg.get(key) or DEFAULT_MAX_CURRENT` zodat ook `None`-waarden correct terugvallen op de default.

@@ -414,7 +414,7 @@
       },
       "boiler_groups": {
         "title": "🚿 Warm Water Cascade",
-        "description": "Beheer meerdere boilers in groepen met slimme cascade-logica (sequentieel, parallel of prioriteit).",
+        "description": "**Avez-vous un chauffe-eau, un boiler électrique ou un ballon tampon?**\n\nActivez ceci pour que CloudEMS le contrôle en fonction du surplus PV, des heures EPEX bon marché et de la congestion réseau.\n\n**Pas de chauffe-eau?** ➜ Laissez le commutateur **DÉSACTIVÉ** et cliquez sur Suivant — cette étape est complètement ignorée.\n\nVous connectez des entités HA existantes: switch, climate ou water_heater.",
         "data": {
           "boiler_groups_enabled": "Warm water cascade activeren",
           "boiler_group_name": "Naam van de groep",

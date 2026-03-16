@@ -306,6 +306,10 @@ class DetectedDevice:
     # v1.20 — room meter: originating HA entity for area registry lookup
     source_entity_id: str = ""      # entity_id of smart plug / power sensor that anchored this device
 
+    # v4.6.279 — auto/manual excluderen van energiebalans
+    exclude_from_balance: bool = False  # True = niet meegeteld in huisverbruik (auto of handmatig)
+    balance_exclude_reason: str = ""    # reden: "auto_integration", "user", ""
+
     # v2.2.5 — LLM naam-suggestie voor generic apparaten
     suggested_name: str = ""        # door LLM voorgestelde naam (nog niet door gebruiker bevestigd)
 
@@ -378,6 +382,8 @@ class DetectedDevice:
             "user_hidden":    self.user_hidden,
             "user_suppressed": self.user_suppressed,
             "source_entity_id": self.source_entity_id,
+            "exclude_from_balance": self.exclude_from_balance,
+            "balance_exclude_reason": self.balance_exclude_reason,
             "suggested_name": self.suggested_name,
             "time_profile":   self.time_profile,
             "phase_votes":    self.phase_votes,
@@ -602,9 +608,376 @@ class NILMDetector:
             )
         self._pv_power_prev = pv_w
 
+    # ── v4.6.282: Balans + correlatie gebaseerde infra-detectie ─────────────
+
+    def check_balance_suspect_devices(
+        self,
+        house_w: float,
+        battery_w: float,
+        solar_w: float,
+        grid_w: float,
+    ) -> list[str]:
+        """
+        Detecteer NILM apparaten die waarschijnlijk infrastructuur zijn op basis
+        van twee signalen:
+
+        1. Balans-overschrijding: totaal NILM > house_w + 20% marge betekent dat
+           er infrastructuurvermogen is meegeteld (bijv. batterij die terugleverd
+           telt als 'verbruik' in smart plug meting).
+
+        2. Vermogenscorrelatie: apparaat wiens power_w sterk meebeweegt met
+           battery_w of solar_w is hoogstwaarschijnlijk infrastructuur.
+           - Batterij: power ~ abs(battery_w)
+           - PV-infra: power ~ solar_w
+
+        Geeft lijst van device_ids terug die verdacht zijn. Caller besluit wat
+        ermee te doen (auto-exclude of alleen loggen).
+
+        Veiligheid: nooit bevestigde apparaten aanpassen.
+        """
+        import time as _t
+
+        # Initialiseer correlatie-ringbuffer als die er nog niet is
+        if not hasattr(self, "_corr_buffer"):
+            self._corr_buffer: dict = {}  # {device_id: [(pw, ref_w), ...]}
+        if not hasattr(self, "_balance_overrun_count"):
+            self._balance_overrun_count: int = 0
+
+        suspects: list[str] = []
+
+        # ── 1. Balans-check ───────────────────────────────────────────────────
+        total_nilm_w = sum(
+            (dev.current_power or 0)
+            for dev in self._devices.values()
+            if dev.is_on and not dev.exclude_from_balance
+        )
+        overrun = total_nilm_w - house_w
+        if overrun > max(100.0, house_w * 0.25):
+            self._balance_overrun_count += 1
+        else:
+            self._balance_overrun_count = max(0, self._balance_overrun_count - 1)
+
+        if self._balance_overrun_count >= 6:
+            # Consistent overrun ≥ 6 cycli (60s) — zoek de grootste verdachte
+            # smart plug waarvan power ≈ de overrun (±30%)
+            for did, dev in self._devices.items():
+                if not dev.is_on or dev.confirmed or dev.exclude_from_balance:
+                    continue
+                if dev.source != "smart_plug":
+                    continue
+                pw = dev.current_power or 0
+                if pw > 50 and abs(pw - overrun) / max(overrun, 1) < 0.35:
+                    suspects.append(did)
+                    _LOGGER.info(
+                        "CloudEMS NILM balans-verdacht: '%s' (%.0fW) — "
+                        "NILM-som %.0fW > huis %.0fW (overrun %.0fW)",
+                        dev.name, pw, total_nilm_w, house_w, overrun,
+                    )
+
+        # ── 2. Correlatie-detectie ────────────────────────────────────────────
+        # Voeg huidige meting toe aan buffer (max 30 samples = ~5 min)
+        ref_battery = abs(battery_w) if battery_w != 0 else 0.0
+        ref_solar   = abs(solar_w)   if solar_w   != 0 else 0.0
+
+        for did, dev in self._devices.items():
+            if dev.confirmed or dev.exclude_from_balance:
+                continue
+            if dev.source != "smart_plug" or not dev.is_on:
+                continue
+            pw = dev.current_power or 0
+            if pw < 50:
+                continue
+            buf = self._corr_buffer.setdefault(did, [])
+            buf.append((pw, ref_battery, ref_solar))
+            if len(buf) > 30:
+                buf.pop(0)
+            if len(buf) < 10:
+                continue
+
+            # Pearson-achtige correlatie (vereenvoudigd)
+            pws = [b[0] for b in buf]
+            bts = [b[1] for b in buf]
+            sos = [b[2] for b in buf]
+            mean_pw = sum(pws) / len(pws)
+            mean_bt = sum(bts) / len(bts)
+            mean_so = sum(sos) / len(sos)
+            if mean_pw < 50 or (mean_bt < 20 and mean_so < 20):
+                continue
+
+            def corr(xs, ys, mx, my):
+                num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+                dx  = sum((x - mx) ** 2 for x in xs) ** 0.5
+                dy  = sum((y - my) ** 2 for y in ys) ** 0.5
+                return num / (dx * dy + 1e-9) if dx > 1 and dy > 1 else 0.0
+
+            r_bat = corr(pws, bts, mean_pw, mean_bt)
+            r_sol = corr(pws, sos, mean_pw, mean_so)
+
+            if r_bat > 0.85 or r_sol > 0.85:
+                if did not in suspects:
+                    suspects.append(did)
+                _LOGGER.info(
+                    "CloudEMS NILM correlatie-verdacht: '%s' (%.0fW) — "
+                    "r_batterij=%.2f r_zon=%.2f → waarschijnlijk infrastructuur",
+                    dev.name, mean_pw, r_bat, r_sol,
+                )
+
+        return suspects
+
+    def apply_balance_suspects(self, suspect_ids: list[str]) -> int:
+        """
+        Markeer verdachte apparaten als exclude_from_balance.
+        Alleen smart plugs die niet bevestigd zijn.
+        Geeft aantal gemarkeerde apparaten terug.
+        """
+        marked = 0
+        for did in suspect_ids:
+            dev = self._devices.get(did)
+            if not dev or dev.confirmed or dev.exclude_from_balance:
+                continue
+            dev.exclude_from_balance   = True
+            dev.balance_exclude_reason = "auto_balance"
+            marked += 1
+            _LOGGER.warning(
+                "CloudEMS NILM: '%s' automatisch uitgesloten — balans/correlatie "
+                "detectie (balans overrun of vermogenscorrelatie met batterij/PV)",
+                dev.name,
+            )
+        return marked
+
+    def auto_merge_duplicate_names(self) -> int:
+        """
+        v4.6.281: Detecteer en merge NILM apparaten met dezelfde naam maar op
+        verschillende fases (bijv. twee keer 'Vaatwasser' op L1 en L2).
+
+        Merge-logica:
+        - Zelfde naam (case-insensitive) + vergelijkbaar vermogen (±30%)
+        - Bevestigde wint altijd; anders degene met meeste on_events
+        - Winner erft: max(power_w), sum(on_events), min(phase) → 'L1' als er meerdere zijn
+        - Loser wordt verwijderd
+
+        Geeft aantal samengevoegde paren terug.
+        """
+        from collections import defaultdict
+        import time as _t
+        now = _t.time()
+
+        # Groepeer op genormaliseerde naam
+        by_name: dict = defaultdict(list)
+        for did, dev in self._devices.items():
+            if did.startswith("__"):
+                continue
+            key = (dev.name or "").strip().lower()
+            if not key:
+                continue
+            by_name[key].append((did, dev))
+
+        merged = 0
+        for name_key, group in by_name.items():
+            if len(group) < 2:
+                continue
+
+            # Controleer of vermogens vergelijkbaar zijn (±30%)
+            powers = [
+                getattr(dev, "nominal_power_w", 0) or getattr(dev, "power_w", 0) or dev.current_power
+                for _, dev in group
+            ]
+            if min(powers) <= 0:
+                continue
+            ratio = max(powers) / max(min(powers), 1)
+            if ratio > 2.0:
+                continue  # te veel verschil — niet samenvoegen
+
+            # Smart plugs nooit samenvoegen (elk is een echt fysiek apparaat)
+            if all(dev.source == "smart_plug" for _, dev in group):
+                continue
+
+            # Winner: bevestigd > meeste on_events > eerste
+            def score(item):
+                _, dev = item
+                return (dev.confirmed, dev.on_events, dev.detection_count)
+            group.sort(key=score, reverse=True)
+            winner_id, winner = group[0]
+            losers = group[1:]
+
+            for loser_id, loser in losers:
+                # Skip als loser smart_plug en winner niet
+                if loser.source == "smart_plug" and winner.source != "smart_plug":
+                    continue
+
+                # Winner erft statistieken van loser
+                winner.on_events    += loser.on_events
+                winner.detection_count += loser.detection_count
+                # Neem hoogste vermogen
+                loser_pw = getattr(loser, "nominal_power_w", 0) or loser.current_power
+                winner_pw = getattr(winner, "nominal_power_w", 0) or winner.current_power
+                if loser_pw > winner_pw and loser_pw > 0:
+                    winner.nominal_power_w = loser_pw
+
+                self._devices.pop(loser_id, None)
+                merged += 1
+                _LOGGER.info(
+                    "CloudEMS NILM auto-merge: '%s' (%s, %.0fW) samengevoegd met '%s' (%s, %.0fW)",
+                    loser.name, loser.phase or "?", loser_pw,
+                    winner.name, winner.phase or "?", winner_pw,
+                )
+
+        return merged
+
     def set_config_sensor_eids(self, entity_ids: set) -> None:
         """Register entity_ids of CloudEMS-configured sensors (grid, PV, P1, gas, etc.)."""
         self._config_sensor_eids = {e for e in entity_ids if e}
+
+    # ── v4.6.279: Auto-exclusie bekende batterij/omvormer integraties ─────────
+    # Scant alle HA entiteiten op bekende integratie-patronen en markeert
+    # overeenkomende smart plug NILM apparaten als 'exclude_from_balance'.
+    # Zo worden Zendure Accu 1/2, SolarFlow, Victron etc nooit dubbel meegeteld.
+
+    # Bekende integrations → entity_id prefix/pattern → display naam
+    _KNOWN_MANAGED_INTEGRATIONS: dict = {
+        # Zendure / SolarFlow
+        "zendure":      ("sensor.zendure_", "sensor.solarflow_", "sensor.ace_"),
+        "solarflow":    ("sensor.solarflow_",),
+        # Victron
+        "victron":      ("sensor.victron_", "sensor.ve_bus_", "sensor.vebus_"),
+        # Growatt
+        "growatt":      ("sensor.growatt_",),
+        # GoodWe
+        "goodwe":       ("sensor.goodwe_",),
+        # SolarEdge
+        "solaredge":    ("sensor.solaredge_",),
+        # Enphase
+        "enphase":      ("sensor.enphase_",),
+        # Huawei FusionSolar
+        "huawei_solar": ("sensor.huawei_solar_",),
+        # Sungrow
+        "sungrow":      ("sensor.sungrow_",),
+        # SMA
+        "sma":          ("sensor.sma_",),
+        # Fronius
+        "fronius":      ("sensor.fronius_",),
+        # Foxess
+        "foxess":       ("sensor.foxess_",),
+        # BYD / KOSTAL
+        "byd":          ("sensor.byd_",),
+        "kostal":       ("sensor.kostal_",),
+        # Pylontech
+        "pylontech":    ("sensor.pylontech_",),
+        # EcoFlow
+        "ecoflow":      ("sensor.ecoflow_",),
+        # Anker SOLIX
+        "anker_solix":  ("sensor.anker_",),
+    }
+
+    def auto_exclude_by_entity_ids(self, entity_ids: set) -> list[str]:
+        """
+        v4.6.283: Sluit NILM smart plug apparaten uit waarvan source_entity_id
+        in de opgegeven set zit (bijv. topology-bekende infra-sensoren).
+        Geeft lijst van namen terug van nieuw-gemarkeerde apparaten.
+        """
+        excluded = []
+        for dev in self._devices.values():
+            if dev.source != "smart_plug" or dev.exclude_from_balance:
+                continue
+            if dev.source_entity_id in entity_ids:
+                dev.exclude_from_balance   = True
+                dev.balance_exclude_reason = "auto_topology"
+                excluded.append(dev.name)
+                _LOGGER.info(
+                    "CloudEMS NILM topology-exclusie: '%s' (entity=%s)",
+                    dev.name, dev.source_entity_id,
+                )
+        return excluded
+
+    def auto_exclude_managed_integration_devices(self, hass_states: dict) -> int:
+        """
+        Detecteer smart plug NILM apparaten die al worden beheerd door een bekende
+        HA batterij/omvormer integratie en markeer ze als exclude_from_balance.
+
+        Aanroepen vanuit coordinator elke N cycli (niet elke 10s — duur).
+        Geeft aantal nieuw-gemarkeerde apparaten terug.
+
+        Logica:
+        1. Bouw een set van bekende integratie entity_id prefixes die actief zijn in HA
+        2. Loop door alle smart_plug NILM apparaten
+        3. Als source_entity_id matcht met een bekende integratie → exclude_from_balance=True
+        4. Als naam matcht (bijv. "Zendure Manager", "Accu 1") → ook markeren
+
+        Gebruikt source_entity_id (bijv. "sensor.zendure_hub_power") als primaire match.
+        Naam-matching als fallback voor apparaten zonder duidelijke entity_id.
+        """
+        # Welke integratie-prefixes zijn actief in HA?
+        active_prefixes: list[str] = []
+        for _integ, prefixes in self._KNOWN_MANAGED_INTEGRATIONS.items():
+            for prefix in prefixes:
+                if any(eid.startswith(prefix) for eid in hass_states):
+                    active_prefixes.append(prefix)
+
+        if not active_prefixes:
+            return 0
+
+        # Naam-patronen die op bekende integraties wijzen
+        _NAME_PATTERNS = (
+            "zendure", "solarflow", "ace ", "growatt", "goodwe", "victron",
+            "solaredge", "enphase", "huawei", "sungrow", "sma ", "fronius",
+            "foxess", "ecoflow", "anker solix", "pylontech", "byd ",
+            "ve.bus", "vebus", "multiplus",
+        )
+
+        newly_marked = 0
+        for dev in self._devices.values():
+            if dev.source != "smart_plug":
+                continue
+            if dev.exclude_from_balance:
+                continue  # already marked
+
+            src_eid = (dev.source_entity_id or "").lower()
+            dev_name = (dev.name or "").lower()
+
+            # Match via entity_id prefix
+            matched_by_eid = any(src_eid.startswith(p) for p in active_prefixes)
+
+            # Match via device name (fallback — Zendure Manager, Accu 1, SolarFlow 2400)
+            matched_by_name = any(pat in dev_name for pat in _NAME_PATTERNS)
+
+            if matched_by_eid or matched_by_name:
+                dev.exclude_from_balance   = True
+                dev.balance_exclude_reason = "auto_integration"
+                newly_marked += 1
+                _LOGGER.info(
+                    "CloudEMS NILM: '%s' automatisch uitgesloten van energiebalans "
+                    "(beheerd door bekende HA integratie, source=%s)",
+                    dev.name, dev.source_entity_id or "—",
+                )
+
+        return newly_marked
+
+    def set_device_balance_exclude(self, device_id: str, exclude: bool,
+                                    reason: str = "user") -> bool:
+        """Handmatig exclude_from_balance zetten voor een apparaat."""
+        dev = self._devices.get(device_id)
+        if not dev:
+            return False
+        dev.exclude_from_balance   = exclude
+        dev.balance_exclude_reason = reason if exclude else ""
+        _LOGGER.info(
+            "CloudEMS NILM: '%s' balans-uitsluiting %s (reden: %s)",
+            dev.name, "AAN" if exclude else "UIT", reason,
+        )
+        return True
+
+    def get_balance_excluded_devices(self) -> list[dict]:
+        """Geef alle apparaten terug die zijn uitgesloten van de energiebalans."""
+        return [
+            {
+                "id":     did,
+                "name":   dev.name,
+                "reason": dev.balance_exclude_reason,
+                "source": dev.source_entity_id,
+            }
+            for did, dev in self._devices.items()
+            if dev.exclude_from_balance
+        ]
         # Purge any devices learned from these sensors — incl. confirmed ones (v4.5.11)
         to_remove = [
             did for did, dev in self._devices.items()
@@ -854,7 +1227,9 @@ class NILMDetector:
                     user_type      = dev_data.get("user_type",""),
                     user_hidden    = dev_data.get("user_hidden", False),
                     user_suppressed = dev_data.get("user_suppressed", False),
-                    source_entity_id = dev_data.get("source_entity_id", ""),
+                    source_entity_id      = dev_data.get("source_entity_id", ""),
+                    exclude_from_balance  = dev_data.get("exclude_from_balance", False),
+                    balance_exclude_reason= dev_data.get("balance_exclude_reason", ""),
                     suggested_name   = dev_data.get("suggested_name", ""),
                     time_profile     = dev_data.get("time_profile", {}),
                     phase_votes      = dev_data.get("phase_votes", {"L1": 0, "L2": 0, "L3": 0}),

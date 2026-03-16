@@ -199,6 +199,69 @@ class SelfConsumptionTracker:
             hourly_pv_wh       = [round(self._hourly[h].pv_wh * 100, 1) for h in range(24)],
         )
 
+    def forecast_self_consumption(self, pv_forecast_hourly: list[float]) -> dict:
+        """
+        v4.6.283: Voorspel zelfconsumptie voor morgen op basis van:
+        - PV-uurforecast (Wh per uur, 24 punten)
+        - Geleerd verbruiksprofiel (_hourly[h].import_wh als proxy voor huisverbruik)
+
+        Formule per uur:
+          self_consumed_wh = min(pv_wh, house_wh)
+          export_wh        = max(0, pv_wh - house_wh)
+          import_wh        = max(0, house_wh - pv_wh)
+
+        Geeft dict met:
+          total_pv_kwh, self_consumed_kwh, export_kwh, self_consumption_pct,
+          hourly (24 dicts met pv_wh, house_wh, self_wh, export_wh)
+        """
+        if not pv_forecast_hourly or len(pv_forecast_hourly) < 24:
+            return {}
+
+        # Gemiddeld huisverbruik per uur uit geleerd profiel (Wh)
+        # import_wh = wat van het net gehaald werd; als PV 0 is = huisverbruik
+        # Als er wel PV was: house = pv_wh - export_wh + import_wh
+        house_profile: list[float] = []
+        for h in range(24):
+            slot = self._hourly[h]
+            if slot.samples > 0:
+                # Reconstruct house_wh: pv + import - export
+                house_wh = slot.pv_wh + slot.import_wh - slot.export_wh
+                house_profile.append(max(0.0, house_wh))
+            else:
+                house_profile.append(200.0)  # fallback 200Wh/uur als geen data
+
+        hourly = []
+        total_pv = 0.0
+        total_self = 0.0
+        total_export = 0.0
+
+        for h in range(24):
+            pv_wh    = float(pv_forecast_hourly[h]) if h < len(pv_forecast_hourly) else 0.0
+            house_wh = house_profile[h]
+            self_wh  = min(pv_wh, house_wh)
+            exp_wh   = max(0.0, pv_wh - house_wh)
+            total_pv    += pv_wh
+            total_self  += self_wh
+            total_export += exp_wh
+            hourly.append({
+                "hour":     h,
+                "pv_wh":   round(pv_wh, 0),
+                "house_wh": round(house_wh, 0),
+                "self_wh":  round(self_wh, 0),
+                "export_wh": round(exp_wh, 0),
+            })
+
+        sc_pct = round(total_self / total_pv * 100, 1) if total_pv > 0 else 0.0
+
+        return {
+            "total_pv_kwh":          round(total_pv   / 1000, 2),
+            "self_consumed_kwh":     round(total_self  / 1000, 2),
+            "export_kwh":            round(total_export/ 1000, 2),
+            "self_consumption_pct":  sc_pct,
+            "hourly":                hourly,
+            "has_profile":           any(s.samples > 0 for s in self._hourly),
+        }
+
     async def async_maybe_save(self) -> None:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
             await self._store.async_save({

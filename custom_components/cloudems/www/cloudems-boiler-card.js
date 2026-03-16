@@ -652,37 +652,56 @@ class CloudemsBoilerCard extends HTMLElement {
         const powerEidL = `sensor.cloudems_boiler_${labelSlugH}_power`;
         const powerEidE = `sensor.cloudems_boiler_${eidSlugH}_power`;
         const powerEid  = this._hass.states[powerEidL] ? powerEidL : powerEidE;
-        const eids = `${tempEid},${powerEid}`;
-        const url  = `history/period/${start.toISOString()}?filter_entity_id=${eids}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
-        const resp = await this._hass.callApi('GET', url);
-
+        // Fetch temp and power SEPARATELY to avoid entity_id ambiguity with minimal_response
         const parseSeries = (arr) => {
           if (!arr || !arr.length) return [];
-          const raw  = arr.filter(s => s.state && !isNaN(parseFloat(s.state)));
+          // minimal_response uses {s, lc} — full uses {state, last_changed}
+          const raw = arr.filter(s => {
+            const v = parseFloat(s.s ?? s.state ?? '');
+            return !isNaN(v);
+          });
           const step = Math.max(1, Math.floor(raw.length / 24));
-          return raw.filter((_, i) => i % step === 0).slice(-24).map(s => ({
-            t: new Date(s.last_changed).getHours() + ':' +
-               String(new Date(s.last_changed).getMinutes()).padStart(2,'0'),
-            v: parseFloat(s.state)
-          }));
+          return raw.filter((_, i) => i % step === 0).slice(-24).map(s => {
+            const ts = new Date(s.lc ?? s.last_changed ?? 0);
+            return { t: ts.getHours() + ':' + String(ts.getMinutes()).padStart(2,'0'),
+                     v: parseFloat(s.s ?? s.state) };
+          });
         };
 
-        if (resp && Array.isArray(resp)) {
-          this._historyPower = this._historyPower || {};
-          for (const series of resp) {
-            if (!series || !series.length) continue;
-            const firstEid = series[0]?.entity_id || '';
-            if (firstEid.endsWith('_temp')) {
-              this._history[eid] = parseSeries(series);
-            } else if (firstEid.endsWith('_power') || firstEid === powerEid) {
-              this._historyPower[eid] = parseSeries(series);
-            }
-          }
-          this._render();
-        }
+        const urlTemp  = `history/period/${start.toISOString()}?filter_entity_id=${tempEid}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
+        const urlPower = `history/period/${start.toISOString()}?filter_entity_id=${powerEid}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
+
+        const [respTemp, respPower] = await Promise.all([
+          this._hass.callApi('GET', urlTemp).catch(() => null),
+          this._hass.callApi('GET', urlPower).catch(() => null),
+        ]);
+
+        this._historyPower = this._historyPower || {};
+        if (respTemp?.[0]?.length)  this._history[eid]      = parseSeries(respTemp[0]);
+        if (respPower?.[0]?.length) this._historyPower[eid]  = parseSeries(respPower[0]);
+        this._render();
       } catch (_) {}
       this._historyLoading[eid] = false;
     }
+  }
+
+  _adjustSetpoint(entityId, delta) {
+    if (!this._hass || !entityId) return;
+    const st = this._hass.states[entityId];
+    const current = parseFloat(st?.attributes?.temperature ?? 53);
+    const newTemp = Math.max(35, Math.min(80, current + delta));
+    this._hass.callService('water_heater', 'set_temperature', {
+      entity_id: entityId,
+      temperature: newTemp,
+    });
+  }
+
+  _setSetpoint(entityId, temp) {
+    if (!this._hass || !entityId) return;
+    this._hass.callService('water_heater', 'set_temperature', {
+      entity_id: entityId,
+      temperature: temp,
+    });
   }
 
   _renderWarmtebron(hass) {
@@ -885,6 +904,30 @@ class CloudemsBoilerCard extends HTMLElement {
           </div>
 
           ${this._renderWarmtebron(hass)}
+
+          ${vboilerSt ? `<div style="margin:8px 0;padding:10px 14px;background:rgba(255,255,255,.04);border-radius:10px;border:1px solid rgba(255,255,255,.08)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,.6)">🌡️ Virtuele thermostaat</span>
+              <span style="font-size:10px;color:rgba(255,255,255,.35)">${vboilerSt.attributes?.hvac_action||vboilerSt.state||'—'}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <button onclick="this.getRootNode().host._adjustSetpoint('${vboilerSt.entity_id||'water_heater.cloudems_boiler_'+labelSlug}', -1)"
+                style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+              <div style="flex:1;text-align:center">
+                <div style="font-size:20px;font-weight:700;color:#ffd600;font-family:monospace">${vbSetpoint != null ? vbSetpoint.toFixed(0)+'°C' : '—'}</div>
+                <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:1px">Setpoint · Nu: ${tempC != null ? tempC.toFixed(1)+'°C' : '—'}</div>
+              </div>
+              <button onclick="this.getRootNode().host._adjustSetpoint('${vboilerSt.entity_id||'water_heater.cloudems_boiler_'+labelSlug}', +1)"
+                style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+              ${[{l:'Nacht',v:45},{l:'Normaal',v:vbSetpoint||53},{l:'PV-boost',v:Math.round(maxSp)}].map(p=>`
+                <button onclick="this.getRootNode().host._setSetpoint('${vboilerSt.entity_id||'water_heater.cloudems_boiler_'+labelSlug}', ${p.v})"
+                  style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:${vbSetpoint!=null&&Math.round(vbSetpoint)===p.v?'rgba(255,214,0,.15)':'rgba(255,255,255,.04)'};color:${vbSetpoint!=null&&Math.round(vbSetpoint)===p.v?'#ffd600':'rgba(255,255,255,.5)'};font-size:10px;cursor:pointer;white-space:nowrap">
+                  ${p.l}<br><span style="font-size:9px;opacity:.7">${p.v}°</span>
+                </button>`).join('')}
+            </div>
+          </div>` : ''}
 
           <div class="metrics">
             <div class="metric">

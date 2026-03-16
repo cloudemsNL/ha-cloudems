@@ -1,40 +1,40 @@
 title: ⚡ CloudEMS
 resources:
-- url: /local/cloudems/cloudems-cards.js?v=4.6.271
+- url: /local/cloudems/cloudems-cards.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-card-mod.js?v=4.6.271
+- url: /local/cloudems/cloudems-card-mod.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-boiler-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-boiler-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-battery-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-battery-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-shutter-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-shutter-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-solar-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-solar-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-pv-forecast-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-pv-forecast-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-overview-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-overview-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-switches-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-switches-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-zelfconsumptie-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-zelfconsumptie-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-decisions-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-decisions-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-prijsverloop-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-prijsverloop-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-price-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-price-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-rooms-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-rooms-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-home-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-home-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-config-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-config-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-gas-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-gas-card.js?v=4.6.297
   type: module
-- url: /local/cloudems/cloudems-nilm-card.js?v=4.6.271
+- url: /local/cloudems/cloudems-nilm-card.js?v=4.6.297
   type: module
 views:
 - title: Overzicht
@@ -82,6 +82,9 @@ views:
     cards:
     - type: custom:cloudems-home-card
       max_ampere: 25
+  cards:
+  - &id001
+    type: custom:cloudems-mini-price-card
 - title: Beslissingen
   path: cloudems-beslissingen
   type: masonry
@@ -92,6 +95,7 @@ views:
     style: "hui-masonry-view {\n  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent\
       \ 60%), rgb(24,24,24) !important;\n}\n"
   cards:
+  - *id001
   - type: custom:cloudems-decisions-card
 - title: Prijzen & Kosten
   path: cloudems-prijzen
@@ -104,6 +108,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: custom:cloudems-gas-card
     title: Gas
   - type: custom:cloudems-price-card
@@ -120,238 +125,25 @@ views:
 
       '
   cards:
-  - type: markdown
-    content: '{%- set pv_now   = states(''sensor.cloudems_solar_system_intelligence'') | float(0) | round(0) | int -%}
-
-      {%- set fc_today = states(''sensor.cloudems_solar_pv_forecast_today'') | float(0) | round(2) -%}
-
-      {%- set fc_tmr   = states(''sensor.cloudems_solar_pv_forecast_tomorrow'') | float(0) | round(2) -%}
-
-      {%- set zelf     = states(''sensor.cloudems_self_consumption'') | float(0) | round(0) | int -%}
-
-      | ⚡ PV nu | 📅 Vandaag | ➡️ Morgen | ♻️ Zelfverbruik |
-
-      |:---:|:---:|:---:|:---:|
-
-      | **{{ pv_now }} W** | **{{ fc_today }} kWh** | **{{ fc_tmr }} kWh** | **{{ zelf }}%** |
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n}\nha-markdown-element\
-        \ table { width: 100%; }\nha-markdown-element td { text-align: center !important; font-size: 1.1em; padding: 6px 4px\
-        \ !important; }\nha-markdown-element th { text-align: center !important; font-size: 0.78em; color: rgb(163,163,163);\
-        \ padding: 4px !important; }\n"
-  - type: markdown
-    title: ☀️ Omvormers — Live status
-    content: '{% set invs = state_attr(''sensor.cloudems_solar_system_intelligence'', ''inverters'') or [] %}
-
-      {% set inv_count_cfg = state_attr(''sensor.cloudems_solar_system_intelligence'', ''inverter_count'') %}
-
-      {% if invs | length == 0 %}
-
-      {% if inv_count_cfg is none %}
-
-      ⏳ *Omvormerdata wordt geladen...*
-
-      {% else %}
-
-      *Geen omvormers geconfigureerd.*
-
-      {% endif %}
-
-      {% else %}
-
-      | Omvormer | Nu | Piek 7d | Rated | Benutting | Richting | Fase | Clipping |
-
-      |----------|----|---------|-------|-----------|----------|------|----------|
-
-      {% for inv in invs -%}
-
-      {%- set ph = inv.phase_display -%}
-
-      {%- set ph_conf = (inv.phase_confidence | default(0)) | round(0) | int -%}
-
-      {%- set ph_cert = inv.phase_certain | default(false) -%}
-
-      {%- set is_3f   = inv.is_three_phase | default(false) -%}
-
-      {%- if ph_cert and is_3f -%}{%- set fase_col = ''✅ 3-fase'' -%}
-
-      {%- elif ph_cert -%}{%- set fase_col = ''✅ '' ~ ph -%}
-
-      {%- elif ph == ''3F'' -%}{%- set fase_col = ''🔍 ~3F '' ~ ph_conf ~ ''%'' -%}
-
-      {%- elif ph -%}{%- set fase_col = ''🔍 ~'' ~ ph ~ '' '' ~ ph_conf ~ ''%'' -%}
-
-      {%- else -%}{%- set fase_col = ''⏳ leren'' -%}{%- endif -%}
-
-      | **{{ inv.label }}** | {{ inv.current_w | int }} W | {{ inv.peak_w_7d | int }} W | {{ (inv.rated_power_w | int | string
-      ~ '' W'') if inv.rated_power_w else ''—'' }} | {{ ''🟢'' if inv.utilisation_pct >= 60 else ''🟡'' if inv.utilisation_pct
-      >= 20 else ''⚫'' }} {{ inv.utilisation_pct | round(0) }}% | {{ inv.azimuth_compass or ''?'' }} {{ inv.tilt_deg | int
-      if inv.tilt_deg else '''' }}° | {{ fase_col }} | {{ ''⚠️ JA'' if inv.clipping else ''✅'' }} |
-
-      {% endfor %}
-
-      {% endif %}
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 📈 Benutting & Clipping-drempel
-    content: '{%- set invs = state_attr(''sensor.cloudems_solar_system_intelligence'', ''inverters'') or [] -%}
-
-      {%- if not invs -%}
-
-      *Geen omvormers beschikbaar.*
-
-      {%- else -%}
-
-      {%- for inv in invs -%}
-
-      {%- set ceiling = inv.rated_power_w or inv.peak_w_7d or inv.peak_w or 0 -%}
-
-      {%- set ceiling = ceiling | float(0) -%}
-
-      {%- set cur_w = inv.current_w | default(0) | float -%}
-
-      {%- set pct = [[(cur_w / ceiling * 100) | round(0) | int, 0] | max, 100] | min if ceiling > 0 else 0 -%}
-
-      {%- set bar_filled = (pct / 5) | int -%}
-
-      {%- set clipping = inv.clipping | default(false) -%}
-
-      {%- set clip_icon = ''⚠️ Clipping!'' if clipping else '''' -%}
-
-      **{{ inv.label }}** — {{ cur_w | int }} W  {{ clip_icon }}
-
-      `[{{ ''█'' * bar_filled }}{{ ''░'' * (20 - bar_filled) }}]` {{ pct }}% van {{ ceiling | int }} W{{ '' *(rating: '' ~
-      (inv.rated_power_w | int) ~ '' W)*'' if inv.rated_power_w else '''' }}
-
-
-      {% endfor %}
-
-      {%- endif %}
-
-      '
-    card_mod:
-      style: 'ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius:
-        16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color: rgb(163,163,163); --secondary-text-color:
-        rgb(102,102,102); --primary-color: rgb(0,177,64); --card-background-color: transparent; --ha-card-border-color: transparent;
-        }
-
-        ha-card:hover { border-color: rgba(0,177,64,0.5) !important; box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)
-        !important; transform: translateY(-1px) !important; }
-
-        .card-header { background: transparent !important; border-bottom: 1px solid rgba(255,255,255,0.07) !important; color:
-        rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important;
-        }
-
-        ha-markdown-element code { background: rgba(0,177,64,0.12) !important; color: rgb(0,212,78) !important; padding: 1px
-        6px !important; border-radius: 4px !important; font-size: 12px !important; }
-
-        ha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }
-
-        ha-markdown-element em { color: rgb(102,102,102) !important; }
+  - *id001
+  - type: conditional
+    conditions:
+    - condition: state
+      entity: switch.cloudems_module_solar_learner
+      state: 'off'
+    card:
+      type: markdown
+      content: '⚠️ **🔋 Batterij module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze
+        functie te activeren.
 
         '
-  - type: markdown
-    title: ☀️ PV samenvatting
-    content: '{%- set pv_w        = states(''sensor.cloudems_solar_system_intelligence'') | float(0) | round(0) | int -%}
+      card_mod:
+        style: 'ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius:
+          12px !important; padding: 4px 12px !important; }
 
-      {%- set vand_kwh    = states(''sensor.cloudems_solar_pv_forecast_today'')   | float(0) | round(2) -%}
-
-      {%- set morg_kwh    = states(''sensor.cloudems_solar_pv_forecast_tomorrow'')| float(0) | round(2) -%}
-
-      {%- set zelf_pct    = states(''sensor.cloudems_self_consumption'')    | float(0) | round(1) -%}
-
-      {%- set ep          = ''sensor.cloudems_energy_epex_today'' -%}
-
-      {%- set vand_exp_kwh  = state_attr(ep, ''pv_kwh_today'')    | float(none) -%}
-
-      {%- set morg_exp_kwh  = state_attr(ep, ''pv_kwh_tomorrow'') | float(none) -%}
-
-      {%- set pv_forecast   = states(''sensor.cloudems_solar_system_intelligence'') -%}
-
-      {%- set pv_attr = state_attr(''sensor.cloudems_solar_system_intelligence'',''pv_forecast_peak_hour'') -%}
-
-      | | Waarde |
-
-      |---|---|
-
-      | ☀️ **PV nu** | **{{ pv_w }} W** |
-
-      | 📅 Verwacht vandaag | {{ vand_kwh }} kWh |
-
-      | 📅 Verwacht morgen | {{ morg_kwh }} kWh |
-
-      | 🔁 Zelfconsumptie | {{ zelf_pct }} % |
-
-      | 🌅 Piekuur vandaag | {{ pv_attr if pv_attr else ''—'' }} |
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse\
-        \ !important; }\nha-markdown-element td, ha-markdown-element th {\n  padding: 5px 8px !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.05) !important;\n  font-size: 13px !important;\n}\nha-markdown-element th { color:\
-        \ rgb(163,163,163) !important; font-size: 11px !important; font-weight:600 !important; }\nha-card:hover {\n  border-color:\
-        \ rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n\
-        \  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-        \  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: ✂️ Clipping Verlies & Curtailment
-    icon: mdi:solar-power-variant-outline
-    entities:
-    - entity: sensor.cloudems_clipping_verlies
-      name: Verlies laatste 30 dagen (kWh)
-    - type: attribute
-      entity: sensor.cloudems_clipping_verlies
-      attribute: total_eur_lost_year
-      name: Geschat verlies per jaar (€)
-    - type: attribute
-      entity: sensor.cloudems_clipping_verlies
-      attribute: worst_inverter
-      name: Grootste verliezer
-    - type: attribute
-      entity: sensor.cloudems_clipping_verlies
-      attribute: expansion_roi_years
-      name: Terugverdientijd uitbreiding (jaar)
-    - type: attribute
-      entity: sensor.cloudems_clipping_verlies
-      attribute: any_curtailment
-      name: Feed-in curtailment vermoed
-    - type: attribute
-      entity: sensor.cloudems_clipping_verlies
-      attribute: advice
-      name: Advies
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-        \ rgb(68,68,68);\n  --state-unavailable-color: rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color:\
-        \ rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color:\
-        \ rgba(255,255,255,0.06);\n  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color:\
-        \ rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n\
-        \  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-        \  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
+          '
+  - type: custom:cloudems-solar-card
+    title: Zonnepanelen
   - type: conditional
     conditions:
     - condition: numeric_state
@@ -377,773 +169,6 @@ views:
         💡 *Tip: laad de batterij vóór de clippinguren volledig op om geclipte energie optimaal te benutten.*
 
         '
-      style: "ha-card {\n  background: linear-gradient(135deg, rgb(45,34,0) 0%, rgb(61,48,0) 100%);\n  border-left: 4px solid\
-        \ rgb(243,156,18);\n  border-radius: 10px;\n}\n"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-          \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-          \ rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-          \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-          \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-          \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-          \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-          \  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse:\
-          \ collapse !important; }\nha-markdown-element th {\n  background: rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78)\
-          \ !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n\
-          \  text-transform: uppercase !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2)\
-          \ !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px solid rgba(255,255,255,0.05)\
-          \ !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06)\
-          \ !important;\n  color: rgb(255,255,255) !important;\n}\nha-markdown-element strong { color: rgb(255,255,255) !important;\
-          \ font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element\
-          \ code {\n  background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px\
-          \ !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element blockquote\
-          \ {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding:\
-          \ 8px 14px !important;\n  border-radius: 0 8px 8px 0 !important;\n  color: rgb(163,163,163) !important;\n}\n"
-  - type: markdown
-    title: 🌥️ Structurele Schaduwdetectie
-    content: '{% set s = state_attr(''sensor.cloudems_schaduwdetectie'', ''inverters'') or [] %}
-
-      {% set any_shadow = state_attr(''sensor.cloudems_schaduwdetectie'', ''any_shadow'') %}
-
-      {% set summary = state_attr(''sensor.cloudems_schaduwdetectie'', ''summary'') %}
-
-      {% set total_loss = states(''sensor.cloudems_schaduwdetectie'') | float(0) %}
-
-
-      {% if s | length == 0 %}
-
-      *Onvoldoende data — schaduwanalyse is beschikbaar na ~5 zonnige dagen.*
-
-      {% elif not any_shadow %}
-
-      ✅ **Geen structurele schaduw gedetecteerd** op de geconfigureerde omvormers.
-
-      {% else %}
-
-      ⚠️ **{{ summary }}**
-
-
-      | Omvormer | Beschaduwd | Gedeeltelijk | Richting | Ernst | Verlies/dag |
-
-      |----------|-----------|--------------|----------|-------|-------------|
-
-      {% for inv in s -%}
-
-      {% set dir_icon = ''🌅'' if inv.direction == ''oost'' else ''🌇'' if inv.direction == ''west'' else ''☀️'' if inv.direction
-      == ''midden'' else ''🔀'' if inv.direction == ''multi'' else ''✅'' %}
-
-      {% set sev_icon = ''🔴'' if inv.severity == ''ernstig'' else ''🟡'' if inv.severity == ''matig'' else ''🟢'' if inv.severity
-      == ''licht'' else ''✅'' %}
-
-      {% set sh_uren = inv.shadowed_hours | map(''string'') | list | join('', '') ~ ''u'' if inv.shadowed_hours else ''—''
-      %}
-
-      {% set pt_uren = inv.partial_hours | map(''string'') | list | join('', '') ~ ''u'' if inv.partial_hours else ''—'' %}
-
-      | **{{ inv.label }}** | {{ sh_uren }} | {{ pt_uren }} | {{ dir_icon }} {{ inv.direction }} | {{ sev_icon }} {{ inv.severity
-      }} | {{ inv.lost_kwh_day_est }} kWh |
-
-      {% endfor %}
-
-
-      {% for inv in s if inv.shadowed_hours or inv.partial_hours %}
-
-      > 💬 {{ inv.advice }}
-
-      {% endfor %}
-
-      {% endif %}
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse\
-        \ !important; }\nha-markdown-element th {\n  background: rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n\
-        \  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform:\
-        \ uppercase !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n\
-        }\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px solid rgba(255,255,255,0.05)\
-        \ !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n}\nha-markdown-element strong { color: rgb(255,255,255) !important;\
-        \ font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element\
-        \ code {\n  background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n\
-        \  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element blockquote {\n  border-left:\
-        \ 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n\
-        \  border-radius: 0 8px 8px 0 !important;\n  color: rgb(163,163,163) !important;\n}\n"
-  - type: entities
-    title: 🌥️ Schaduw — Details per omvormer
-    icon: mdi:weather-partly-cloudy
-    entities:
-    - entity: sensor.cloudems_schaduwdetectie
-      name: Totaal geschat verlies (kWh/dag)
-    - type: attribute
-      entity: sensor.cloudems_schaduwdetectie
-      attribute: any_shadow
-      name: Schaduw gedetecteerd
-    - type: attribute
-      entity: sensor.cloudems_schaduwdetectie
-      attribute: summary
-      name: Samenvatting
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-        \ rgb(68,68,68);\n  --state-unavailable-color: rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color:\
-        \ rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color:\
-        \ rgba(255,255,255,0.06);\n  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color:\
-        \ rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n\
-        \  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-        \  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: custom:cloudems-zelfconsumptie-card
-    title: ♻️ Zelfconsumptie
-  - type: conditional
-    conditions:
-    - condition: template
-      value_template: '{% set alerts = state_attr(''sensor.cloudems_actieve_meldingen'', ''active_alerts'') or [] %} {{ alerts
-        | selectattr(''key'', ''eq'', ''inverter_negative_price_dim'') | list | length > 0 }}
-
-        '
-    card:
-      type: markdown
-      content: '{% set alerts = state_attr(''sensor.cloudems_actieve_meldingen'', ''active_alerts'') or [] %} {% set a = (alerts
-        | selectattr(''key'', ''eq'', ''inverter_negative_price_dim'') | list | first) %} 🔴 **{{ a.title }}** — {{ a.message
-        }}
-
-        '
-      card_mod:
-        style: "ha-card {\n  background: linear-gradient(135deg, rgba(231,76,60,0.15) 0%, rgba(192,57,43,0.2) 100%) !important;\n\
-          \  border-left: 4px solid rgb(231,76,60) !important;\n  border-radius: 10px !important;\n  margin-bottom: 4px !important;\n\
-          }\n"
-  - type: conditional
-    conditions:
-    - condition: template
-      value_template: '{% set alerts = state_attr(''sensor.cloudems_actieve_meldingen'', ''active_alerts'') or [] %} {{ alerts
-        | selectattr(''key'', ''eq'', ''inverter_dimmer_disabled'') | list | length > 0 }}
-
-        '
-    card:
-      type: markdown
-      content: '{% set alerts = state_attr(''sensor.cloudems_actieve_meldingen'', ''active_alerts'') or [] %} {% set a = (alerts
-        | selectattr(''key'', ''eq'', ''inverter_dimmer_disabled'') | list | first) %} 🟡 **{{ a.title }}** — {{ a.message
-        }}
-
-        '
-      card_mod:
-        style: "ha-card {\n  background: linear-gradient(135deg, rgba(243,156,18,0.12) 0%, rgba(230,126,34,0.15) 100%) !important;\n\
-          \  border-left: 4px solid rgb(243,156,18) !important;\n  border-radius: 10px !important;\n  margin-bottom: 4px !important;\n\
-          }\n"
-  - type: entities
-    title: ☀️ Zonnedimmer — Omvormers
-    show_empty: false
-    entities:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_1
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_1
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_1
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_1
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_1
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_1
-        attribute: status
-        name: 🔆 Status beslissing
-        icon: mdi:information-outline
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_1
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_1
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_2
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_2
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_2
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_2
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_2
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_2
-        attribute: status
-        name: 🔆 Status beslissing
-        icon: mdi:information-outline
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_2
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_2
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_3
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_3
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_3
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_3
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_3
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_3
-        attribute: status
-        name: 🔆 Status beslissing
-        icon: mdi:information-outline
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_3
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_3
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_4
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_4
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_4
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_4
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_4
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_4
-        attribute: status
-        name: 🔆 Status beslissing
-        icon: mdi:information-outline
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_4
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_4
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_5
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_5
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_5
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_5
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_5
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_5
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_6
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_6
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_6
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_6
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_6
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_6
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_7
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_7
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_7
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_7
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_7
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_7
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_8
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_8
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_8
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_8
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_8
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_8
-        icon: mdi:brightness-percent
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_zonnedimmer_9
-        state_not: unavailable
-      row:
-        entity: switch.cloudems_zonnedimmer_9
-        icon: mdi:solar-power
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_9
-        state_not: unavailable
-      row:
-        type: attribute
-        entity: number.cloudems_zonnedimmer_9
-        attribute: setpoint
-        icon: mdi:target
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: number.cloudems_zonnedimmer_9
-        state_not: unavailable
-      row:
-        entity: number.cloudems_zonnedimmer_9
-        icon: mdi:brightness-percent
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-        \ rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n}\n.card-header\
-        \ {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color:\
-        \ rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em\
-        \ !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: horizontal-stack
-    cards:
-    - type: entity
-      entity: sensor.cloudems_net_co2_intensiteit
-      name: CO2 intensiteit
-      icon: mdi:molecule-co2
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-          \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-          \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-          \ rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color:\
-          \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-          \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-          \ !important;\n}\n"
-    - type: entity
-      entity: sensor.cloudems_ai_status
-      name: AI modus
-      icon: mdi:robot
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-          \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-          \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-          \ rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color:\
-          \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-          \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-          \ !important;\n}\n"
-  - type: markdown
-    title: 🧭 Oriëntatie leervoortgang (helling & hoek)
-    content: '{% set invs = state_attr(''sensor.cloudems_solar_system_intelligence'', ''inverters'') or [] %}
-
-      {% if invs | length == 0 %}*Geen omvormers.*
-
-      {% else %}
-
-      {% for inv in invs -%}
-
-      {%- set have = inv.clear_sky_samples | default(0) | int -%}
-
-      {%- set need = inv.orientation_samples_needed | default(1800) | int -%}
-
-      {%- set pct  = [[((have / need * 100) | round(0) | int), 0] | max, 100] | min -%}
-
-      {%- set conf = inv.orientation_confident | default(false) -%}
-
-      {%- set filled = (pct / 100 * 20) | round(0) | int -%}
-
-      {%- set empty  = 20 - filled -%}
-
-      {%- set bar    = ''█'' * filled ~ ''░'' * empty -%}
-
-      {%- set icon   = ''✅'' if conf else (''🟡'' if pct >= 50 else ''🔴'') -%}
-
-      **{{ icon }} {{ inv.label }}** — {{ pct }}% geleerd
-
-      `{{ bar }}` {{ have }}/{{ need }} zonneminuten
-
-      Azimut: {{ inv.azimuth_compass or ''?'' }}{% if inv.azimuth_learned %} ({{ inv.azimuth_learned | round(0) | int }}°){%
-      endif %} · Helling: {% if inv.tilt_learned %}{{ inv.tilt_learned | round(0) | int }}°{% else %}?{% endif %}{% if not
-      conf %} · nog ~{{ [((need - have) / 60) | round(0) | int, 0] | max }} zonne-uren{% endif %}
-
-
-      {% endfor %}
-
-      {% endif %}
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse\
-        \ !important; }\nha-markdown-element th {\n  background: rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n\
-        \  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform:\
-        \ uppercase !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n\
-        }\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px solid rgba(255,255,255,0.05)\
-        \ !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n}\nha-markdown-element strong { color: rgb(255,255,255) !important;\
-        \ font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element\
-        \ code {\n  background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n\
-        \  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element blockquote {\n  border-left:\
-        \ 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n\
-        \  border-radius: 0 8px 8px 0 !important;\n  color: rgb(163,163,163) !important;\n}\n"
-  - type: markdown
-    title: 🎯 PV Voorspelling Nauwkeurigheid
-    content: '{% set acc   = states(''sensor.cloudems_pv_forecast_accuracy'') | float(0) %}
-
-      {% set m14   = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''mape_14d_pct'') | float(0) %}
-
-      {% set m30   = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''mape_30d_pct'') | float(0) %}
-
-      {% set bias  = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''bias_factor'') | float(1) %}
-
-      {% set samp  = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''samples'') | int(0) %}
-
-      {% set last  = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''last_day_mape'') | float(0) %}
-
-      {% set last_raw = state_attr(''sensor.cloudems_pv_forecast_accuracy'', ''last_day_error_pct'') | float(0) %}
-
-      {% if samp > 0 %}
-
-      {% if acc >= 85 %}🟢{% elif acc >= 70 %}🟡{% else %}🔴{% endif %} **Nauwkeurigheid: {{ [[acc, 0] | max, 100] | min | round(1)
-      }}%**
-
-
-      | Periode | Fout | Nauwkeurigheid |
-
-      |---|---|---|
-
-      | Gisteren | {{ last_raw | round(1) }}% | {{ [[100 - last, 0] | max, 100] | min | round(1) }}% |
-
-      | Laatste 14 dagen | {{ m14 | round(1) }}% | {{ [[100 - m14, 0] | max, 100] | min | round(1) }}% |
-
-      | Laatste 30 dagen | {{ m30 | round(1) }}% | {{ [[100 - m30, 0] | max, 100] | min | round(1) }}% |
-
-
-      | Bias factor | Betekenis |
-
-      |---|---|
-
-      | {{ bias | round(2) }} | {% if bias > 1.05 %}Model overschat opbrengst{% elif bias < 0.95 %}Model onderschat opbrengst{%
-      else %}✅ Goed gekalibreerd{% endif %} |
-
-
-      _Gebaseerd op {{ samp }} meetdagen_
-
-      {% else %}
-
-      ⏳ PV nauwkeurigheidsmodel verzamelt data — beschikbaar na ~7 meetdagen.
-
-      {% endif %}
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 💰 PV Opbrengst & Terugverdientijd
-    content: '{% set val     = states(''sensor.cloudems_pv_opbrengst_terugverdientijd'') | float(0) %}
-
-      {% set wp      = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''estimated_wp_total'') | float(0) %}
-
-      {% set peak_w  = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''peak_w_alltime'') | float(0) %}
-
-      {% set kwh_yr  = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''annual_yield_kwh_est'') | float(0)
-      %}
-
-      {% set eur_yr  = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''annual_value_eur_est'') | float(0)
-      %}
-
-      {% set price      = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''roi_price_eur_kwh'') | float(0)
-      or state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''avg_price_eur_kwh'') | float(0) %}
-
-      {% set price_lbl  = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''roi_price_label'') or ''gem.'' %}
-
-      {% set is_fixed   = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''is_fixed_contract'') %}
-
-      {% set cons_kwh   = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''annual_consumption_kwh_est'') |
-      float(0) %}
-
-      {% set opt_wp     = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''optimal_wp'') | float(0) %}
-
-      {% set exp_kwp    = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''expansion_advice_kwp'') %}
-
-      {% set self_pct   = state_attr(''sensor.cloudems_pv_opbrengst_terugverdientijd'', ''self_sufficiency_pct'') | float(0)
-      %}
-
-      {% set price_row  = (''Stroomprijs (vast tarief)'' if is_fixed else ''Stroomprijs ('' ~ price_lbl ~ '')'') %}
-
-      {% if wp > 0 %}
-
-      | Gegeven | Waarde |
-
-      |---|---|
-
-      | Gedetecteerd piekvermogen | {{ (wp / 1000) | round(2) }} kWp |
-
-      | Hoogste gemeten productie | {{ peak_w | round(0) | int }} W |
-
-      | Geschatte jaaropbrengst | {{ kwh_yr | round(0) | int }} kWh |
-
-      | Financiële jaarwaarde | **€{{ eur_yr | round(0) | int }}** |
-
-      | {{ price_row }} | €{{ price | round(4) }}/kWh |
-
-      {% if self_pct > 0 %}| Zelfvoorzieningsgraad | {{ self_pct }}% |{% endif %}
-
-
-      {% if eur_yr > 0 %}
-
-      | Investering | Terugverdientijd |
-
-      |---|---|
-
-      | €7.000 (5 kWp) | {{ (7000 / eur_yr) | round(1) }} jaar |
-
-      | €12.000 (10 kWp) | {{ (12000 / eur_yr) | round(1) }} jaar |
-
-      {% endif %}
-
-
-      {% if exp_kwp is not none %}
-
-      ---
-
-      **💡 Uitbreidingsadvies**
-
-      {% if exp_kwp == 0 %}
-
-      ✅ Huidig vermogen ({{ (wp/1000)|round(1) }} kWp) dekt al ~100% van je jaarverbruik.
-
-      {% else %}
-
-      {% if cons_kwh > 0 %}Geschat jaarverbruik: **{{ cons_kwh | round(0) | int }} kWh**{% endif %}
-
-
-      Optimaal vermogen: **{{ (opt_wp/1000)|round(1) }} kWp** — advies uitbreiding: **+{{ exp_kwp }} kWp**
-
-      ≈ {{ ((exp_kwp * 1000) / 400) | round(0) | int }}–{{ ((exp_kwp * 1000) / 300) | round(0) | int }} extra panelen (300–400
-      Wp/paneel)
-
-
-      {% set extra_eur   = exp_kwp * 850 * price %}
-
-      {% set invest_low  = (exp_kwp * 700)  | round(0) | int %}
-
-      {% set invest_high = (exp_kwp * 1000) | round(0) | int %}
-
-      | Uitbreiding | Geschatte invest. | Terugverdientijd |
-
-      |---|---|---|
-
-      | +{{ exp_kwp }} kWp | €{{ invest_low }}–€{{ invest_high }} | {{ (invest_low / extra_eur) | round(1) }}–{{ (invest_high
-      / extra_eur) | round(1) }} jaar |
-
-      {% endif %}
-
-      {% endif %}
-
-
-      _Prijs: {{ price_lbl }} · Opbrengst: 850 kWh/kWp/jaar (NL gemiddeld)_
-
-      {% else %}
-
-      ⏳ PV-data wordt verzameld — beschikbaar na eerste zonnige dag.
-
-      {% endif %}
-
-      '
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n\
-        \  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px)\
-        \ !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07)\
-        \ !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n\
-        \  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: 📊 Energiemeter totalen (kWh)
-    entities:
-    - entity: sensor.cloudems_grid_import_energy_tariff_1
-      name: Afname Tarief 1 (dal)
-    - entity: sensor.cloudems_grid_import_energy_tariff_2
-      name: Afname Tarief 2 (piek)
-    - entity: sensor.cloudems_grid_export_energy_tariff_1
-      name: Teruglevering Tarief 1
-    - entity: sensor.cloudems_grid_export_energy_tariff_2
-      name: Teruglevering Tarief 2
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n\
-        \  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color:\
-        \ rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color:\
-        \ rgb(68,68,68);\n  --state-unavailable-color: rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color:\
-        \ rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color:\
-        \ rgba(255,255,255,0.06);\n  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color:\
-        \ rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n\
-        \  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-        \  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px\
-      \ 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span style=\"font-size:20px;\">⚡</span>\n\
-      \    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{\
-      \ state_attr('sensor.cloudems_status','version') or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?'\
-      \ }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n  \
-      \  </div>\n  </div>\n  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\">\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\"\
-      \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px solid rgba(239,68,68,0.4);color:#f87171;padding:6px\
-      \ 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">\U0001F41B Bug melden</a>\n    <a href=\"\
-      https://github.com/cloudemsNL/ha-cloudems/issues/new?template=feature_request.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
-      \ solid rgba(99,102,241,0.4);color:#a5b4fc;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\"\
-      >\U0001F4A1 Feature verzoek</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
-      \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n\
-        \  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color: transparent;\n  --ha-card-border-color:\
-        \ transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity:\
-        \ 0.85 !important; }\n"
-- title: Batterij
-  path: cloudems-batterij
-  type: masonry
-  max_columns: 1
-  icon: mdi:battery-charging-80
-  background: url(/local/cloudems/images/bg-batterij.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%,
-    rgba(79,195,247,0.07) 0%, transparent 60%), rgb(24,24,24)
-  cards:
   - type: conditional
     conditions:
     - condition: state
@@ -1174,18 +199,7 @@ views:
 
       '
   cards:
-  - type: custom:cloudems-chip-card
-    primary: '{% set name = state_attr(''sensor.cloudems_nilm_review_current'', ''name'') %} {% if name %}{{ name }}{% else
-      %}✅ Alle apparaten beoordeeld{% endif %}'
-    secondary: '{% set s = states(''sensor.cloudems_nilm_review_current'') %} {% set count = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''pending_count'') | int(0) %} {% if s == ''none'' %}Geen onbesliste apparaten. {% else %}{% set dtype = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''device_type'') or ''?'' %}{% set pw = state_attr(''sensor.cloudems_nilm_review_current'', ''power_w'') | int(0) %}{%
-      set conf = state_attr(''sensor.cloudems_nilm_review_current'', ''confidence'') | int(0) %}{% set ph = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''phase'') or ''?'' %}{% set ev = state_attr(''sensor.cloudems_nilm_review_current'', ''on_events'') | int(0) %}{{ dtype
-      }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen{% endif %}'
-    icon: '{% if states(''sensor.cloudems_nilm_review_current'') == ''none'' %}mdi:check-all{% else %}mdi:help-circle-outline{%
-      endif %}'
-    icon_color: '{% if states(''sensor.cloudems_nilm_review_current'') == ''none'' %}green{% else %}orange{% endif %}'
+  - *id001
   - type: horizontal-stack
     cards:
     - type: button
@@ -1467,18 +481,6 @@ views:
         \  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element blockquote {\n  border-left:\
         \ 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n\
         \  border-radius: 0 8px 8px 0 !important;\n  color: rgb(163,163,163) !important;\n}\n"
-  - type: custom:cloudems-graph-card
-    name: 📈 Top verbruikers (2u)
-    entities:
-    - entity: sensor.cloudems_nilm_top_1_device
-      color: rgb(231,76,60)
-    - entity: sensor.cloudems_nilm_top_2_device
-      color: rgb(243,156,18)
-    - entity: sensor.cloudems_nilm_top_3_device
-      color: rgb(52,152,219)
-    hours_to_show: 2
-    points_per_hour: 4
-    line_width: 2
   - type: markdown
     title: 🔝 Top 10 — Hoogste verbruikers nu
     content: '{% set min_conf = 30 %}
@@ -1898,6 +900,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: markdown
     title: 🧺 Wasbeurt Cyclus Detector
     content: '{% set apps = state_attr(''sensor.cloudems_nilm_devices'', ''appliance_cycles'') %}
@@ -2248,18 +1251,6 @@ views:
         \ border-bottom: 1px solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element\
         \ tr:hover td { background: rgba(0,177,64,0.06) !important; color: rgb(255,255,255) !important; }\nha-markdown-element\
         \ strong { color: rgb(255,255,255) !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\n"
-  - type: custom:cloudems-chip-card
-    primary: '{% set name = state_attr(''sensor.cloudems_nilm_review_current'', ''name'') %} {% if name %}{{ name }}{% else
-      %}✅ Alle apparaten beoordeeld{% endif %}'
-    secondary: '{% set s = states(''sensor.cloudems_nilm_review_current'') %} {% set count = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''pending_count'') | int(0) %} {% if s == ''none'' %} Geen onbesliste apparaten. {% else %} {% set dtype = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''device_type'') or ''?'' %} {% set pw = state_attr(''sensor.cloudems_nilm_review_current'', ''power_w'') | int(0) %}
-      {% set conf = state_attr(''sensor.cloudems_nilm_review_current'', ''confidence'') | int(0) %} {% set ph = state_attr(''sensor.cloudems_nilm_review_current'',
-      ''phase'') or ''?'' %} {% set ev = state_attr(''sensor.cloudems_nilm_review_current'', ''on_events'') | int(0) %} {{
-      dtype }} · {{ pw }} W · {{ ph }} · {{ conf }}% · {{ ev }}× gezien | nog {{ count }} te beoordelen {% endif %}'
-    icon: '{% if states(''sensor.cloudems_nilm_review_current'') == ''none'' %}mdi:check-all{% else %}mdi:help-circle-outline{%
-      endif %}'
-    icon_color: '{% if states(''sensor.cloudems_nilm_review_current'') == ''none'' %}green{% else %}orange{% endif %}'
   - type: horizontal-stack
     cards:
     - type: button
@@ -2516,6 +1507,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -2539,95 +1531,6 @@ views:
     shower_liters_per_min: 8
     shower_duration_min: 8
     title: Warm water
-  - type: markdown
-    title: 🚿 Boilers — Live status
-    content: '{%- set all_boilers = (state_attr(''sensor.cloudems_boiler_status'', ''boilers'') or []) -%}
-
-      {%- if not all_boilers %}
-
-      *Geen boilers geconfigureerd.*
-
-      {%- else %}
-
-      {%- for b in all_boilers %}
-
-      {%- set temp = b.get(''temp_c'') %}
-
-      {%- set label_slug = b.get(''label'', '''') | lower | replace('' '', ''_'') | replace(''-'', ''_'') %}
-
-      {%- set vboiler_eid = ''water_heater.cloudems_boiler_'' + label_slug %}
-
-      {%- set vboiler_sp = state_attr(vboiler_eid, ''temperature'') %}
-
-      {%- set override_sp = state_attr(vboiler_eid, ''override_setpoint_c'') %}
-
-      {%- set setpoint = (override_sp or vboiler_sp or b.get(''active_setpoint_c'') or b.get(''setpoint_c'', 60)) | round(0)
-      | int %}
-
-      {%- set power = (b.get(''current_power_w'') or states(''sensor.cloudems_boiler_'' + label_slug + ''_power'') | float(0))
-      | float(0) %}
-
-      {%- set cop = b.get(''cop_at_current_temp'') %}
-
-      {%- set label = b.get(''label'', ''?'') %}
-
-      {%- set is_on = b.get(''is_on'', false) %}
-
-      ---
-
-      #### {{ ''🟢'' if is_on else ''⚫'' }} **{{ label }}**
-
-      | | |
-
-      |---|---|
-
-      | **Temperatuur** | {{ temp | round(1) | string + ''°C'' if temp is not none else ''—'' }} |
-
-      | **Setpoint** | {{ setpoint }}°C |
-
-      | **Vermogen** | {{ power | round(0) | int }} W |
-
-      {%- if cop %}
-
-      | **COP nu** | {{ cop | round(2) }} |
-
-      {%- endif %}
-
-      {%- endfor %}
-
-      {%- endif %}
-
-      '
-    card_mod:
-      style: 'ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius:
-        16px !important; }
-
-        .card-header { border-bottom: 1px solid rgba(255,255,255,0.07) !important; color: rgb(255,255,255) !important; font-size:
-        14px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }
-
-        ha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }
-
-        ha-markdown-element td { padding: 4px 8px !important; border-bottom: 1px solid rgba(255,255,255,0.04) !important;
-        font-size: 13px !important; }
-
-        ha-markdown-element h4 { color: rgba(255,180,60,1) !important; margin: 16px 0 4px !important; font-size: 14px !important;
-        }
-
-        ha-markdown-element hr { border-color: rgba(255,255,255,0.08) !important; margin: 8px 0 !important; }
-
-        '
-  - type: custom:cloudems-entity-list
-    show_empty: false
-    unique: true
-    card:
-      type: entities
-      title: 🌡️ Virtuele thermostaten
-      show_header_toggle: false
-    filter:
-      include:
-      - entity_id: water_heater.cloudems_*
-    sort:
-      method: friendly_name
   - type: markdown
     title: 🌡️ Thermisch verlies & voorspelling
     content: "{%- set groups   = (state_attr('sensor.cloudems_boiler_status', 'groups')  or []) %}\n{%- set all_boilers =\
@@ -2724,6 +1627,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -2940,134 +1844,6 @@ views:
         16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }
 
         '
-  - type: custom:cloudems-stack-card
-    mode: vertical
-    cards:
-    - type: markdown
-      content: '## 🌐 VTherm Central Mode
-
-        Stuur **alle VTherm-thermostaten tegelijk** via Central Mode (vereist Versatile Thermostat v6+).
-
-        '
-      card_mod:
-        style: 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding:
-          16px 16px 4px !important; }
-
-          '
-    - type: grid
-      columns: 4
-      square: false
-      cards:
-      - type: button
-        name: Verwarmen
-        icon: mdi:fire
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.vtherm_set_central_mode
-          data:
-            hvac_mode: heat
-        card_mod:
-          style: 'ha-card { background: rgba(255,80,0,0.12) !important; border: 1px solid rgba(255,80,0,0.3) !important; border-radius:
-            10px !important; }
-
-            '
-      - type: button
-        name: Eco
-        icon: mdi:leaf
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.vtherm_set_central_mode
-          data:
-            hvac_mode: eco
-        card_mod:
-          style: 'ha-card { background: rgba(0,177,64,0.10) !important; border: 1px solid rgba(0,177,64,0.3) !important; border-radius:
-            10px !important; }
-
-            '
-      - type: button
-        name: Weg
-        icon: mdi:car
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.vtherm_set_central_mode
-          data:
-            hvac_mode: away
-        card_mod:
-          style: 'ha-card { background: rgba(100,100,100,0.12) !important; border: 1px solid rgba(150,150,150,0.3) !important;
-            border-radius: 10px !important; }
-
-            '
-      - type: button
-        name: Uit
-        icon: mdi:power
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.vtherm_set_central_mode
-          data:
-            hvac_mode: 'off'
-        card_mod:
-          style: 'ha-card { background: rgba(255,0,0,0.08) !important; border: 1px solid rgba(255,0,0,0.25) !important; border-radius:
-            10px !important; }
-
-            '
-    - type: markdown
-      content: '{% set sc = state_attr(''sensor.cloudems_climate'', ''smart_climate'') or {} %}
-
-        {% set vt = sc.get(''vtherm_central'', {}) %}
-
-        {% if vt %}**Central Boiler:** {{ ''🔴 AAN'' if vt.get(''boiler_on'') else ''🔵 UIT'' }} &nbsp;·&nbsp; **Modus:** {{
-        vt.get(''central_mode'', ''—'') }}{% else %}*VTherm Central Mode niet geconfigureerd.*{% endif %}
-
-        '
-      card_mod:
-        style: 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding:
-          4px 16px 12px !important; }
-
-          '
-  - type: custom:cloudems-stack-card
-    mode: vertical
-    cards:
-    - type: markdown
-      content: '## ⏱️ VTherm Tijdelijke Preset
-
-        Zone tijdelijk op een andere preset — keert automatisch terug.
-
-        Service: `cloudems.vtherm_set_timed_preset` (zone, preset, duration_min)
-
-        '
-      card_mod:
-        style: 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding:
-          16px 16px 4px !important; }
-
-          '
-    - type: markdown
-      content: '{% set sc = state_attr(''sensor.cloudems_climate'', ''smart_climate'') or {} %}
-
-        {% set zones = sc.get(''zones'', []) %}
-
-        {% if zones %}
-
-        | Zone | Preset | Override | Verloopt |
-
-        |---|---|---|---|
-
-        {% for z in zones %}
-
-        {% set pie = {''comfort'':''🏠'',''eco'':''🌿'',''boost'':''🔥'',''sleep'':''😴'',''away'':''🚗'',''solar'':''☀️''} %}
-
-        | **{{ z.name }}** | {{ pie.get(z.preset,''❓'') }} {{ z.preset }} | {{ ''⚡ '' + z.override if z.get(''override'')
-        else ''—'' }} | {{ z.get(''override_expires'', ''—'') }} |
-
-        {% endfor %}
-
-        {% else %}*Geen actieve zones.*{% endif %}
-
-        '
-      card_mod:
-        style: 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding:
-          4px 16px 12px !important; }
-
-          '
   - type: markdown
     title: 📅 Geleerd Aanwezigheidspatroon
     content: '{% set sc = state_attr(''sensor.cloudems_climate'', ''smart_climate'') or {} %}
@@ -3103,118 +1879,6 @@ views:
         16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }
 
         '
-  - type: custom:cloudems-stack-card
-    mode: vertical
-    cards:
-    - type: markdown
-      content: '## 🎛️ Handmatige Override
-
-        Tijdelijk een zone overschrijven — vervalt automatisch na de ingestelde tijd.'
-      card_mod:
-        style: 'ha-card { background: transparent !important; border: none !important; box-shadow: none !important; padding:
-          16px 16px 4px !important; }
-
-          '
-    - type: grid
-      columns: 3
-      square: false
-      cards:
-      - type: button
-        name: Comfort
-        icon: mdi:sofa
-        label: Woonkamer · 2u
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: woonkamer
-            preset: comfort
-            hours: 2
-        card_mod:
-          style: 'ha-card { background: rgba(255,160,0,0.08) !important; border: 1px solid rgba(255,160,0,0.25) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
-      - type: button
-        name: Eco
-        icon: mdi:leaf
-        label: Woonkamer · 4u
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: woonkamer
-            preset: eco
-            hours: 4
-        card_mod:
-          style: 'ha-card { background: rgba(80,200,80,0.08) !important; border: 1px solid rgba(80,200,80,0.25) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
-      - type: button
-        name: Boost
-        icon: mdi:fire
-        label: Woonkamer · 1u
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: woonkamer
-            preset: boost
-            hours: 1
-        card_mod:
-          style: 'ha-card { background: rgba(255,80,80,0.08) !important; border: 1px solid rgba(255,80,80,0.25) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
-      - type: button
-        name: Slaap
-        icon: mdi:sleep
-        label: Alle zones
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: all
-            preset: sleep
-            hours: 8
-        card_mod:
-          style: 'ha-card { background: rgba(80,100,200,0.08) !important; border: 1px solid rgba(80,100,200,0.25) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
-      - type: button
-        name: Weg
-        icon: mdi:car
-        label: Alle zones
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: all
-            preset: away
-            hours: 12
-        card_mod:
-          style: 'ha-card { background: rgba(150,150,150,0.08) !important; border: 1px solid rgba(150,150,150,0.25) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
-      - type: button
-        name: Solar
-        icon: mdi:solar-power
-        label: Alle zones
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.set_zone_preset
-          data:
-            zone_name: all
-            preset: solar
-            hours: 4
-        card_mod:
-          style: 'ha-card { background: rgba(255,210,0,0.08) !important; border: 1px solid rgba(255,210,0,0.30) !important;
-            border-radius: 10px !important; box-shadow: none !important; }
-
-            '
   - type: markdown
     content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px\
       \ 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span style=\"font-size:20px;\">⚡</span>\n\
@@ -3245,6 +1909,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -3466,6 +2131,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -3985,6 +2651,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -4242,6 +2909,7 @@ views:
   background: url(/local/cloudems/images/bg-rolluiken.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50%
     -10%, rgba(144,202,249,0.07) 0%, transparent 60%), rgb(24,24,24)
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -4492,6 +3160,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -4847,6 +3516,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: conditional
     conditions:
     - condition: state
@@ -5056,6 +3726,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: entities
     title: 🧠 Leervoortgang overzicht
     entities:
@@ -5251,6 +3922,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: horizontal-stack
     cards:
     - type: entity
@@ -5445,6 +4117,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: markdown
     title: 💚 Systeem Gezondheid
     content: '{%- set score = states(''sensor.cloudems_system_health'') | float(0) | round(1) -%}
@@ -6225,16 +4898,6 @@ views:
         \  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size:\
         \ 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px\
         \ !important;\n}\n"
-  - type: custom:cloudems-chip-card
-    primary: 📧 E-mail rapporten
-    secondary: '{% set enabled = state_attr(''sensor.cloudems_mail_status'', ''enabled'') %} {% if enabled %}✅ Geconfigureerd
-      — klik om testmail te sturen{% else %}⚠️ Niet geconfigureerd — ga naar Configureren → E-mail rapporten{% endif %}'
-    icon: mdi:email-fast-outline
-    icon_color: '{{ ''green'' if state_attr(''sensor.cloudems_mail_status'', ''enabled'') else ''orange'' }}'
-    tap_action:
-      action: perform-action
-      perform_action: cloudems.send_test_mail
-      data: {}
   - type: vertical-stack
     title: 🌡️ Slim Klimaatbeheer
     cards:
@@ -6677,6 +5340,7 @@ views:
 
       '
   cards:
+  - *id001
   - type: custom:cloudems-config-card
   - type: custom:cloudems-beheer-card
     title: ⚡ CloudEMS

@@ -417,6 +417,9 @@
       this._config = config;
       this._needsFullRender = true;
       this._startAnim();
+      // Force re-render na 3s — vangt startup op waar data al beschikbaar is
+      // maar _renderFull al gedraaid had vóór hass gezet was
+      setTimeout(() => { this._needsFullRender = true; }, 3000);
     }
 
     set hass(hass) {
@@ -664,12 +667,31 @@
     }
 
     // Device types die eigen nodes hebben — NOOIT in NILM laag tonen
-    _isDedicatedNode(label, deviceType) {
+    _isDedicatedNode(label, deviceType, deviceData) {
       const dt = (deviceType || '').toLowerCase();
       const lb = (label || '').toLowerCase();
+
+      // Apparaten met eigen node in de flow — nooit tonen onder Thuis
       const dedicated = ['boiler','water_heater','heat_pump','ev_charger','ev_lader',
                          'pool','zwembad','ebike','e-bike','micro_mobility','micro_mobiliteit'];
-      return dedicated.some(k => dt.includes(k) || lb.includes(k));
+      if (dedicated.some(k => dt.includes(k) || lb.includes(k))) return true;
+
+      // Batterijen horen nooit in NILM — ze zijn direct aan de hub gekoppeld
+      // en worden apart gepland. Hier ook Accu 1/2, thuisbatterij etc.
+      const batteryKw = ['accu','battery','batterij','thuisbatterij','home battery',
+                         'powerwall','powervault','byd ','foxess','pylontech'];
+      if (batteryKw.some(k => lb.includes(k))) return true;
+
+      // PV / omvormer infra — gaat al via de zon-node, niet via Thuis
+      const pvKw = ['solarflow','solar flow','omvormer','inverter','growatt','goodwe',
+                    'solaredge','enphase','huawei solar','sungrow','fronius','sma ',
+                    'zendure manager','ace ','smartplug hub'];
+      if (pvKw.some(k => lb.includes(k))) return true;
+
+      // Apparaten die bewust uitgesloten zijn van de balans
+      if (deviceData && deviceData.exclude_from_balance) return true;
+
+      return false;
     }
 
     // Layer2: max 5 nodes — topology meters (purple, with children) + direct NILM
@@ -689,7 +711,7 @@
           if (nodes.length >= 5) break;
           if (!node.is_topology_meter) continue;
           const children = (node.children || [])
-            .filter(c => !this._isDedicatedNode(c.name, c.device_type))
+            .filter(c => !this._isDedicatedNode(c.name, c.device_type, c))
             .slice(0, 2)
             .map(c => ({ label: c.name || 'Apparaat', power_w: c.power_w || 0, color: '#a78bfa' }));
           nodes.push({ label: node.name || 'Meter', power_w: node.power_w || 0, color: '#a78bfa', isSub: true, children });
@@ -708,7 +730,7 @@
       // Top 5 op vermogen, skip dedicated nodes
       return running
         .filter(d => (d.power_w || d.current_power || 0) > 1)
-        .filter(d => !this._isDedicatedNode(d.name, d.device_type || d.type))
+        .filter(d => !this._isDedicatedNode(d.name, d.device_type || d.type, d))
         .sort((a, b) => (b.power_w || b.current_power || 0) - (a.power_w || a.current_power || 0))
         .slice(0, 5)
         .map(d => ({
@@ -737,7 +759,10 @@
       const pts = d.map((v, i) =>
         `${(x + i/(d.length-1)*w).toFixed(1)},${(y + h - (v/mx)*h).toFixed(1)}`
       ).join(' ');
-      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="0.9" opacity="0.28" stroke-linecap="round" stroke-linejoin="round"/>`;
+      // Filled area under sparkline for better visibility
+      const apts = `${(x).toFixed(1)},${(y+h).toFixed(1)} ` + pts + ` ${(x+w).toFixed(1)},${(y+h).toFixed(1)}`;
+      return `<polygon points="${apts}" fill="${color}" opacity="0.12"/>` +
+             `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" opacity="0.70" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
 
     // ── Animation loop ────────────────────────────────────────────────────────
@@ -827,8 +852,8 @@
       // ── Layout ─────────────────────────────────────────────────────────────
       const W = 500;
       const COL_LEFT = 78, COL_HUB = 250, COL_R = 430;
-      const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 110;
-      const R_EV    = 122, R_HUB   = 172, R_BOI  = 230;
+      const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 105;
+      const R_EV    = 122, R_HUB   = 172, R_BOI  = 235;
       const R_EBIKE = 232, R_POOL  = 302;
       const R_HOME  = 400, R_L2    = 480, R_L3   = 556;
       const hasL3 = subs.some(s => s.children.length > 0);
@@ -853,8 +878,8 @@
 
       // Single positions for solar/batt/boiler
       const solarX = COL_HUB, solarY = R_SUN;
-      const battX  = COL_R - 38, battY = R_BATT;
-      const bolX   = COL_R - 34 + 34, bolY = R_BOI + 17;
+      const battX  = COL_R - 20, battY = R_BATT;
+      const bolX   = COL_R - 20, bolY  = R_BOI;
 
       // Init dots
       const pipeKeys = [
@@ -1261,6 +1286,8 @@
           .nilm-ph { font-size:9px;font-weight:700;padding:2px 4px;border-radius:4px;text-align:center; }
           .nilm-bar { height:3px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden; }
           .nilm-bar-fill { height:100%;border-radius:2px; }
+          .nilm-row.excluded { opacity:.5; }
+          .nilm-excl-badge { font-size:9px;color:#f87171;padding:1px 5px;border-radius:4px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);margin-left:auto;flex-shrink:0; }
           .nilm-detail-box { margin-top:6px;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;border:0.5px solid rgba(255,255,255,0.08); }
           .nilm-detail-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:5px; }
           .nilm-bar-lbl { display:flex;justify-content:space-between;font-size:9px;color:rgba(255,255,255,0.3);margin-bottom:3px; }
@@ -1340,9 +1367,10 @@
           const cconf = conf>=70?'#34d399':conf>=50?'#f59e0b':'#ef4444';
           const nid2 = `nilm_${(d.name||d.device_id||'?').replace(/[^a-zA-Z0-9]/g,'_')}`;
           const nid2safe = nid2.replace(/'/g, "\\'");
-          return `<div class="nilm-row" id="nr-${nid2}" onclick="this.getRootNode().host._clickNilmRow('${nid2safe}','${(d.name||'?').replace(/'/g,"\\'")}',${isOn?Math.round(d.power_w||0):0},'${phCol(ph)}','${ph}','${d.device_type||d.type||'—'}',${conf},${d.on_events||0},'${d.room||'—'}')">
+          return `<div class="nilm-row" id="nr-${nid2}" onclick="this.getRootNode().host._clickNilmRow('${nid2safe}','${(d.name||'?').replace(/'/g,"\\'")}',${isOn?Math.round(d.power_w||0):0},'${phCol(ph)}','${ph}','${d.device_type||d.type||'—'}',${conf},${d.on_events||0},'${d.room||'—'}',${d.exclude_from_balance||false},'${(d.balance_exclude_reason||'')}',${d.confirmed||false})">
             <div class="nilm-dot" style="background:${isOn?phCol(ph):'rgba(255,255,255,0.12)'}"></div>
             <div class="nilm-name">${d.name||d.device_type||'?'}</div>
+            ${(d.exclude_from_balance||false)?'<div class="nilm-excl-badge">⊗</div>':''}
             <div class="nilm-w" style="color:${isOn?'#e2e8f0':'rgba(255,255,255,0.25)'}">${isOn?Math.round(d.power_w||0)+' W':'—'}</div>
             <div class="nilm-ph" style="background:${phCol(ph)}22;color:${phCol(ph)}">${ph}</div>
             <div class="nilm-bar"><div class="nilm-bar-fill" style="width:${conf}%;background:${cconf}"></div></div>
@@ -1360,17 +1388,41 @@
         </div>`;
       }
 
+      // Build extra grid EPEX section
+      let gridEpexHtml = '';
+      if (nd._gridExtra) {
+        const ex = nd._gridExtra;
+        gridEpexHtml = `
+          <div style="padding:0 10px 4px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+              <span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.3)">EPEX Prijsverloop vandaag</span>
+              <button id="epex-toggle" style="font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:rgba(255,255,255,.6);cursor:pointer">
+                ${ex.showIncl ? '✓ incl. btw' : '○ excl. btw'}
+              </button>
+            </div>
+            ${ex.chartSvg}
+            ${ex.taxPer > 0 ? `<div style="font-size:10px;color:rgba(255,255,255,.3);margin-bottom:4px">Energiebelasting + BTW: ${ex.taxPer.toFixed(1)} ct/kWh</div>` : ''}
+          </div>`;
+      }
+
       panel.innerHTML = `<div class="dp">
         <div class="dp-hdr">
           <span class="dp-title" style="color:${nd.color}">${nd.title}</span>
           <button class="dp-close" id="dp-close-btn">✕</button>
         </div>
         <div class="dp-grid">${metrics}</div>
+        ${gridEpexHtml}
         <div class="dp-note">${nd.note}</div>
         ${nilmHtml}
       </div>`;
       panel.style.display = 'block';
       panel.querySelector('#dp-close-btn')?.addEventListener('click', () => this._closeDetail());
+      // EPEX incl/excl toggle
+      panel.querySelector('#epex-toggle')?.addEventListener('click', () => {
+        this._priceInclTax = !(this._priceInclTax !== false);
+        // Re-open with new setting
+        this._showNodeDetail(this._activeNid);
+      });
     }
 
     _buildNodeDetail(nid) {
@@ -1395,9 +1447,9 @@
           peak_w_7d: parseFloat(i.peak_w_7d||0),
           phase: i.phase_display || i.phase || '?',
         })) : invs;
-        const todaySt = h.states['sensor.cloudems_pv_forecast_today'];
-        const tomSt   = h.states['sensor.cloudems_pv_forecast_tomorrow'];
-        const accSt   = h.states['sensor.cloudems_pv_forecast_accuracy'];
+        const todaySt = h.states['sensor.cloudems_solar_pv_forecast_today'] ?? h.states['sensor.cloudems_pv_forecast_today'];
+        const tomSt   = h.states['sensor.cloudems_solar_pv_forecast_tomorrow'] ?? h.states['sensor.cloudems_pv_forecast_tomorrow'];
+        const accSt   = h.states['sensor.cloudems_solar_pv_forecast_accuracy'] ?? h.states['sensor.cloudems_pv_forecast_accuracy'];
         return {
           title: 'Zonnepanelen', color: C,
           metrics: [
@@ -1444,16 +1496,68 @@
       if (nid === 'grid') {
         const grid = this._getVal((this._config.entities||{}).grid);
         const gc = grid > T ? '#e74c3c' : '#2ecc71';
-        const priceCt = parseFloat(h.states['sensor.cloudems_price_current_hour']?.state||0)*100||0;
+        const priceS = h.states['sensor.cloudems_price_current_hour'];
+        const priceA = priceS?.attributes || {};
+        // Gebruiker kan incl/excl kiezen via config of toggle (staat op _priceInclTax)
+        const showIncl = this._priceInclTax !== false; // default incl
+        const priceCt = showIncl
+          ? (parseFloat(priceA.price_incl_tax || priceA.price_all_in || priceS?.state || 0) * 100)
+          : (parseFloat(priceA.price_excl_tax || priceA.base_epex_price || priceS?.state || 0) * 100);
+        const pricesArr = showIncl
+          ? (priceA.today_prices_incl_tax || [])
+          : (priceA.today_prices_excl_tax || []);
+        const avgCt  = showIncl
+          ? (priceA.avg_today_incl_tax || 0) * 100
+          : (priceA.avg_today_excl_tax || 0) * 100;
+        const minCt  = showIncl
+          ? (priceA.min_today_incl_tax || 0) * 100
+          : (priceA.min_today_excl_tax || 0) * 100;
+        const maxCt  = showIncl
+          ? (priceA.max_today_incl_tax || 0) * 100
+          : (priceA.max_today_excl_tax || 0) * 100;
+        const nowH   = new Date().getHours();
+        const taxPer = (priceA.tax_per_kwh || 0) * 100;
         const tariff = fa('sensor.cloudems_batterij_epex_schema','zonneplan',{})?.tariff_group || '—';
+        const isNeg  = priceCt < 0;
+
+        // Build hourly barchart SVG
+        let chartSvg = '';
+        if (pricesArr.length > 0) {
+          const prices = pricesArr.map(s => parseFloat(s.price || s.price_excl_tax || 0) * 100);
+          const maxP = Math.max(...prices.map(Math.abs), 1);
+          const bw = 7, gap = 1, W = (bw + gap) * 24, H = 48, base = H * 0.7;
+          const bars = prices.map((p, i) => {
+            const isNow = i === nowH;
+            const pos = p >= 0;
+            const h2 = Math.max(2, Math.abs(p) / maxP * (pos ? base : H - base));
+            const y = pos ? base - h2 : base;
+            const col = isNow ? '#f0c040' : p < 0 ? '#34d399' : p < avgCt ? '#86efac' : p > maxCt * 0.8 ? '#ef4444' : '#60a5fa';
+            const bx = i * (bw + gap);
+            return `<rect x="${bx}" y="${y.toFixed(1)}" width="${bw}" height="${h2.toFixed(1)}" rx="1.5" fill="${col}" opacity="${isNow ? 1 : 0.75}"/>
+              ${isNow ? `<rect x="${bx}" y="0" width="${bw}" height="${H}" rx="1.5" fill="${col}" opacity="0.06"/>` : ''}`;
+          }).join('');
+          const baseY = base.toFixed(1);
+          chartSvg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:50px;margin:8px 0 2px;overflow:visible">
+            <line x1="0" y1="${baseY}" x2="${W}" y2="${baseY}" stroke="rgba(255,255,255,.1)" stroke-width="0.5"/>
+            ${bars}
+          </svg>
+          <div style="display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.3);font-family:monospace;margin-bottom:6px">
+            <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+          </div>`;
+        }
+
+        // Toggle incl/excl button ID
+        const toggleId = 'epex-toggle-' + Date.now();
         return {
-          title: 'Net · import/export', color: gc,
+          title: 'Net · Import / Export', color: gc,
+          _gridExtra: { chartSvg, priceCt, avgCt, minCt, maxCt, taxPer, tariff, showIncl, toggleId, grid, isNeg },
           metrics: [
-            {l:'Nu', v: fmt(Math.abs(grid)), sub: grid>T?'import':'export'},
-            {l:'Import vandaag', v: fmt((parseFloat(fv('sensor.cloudems_import_energy_today','0'))||0)*1000)},
-            {l:'Export vandaag', v: fmt((parseFloat(fv('sensor.cloudems_export_energy_today','0'))||0)*1000)},
-            {l:'EPEX prijs', v: priceCt?priceCt.toFixed(1)+' ct':'—'},
-            {l:'Tarief', v: tariff},
+            {l:'Nu', v: fmt(Math.abs(grid)), sub: grid>T?'⬇ import':'⬆ export'},
+            {l:'Import vandaag', v: (() => { const s=h.states['sensor.cloudems_import_energy_today']; return s&&s.state!=='unavailable'?(parseFloat(s.state)||0).toFixed(2)+' kWh':'—'; })()},
+            {l:'Export vandaag', v: (() => { const s=h.states['sensor.cloudems_export_energy_today']; return s&&s.state!=='unavailable'?(parseFloat(s.state)||0).toFixed(2)+' kWh':'—'; })()},
+            {l:'Prijs nu', v: priceCt ? (isNeg ? '🎉 ' : '') + priceCt.toFixed(1)+' ct/kWh' : '—', sub: showIncl ? 'incl. belasting' : 'excl. belasting'},
+            {l:'Gem. vandaag', v: avgCt ? avgCt.toFixed(1)+' ct' : '—'},
+            {l:'Min / Max', v: (minCt&&maxCt) ? `${minCt.toFixed(1)} / ${maxCt.toFixed(1)} ct` : '—'},
           ],
           note: grid > T ? `Importeert ${fmt(grid)} van het net.` : `Exporteert ${fmt(Math.abs(grid))} naar het net.`,
         };
@@ -1506,7 +1610,7 @@
     }
 
 
-    _clickNilmRow(nid, name, pw, color, phase, type, conf, events, room) {
+    _clickNilmRow(nid, name, pw, color, phase, type, conf, events, room, isExcluded=false, excludeReason="", isConfirmed=false) {
       const list = this.shadowRoot?.getElementById('nilm-list');
       const det  = this.shadowRoot?.getElementById('nilm-inline-detail');
       if (!list || !det) return;
@@ -1532,10 +1636,14 @@
         </div>
         <div class="nilm-bar-lbl"><span>Betrouwbaarheid</span><span style="color:${confCol}">${conf}%</span></div>
         <div class="nilm-bar"><div class="nilm-bar-fill" style="width:${conf}%;background:${confCol}"></div></div>
+        ${isExcluded?`<div style="padding:6px 8px 4px;font-size:10px;background:rgba(239,68,68,.08);border-radius:6px;color:#f87171;margin-bottom:6px">⊗ Uitgesloten van energiebalans${excludeReason==='auto_integration'?' (automatisch — bekende integratie)':excludeReason==='user'?' (handmatig)':''}</div>`:''}
         <div class="nilm-actions" id="na-${nid}">
           <button class="na-btn na-confirm" id="nb-confirm-${nid}">✓ Bevestigen</button>
           <button class="na-btn na-dismiss" id="nb-dismiss-${nid}">✗ Afwijzen</button>
           <button class="na-btn na-ignore" id="nb-ignore-${nid}">○ Negeren</button>
+          ${isExcluded
+            ? `<button class="na-btn" id="nb-include-${nid}" style="color:#86efac;border-color:rgba(134,239,172,.3)">✓ Opnemen in balans</button>`
+            : `<button class="na-btn" id="nb-exclude-${nid}" style="color:#f87171;border-color:rgba(239,68,68,.25)">⊗ Uitsluiten van balans</button>`}
         </div>
         <div class="na-feedback" id="nf-${nid}" style="display:none"></div>
       </div>`;
@@ -1564,9 +1672,118 @@
         callSvc('suppress_nilm_device');
         feedback('○ Genegeerd — niet meer tonen', '#94a3b8');
       });
+      det.querySelector(`#nb-exclude-${nid}`)?.addEventListener('click', () => {
+        callSvc('set_balance_exclude', {device_name: name, exclude: true, reason: 'user'});
+        feedback('⊗ Uitgesloten van balans — telt niet meer mee in huisverbruik', '#f87171');
+      });
+      det.querySelector(`#nb-include-${nid}`)?.addEventListener('click', () => {
+        callSvc('set_balance_exclude', {device_name: name, exclude: false, reason: ''});
+        feedback('✓ Opgenomen in balans — telt weer mee', '#86efac');
+      });
     }
 
-    _showNilmDetail(ds) { this._showNodeDetail('home'); }
+    _showNilmDetail(ds) {
+      // ds = g.dataset from the SVG nilmBox element
+      const panel = this.shadowRoot?.getElementById('detail-panel');
+      if (!panel) return;
+      const h = this._hass;
+
+      const name   = ds.nlabel || '?';
+      const pw     = parseFloat(ds.npw) || 0;
+      const color  = ds.ncolor || '#94a3b8';
+      const phase  = ds.nphase || '?';
+      const type   = ds.ntype  || '—';
+      const conf   = parseInt(ds.nconf)  || 0;
+      const events = parseInt(ds.nevents)|| 0;
+      const room   = ds.nroom  || '—';
+
+      // Find full device data from nilm sensor for extra fields
+      const allDevs = h?.states['sensor.cloudems_nilm_devices']?.attributes?.device_list || [];
+      const running = h?.states['sensor.cloudems_nilm_running_devices']?.attributes?.device_list || [];
+      const fullDev = allDevs.find(d => (d.name||'').toLowerCase() === name.toLowerCase())
+                   || running.find(d => (d.name||'').toLowerCase() === name.toLowerCase())
+                   || {};
+
+      const isExcluded  = fullDev.exclude_from_balance || false;
+      const excReason   = fullDev.balance_exclude_reason || '';
+      const confirmed   = fullDev.confirmed || false;
+      const isOn        = pw > 10;
+      const phCol = p => p==='L1'?'#06b6d4':p==='L2'?'#f59e0b':p==='L3'?'#34d399':'#94a3b8';
+      const confCol = conf>=70?'#34d399':conf>=50?'#fbbf24':'#f87171';
+
+      const excBadge = isExcluded
+        ? `<div style="padding:5px 8px;font-size:10px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;color:#f87171;margin-bottom:8px">
+            ⊗ Uitgesloten van energiebalans${excReason==='auto_integration'?' — automatisch herkend als integratie-apparaat':excReason==='user'?' — handmatig ingesteld':''}</div>`
+        : '';
+
+      const nidSafe = `nilm_${name.replace(/[^a-zA-Z0-9]/g,'_')}`;
+
+      panel.innerHTML = `<div class="dp">
+        <div class="dp-hdr">
+          <span class="dp-title" style="color:${color}">
+            ${isOn ? '🟢' : '⚪'} ${name}
+          </span>
+          <button class="dp-close" id="dp-close-btn">✕</button>
+        </div>
+        <div class="dp-grid">
+          <div class="dp-metric"><div class="dp-ml">Vermogen</div><div class="dp-mv" style="color:${isOn?color:'rgba(255,255,255,.4)'}">${isOn ? Math.round(pw)+' W' : 'UIT'}</div></div>
+          <div class="dp-metric"><div class="dp-ml">Fase</div><div class="dp-mv" style="color:${phCol(phase)}">${phase}</div></div>
+          <div class="dp-metric"><div class="dp-ml">Type</div><div class="dp-mv" style="font-size:11px">${type}</div></div>
+          <div class="dp-metric"><div class="dp-ml">On events</div><div class="dp-mv">${events}×</div></div>
+          <div class="dp-metric"><div class="dp-ml">Kamer</div><div class="dp-mv" style="font-size:11px">${room}</div></div>
+          <div class="dp-metric"><div class="dp-ml">Status</div><div class="dp-mv" style="font-size:11px;color:${confirmed?'#34d399':'#fbbf24'}">${confirmed?'✓ Bevestigd':'Lerend'}</div></div>
+        </div>
+        <div style="padding:0 10px 6px">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.4);margin-bottom:3px"><span>Betrouwbaarheid</span><span style="color:${confCol}">${conf}%</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div style="height:100%;width:${conf}%;background:${confCol};border-radius:2px"></div></div>
+        </div>
+        ${excBadge}
+        <div class="dp-note" id="nf-${nidSafe}"></div>
+        <div class="nilm-actions" id="na-${nidSafe}">
+          ${!confirmed  ? `<button class="na-btn na-confirm" id="nb-confirm-${nidSafe}">✓ Bevestigen</button>` : ''}
+          ${!confirmed  ? `<button class="na-btn na-dismiss" id="nb-dismiss-${nidSafe}">✗ Afwijzen</button>` : ''}
+          <button class="na-btn na-ignore" id="nb-ignore-${nidSafe}">○ Negeren</button>
+          ${isExcluded
+            ? `<button class="na-btn" id="nb-include-${nidSafe}" style="color:#86efac;border-color:rgba(134,239,172,.3)">✓ Opnemen in balans</button>`
+            : `<button class="na-btn" id="nb-exclude-${nidSafe}" style="color:#f87171;border-color:rgba(239,68,68,.25)">⊗ Uitsluiten van balans</button>`}
+        </div>
+      </div>`;
+
+      panel.style.display = 'block';
+      panel.querySelector('#dp-close-btn')?.addEventListener('click', () => this._closeDetail());
+
+      const callSvc = (svc, extra={}) => {
+        if (!this._hass) return;
+        this._hass.callService('cloudems', svc, {device_name: name, ...extra});
+      };
+      const feedback = (msg, col='#94a3b8') => {
+        const fb = panel.querySelector(`#nf-${nidSafe}`);
+        const ab = panel.querySelector(`#na-${nidSafe}`);
+        if(fb){fb.textContent=msg;fb.style.color=col;fb.style.padding='6px 10px';fb.style.fontSize='11px';}
+        if(ab) ab.style.display='none';
+      };
+
+      panel.querySelector(`#nb-confirm-${nidSafe}`)?.addEventListener('click', () => {
+        callSvc('confirm_nilm_device');
+        feedback('✓ Bevestigd — apparaat opgeslagen', '#34d399');
+      });
+      panel.querySelector(`#nb-dismiss-${nidSafe}`)?.addEventListener('click', () => {
+        callSvc('dismiss_nilm_device');
+        feedback('✗ Afgewezen — apparaat verwijderd', '#f87171');
+      });
+      panel.querySelector(`#nb-ignore-${nidSafe}`)?.addEventListener('click', () => {
+        callSvc('suppress_nilm_device');
+        feedback('○ Genegeerd — niet meer tonen', '#94a3b8');
+      });
+      panel.querySelector(`#nb-exclude-${nidSafe}`)?.addEventListener('click', () => {
+        callSvc('set_balance_exclude', {exclude: true, reason: 'user'});
+        feedback('⊗ Uitgesloten — telt niet meer mee in huisverbruik', '#f87171');
+      });
+      panel.querySelector(`#nb-include-${nidSafe}`)?.addEventListener('click', () => {
+        callSvc('set_balance_exclude', {exclude: false});
+        feedback('✓ Opgenomen in balans — telt weer mee', '#86efac');
+      });
+    }
 
     _closeNilmDetail() { this._closeDetail(); }
 

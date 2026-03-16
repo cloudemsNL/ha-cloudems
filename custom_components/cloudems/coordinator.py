@@ -88,6 +88,7 @@ from collections import deque
 import aiohttp
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .entity_provider import EntityState
+from .adaptivehome_bridge import AdaptiveHomeBridge, HouseMode
 from .ha_provider import HAEntityProvider
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -336,6 +337,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._session = None  # v4.0.9: HA aiohttp_client sessie
         # v4.0.9: EntityProvider abstractielaag
         self._provider: HAEntityProvider = HAEntityProvider(hass)
+
+        # v4.6.276: AdaptiveHome koppeling — staat onzichtbaar klaar voor koppeling
+        self._ah_bridge:        AdaptiveHomeBridge = AdaptiveHomeBridge(hass, self)
+        self._ah_house_mode:    str  = HouseMode.HOME
+        self._ah_occupied_rooms: list = []
+        self._ah_active_scene:  str  = ""
+        self._ah_enabled:       bool = False  # wordt True zodra AH een event stuurt
 
         # v4.6.152: Adaptive performance monitor
         from .performance_monitor import PerformanceMonitor
@@ -1759,6 +1767,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if getattr(self, "_shutter_ctrl", None):
             await self._shutter_ctrl.async_shutdown()
 
+        # v4.6.276: AdaptiveHome bridge opruimen
+        if getattr(self, "_ah_bridge", None):
+            await self._ah_bridge.async_shutdown()
+
         # v4.0.9: HA-sessie — niet zelf sluiten
         if self._p1_reader:
             try:
@@ -1908,6 +1920,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         await self._bde_feedback.async_load()
         # v4.5.66: BatterySocLearner laden
         await self._battery_soc_learner.async_load()
+
+        # v4.6.276: AdaptiveHome bridge opstarten (luistert naar AH events)
+        await self._ah_bridge.async_setup()
         # v4.5.7: EnergyBalancer geleerde lags laden
         if self._energy_balancer:
             _bal_saved = await self._store_balancer.async_load()
@@ -7241,6 +7256,78 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if _bk_perf:
                     import asyncio as _aio_perf
                     _aio_perf.ensure_future(_bk_perf.async_log_normal("performance", _perf_status))
+
+            # v4.6.279: Auto-excludeer bekende integratie-apparaten uit energiebalans
+            _nilm_det = getattr(self, "_nilm_detector", None)
+            self._nilm_auto_excl_cycle = getattr(self, "_nilm_auto_excl_cycle", 0) + 1
+            if _nilm_det and self._nilm_auto_excl_cycle % 60 == 1:  # ~elke 10 min
+                try:
+                    _all_eids = {eid for eid in self.hass.states.async_entity_ids()}
+                    # Topology: geef bekende infra-entity_ids door aan NILM
+                    _topo = getattr(self, "_meter_topology", None)
+                    if _topo:
+                        try:
+                            _topo_tree = _topo.get_tree()
+                            _topo_infra_eids = set()
+                            _cfg = self._config
+                            _known_infra = {
+                                _cfg.get("battery_sensor", ""),
+                                _cfg.get("solar_sensor", ""),
+                                _cfg.get("grid_sensor", ""),
+                                _cfg.get("battery_soc_entity", ""),
+                            } - {""}
+                            # Alle topo-nodes waarvan entity_id in bekende infra-set
+                            def _collect_infra(nodes):
+                                for n in nodes:
+                                    if n.get("entity_id","") in _known_infra:
+                                        _topo_infra_eids.add(n["entity_id"])
+                                    _collect_infra(n.get("children", []))
+                            _collect_infra(_topo_tree)
+                            if _topo_infra_eids:
+                                _topo_excl = _nilm_det.auto_exclude_by_entity_ids(_topo_infra_eids)
+                                if _topo_excl:
+                                    _LOGGER.info(
+                                        "CloudEMS NILM: %d apparaten uitgesloten via topology (%s)",
+                                        len(_topo_excl), ", ".join(_topo_excl[:3])
+                                    )
+                        except Exception as _te:
+                            _LOGGER.debug("CloudEMS topology→NILM exclusie fout: %s", _te)
+
+                    _excl_count  = _nilm_det.auto_exclude_managed_integration_devices(_all_eids)
+                    _merge_count = _nilm_det.auto_merge_duplicate_names()
+                    # Balans + correlatie check
+                    _suspects = _nilm_det.check_balance_suspect_devices(
+                        house_w   = float(self._data.get("house_power",    0) or 0) if self._data else 0,
+                        battery_w = float(self._data.get("battery_power",  0) or 0) if self._data else 0,
+                        solar_w   = float(self._data.get("solar_power",    0) or 0) if self._data else 0,
+                        grid_w    = float(self._data.get("grid_power",     0) or 0) if self._data else 0,
+                    )
+                    _bal_count = _nilm_det.apply_balance_suspects(_suspects) if _suspects else 0
+                    if _excl_count > 0 or _merge_count > 0 or _bal_count > 0:
+                        _LOGGER.info(
+                            "CloudEMS: %d NILM uitgesloten (integratie), "
+                            "%d duplicaten samengevoegd, %d uitgesloten (balans/correlatie)",
+                            _excl_count, _merge_count, _bal_count,
+                        )
+                        self.async_update_listeners()
+                except Exception as _ae:
+                    _LOGGER.debug("CloudEMS NILM auto-exclusie/merge fout: %s", _ae)
+
+            # v4.6.276: AdaptiveHome bridge — stuur energiestatus, NILM en prijsinfo
+            try:
+                _ah = getattr(self, "_ah_bridge", None)
+                if _ah is not None:
+                    _ah.fire_state_update(self._data)
+                    _nilm_devs = self._data.get("nilm_devices", [])
+                    if _nilm_devs:
+                        _ah.fire_nilm_update(_nilm_devs)
+                    _pi = self._data.get("price_info", {}) or {}
+                    if _pi:
+                        _ah.fire_price_update(_pi)
+                    _pres = self._data.get("presence_detected", False)
+                    _ah.fire_presence_update(_pres, method="power")
+            except Exception as _ah_err:  # noqa: BLE001
+                _LOGGER.debug("CloudEMS AdaptiveHome bridge fire fout: %s", _ah_err)
 
             return self._data
 

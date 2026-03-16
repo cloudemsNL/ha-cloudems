@@ -1576,11 +1576,11 @@ class BoilerController:
             _wp_th     = _current_price / max(_cop_wp, 0.1)
             _wp_cheaper_than_gas = (b.has_gas_heating != "yes") or (_wp_th <= _gas_th_wp + GAS_VS_ELEC_MARGIN)
 
-            # Boven green_mode_max_c: GREEN-modus kan dit niet bereiken → BOOST verplicht
+            # v4.6.273: vergelijk het actieve setpoint met GREEN-max, niet de huidige temp.
+            # BOOST verplicht alleen als het SETPOINT boven GREEN-max uitkomt.
             _above_green_max = (
                 b.max_setpoint_green_c > 0
-                and _has_temp
-                and b.current_temp_c >= b.max_setpoint_green_c - 1.0
+                and b.active_setpoint_c > b.max_setpoint_green_c
             )
 
             if not b.needs_heat:
@@ -1642,10 +1642,12 @@ class BoilerController:
             _hyb_th    = _current_price / max(_cop_hyb, 0.1)
             cop_str_h  = f" COP≈{_cop_hyb:.1f}" if _outside is not None else ""
 
+            # v4.6.273: vergelijk het actieve setpoint met GREEN-max, niet de huidige temp.
+            # Fout: temp=52 >= green_max-1=52 → True → BOOST, terwijl GREEN 53°C WEL kan halen.
+            # Fix: BOOST verplicht alleen als het SETPOINT boven GREEN-max uitkomt.
             _above_green_max_h = (
                 b.max_setpoint_green_c > 0
-                and _has_temp
-                and b.current_temp_c >= b.max_setpoint_green_c - 1.0
+                and b.active_setpoint_c > b.max_setpoint_green_c
             )
 
             if not b.needs_heat:

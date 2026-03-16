@@ -49,6 +49,7 @@ LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
 LOVELACE_PRIJSVERLOOP_URL   = f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}"
 LOVELACE_PRICE_URL          = f"/local/cloudems/cloudems-price-card.js?v={VERSION}"
+LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={VERSION}"
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
@@ -110,6 +111,7 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-config-card.js?v={VERSION}", "cloudems-config-card.js"),
     (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",    "cloudems-gas-card.js"),
     (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
+    (LOVELACE_MINI_PRICE_URL,   "cloudems-mini-price-card.js"),
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -2403,6 +2405,65 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         DOMAIN, "meter_topology_set_root", meter_topology_set_root,
         schema=vol.Schema({
             vol.Required("entity_id"): str,
+        }),
+    )
+
+    # ── v4.6.279: Balans uitsluiting ─────────────────────────────────────────
+    async def set_balance_exclude(call) -> None:
+        """Sluit een NILM apparaat in of uit van de energiebalans."""
+        det = getattr(coordinator, "_nilm_detector", None)
+        if not det:
+            return
+        name    = call.data.get("device_name", "")
+        exclude = bool(call.data.get("exclude", True))
+        reason  = call.data.get("reason", "user")
+        # Zoek op naam
+        changed = False
+        for dev in det._devices.values():
+            if (dev.name or "").lower() == name.lower():
+                det.set_device_balance_exclude(dev.source_entity_id or dev.name, exclude, reason)
+                changed = True
+                break
+        if changed:
+            coordinator.async_update_listeners()
+
+    hass.services.async_register(
+        DOMAIN, "set_balance_exclude", set_balance_exclude,
+        schema=vol.Schema({
+            vol.Required("device_name"): str,
+            vol.Optional("exclude", default=True): bool,
+            vol.Optional("reason", default="user"): str,
+        }),
+    )
+
+    # ── v4.6.276: AdaptiveHome koppeling services ─────────────────────────────
+    # Onzichtbaar voor bestaande gebruikers — AdaptiveHome gebruikt dit intern.
+
+    async def ah_get_status(call) -> None:
+        """AdaptiveHome vraagt CloudEMS status op via event-respons."""
+        bridge = getattr(coordinator, "_ah_bridge", None)
+        if bridge:
+            hass.bus.async_fire("cloudems_ah_status_response", bridge.get_status())
+
+    async def ah_set_mode(call) -> None:
+        """AdaptiveHome zet huismodus (home/away/sleep/vacation)."""
+        import time as _time_ah
+        mode   = call.data.get("mode", "home")
+        bridge = getattr(coordinator, "_ah_bridge", None)
+        if bridge:
+            coordinator._ah_house_mode   = mode
+            bridge._state.house_mode     = mode
+            bridge._state.last_seen      = _time_ah.time()
+            bridge._state.connected      = True
+            _LOGGER.info("CloudEMS AdaptiveHome: huismodus → %s", mode)
+
+    hass.services.async_register(
+        DOMAIN, "ah_get_status", ah_get_status,
+    )
+    hass.services.async_register(
+        DOMAIN, "ah_set_mode", ah_set_mode,
+        schema=vol.Schema({
+            vol.Optional("mode", default="home"): str,
         }),
     )
 

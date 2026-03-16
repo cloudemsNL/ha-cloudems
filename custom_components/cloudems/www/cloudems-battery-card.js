@@ -116,7 +116,12 @@ class CloudemsBatteryCard extends HTMLElement {
     this._chartData6=null;
     this._chartRange=24;
   }
-  setConfig(c){ this._cfg={title:c.title??'Batterij',...c}; this._render(); }
+  setConfig(c){
+    this._cfg={title:c.title??'Batterij',...c};
+    this._render();
+    // Force re-render na 3s — vangt startup op waar last_changed niet verandert
+    setTimeout(()=>{ this._prev=''; this._render(); }, 3000);
+  }
   set hass(h){
     this._hass=h;
     const soc=h.states['sensor.cloudems_battery_so_c'];

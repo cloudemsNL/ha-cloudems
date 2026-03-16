@@ -405,7 +405,7 @@
       },
       "boiler_groups": {
         "title": "🚿 Warm Water Cascade",
-        "description": "Beheer meerdere boilers in groepen met slimme cascade-logica (sequentieel, parallel of prioriteit).",
+        "description": "**Do you have a hot water boiler, electric water heater or buffer tank?**\n\nEnable this to let CloudEMS control it based on PV surplus, cheap EPEX hours and grid congestion.\n\n**No boiler?** ➜ Leave the switch **OFF** and click Next — this step is completely skipped.\n\nYou connect existing HA entities: switch, climate or water_heater.",
         "data": {
           "boiler_groups_enabled": "Warm water cascade activeren",
           "boiler_group_name": "Naam van de groep",
