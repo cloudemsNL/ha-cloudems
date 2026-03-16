@@ -1,3 +1,112 @@
+## [4.6.271] - 2026-03-16
+### Fix — Issue #28: PV toevoegen geeft TypeError crash
+- **Oorzaak:** `float(cfg.get(f'max_current_{phase.lower()}', DEFAULT_MAX_CURRENT))` crasht als de config-key bestaat maar expliciet `None` als waarde heeft. In dat geval geeft `.get(key, default)` de default NIET terug — alleen als de key ontbreekt. Resultaat: `float(None)` → `TypeError: float() argument must be a string or a real number, not 'NoneType'` → integratie start niet op.
+- **Fix:** Vervangen door `cfg.get(key) or DEFAULT_MAX_CURRENT` zodat ook `None`-waarden correct terugvallen op de default.
+
+### Fix — Issue #27: Batterij module bevriest, alleen update na herlaad
+- **Oorzaak (rootcause):** `decide_action_v3()` in ZonneplanProvider leest `self._last_state` voor SoC, actieve mode en tariefgroep. Maar `_last_state` wordt alleen bijgewerkt door `read_state()`. De coordinator roept `provider.read_state()` alleen aan als `battery_soc_entity` geen waarde teruggeeft (fallback-pad). Als de soc_entity wél geconfigureerd is → `read_state()` wordt overgeslagen → `_last_state.active_mode` wordt stale → de idempotentie-check in `_send_control_mode()` (`current == mode_val and _last_sent_mode == mode_val`) blokkeert elke verdere sturing → batterij "bevriest" totdat de integratie herlaadt.
+- **Fix:** `_zp_provider.read_state()` wordt nu altijd aangeroepen aan het begin van elke coordinator-cyclus, ongeacht of `battery_soc_entity` geconfigureerd is.
+- **Extra logging:** Bij mode-wijziging via state refresh wordt dit gelogd als INFO. `decide_action_v3()` logt nu op DEBUG niveau: SoC bron, tariefgroep, actieve mode en last_sent_mode.
+
+### Feature — Startup banner
+- Zichtbaar in HA logs bij elke start: versienummer, URL. Helpt HACS-gebruikers bij diagnostiek via GitHub issues.
+
+## [4.6.270] - 2026-03-16
+
+### Fix
+- **Alle JS solar kaarten werken nu** — Rootcause gevonden: de werkende markdown tab leest uit `sensor.cloudems_solar_system_intelligence` (oude entity_id bewaard door HA entity registry), terwijl de JS kaarten uit `sensor.cloudems_solar_system` lazen die leeg bleef. Alle JS kaarten lezen nu eerst `sensor.cloudems_solar_system_intelligence`, dan fallback naar `sensor.cloudems_solar_system`.
+- **Solar-card dirty-check** — Was ook afhankelijk van `sensor.cloudems_status.attributes.inverter_data` (bestaat niet per CLAUDE_INSTRUCTIONS). Vervangen door `sol.attributes.inverters`.
+
+## [4.6.269] - 2026-03-16
+
+### Fix
+- **NILM device detail opent niet bij klik** — `nid` bevatte spaties (bijv. `nilm_Ariston Boiler`) wat een ongeldig HTML id geeft. `querySelector('#nr-nilm_Ariston Boiler')` faalt op spaties. Fix: spaties en speciale tekens vervangen door `_` in het id. Bevestigen/Afwijzen/Negeren knoppen werken nu.
+
+## [4.6.268] - 2026-03-16
+
+### Fix
+- **Solar tab hersteld** — Tab was per ongeluk vervangen door de nieuwe JS kaart zonder goedkeuring. Exact teruggezet naar de 4.6.236 inhoud (18 kaarten).
+- **Infinity kW opgelost** — `Math.max(...[])` geeft Infinity als er geen omvormers zijn. Nu een veilige lege-array check.
+
+## [4.6.267] - 2026-03-16
+
+### Fix
+- **Solar detail toont nu alle info** — Detail data wordt nu LIVE gebouwd vanuit hass bij elke klik (`_buildNodeDetail`) i.p.v. uit verouderde `_nodeData`. Toont: productie nu, vandaag kWh, morgen forecast, piek 7d, zekerheid%, en ALLE omvormers met individueel vermogen + piek.
+- **Beide omvormers zichtbaar** — `_buildNodeDetail` leest `sensor.cloudems_solar_system.attributes.inverters` direct, niet de gefilterde `_getInverters()` output. Alle geconfigureerde omvormers verschijnen altijd.
+- Zelfde live-aanpak voor batterij, boiler, grid, ev, home — altijd actuele data.
+
+## [4.6.266] - 2026-03-16
+
+### Fix
+- **NILM devices verschijnen weer automatisch onder Thuis** — Twee bugs tegelijk: (1) `subBox` en `nilmBox` functies waren weggevallen tijdens refactor waardoor ze undefined waren. (2) `_getFlowLayer2` las uit `sensor.cloudems_nilm_top_N_device` die `unknown` teruggeeft als apparaat niet actief is — vervangen door directe read uit `sensor.cloudems_nilm_running_devices.attributes.device_list` (zelfde bron als detail panel). Top 5 op vermogen, klikbaar met detail.
+
+## [4.6.265] - 2026-03-16
+
+### Fix
+- **Solar detail panel uitgebreid** — Toont nu: productie nu, vandaag kWh, morgen forecast, piek 7d, zekerheid%, en per omvormer vermogen + piek. Zoals in de mockup.
+
+## [4.6.264] - 2026-03-16
+
+### Fix
+- **NILM devices niet zichtbaar onder Thuis** — `L2_XS` (de x-posities van de NILM nodes) werd gedefinieerd NADAT de pipes en arrows al werden getekend, waardoor `L2_XS[i]` `undefined` was. Definitie verplaatst naar vóór de pipes-sectie. NILM apparaten worden nu weer automatisch getoond onderaan de energiestroom kaart zonder te klikken.
+
+## [4.6.263] - 2026-03-16
+
+### Feature
+- **Batterij tab productie-klaar** — Oude markdown/entities kaarten volledig verwijderd. Tab toont nu: module-uit waarschuwing (conditional) + nieuwe cloudems-battery-card v3.
+
+## [4.6.262] - 2026-03-16
+
+### Fix
+- **Detail panel verdwijnt** — `_renderFull` schreef elke 30 ticks de volledige `shadowRoot.innerHTML` opnieuw, waardoor het detail panel direct werd vernietigd na openen. Fix: geen `_renderFull` zolang een detail panel open staat (`_activeNid` gezet).
+- **Zon animatie hersteld** — Originele zon met glow, stralen, bewolkings-overlay en sparkline teruggeplaatst. Tekst staat nu correct onder de zon (y+27/y+38), niet erin.
+
+## [4.6.261] - 2026-03-16
+
+### Fix
+- **Piekschaving badges** — Fase-badges: 'EXP' → 'EXPORT', 'OK' → 'IMPORT'. Onbalans-badge: 'HOOG' → 'ALERT', 'WARN' blijft, 'OK' blijft. Thresholds ongewijzigd: >5A = ALERT (rood), >3A = WARN (oranje), ≤3A = OK (groen).
+
+## [4.6.260] - 2026-03-16
+
+### Feature
+- **Flow kaart volledig herschreven** — Altijd één node per type (zon/batterij/boiler), ongeacht hoeveel omvormers/accu's/boilers er zijn. Alle nodes zijn klikbaar: klikken toont een detail panel. Multi-node SOM-pill constructie verwijderd. Klikken op Zon toont per-omvormer vermogen, Batterij toont per-accu SoC+vermogen, Boiler toont per-boiler temp+setpoint. Klikken op Thuis toont NILM apparaten-lijst — NILM apparaten zijn zelf ook klikbaar voor details (fase, type, betrouwbaarheid, kamer, on-events).
+- **Battery card v3.0** — Volledig nieuwe kaart: volledige cirkel arc met SoC exact in het midden + kWh + capaciteit, 24u vermogensgrafiek met 6u/24u wissel (laden groen / ontladen amber / nul-lijn), Providers-tabel met live interval-countdown en retry-pips, Zonneplan sturing uitklapbaar, Forecast 8u dots, slijtagekosten. Sliders Pad A en Entiteiten verwijderd.
+- **Dashboard** — Batterij tab vernieuwd: alleen de nieuwe cloudems-battery-card (v3.0), oude markdown/entities kaarten verwijderd.
+
+## [4.6.259] - 2026-03-16
+
+### Feature
+- **Flow kaart: NILM nodes klikbaar** — Elk NILM/subnode apparaat onderaan de energiestroom kaart is nu klikbaar. Klikken toont een detail-panel met: vermogen, fase (L1/L2/L3 met kleur), type, bron, on-events, kamer en betrouwbaarheidsbalk. Klik opnieuw of op ✕ om te sluiten. Data wordt live opgehaald uit `sensor.cloudems_nilm_devices` en `sensor.cloudems_nilm_running_devices`.
+
+## [4.6.258] - 2026-03-16
+
+### Fix
+- **Solar/Batterij/NILM tabs: exact hersteld naar 4.6.236** — Nieuwe custom kaarten verwijderd uit de hoofdtabs. Tabs zijn nu weer identiek aan de laatste werkende versie (18/16/16 kaarten).
+- **NILM Beheer tab hersteld** — Tab was verdwenen, teruggeplaatst na NILM tab.
+- **Dev dashboard** — Alle nieuwe JS kaarten (solar, battery, boiler, shutter, nilm, pv-forecast, beheer) staan nu uitsluitend in `cloudems-dashboard-dev.yaml` voor testing.
+- **Solar card crash** — `solS?.attributes` fix bij unavailable sensor.
+- **cloudems-cards.js duplicate define** — `cloudems-nilm-card-editor` guard toegevoegd.
+
+## [4.6.257] - 2026-03-16
+### Fix
+- **Solar/Batterij/NILM tabs: volledige oude inhoud hersteld** — Tabs waren vervangen door alleen de nieuwe custom kaart waardoor vrijwel alle informatie verdween. Oude tab-inhoud (18 solar cards, 16 battery cards, 16 NILM cards) teruggezet; nieuwe custom kaart staat bovenaan de tab als preview.
+- **NILM Beheer tab hersteld** — Tab `cloudems-nilm-beheer` was verdwenen uit de navigatie. Teruggeplaatst na NILM tab.
+- **Solar card crash** — `TypeError: Cannot read properties of undefined (reading 'attributes')` op lijn 102: `solS.attributes` → `solS?.attributes` wanneer sensor nog unavailable is bij opstarten.
+- **cloudems-cards.js duplicate define** — `cloudems-nilm-card-editor` werd twee keer geregistreerd waardoor `customElements.define` een fout gooide op lijn 3034. Tweede registratie beveiligd met `!customElements.get(...)` guard.
+
+## [4.6.256] - 2026-03-16
+### Fix
+- **Fase-balk gradient verwijderd** — De piekschaving fase-balken (L1/L2/L3) toonden altijd een groen→oranje→rood gradient ongeacht de werkelijke belasting. Nu een solide kleur op basis van belastingspercentage: `hsl(120 - ratio×120)` zodat 2A/25A groen is, 12A/25A geel-oranje, 24A/25A rood. Balk-label en badge-kleur volgen mee.
+- **Solar card "Laden..." bij opstarten** — `sensor.cloudems_status` exporteerde geen `inverter_data` attribuut. De solar card gebruikt dit als fallback tijdens opstarten voordat `sensor.cloudems_solar_system` beschikbaar is. Nu toegevoegd aan `extra_state_attributes` van `CloudEMSStatusSensor`.
+- **Battery card crash** — `TypeError: Cannot read properties of undefined (reading 'attributes')` op lijn 131 wanneer `sensor.cloudems_battery_so_c` undefined is maar `zpSoc` via EPEX schema wél beschikbaar is. Fix: `socS?.attributes||{}` i.p.v. `socS.attributes||{}`.
+- **Overview card duplicate constructor** — `cloudems-control-card` probeerde `CloudemsControlCard` als constructor voor de tweede keer te registreren naast `cloudems-beheer-card`, wat een `CustomElementRegistry` fout veroorzaakte. Fix: thin alias class.
+- **NILM card clicks werken niet** — `set hass()` deed altijd `_render()` zonder dirty-check, waardoor HA state-updates elke seconden de innerHTML vervingen en alle event listeners verdwenen vóór de gebruiker kon klikken. Fix: dirty-check op `last_changed` van de 4 NILM sensoren.
+
+## [4.6.255] - 2026-03-16
+### Fix
+- **Home card crash** — `querySelectorAll is not defined` in `cloudems-home-card.js` (_bind(): ontbrekende `sr.` prefix op lijn ~999. Veroorzaakte een ReferenceError bij elke render waardoor de hele home tab een foutmelding toonde.
+- **Dashboard resource cache** — Alle JS-resource URLs in `cloudems-dashboard.yaml` bijgewerkt naar `?v=4.6.255` (waren gemengd 4.6.196/4.6.227/4.6.233/4.6.241/4.6.248). Browser serveerde oude gecachte versies van battery-, solar- en home-card, waardoor tabs zwart of bevroren bleven na de upgrade naar 4.6.254.
+
 ## [4.6.140] - 2026-03-14
 ### Debug
 - **Boiler vermogen WARNING log** — Elke coordinator-cyclus logt een WARNING in `cloudems_high.log`: `CloudEMS boiler [Boiler 1]: sensor_state=XXW → status.current_power_w=YYW`. Geen DEBUG-mode nodig. Hiermee is exact zichtbaar of `_read_sensors()` de waarde ophaalt maar `get_status()` hem niet doorgeeft, of omgekeerd.

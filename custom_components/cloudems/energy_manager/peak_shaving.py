@@ -55,6 +55,7 @@ class PeakShaving:
         self._hass   = hass
         self._limit  = float(config.get("peak_shaving_limit_w", 5000))
         self._assets: list[str] = config.get("peak_shaving_assets", [])
+        self._shed_active: list[str] = []
         self._store  = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._history: dict = {"daily": {}, "monthly": {}}
         self._active = False
@@ -133,6 +134,7 @@ class PeakShaving:
             "peak_today_w":  self._history["daily"].get(day_key, 0.0),
             "peak_month_w":  self._history["monthly"].get(month_key, 0.0),
             "peak_history":  self._get_monthly_summary(),
+            "shed_devices":  list(self._shed_active),
         }
 
     # ── Shedding ──────────────────────────────────────────────────────────────
@@ -146,11 +148,14 @@ class PeakShaving:
                     "homeassistant", "turn_off", {"entity_id": entity_id}, blocking=False
                 )
                 _LOGGER.info("CloudEMS PeakShaving: shed %s (%.0f W)", entity_id, current_w)
+                if entity_id not in self._shed_active:
+                    self._shed_active.append(entity_id)
                 return f"shed:{entity_id}"
         return "at_limit_no_assets"
 
     async def _restore_loads(self) -> None:
         """Restore sheddable assets (reverse order)."""
+        self._shed_active = []
         for entity_id in reversed(self._assets):
             state = self._hass.states.get(entity_id)
             if state and state.state in ("off",):

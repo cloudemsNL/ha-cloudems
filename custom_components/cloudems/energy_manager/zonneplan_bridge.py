@@ -711,6 +711,11 @@ class ZonneplanProvider(BatteryProvider):
         raw      = self._last_state.raw
         soc      = self._last_state.soc_pct or 50.0
         tg       = raw.get("tariff_group", "normal") or "normal"
+        _LOGGER.debug(
+            "ZonneplanProvider decide_v3: SoC=%.0f%% (from_state=%s) tarief=%s mode=%s last_sent=%s",
+            soc, self._last_state.soc_pct is not None,
+            tg, self._last_state.active_mode, self._last_sent_mode,
+        )
         forecast = raw.get("forecast_tariff_groups", [])   # uur +1..+8
         # Gebruik all-in prijs (incl. energiebelasting, BTW, opslag) voor correcte berekeningen
         price    = self._get_effective_price()
@@ -1908,7 +1913,10 @@ class ZonneplanProvider(BatteryProvider):
         # Idempotentie: check huidige staat
         current = self._last_state.active_mode
         if current == mode_val and self._last_sent_mode == mode_val:
-            _LOGGER.debug("ZonneplanProvider: mode al %s, geen call", mode_val)
+            _LOGGER.debug(
+                "ZonneplanProvider: mode al %s, geen call (idempotent: last_sent=%s, current=%s)",
+                mode_val, self._last_sent_mode, current,
+            )
             return True
 
         await self._save_current_mode()

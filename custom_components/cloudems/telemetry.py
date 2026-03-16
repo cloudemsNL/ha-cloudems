@@ -229,9 +229,21 @@ class CloudEMSTelemetry:
         """Lees of genereer een persistente anonieme installatie-ID."""
         path = os.path.join(self._config_dir, STORAGE_KEY)
         try:
-            if os.path.exists(path):
+            import asyncio as _aio
+            def _read_install():
+                if not os.path.exists(path):
+                    return None
                 with open(path) as f:
-                    data = json.load(f)
+                    return json.load(f)
+            try:
+                loop = _aio.get_event_loop()
+                if loop.is_running():
+                    # We're in the event loop - return a placeholder ID and schedule proper load
+                    return f"cloudems-{hash(path) & 0xFFFFFFFF:08x}"
+                data = loop.run_until_complete(loop.run_in_executor(None, _read_install))
+            except Exception:
+                data = _read_install()
+            if data is not None:
                     if "installation_id" in data:
                         return data["installation_id"]
         except Exception:

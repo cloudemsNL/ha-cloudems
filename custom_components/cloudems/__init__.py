@@ -49,9 +49,48 @@ LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
 LOVELACE_PRIJSVERLOOP_URL   = f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}"
 LOVELACE_PRICE_URL          = f"/local/cloudems/cloudems-price-card.js?v={VERSION}"
+LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
+LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# JS KAART REGISTER — bijgewerkt v4.6.247 (2026-03-16)
+# Gebruik dit overzicht om te beslissen welke kaarten verwijderd kunnen worden.
+# NOOIT automatisch verwijderen — altijd handmatig beoordelen.
+#
+# ACTIEF IN DASHBOARD (cloudems-dashboard.yaml):
+#   cloudems-home-card          → cloudems-home-card.js         ✓ actief
+#   cloudems-boiler-card        → cloudems-boiler-card.js       ✓ actief
+#   cloudems-shutter-card       → cloudems-shutter-card.js      ✓ actief
+#   cloudems-decisions-card     → cloudems-decisions-card.js    ✓ actief
+#   cloudems-prijsverloop-card  → cloudems-prijsverloop-card.js ✓ actief
+#   cloudems-config-card        → cloudems-config-card.js       ✓ actief
+#   cloudems-gas-card           → cloudems-gas-card.js          ✓ actief
+#   cloudems-nilm-card          → cloudems-nilm-card.js         ✓ actief
+#   cloudems-zelfconsumptie-card→ cloudems-zelfconsumptie-card.js ✓ actief
+#   cloudems-beheer-card        → cloudems-overview-card.js     ✓ actief (ook: control-card)
+#   cloudems-chip-card          ↘
+#   cloudems-flow-card          ↘
+#   cloudems-graph-card         ↘ allen gedefinieerd in cloudems-cards.js
+#   cloudems-stack-card         ↘
+#   cloudems-entity-list        ↘
+#   cloudems-card-mod.js        → card-mod / mod-card (gebruikt via card_mod: YAML)
+#
+# GEREGISTREERD MAAR NIET IN DASHBOARD (kandidaat voor verwijdering):
+#   cloudems-battery-card.js    → cloudems-battery-card        ⚠ Batterij tab gebruikt andere opzet?
+#   cloudems-solar-card.js      → cloudems-solar-card          ⚠ Solar tab gebruikt andere opzet?
+#   cloudems-price-card.js      → cloudems-price-card          ⚠ Prijzen tab gebruikt andere opzet?
+#   cloudems-pv-forecast-card.js→ cloudems-pv-forecast-card    ⚠ Idem
+#   cloudems-rooms-card.js      → cloudems-rooms-card          ⚠ Kamers tab?
+#   cloudems-switches-card.js   → cloudems-switches-card       ⚠ Goedkope uren?
+#
+# BEVINDING: cloudems-cards.js definieert ook cloudems-nilm-card (oud) en
+#            cloudems-overview-card (oud) — die conflicteren mogelijk met de
+#            nieuwere losse JS bestanden. Guards (customElements.get) voorkomen crash.
+# ═══════════════════════════════════════════════════════════════════════════════
+
 _ALL_JS_RESOURCES = [
     (LOVELACE_CARDS_URL,        "cloudems-cards.js"),
     (LOVELACE_CARDMOD_URL,      "cloudems-card-mod.js"),
@@ -66,6 +105,11 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_DECISIONS_URL,    "cloudems-decisions-card.js"),
     (LOVELACE_PRIJSVERLOOP_URL, "cloudems-prijsverloop-card.js"),
     (LOVELACE_PRICE_URL,        "cloudems-price-card.js"),
+    (LOVELACE_ROOMS_URL,        "cloudems-rooms-card.js"),
+    (LOVELACE_HOME_URL,         "cloudems-home-card.js"),
+    (f"/local/cloudems/cloudems-config-card.js?v={VERSION}", "cloudems-config-card.js"),
+    (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",    "cloudems-gas-card.js"),
+    (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -366,7 +410,16 @@ def _prune_climate_entities(hass, entry) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    _LOGGER.info("Setting up CloudEMS integration v%s", VERSION)
+    # ── Startup banner — zichtbaar in HA logs voor diagnostiek ──────────────
+    _LOGGER.info(
+        "\n"
+        "╔══════════════════════════════════════════════════════╗\n"
+        "║           CloudEMS Energy Management v%-13s║\n"
+        "║           https://cloudems.eu                       ║\n"
+        "╚══════════════════════════════════════════════════════╝",
+        VERSION,
+    )
+    _LOGGER.info("CloudEMS: Starting setup v%s", VERSION)
 
     # v3.9: Maak CloudEMS HA-ruimtes aan als ze nog niet bestaan.
     # "CloudEMS"         → voor alle CloudEMS sensors/switches (suggested_area)
@@ -531,23 +584,16 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
 
             dashboard_config = _yaml.safe_load(yaml_src.read_text(encoding="utf-8"))
 
-            # Zorg dat resources in de storage-config de versie-cache-buster hebben.
-            # Hiermee laadt de browser na elke update de nieuwste JS — geen hard refresh nodig.
-            dashboard_config["resources"] = [
-                {"url": f"/local/cloudems/cloudems-cards.js?v={VERSION}",          "type": "module"},
-                {"url": f"/local/cloudems/cloudems-card-mod.js?v={VERSION}",             "type": "module"},
-                {"url": f"/local/cloudems/cloudems-boiler-card.js?v={VERSION}",    "type": "module"},
-                {"url": f"/local/cloudems/cloudems-battery-card.js?v={VERSION}",   "type": "module"},
-                {"url": f"/local/cloudems/cloudems-shutter-card.js?v={VERSION}",   "type": "module"},
-                {"url": f"/local/cloudems/cloudems-solar-card.js?v={VERSION}",     "type": "module"},
-                {"url": f"/local/cloudems/cloudems-pv-forecast-card.js?v={VERSION}","type": "module"},
-                {"url": f"/local/cloudems/cloudems-overview-card.js?v={VERSION}",  "type": "module"},
-                {"url": f"/local/cloudems/cloudems-switches-card.js?v={VERSION}",  "type": "module"},
-                {"url": f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}", "type": "module"},
-                {"url": f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}",      "type": "module"},
-                {"url": f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}",   "type": "module"},
-                {"url": f"/local/cloudems/cloudems-price-card.js?v={VERSION}",          "type": "module"},
-            ]
+            # Dashboard YAML kan een lijst van views zijn OF een dict met views: sleutel.
+            # HA storage verwacht altijd een dict — normaliseer hier.
+            if isinstance(dashboard_config, list):
+                dashboard_config = {"views": dashboard_config}
+            elif not isinstance(dashboard_config, dict):
+                dashboard_config = {"views": []}
+
+            # Resources horen NIET in de dashboard storage config —
+            # die worden apart beheerd via _async_register_lovelace_resource.
+            dashboard_config.pop("resources", None)
 
             # Registreer in sidebar als nog niet aanwezig
             if slug not in existing_ids:
@@ -597,6 +643,33 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
 
         # ── Live reload van bestaande dashboards ───────────────────────────────
         await _async_reload_cloudems_dashboards(hass)
+
+        # ── Lovelace resources reload — browser laadt nieuwe JS direct ─────────
+        # Dit forceert de browser om alle JS opnieuw te laden zonder hard refresh.
+        try:
+            await hass.services.async_call("lovelace", "reload_resources", {}, blocking=False)
+            _LOGGER.debug("CloudEMS: lovelace resources reload getriggerd")
+        except Exception:
+            pass  # service bestaat niet in alle HA versies
+
+        # ── Delayed reload: HA laadt .storage vóór onze write bij eerste boot ──
+        # Oplossing voor het "dubbele herstart" probleem: na volledige HA start
+        # herladen we het dashboard nogmaals zodat de nieuwste versie actief is.
+        async def _delayed_reload():
+            """Wacht tot HA volledig gestart is, herlaad dan dashboard opnieuw."""
+            try:
+                await hass.async_block_till_done()
+                import asyncio  # noqa: PLC0415
+                await asyncio.sleep(3)  # geef HA tijd om volledig op te starten
+                await _async_reload_cloudems_dashboards(hass)
+                try:
+                    await hass.services.async_call("lovelace", "reload_resources", {}, blocking=False)
+                except Exception:
+                    pass
+                _LOGGER.debug("CloudEMS: dashboard delayed reload voltooid")
+            except Exception as _dr_err:
+                _LOGGER.debug("CloudEMS: delayed reload mislukt (niet kritiek): %s", _dr_err)
+        hass.async_create_task(_delayed_reload())
 
         # ── Herstel verwijderd dashboard ───────────────────────────────────────
         # Na verwijdering + herstart: storage is correct maar lovelace.dashboards
@@ -719,23 +792,89 @@ async def _async_reload_cloudems_dashboards(hass: HomeAssistant) -> None:
             return
 
         reloaded = []
-        for slug, dash in dashboards.items():
-            # Alleen onze eigen dashboards
-            if slug not in CLOUDEMS_SLUGS:
-                continue
-            # YAML-modus dashboards kunnen niet programmatisch worden herladen
+        for slug, dash in (dashboards.items() if hasattr(dashboards, "items") else []):
+            # Skip YAML-modus dashboards
             if getattr(dash, "mode", None) == "yaml":
                 continue
+
+            # Detecteer CloudEMS dashboard via slug of via view paths
+            is_cloudems = slug in CLOUDEMS_SLUGS
+            if not is_cloudems:
+                try:
+                    # Probeer via geladen config
+                    for attr in ("_data", "config", "_config"):
+                        cfg = getattr(dash, attr, None)
+                        if isinstance(cfg, dict):
+                            views = cfg.get("views", [])
+                            if any(str(v.get("path", "")).startswith("cloudems-") for v in views):
+                                is_cloudems = True
+                                break
+                except Exception:
+                    pass
+
+            # Fallback: herlaad sowieso als de storage file CloudEMS content bevat
+            if not is_cloudems:
+                try:
+                    import json as _json  # noqa: PLC0415
+                    from pathlib import Path as _Path  # noqa: PLC0415
+                    storage_file = _Path(hass.config.config_dir) / ".storage" / f"lovelace.{slug}"
+                    if storage_file.exists():
+                        raw = _json.loads(storage_file.read_text(encoding="utf-8"))
+                        views = raw.get("data", {}).get("config", {}).get("views", [])
+                        if any(str(v.get("path", "")).startswith("cloudems-") for v in views):
+                            is_cloudems = True
+                except Exception:
+                    pass
+
+            if not is_cloudems:
+                continue
+
             try:
-                await dash.async_load(force=True)
+                # Probeer eerst met force=True, dan zonder
+                try:
+                    await dash.async_load(force=True)
+                except TypeError:
+                    await dash.async_load()
                 reloaded.append(slug)
                 _LOGGER.info("CloudEMS: dashboard '%s' in-memory herladen ✓", slug)
             except Exception as e:  # noqa: BLE001
                 _LOGGER.debug("CloudEMS: reload '%s' mislukt (niet kritiek): %s", slug, e)
 
         if reloaded:
-            # Stuur een Lovelace updated event zodat open browsers automatisch refreshen
-            hass.bus.async_fire("lovelace_updated", {"url_path": slug} if len(reloaded) == 1 else {})
+            for s in reloaded:
+                hass.bus.async_fire("lovelace_updated", {"url_path": s})
+
+        # Fallback: lees storage bestanden om CloudEMS slugs te vinden
+        # Dit is de meest betrouwbare methode — werkt ook als dashboard object
+        # nog niet geladen is
+        try:
+            import json as _json  # noqa: PLC0415
+            import glob as _glob  # noqa: PLC0415
+            storage_dir = hass.config.config_dir + "/.storage/"
+            for f in _glob.glob(storage_dir + "lovelace.*"):
+                slug_from_file = f.replace(storage_dir + "lovelace.", "")
+                if slug_from_file in reloaded:
+                    continue
+                if slug_from_file == "dashboards":
+                    continue
+                try:
+                    raw = _json.loads(open(f, encoding="utf-8").read())
+                    views = raw.get("data", {}).get("config", {}).get("views", [])
+                    if any(str(v.get("path", "")).startswith("cloudems-") for v in views):
+                        # Slug gevonden via storage file — zoek het dashboard object
+                        dash = (dashboards if hasattr(dashboards, "get") else {}).get(slug_from_file)
+                        if dash and getattr(dash, "mode", None) != "yaml":
+                            try:
+                                await dash.async_load(force=True)
+                            except TypeError:
+                                await dash.async_load()
+                            reloaded.append(slug_from_file)
+                            hass.bus.async_fire("lovelace_updated", {"url_path": slug_from_file})
+                            _LOGGER.info("CloudEMS: dashboard '%s' herladen via storage-detectie ✓", slug_from_file)
+                except Exception as _sf_err:
+                    _LOGGER.debug("CloudEMS: storage file scan fout: %s", _sf_err)
+        except Exception as _scan_err:
+            _LOGGER.debug("CloudEMS: storage scan mislukt: %s", _scan_err)
 
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("CloudEMS: _async_reload_cloudems_dashboards fout (niet kritiek): %s", err)

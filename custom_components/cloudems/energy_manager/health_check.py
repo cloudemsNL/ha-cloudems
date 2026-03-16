@@ -219,6 +219,18 @@ class SetupHealthCheck:
                 report.warn_count += 1
             return
 
+        # v4.6.247: 'unavailable' na herstart of 429 rate-limit → waarschuwing, geen fout
+        if state.state in ("unavailable", "unknown"):
+            # Check if it's a known cloud integration that rate-limits (Ariston etc.)
+            report.issues.append(HealthIssue(
+                sensor_id  = entity_id,
+                level      = "warning",
+                message    = f"Entiteit '{entity_id}' is tijdelijk niet beschikbaar ({state.state}). Mogelijk herstart of 429 rate-limit van cloud-integratie.",
+                suggestion = "Wacht een paar minuten. CloudEMS gaat automatisch door zodra de entiteit beschikbaar is.",
+            ))
+            report.warn_count += 1
+            return
+
         if state.state in ("unavailable", "unknown", ""):
             report.issues.append(HealthIssue(
                 sensor_id  = entity_id,

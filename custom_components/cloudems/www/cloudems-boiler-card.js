@@ -620,7 +620,7 @@ class CloudemsBoilerCard extends HTMLElement {
       // History throttle: max 1x per 5 minuten — recorder API niet elke 10s aanroepen
       const now = Date.now();
       // Eerste load: 30s throttle. Daarna: 5 minuten.
-      const throttleMs = this._historyLastFetch === 0 ? 30 * 1000 : 5 * 60 * 1000;
+      const throttleMs = this._historyLastFetch === 0 ? 5 * 1000 : 5 * 60 * 1000;
       if (now - this._historyLastFetch > throttleMs) {
         this._historyLastFetch = now;
         this._fetchHistory();
@@ -649,7 +649,9 @@ class CloudemsBoilerCard extends HTMLElement {
         const tempEidL  = `sensor.cloudems_boiler_${labelSlugH}_temp`;
         const tempEidE  = `sensor.cloudems_boiler_${eidSlugH}_temp`;
         const tempEid   = this._hass.states[tempEidL] ? tempEidL : tempEidE;
-        const powerEid  = `sensor.cloudems_boiler_${labelSlugH}_power`;
+        const powerEidL = `sensor.cloudems_boiler_${labelSlugH}_power`;
+        const powerEidE = `sensor.cloudems_boiler_${eidSlugH}_power`;
+        const powerEid  = this._hass.states[powerEidL] ? powerEidL : powerEidE;
         const eids = `${tempEid},${powerEid}`;
         const url  = `history/period/${start.toISOString()}?filter_entity_id=${eids}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
         const resp = await this._hass.callApi('GET', url);
@@ -672,7 +674,7 @@ class CloudemsBoilerCard extends HTMLElement {
             const firstEid = series[0]?.entity_id || '';
             if (firstEid.endsWith('_temp')) {
               this._history[eid] = parseSeries(series);
-            } else if (firstEid.endsWith('_power')) {
+            } else if (firstEid.endsWith('_power') || firstEid === powerEid) {
               this._historyPower[eid] = parseSeries(series);
             }
           }
@@ -767,7 +769,7 @@ class CloudemsBoilerCard extends HTMLElement {
                     ?? hass.states[`water_heater.cloudems_boiler_${eidSlug}`];
     const vbSetpoint = vboilerSt?.attributes?.temperature ?? null;
     const setpoint   = vbSetpoint ?? b.active_setpoint_c ?? b.setpoint_c ?? 60;
-    const maxSp    = b.max_setpoint_boost_c || Math.max(setpoint, b.setpoint_c || 60);
+    const maxSp    = b.hardware_max_c || b.max_setpoint_boost_c || Math.max(b.max_setpoint_green_c||0, b.setpoint_c||60, 75);
     // v4.6.170: gebruik recorder sensor als current_power_w niet beschikbaar is
     // NOOIT b.power_w (nominaal vermogen) gebruiken — dat toont bijv. 2500W als de boiler uit staat
     const recorderPowerSt = hass.states[`sensor.cloudems_boiler_${labelSlugT}_power`];
@@ -875,7 +877,7 @@ class CloudemsBoilerCard extends HTMLElement {
                     <span class="sp-val" style="color:${powerW > 50 ? '#ffd600' : 'rgba(255,255,255,0.4)'}">${powerW.toFixed(0)} W</span>
                   </div>
                   <div class="sp-bar-wrap">
-                    <div class="sp-bar" style="width:${powerW > 50 ? clamp(powerW/3000*100,2,100) : 0}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div>
+                    <div class="sp-bar" style="width:${powerW > 50 ? clamp(powerW/Math.max(b.power_w||1500,powerW,1)*100,2,100) : 0}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div>
                   </div>
                 </div>
               </div>
@@ -910,7 +912,7 @@ class CloudemsBoilerCard extends HTMLElement {
               </div>
               <div class="graph-panel">
                 <div class="graph-title">⚡ Vermogen (4u)</div>
-                ${buildPowerLine(histPower, powerW, powerW)}
+                ${buildPowerLine(histPower, powerW, b.power_w || Math.max(powerW, 1500))}
               </div>
             </div>
 

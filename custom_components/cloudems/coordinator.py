@@ -688,6 +688,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._peak_shaving_enabled:     bool = True
         self._phase_balancing_enabled:  bool = True
         self._cheap_switch_enabled:     bool = True
+        self._nilm_load_shifting_enabled: bool = True
+        self._budget_enabled:             bool = True
         self._pv_forecast_enabled:      bool = True
         self._shadow_detector_enabled:  bool = True
         self._solar_learner_enabled:    bool = True
@@ -1168,7 +1170,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "learned_eb_kwh":         round(_eb, 5),
                 "learned_btw_rate":       _vat_rate,
                 # v4.5.87: gasprijs meegeven voor gas-vs-stroom vergelijking
-                "gas_price_eur_m3":       float(self._config.get("gas_price_eur_m3") or 1.25),
+                "gas_price_eur_m3":       self._read_gas_price(),
             }
 
         epex_base = price_info.get("current")
@@ -1291,7 +1293,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "learned_eb_kwh":         round(_tax, 5),
             "learned_btw_rate":       round(diag_vat, 4),
             # v4.5.87: gasprijs meegeven zodat boiler_controller gas-vs-stroom kan vergelijken
-            "gas_price_eur_m3":       float(self._config.get("gas_price_eur_m3") or 1.25),
+            "gas_price_eur_m3":       self._read_gas_price(),
         }
 
 
@@ -1739,6 +1741,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             getattr(self, "_battery_degradation", None),
             getattr(self, "_sensor_hints", None),
             getattr(self, "_room_meter", None),          # v1.20
+            getattr(self, "_nilm", None),                    # v4.6.246: NILM devices persistent
         ]
         for module in flush_targets:
             if module is None:
@@ -2298,6 +2301,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         _smart_delay_cfgs = cfg.get("smart_delay_switches", []) or []
         self._smart_delay_scheduler = SmartDelayScheduler(self.hass, _smart_delay_cfgs)
 
+        # v4.6.217: NILM Load Shifter — automatisch uitstellen via NILM detectie
+        from .energy_manager.nilm_load_shifter import NILMLoadShifter
+        if cfg.get("nilm_load_shifting_enabled", True):
+            self._nilm_load_shifter = NILMLoadShifter(self._provider, {**cfg, '_hass': self.hass})
+        else:
+            self._nilm_load_shifter = None
+
         # v1.9: Battery EPEX scheduler (only when battery entities configured)
         if cfg.get("battery_scheduler_enabled", False) or cfg.get("battery_soc_entity"):
             from .energy_manager.battery_scheduler import BatteryEPEXScheduler
@@ -2508,7 +2518,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     ) for inv in inverter_configs
                 ]
                 max_phase_a = {
-                    phase: float(cfg.get(f"max_current_{phase.lower()}", DEFAULT_MAX_CURRENT))
+                    phase: float(cfg.get(f"max_current_{phase.lower()}") or DEFAULT_MAX_CURRENT)  # v4.6.271: or-fallback voorkomt float(None) crash bij None-waarde in config (issue #28)
                     for phase in ALL_PHASES
                 }
                 self._multi_inv_manager = MultiInverterManager(
@@ -2811,7 +2821,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 try:
                     import json as _j, os as _os
                     _mp = _os.path.join(_os.path.dirname(__file__), "manifest.json")
-                    _manifest = _j.load(open(_mp))
+                    import asyncio as _aio_m
+                    def _read_manifest():
+                        with open(_mp) as _f:
+                            return _j.load(_f)
+                    _manifest = await _aio_m.get_event_loop().run_in_executor(None, _read_manifest)
                 except Exception:
                     pass
                 self._telemetry = CloudEMSTelemetry(
@@ -5154,6 +5168,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             except Exception as _cs_err:
                 _LOGGER.debug("CheapSwitch error: %s", _cs_err)
 
+            # v4.6.217: NILM Load Shifter
+            nilm_shift_data: dict = {}
+            try:
+                if hasattr(self, "_nilm_load_shifter") and self._nilm_load_shifter and self._nilm_load_shifting_enabled:
+                    _shift_price = self._enrich_price_info(price_info) if price_info else {}
+                    _shift_devices = nilm_devices_enriched if 'nilm_devices_enriched' in dir() else []
+                    _shift_actions = await self._nilm_load_shifter.async_evaluate(
+                        _shift_devices, _shift_price
+                    )
+                    _shift_status = self._nilm_load_shifter.get_status()
+                    nilm_shift_data = {**_shift_status, "actions": _shift_actions}
+                    for _sa in (_shift_actions or []):
+                        self._log_decision(
+                            "nilm_load_shift",
+                            f"🔀 {_sa.get('label','?')}: {_sa.get('action','?')} — {_sa.get('reason','')}",
+                            payload=_sa,
+                        )
+            except Exception as _shift_err:
+                _LOGGER.warning("CloudEMS NILMLoadShifter fout: %s", _shift_err)
+
             # v4.2: Slimme uitstelmodus
             smart_delay_data: dict = {}
             try:
@@ -5482,7 +5516,23 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Draait automatisch elke coordinator-cyclus als de gebruiker
             # zonneplan_auto_forecast heeft ingeschakeld. Geeft alle beschikbare
             # PV-signalen mee zodat decide_action_v3() optimale beslissingen neemt.
+            # v4.6.271: Altijd provider.read_state() aanroepen zodat _last_state
+            # nooit stale wordt — fix voor battery freeze na reload (issue #27).
+            # Rootcause: decide_action_v3() leest self._last_state maar die werd
+            # alleen bijgewerkt als battery_soc_entity None teruggaf (fallback-pad).
+            # Gevolg: _last_state.active_mode werd stale → idempotentie-check blokkeerde
+            # alle verdere sturing → batterij "bevriest" na herstart integratie.
             _zp_provider = getattr(self, "_zonneplan_bridge", None)
+            if _zp_provider is not None and getattr(_zp_provider, "is_available", False):
+                _zp_prev_mode = getattr(_zp_provider, "_last_state", None)
+                _zp_prev_mode = _zp_prev_mode.active_mode if _zp_prev_mode else None
+                _zp_provider.read_state()
+                _zp_new_mode = _zp_provider._last_state.active_mode
+                if _zp_prev_mode != _zp_new_mode:
+                    _LOGGER.info(
+                        "CloudEMS ZonneplanProvider: mode gewijzigd %s → %s (state refresh)",
+                        _zp_prev_mode, _zp_new_mode,
+                    )
             if (
                 _zp_provider is not None
                 and getattr(_zp_provider, "is_available", False)
@@ -6183,7 +6233,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _weather_eid = self._config.get("weather_entity", "weather.forecast_home")
                 _temp_st     = self._safe_state(_weather_eid)
                 _temp_tom    = float(_temp_st.attributes.get("temperature", 10)) if _temp_st else 10.0
-                _gas_price   = float(self._config.get("gas_price_eur_m3") or 1.20)
+                _gas_price   = self._read_gas_price()
                 self._gas_prediction = self._gas_predictor.predict(_temp_tom, _gas_price).to_dict()
             except Exception as _gp_err:
                 _LOGGER.debug("GasPredictor dagcyclus fout: %s", _gp_err)
@@ -6549,7 +6599,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             gas_m3_cumulative = float(_gas_m3_val),
                             outside_temp_c    = float(_outside_t),
                         )
-                    _gas_price = float(self._config.get("gas_price_eur_m3") or 1.25)
+                    _gas_price = self._read_gas_price()
                     _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price)
                     gas_analysis_data = {
                         "gas_m3_today":           _gas_result.gas_m3_today,
@@ -6843,8 +6893,37 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "config_nilm_confidence":  float(self._config.get("nilm_min_confidence", 0.65)),
                 "ev_decision":          ev_decision,
                 "ev_solar_plan":        ev_solar_plan,
+                "outdoor_temp_c":       outside_temp_c_val,
                 "p1_data":              p1_data,
-                "inverter_data":        inverter_data,          # ← NEW: peak + clipping
+                "inverter_data":        inverter_data if inverter_data else [
+                    # v4.6.195: fallback als solar_learner nog geen profielen heeft (cold start)
+                    {
+                        "entity_id": c.get("entity_id", ""),
+                        "label":     c.get("label") or c.get("name") or f"Omvormer {i+1}",
+                        "current_w": 0.0,
+                        "peak_w":    0.0,
+                        "peak_w_7d": 0.0,
+                        "estimated_wp": c.get("rated_power_w") or 0,
+                        "rated_power_w": c.get("rated_power_w"),
+                        "utilisation_pct": 0.0,
+                        "clipping": False,
+                        "phase": None,
+                        "phase_certain": False,
+                        "phase_display": None,
+                        "phase_confidence": 0.0,
+                        "phase_provisional": True,
+                        "samples": 0,
+                        "confident": False,
+                        "azimuth_deg": None, "azimuth_learned": None, "azimuth_compass": "onbekend",
+                        "tilt_deg": None, "tilt_learned": None,
+                        "orientation_confident": False,
+                        "orientation_learning_pct": 0,
+                        "clear_sky_samples": 0,
+                        "orientation_samples_needed": 60,
+                        "clipping_ceiling_w": None,
+                    }
+                    for i, c in enumerate(self._config.get("inverter_configs", []))
+                ],          # ← peak + clipping
                 "pv_forecast_today_kwh":     pv_forecast_kwh,
                 "pv_payback":           self._calc_pv_payback(
                     pv_forecast_kwh,
@@ -6945,7 +7024,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "maand_eur": float(gas_analysis_data.get("gas_cost_month_eur")  or 0.0),
                     "jaar_eur":  float(gas_analysis_data.get("gas_cost_year_eur")   or 0.0),
                     # Gasprijs €/m³
-                    "gas_prijs_per_m3": float(self._config.get("gas_price_eur_m3") or 1.25),
+                    "gas_prijs_per_m3": self._read_gas_price(),
                 },
                 "batteries":            self._collect_multi_battery_data(),
                 "micro_mobility":       micro_mobility_data,
@@ -6955,6 +7034,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "room_meter":       room_meter_data,         # ← v1.20
                 "cheap_switches":   cheap_switch_data,        # ← v1.20
                 "smart_delay":      smart_delay_data,         # ← v4.2
+                "nilm_load_shift":  nilm_shift_data,          # ← v4.6.217
                 "battery_providers": (lambda: {               # ← v1.21 + v4.5.7 balancer-verrijking
                     **((getattr(self, "_battery_providers", None) and
                         self._battery_providers.get_info()) or {}),
@@ -7326,6 +7406,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return float(state.state)
         except (ValueError, TypeError):
             return None
+
+
+    def _read_gas_price(self) -> float:
+        """Lees gasprijs van dynamische sensor of fall back naar vaste config waarde."""
+        eid = self._config.get("gas_price_sensor", "")
+        if eid:
+            st = self.hass.states.get(eid)
+            if st and st.state not in ("unavailable", "unknown", "", None):
+                try:
+                    return float(st.state)
+                except (ValueError, TypeError):
+                    pass
+        return float(self._config.get("gas_price_eur_m3") or 1.25)
 
     def _read_gas_sensor(self) -> Optional[float]:
         """Read standalone gas sensor (m³) when P1 reader is not active.

@@ -297,6 +297,58 @@ class CloudemsPriceCard extends HTMLElement {
     this._buildRows('tomorrow', tomorrow, hass, { chargeHours:[], dischargeHours:[], solarByHour:{}, maxSolar, evOptStart:-1, boilerTrigger:-1, modBat, modEV, modBoil, modPool, nowH:-1 });
     this._buildSummary('today',    today,    attr);
     this._buildSummary('tomorrow', tomorrow, null);
+
+    // Extra: bill simulator, kosten, goedkope uren schakelaars
+    this._renderExtras(hass, attr);
+  }
+
+  _renderExtras(hass, attr) {
+    let el = this.shadowRoot.getElementById('price-extras');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'price-extras';
+      el.style.cssText = 'padding:0 0 4px';
+      this.shadowRoot.querySelector('.card')?.appendChild(el);
+    }
+
+    const bill = hass.states['sensor.cloudems_bill_simulator'];
+    const kv   = hass.states['sensor.cloudems_energie_kosten_verwachting'];
+    const ec   = hass.states['sensor.cloudems_energy_cost'];
+    const fv   = s => s?.state && s.state !== 'unavailable' ? parseFloat(s.state) : null;
+    const billV = bill?.attributes?.projected_month_eur ?? fv(bill);
+    const kvV   = fv(kv);
+    const ecV   = fv(ec);
+
+    // Goedkope uren schakelaars
+    const gus = hass.states['sensor.cloudems_goedkope_uren_schakelaars'];
+    const switches = gus?.attributes?.schakelaars || [];
+
+    const css = `<style>
+      .p-extra{padding:10px 14px;border-top:1px solid rgba(255,255,255,0.06)}
+      .p-extra-row{display:flex;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.04);gap:8px}
+      .p-extra-lbl{font-size:11px;color:rgba(255,255,255,0.45);flex:1}
+      .p-extra-val{font-size:12px;font-weight:600;color:rgba(255,255,255,0.85)}
+      .p-sub{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,0.3);padding:8px 0 3px}
+    </style>`;
+
+    const costRows = [
+      ecV !== null ? `<div class="p-extra-row"><span class="p-extra-lbl">Kosten vandaag</span><span class="p-extra-val">€ ${ecV.toFixed(2)}</span></div>` : '',
+      kvV !== null ? `<div class="p-extra-row"><span class="p-extra-lbl">Verwacht vandaag</span><span class="p-extra-val">€ ${kvV.toFixed(2)}</span></div>` : '',
+      billV !== null ? `<div class="p-extra-row"><span class="p-extra-lbl">Maandprognose</span><span class="p-extra-val">€ ${parseFloat(billV).toFixed(0)}</span></div>` : '',
+    ].filter(Boolean).join('');
+
+    const swRows = switches.slice(0,6).map(s => {
+      const on = hass.states[s.entity_id]?.state === 'on';
+      const sched = s.schedule ? ` · ${s.schedule}` : '';
+      return `<div class="p-extra-row"><span class="p-extra-lbl">${s.name || s.entity_id}${sched}</span><span class="p-extra-val" style="color:${on?'#34d399':'rgba(255,255,255,0.35)'}">${on?'aan':'uit'}</span></div>`;
+    }).join('');
+
+    if (!costRows && !swRows) { el.innerHTML = ''; return; }
+
+    el.innerHTML = css + `<div class="p-extra">
+      ${costRows ? `<div class="p-sub">Kosten</div>${costRows}` : ''}
+      ${swRows ? `<div class="p-sub">Goedkope uren schakelaars</div>${swRows}` : ''}
+    </div>`;
   }
 
   _bestBlock(prices, n) {
@@ -432,6 +484,30 @@ class CloudemsPriceCard extends HTMLElement {
       setTimeout(() => { el.style.transition = 'width 0.45s cubic-bezier(0.25,0.46,0.45,0.94)'; el.style.width = el.dataset.pct + '%'; }, (i%24)*22+20);
     });
   }
+  static getConfigElement() { return document.createElement('cloudems-price-card-editor'); }
+  static getStubConfig() { return { title: 'Prijzen & Kosten' }; }
 }
 
 customElements.define('cloudems-price-card', CloudemsPriceCard);
+
+if (!customElements.get('cloudems-price-card-editor')) {
+  class _cloudems_price_card_editor extends HTMLElement {
+    constructor(){super();this.attachShadow({mode:'open'});}
+    setConfig(c){this._cfg=c;this._render();}
+    _fire(key,val){
+      this._cfg={...this._cfg,[key]:val};
+      this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:this._cfg},bubbles:true,composed:true}));
+    }
+    _render(){
+      const cfg=this._cfg||{};
+      this.shadowRoot.innerHTML=`<div style="padding:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0">
+          <label style="font-size:12px;color:rgba(255,255,255,0.6)">Titel</label>
+          <input type="text" value="${cfg.title||''}" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;padding:4px 8px;font-size:12px;width:180px"
+            @input="${e=>this._fire('title',e.target.value)}" />
+        </div>
+      </div>`;
+    }
+  }
+  customElements.define('cloudems-price-card-editor', _cloudems_price_card_editor);
+}

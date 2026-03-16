@@ -2280,6 +2280,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
                         selector.SelectOptionDict(value="cheap_switches_opts", label="⚡ Goedkope Uren Schakelaars & Slimme Uitstel"),
                         selector.SelectOptionDict(value="ai_opts",        label="🤖 AI & NILM"),
+                        selector.SelectOptionDict(value="nilm_shift_opts",   label="🔀 NILM Lastverschuiving"),
+                        selector.SelectOptionDict(value="budget_opts",         label="💶 Energiebudget"),
                         selector.SelectOptionDict(value="nilm_devices_opts", label="🏷️ NILM Apparaten beheren"),
                         selector.SelectOptionDict(value="advanced_opts",  label="📡 P1 & Advanced"),
                         selector.SelectOptionDict(value="pool_opts",      label="🏊 Zwembad Controller"),
@@ -2758,6 +2760,104 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
 
     # ── PV Inverter management (Options) ──────────────────────────────────────
+
+
+    async def async_step_budget_opts(self, user_input=None):
+        """💶 Energiebudget — stel maandbudget in of schakel uit."""
+        if user_input is not None:
+            self._opts["budget_enabled"]          = user_input.get("budget_enabled", True)
+            self._opts["budget_elec_eur_month"]   = float(user_input.get("budget_elec_eur_month", 120.0))
+            self._opts["budget_elec_kwh_month"]   = float(user_input.get("budget_elec_kwh_month", 300.0))
+            self._opts["budget_gas_m3_month"]     = float(user_input.get("budget_gas_m3_month", 150.0))
+            return await self.async_step_menu_opts()
+
+        existing = self._opts
+        return self.async_show_form(
+            step_id="budget_opts",
+            data_schema=vol.Schema({
+                vol.Required("budget_enabled",
+                    default=existing.get("budget_enabled", True)):
+                    selector.BooleanSelector(),
+                vol.Required("budget_elec_eur_month",
+                    default=existing.get("budget_elec_eur_month", 120.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(
+                        min=10, max=2000, step=5, unit_of_measurement="€/maand", mode="box"
+                    )),
+                vol.Required("budget_elec_kwh_month",
+                    default=existing.get("budget_elec_kwh_month", 300.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(
+                        min=50, max=5000, step=10, unit_of_measurement="kWh/maand", mode="box"
+                    )),
+                vol.Required("budget_gas_m3_month",
+                    default=existing.get("budget_gas_m3_month", 150.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(
+                        min=0, max=1000, step=5, unit_of_measurement="m³/maand", mode="box"
+                    )),
+            }),
+        )
+
+    async def async_step_nilm_shift_opts(self, user_input=None):
+        """🔀 NILM Lastverschuiving — configureer include/exclude en drempel."""
+        if user_input is not None:
+            # Parse include/exclude uit komma-gescheiden tekst
+            def _parse_list(val: str) -> list:
+                return [s.strip() for s in (val or "").split(",") if s.strip()]
+
+            self._opts["nilm_load_shifting_enabled"] = user_input.get("nilm_load_shifting_enabled", True)
+            self._opts["nilm_shift_price_threshold"]  = float(user_input.get("nilm_shift_price_threshold", 0.25))
+            self._opts["nilm_shift_max_defer_hours"]  = int(user_input.get("nilm_shift_max_defer_hours", 8))
+            self._opts["nilm_shift_include"]          = _parse_list(user_input.get("nilm_shift_include", ""))
+            self._opts["nilm_shift_exclude"]          = _parse_list(user_input.get("nilm_shift_exclude", ""))
+            # Parse deadlines: "wasmachine=07:00, vaatwasser=08:30"
+            raw = user_input.get("nilm_shift_deadlines_raw", "")
+            deadlines = {}
+            for part in raw.split(","):
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    deadlines[k.strip().lower()] = v.strip()
+            self._opts["nilm_shift_deadlines"]      = deadlines
+            self._opts["nilm_shift_deadlines_raw"]  = raw
+            return await self.async_step_menu_opts()
+
+        existing = self._opts
+        inc_str = ", ".join(existing.get("nilm_shift_include") or [])
+        exc_str = ", ".join(existing.get("nilm_shift_exclude") or [])
+
+        return self.async_show_form(
+            step_id="nilm_shift_opts",
+            data_schema=vol.Schema({
+                vol.Required("nilm_load_shifting_enabled",
+                    default=existing.get("nilm_load_shifting_enabled", True)):
+                    selector.BooleanSelector(),
+                vol.Required("nilm_shift_price_threshold",
+                    default=existing.get("nilm_shift_price_threshold", 0.25)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(
+                        min=0.05, max=1.00, step=0.01, unit_of_measurement="€/kWh", mode="box"
+                    )),
+                vol.Required("nilm_shift_max_defer_hours",
+                    default=existing.get("nilm_shift_max_defer_hours", 8)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(
+                        min=1, max=12, step=1, unit_of_measurement="uur", mode="slider"
+                    )),
+                vol.Optional("nilm_shift_include", default=inc_str):
+                    selector.TextSelector(selector.TextSelectorConfig(
+                        multiline=False
+                    )),
+                vol.Optional("nilm_shift_exclude", default=exc_str):
+                    selector.TextSelector(selector.TextSelectorConfig(
+                        multiline=False
+                    )),
+                vol.Optional("nilm_shift_deadlines_raw",
+                    default=existing.get("nilm_shift_deadlines_raw", "")):
+                    selector.TextSelector(selector.TextSelectorConfig(
+                        multiline=True
+                    )),
+            }),
+            description_placeholders={
+                "include_hint": "Komma-gescheiden apparaatnamen die WEL verschoven mogen worden. Leeg = alles.",
+                "exclude_hint": "Komma-gescheiden apparaatnamen die NOOIT verschoven mogen worden.",
+            },
+        )
 
     async def async_step_nilm_devices_opts(self, user_input=None):
         """🏷️ NILM Apparaten beheren — hernoem of verberg gedetecteerde apparaten.

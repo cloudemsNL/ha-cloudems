@@ -1592,17 +1592,33 @@ class BoilerController:
                 want_on = True
                 _heat_up_min = b.heat_up_hours * 60 if b.heat_up_hours > 0 else 600
                 _mts = b.minutes_to_setpoint or 0
-                if _boost_allowed or _above_green_max:
+                # v4.6.229: Boost alleen bij PV surplus, negatieve prijs of boven GREEN-cap.
+                # Goedkope uren alleen boost toestaan als GREEN de setpoint NIET kan halen.
+                # Reden: warmtepomp (COP≈3-4) is efficiënter dan weerstandselement.
+                _boost_by_surplus = solar_surplus_w > surplus_threshold_w * 0.8
+                _boost_by_price   = _is_negative
+                _boost_needed     = _above_green_max
+                _boost_green_possible = (
+                    b.max_setpoint_green_c > 0
+                    and _has_temp
+                    and b.current_temp_c < b.max_setpoint_green_c - 1.0
+                )
+                # Boost bij goedkoop uur alleen als GREEN het setpoint niet kan halen
+                _boost_cheap_ok = _boost_allowed and not _boost_green_possible
+
+                if _boost_by_surplus or _boost_by_price or _boost_needed or _boost_cheap_ok:
                     b.force_green = False  # boost: weerstandselement
-                    if _above_green_max and not _boost_allowed:
-                        # Temp al boven GREEN-cap: BOOST nodig om setpoint te halen
+                    if _above_green_max and not (_boost_by_surplus or _boost_by_price):
                         cop_str = f" COP≈{_cop_wp:.1f}" if _outside is not None else ""
                         reason = f"WP boost{cop_str}: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
+                    elif _boost_by_surplus:
+                        reason = f"WP boost: PV surplus {solar_surplus_w:.0f}W"
+                    elif _boost_by_price:
+                        reason = f"WP boost: negatieve prijs {_current_price:.4f} €/kWh"
                     else:
-                        reason = f"WP boost+green: {_deficit:.1f}°C tekort"
-                        reason += f" (goedkoopste {boost_n}u)" if boost_n > 0 else ""
+                        reason = f"WP boost: {_deficit:.1f}°C tekort, GREEN-cap ({b.max_setpoint_green_c:.0f}°C) bereikt"
                 else:
-                    b.force_green = True   # alleen WP-element (green)
+                    b.force_green = True   # GREEN/WP-element — efficiënter
                     cop_str = f" COP≈{_cop_wp:.1f}" if _outside is not None else ""
                     if _mts > 0:
                         reason = f"WP green{cop_str}: {_deficit:.1f}°C tekort (~{_mts:.0f} min tot setpoint)"
@@ -1639,16 +1655,28 @@ class BoilerController:
                 want_on = True; reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
             else:
                 want_on = True
-                if _boost_allowed or _above_green_max_h:
+                # v4.6.229: zelfde logica als heat_pump — boost alleen bij surplus,
+                # negatieve prijs of boven GREEN-cap. Niet alleen op basis van goedkoop uur.
+                _boost_by_surplus_h = solar_surplus_w > surplus_threshold_w * 0.8
+                _boost_by_price_h   = _is_negative
+                _boost_needed_h     = _above_green_max_h
+                _boost_green_ok_h   = (
+                    b.max_setpoint_green_c > 0
+                    and _has_temp
+                    and b.current_temp_c < b.max_setpoint_green_c - 1.0
+                )
+                _boost_cheap_ok_h = _boost_allowed and not _boost_green_ok_h
+
+                if _boost_by_surplus_h or _boost_by_price_h or _boost_needed_h or _boost_cheap_ok_h:
                     b.force_green = False  # boost actief
-                    if _above_green_max_h and not _boost_allowed:
+                    if _above_green_max_h and not (_boost_by_surplus_h or _boost_by_price_h):
                         reason = f"Hybrid boost verplicht: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
+                    elif _boost_by_surplus_h:
+                        reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W"
+                    elif _boost_by_price_h:
+                        reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
                     else:
-                        base = f"Hybrid green+boost{cop_str_h}: {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green+boost{cop_str_h}: geen temp sensor"
-                        if solar_surplus_w > surplus_threshold_w:
-                            reason = base + f" (surplus {solar_surplus_w:.0f}W)"
-                        else:
-                            reason = base + (f" (goedkoopste {boost_n}u)" if boost_n > 0 else "")
+                        reason = f"Hybrid boost: {_deficit:.1f}°C tekort, GREEN-cap ({b.max_setpoint_green_c:.0f}°C) bereikt"
                 else:
                     b.force_green = True   # alleen WP-element
                     reason = f"Hybrid green (WP{cop_str_h}): {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green (WP{cop_str_h}): geen temp sensor"

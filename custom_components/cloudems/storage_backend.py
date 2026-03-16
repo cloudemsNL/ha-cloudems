@@ -47,21 +47,31 @@ class LocalFileBackend(StorageBackend):
         return os.path.join(self._dir, f"cloudems_{safe}.json")
 
     async def write(self, key: str, data: Any) -> bool:
+        import asyncio
+        path = self._path(key)
+        payload = json.dumps({"version": 1, "data": data}, ensure_ascii=False)
+        def _do_write():
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(payload)
         try:
-            with open(self._path(key), "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "data": data}, f, ensure_ascii=False)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _do_write)
             return True
         except Exception as err:
             _LOGGER.warning("CloudEMS StorageBackend write(%s): %s", key, err)
             return False
 
     async def read(self, key: str, default: Any = None) -> Any:
+        import asyncio
         path = self._path(key)
         if not os.path.exists(path):
             return default
-        try:
+        def _do_read():
             with open(path, encoding="utf-8") as f:
                 return json.load(f).get("data", default)
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(None, _do_read)
         except Exception as err:
             _LOGGER.warning("CloudEMS StorageBackend read(%s): %s", key, err)
             return default

@@ -115,8 +115,19 @@ class DecisionsHistory:
         if not os.path.exists(self._path):
             return
         try:
-            with open(self._path, encoding="utf-8") as f:
-                data = json.load(f)
+            import asyncio as _asyncio
+            def _do_load():
+                with open(self._path, encoding="utf-8") as f:
+                    return json.load(f)
+            try:
+                loop = _asyncio.get_event_loop()
+                if loop.is_running():
+                    # Event loop actief — schedule async load, skip blocking read
+                    loop.run_in_executor(None, _do_load)
+                    return
+                data = loop.run_until_complete(loop.run_in_executor(None, _do_load))
+            except Exception:
+                return  # Skip als we niet kunnen laden
             cutoff = time.time() - 86400
             entries = [e for e in data.get("entries", []) if e.get("ts", 0) >= cutoff]
             self._entries.extend(entries)

@@ -46,7 +46,7 @@ STORAGE_VERSION = 1
 
 HDD_SETPOINT_C   = 18.0    # NL-norm stookgrens
 GAS_PRICE_DEFAULT= 1.25    # €/m³ — indicatief als geen sensor beschikbaar
-SAVE_INTERVAL_S  = 600
+SAVE_INTERVAL_S  = 60
 
 # Benchmarks m³/HDD
 BENCH_EXCELLENT = 0.06
@@ -413,6 +413,25 @@ class GasAnalyzer:
             isolation_advice     = isolation_advice,
             isolation_saving_pct = isolation_saving_pct,
         )
+
+    async def async_save(self) -> None:
+        """Direct opslaan — aangeroepen bij shutdown ongeacht dirty/interval."""
+        await self._store.async_save({
+            "records":           [r.to_dict() for r in self._records],
+            "last_gas_m3":       round(self._last_gas_m3, 3),
+            "isolation_date":    self._isolation_date,
+            "pre_isolation_eff": round(self._pre_isolation_eff, 6),
+            "today_date":          self._today_date,
+            "month_key":           self._month_key,
+            "week_key":            self._week_key,
+            "year_key":            self._year_key,
+            "today_gas_start_m3":  round(self._today_gas_start_m3, 3) if self._today_gas_start_m3 is not None else None,
+            "month_gas_start_m3":  round(self._month_gas_start_m3, 3) if self._month_gas_start_m3 is not None else None,
+            "week_gas_start_m3":   round(self._week_gas_start_m3, 3)  if self._week_gas_start_m3  is not None else None,
+            "year_gas_start_m3":   round(self._year_gas_start_m3, 3)  if self._year_gas_start_m3  is not None else None,
+        })
+        self._dirty = False
+        self._last_save = time.time()
 
     async def async_maybe_save(self) -> None:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:

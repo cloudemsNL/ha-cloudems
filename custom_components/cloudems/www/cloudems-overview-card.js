@@ -615,10 +615,15 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--primary-color,#03
     });
   }
 }
-customElements.define("cloudems-beheer-card-editor", CloudemsBeheerCardEditor);
-customElements.define("cloudems-beheer-card", CloudemsControlCard);
+if (!customElements.get("cloudems-beheer-card-editor")) {
+  customElements.define("cloudems-beheer-card-editor", CloudemsBeheerCardEditor);
+}
+if (!customElements.get("cloudems-beheer-card")) {
+  customElements.define("cloudems-beheer-card", CloudemsControlCard);
+}
 if (!customElements.get("cloudems-control-card")) {
-  customElements.define("cloudems-control-card", CloudemsControlCard);
+  class CloudemsControlCardAlias extends CloudemsControlCard {}
+  customElements.define("cloudems-control-card", CloudemsControlCardAlias);
 }
 window.customCards = window.customCards || [];
 window.customCards.push({

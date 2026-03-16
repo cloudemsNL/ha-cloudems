@@ -66,11 +66,11 @@ class CloudemsSolarCard extends HTMLElement {
   setConfig(c){ this._cfg={title:c.title??"Zonnepanelen",...c}; this._render(); }
   set hass(h){
     this._hass=h;
-    const sol=h.states["sensor.cloudems_solar_system"];
+    const sol = h.states["sensor.cloudems_solar_system_intelligence"] ?? h.states["sensor.cloudems_solar_system"];
     const fc=h.states["sensor.cloudems_pv_forecast_today"];
     const mod=h.states["switch.cloudems_module_solar_learner"];
-    // Also include inverter_data from status sensor so we render when it appears
-    const invCount=(h.states["sensor.cloudems_status"]?.attributes?.inverter_data||[]).length;
+    // Watch inverter count so we re-render when omvormers appear
+    const invCount=(sol?.attributes?.inverters||[]).length;
     const j=JSON.stringify([sol?.state,sol?.last_changed,fc?.state,fc?.last_changed,mod?.state,invCount]);
     if(j!==this._prev){this._prev=j;this._render();}
   }
@@ -79,16 +79,15 @@ class CloudemsSolarCard extends HTMLElement {
     const h=this._hass, c=this._cfg??{};
     if(!h){ sh.innerHTML=`<style>${SOL_STYLES}</style><div class="card"><div class="empty"><span class="empty-icon">☀️</span></div></div>`; return; }
 
-    const solS=h.states["sensor.cloudems_solar_system"];
+    // Try both entity IDs - old name kept by HA entity registry may have the data
+    const solS = h.states["sensor.cloudems_solar_system_intelligence"] ?? h.states["sensor.cloudems_solar_system"];
     const fcS=h.states["sensor.cloudems_pv_forecast_today"];
     const accS=h.states["sensor.cloudems_pv_forecast_accuracy"];
 
     // Only show "no inverter" when module is truly disabled or no data at all
     const hasInverters = (solS?.attributes?.inverters||[]).length > 0;
-    // Also check status sensor for inverter data (available sooner after restart)
-    const statusInvs = h.states["sensor.cloudems_status"]?.attributes?.inverter_data || [];
     const moduleOn = h.states["switch.cloudems_module_solar_learner"]?.state === "on";
-    const hasAnyData = hasInverters || statusInvs.length > 0;
+    const hasAnyData = hasInverters;
     if((!solS||solS.state==="unavailable"||solS.state==="unknown") && !hasAnyData && !moduleOn){
       sh.innerHTML=`<style>${SOL_STYLES}</style><div class="card"><div class="hdr"><span class="hdr-icon">☀️</span><div class="hdr-texts"><div class="hdr-title">${esc(c.title)}</div><div class="hdr-sub" style="color:rgba(251,146,60,.7)">⚠️ Geen omvormer geconfigureerd</div></div></div><div class="empty"><span class="empty-icon">☀️</span>Configureer een omvormer via CloudEMS instellingen.</div></div>`;
       return;
@@ -99,8 +98,8 @@ class CloudemsSolarCard extends HTMLElement {
       return;
     }
 
-    const sA=solS.attributes||{}, fcA=fcS?.attributes||{};
-    const totalW=parseFloat(solS.state)||0;
+    const sA=solS?.attributes||{}, fcA=fcS?.attributes||{};
+    const totalW=parseFloat(solS?.state)||0;
     const inverters=sA.inverters||[];
     const peakW=sA.total_peak_w||0;
     const clipping=sA.clipping_active||false;

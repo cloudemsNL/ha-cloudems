@@ -42,6 +42,8 @@ async def async_setup_entry(
         CloudEMSPeakShavingSwitch(coordinator, entry),
         CloudEMSPhaseBalancingSwitch(coordinator, entry),
         CloudEMSCheapSwitchModule(coordinator, entry),
+        CloudEMSNILMLoadShiftSwitch(coordinator, entry),  # v4.6.218
+        CloudEMSBudgetSwitch(coordinator, entry),          # v4.6.239
         CloudEMSPVForecastSwitch(coordinator, entry),
         CloudEMSShadowDetectorSwitch(coordinator, entry),
         CloudEMSSolarLearnerSwitch(coordinator, entry),
@@ -574,6 +576,28 @@ class CloudEMSCheapSwitchModule(_CloudEMSModuleSwitch):
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         self.entity_id = "switch.cloudems_module_goedkope_uren"
+
+
+class CloudEMSBudgetSwitch(_CloudEMSModuleSwitch):
+    _attr_name = "CloudEMS Energiebudget"
+    _attr_icon = "mdi:cash-check"
+    _coordinator_attr = "_budget_enabled"
+    _default_state = True
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self.entity_id = "switch.cloudems_module_budget"
+
+
+class CloudEMSNILMLoadShiftSwitch(_CloudEMSModuleSwitch):
+    _attr_name = "CloudEMS NILM Lastverschuiving"
+    _attr_icon = "mdi:swap-horizontal-bold"
+    _coordinator_attr = "_nilm_load_shifting_enabled"
+    _default_state = True
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator, entry)
+        self.entity_id = "switch.cloudems_module_nilm_load_shift"
 
 
 class CloudEMSPVForecastSwitch(_CloudEMSModuleSwitch):

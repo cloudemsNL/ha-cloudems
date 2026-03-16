@@ -144,6 +144,8 @@ async def async_setup_entry(
         CloudEMSNILMRunningDevicesPowerSensor(coordinator, entry),
         CloudEMSNILMReviewCurrentSensor(coordinator, entry),
         CloudEMSCostSensor(coordinator, entry),
+        CloudEMSDagkostenSensor(coordinator, entry),
+        CloudEMSComfortScoreSensor(coordinator, entry),
         CloudEMSP1Sensor(coordinator, entry),
         CloudEMSForecastSensor(coordinator, entry),
         CloudEMSForecastTomorrowSensor(coordinator, entry),
@@ -259,6 +261,7 @@ async def async_setup_entry(
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
     for ph in phases:
         entities.append(CloudEMSPhaseCurrentSensor(coordinator, entry, ph))
+        entities.append(CloudEMSPhaseSignedCurrentSensor(coordinator, entry, ph))
         entities.append(CloudEMSPhaseVoltageSensor(coordinator, entry, ph))
         entities.append(CloudEMSPhasePowerSensor(coordinator, entry, ph))
         entities.append(CloudEMSPhaseImportPowerSensor(coordinator, entry, ph))
@@ -1276,6 +1279,77 @@ class CloudEMSPhaseCurrentSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+class CloudEMSPhaseSignedCurrentSensor(CoordinatorEntity, SensorEntity):
+    """
+    Gesigneerde fasestroom (A).
+
+    Positief = import, negatief = export.
+    DSMR4 P1-meters rapporteren current_a altijd positief — dit sensor
+    leidt het teken af uit power_w (negatief = export).
+
+    Berekening (prioriteit):
+      1. power_w / voltage_v  — meest nauwkeurig als voltage bekend is
+      2. current_a * sign(power_w) — als alleen DSMR current beschikbaar is
+      3. None — onvoldoende data
+    """
+    _attr_device_class = SensorDeviceClass.CURRENT
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
+    _attr_icon = "mdi:current-ac"
+
+    def __init__(self, coord, entry, phase: str):
+        super().__init__(coord)
+        self._entry = entry
+        self._phase = phase
+        self._attr_name = f"CloudEMS Grid · Phase {phase} Signed Current"
+        self._attr_unique_id = f"{entry.entry_id}_signed_current_{phase.lower()}"
+        self.entity_id = f"sensor.cloudems_signed_current_{phase.lower()}"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        pd = (self.coordinator.data or {}).get("phases", {}).get(self._phase, {})
+        power_w  = pd.get("power_w")
+        voltage_v = pd.get("voltage_v")
+        current_a = pd.get("current_a")
+
+        if power_w is None:
+            return None
+
+        # Sanity: vermogen >25kW per fase = opstartartefact
+        if abs(power_w) > 25000:
+            return None
+
+        # Methode 1: P / V — alleen bij plausibele spanning (195–265V)
+        if voltage_v and 195 <= voltage_v <= 265:
+            result = round(power_w / voltage_v, 2)
+            return result if abs(result) <= 100 else None
+
+        # Methode 2: |I| * sign(P)
+        if current_a is not None and abs(current_a) <= 100:
+            sign = -1 if power_w < 0 else 1
+            return round(current_a * sign, 2)
+
+        return None
+
+    @property
+    def extra_state_attributes(self):
+        pd = (self.coordinator.data or {}).get("phases", {}).get(self._phase, {})
+        power_w   = pd.get("power_w")
+        voltage_v = pd.get("voltage_v")
+        current_a = pd.get("current_a")
+        method = "p_div_v" if (voltage_v and voltage_v > 10) else ("abs_times_sign" if current_a is not None else "none")
+        return {
+            "power_w":    power_w,
+            "voltage_v":  voltage_v,
+            "current_a":  current_a,
+            "method":     method,
+            "is_export":  power_w < 0 if power_w is not None else None,
+        }
+
+
 class CloudEMSPhaseVoltageSensor(CoordinatorEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.VOLTAGE
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2138,6 +2212,231 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
             "cost_today_eur": d.get("cost_today_eur", 0.0),
             "cost_month_eur": d.get("cost_month_eur", 0.0),
             "bill_simulator": d.get("bill_simulator", {}),
+        }
+
+
+class CloudEMSDagkostenSensor(CoordinatorEntity, SensorEntity):
+    """
+    Werkelijke dagkosten stroom (€).
+
+    Berekening: (import_kwh × import_prijs) − (export_kwh × export_prijs)
+    Prijs per kWh wordt afgeleid uit de gemiddelde EPEX prijs of de
+    geconfigureerde vaste prijs. Export prijs = geconfigureerde
+    terugleverprijs of 70% van importprijs als fallback.
+
+    Attribuut 'gas_cost_today_eur' bevat gas kosten vandaag als P1 gas
+    beschikbaar is.
+    """
+    _attr_name  = "CloudEMS · Dagkosten Stroom"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon  = "mdi:cash-clock"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_dagkosten_stroom"
+        self.entity_id = "sensor.cloudems_dagkosten_stroom"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data") or {}
+        imp_kwh = float(p1.get("electricity_import_today_kwh") or 0)
+        exp_kwh = float(p1.get("electricity_export_today_kwh") or 0)
+
+        # Prijzen ophalen
+        price_info = d.get("energy_price") or {}
+        import_eur_kwh = float(
+            price_info.get("price_incl_tax_eur_kwh")
+            or price_info.get("all_in_price_eur_kwh")
+            or self.coordinator._config.get("fixed_price", 0.0)
+            or 0.25
+        )
+        cfg = self.coordinator._config
+        export_eur_kwh = float(
+            cfg.get("fixed_export_price") or import_eur_kwh * 0.70
+        )
+
+        cost = round(imp_kwh * import_eur_kwh - exp_kwh * export_eur_kwh, 4)
+        return max(cost, 0.0)  # negatief (netto opbrengst) als 0 rapporteren
+
+    @property
+    def extra_state_attributes(self):
+        d = self.coordinator.data or {}
+        p1 = d.get("p1_data") or {}
+        imp_kwh = float(p1.get("electricity_import_today_kwh") or 0)
+        exp_kwh = float(p1.get("electricity_export_today_kwh") or 0)
+        price_info = d.get("energy_price") or {}
+        import_eur_kwh = float(
+            price_info.get("price_incl_tax_eur_kwh")
+            or price_info.get("all_in_price_eur_kwh")
+            or self.coordinator._config.get("fixed_price", 0.0)
+            or 0.25
+        )
+        cfg = self.coordinator._config
+        export_eur_kwh = float(cfg.get("fixed_export_price") or import_eur_kwh * 0.70)
+
+        gross_import = round(imp_kwh * import_eur_kwh, 4)
+        gross_export = round(exp_kwh * export_eur_kwh, 4)
+        netto = round(gross_import - gross_export, 4)
+
+        # Gas kosten vandaag
+        gas_m3 = float(p1.get("gas_today_m3") or 0)
+        gas_sensor_eid = cfg.get("gas_price_sensor", "")
+        gas_price = 0.0
+        if gas_sensor_eid:
+            try:
+                gs = self.coordinator.hass.states.get(gas_sensor_eid)
+                gas_price = float(gs.state) if gs else 0.0
+            except Exception:
+                gas_price = 0.0
+        if not gas_price:
+            gas_price = float(cfg.get("gas_price_fixed", 0.0) or 0.0)
+        gas_cost = round(gas_m3 * gas_price, 4)
+
+        return {
+            "import_kwh":           round(imp_kwh, 3),
+            "export_kwh":           round(exp_kwh, 3),
+            "import_cost_eur":      gross_import,
+            "export_revenue_eur":   gross_export,
+            "netto_cost_eur":       netto,
+            "netto_opbrengst":      netto < 0,
+            "import_price_eur_kwh": round(import_eur_kwh, 4),
+            "export_price_eur_kwh": round(export_eur_kwh, 4),
+            "gas_m3_today":         round(gas_m3, 3),
+            "gas_price_eur_m3":     round(gas_price, 4),
+            "gas_cost_today_eur":   gas_cost,
+            "totaal_incl_gas_eur":  round(max(netto, 0) + gas_cost, 4),
+        }
+
+
+class CloudEMSComfortScoreSensor(CoordinatorEntity, SensorEntity):
+    """
+    Comfort score (0-100).
+
+    Samengestelde score op basis van:
+      - Temperatuurcomfort: gemiddeld verschil actueel vs setpoint per ruimte (40%)
+      - Aanwezigheid: is het huis bezet? (20%)
+      - Weersomstandigheden: buitentemp en neerslagrisico (20%)
+      - Energieprestatie: zelfconsumptie % vandaag (20%)
+
+    Score 80-100 = uitstekend, 60-79 = goed, 40-59 = matig, <40 = slecht.
+    """
+    _attr_name  = "CloudEMS · Comfort Score"
+    _attr_state_class  = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon  = "mdi:home-heart"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_comfort_score"
+        self.entity_id = "sensor.cloudems_comfort_score"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    def _temp_score(self) -> tuple[float, dict]:
+        """0-100 score op basis van temperatuur vs setpoint in alle ruimtes."""
+        climate_data = (self.coordinator.data or {}).get("climate_entities", {})
+        all_ents = climate_data.get("all", []) if isinstance(climate_data, dict) else []
+        if not all_ents:
+            return 70.0, {}  # geen data → neutraal
+        diffs = []
+        details = {}
+        for e in all_ents:
+            cur = e.get("current_temp")
+            tgt = e.get("target_temp")
+            mode = e.get("mode", "off")
+            if cur is None or tgt is None or mode in ("off", "unavailable"):
+                continue
+            diff = abs(float(cur) - float(tgt))
+            diffs.append(diff)
+            details[e.get("name", e.get("entity_id", "?"))] = round(diff, 1)
+        if not diffs:
+            return 70.0, details
+        avg_diff = sum(diffs) / len(diffs)
+        # 0°C diff = 100, 2°C diff = 60, 4°C diff = 20, >5°C = 0
+        score = max(0, min(100, 100 - avg_diff * 20))
+        return round(score, 1), details
+
+    def _presence_score(self) -> float:
+        """Aanwezigheid: 100 als thuis, 50 als afwezig (we weten het niet zeker)."""
+        try:
+            s = self.coordinator.hass.states.get(
+                "binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom"
+            )
+            if s:
+                return 100.0 if s.state == "on" else 50.0
+        except Exception:
+            pass
+        return 50.0
+
+    def _weather_score(self) -> float:
+        """Weerscore: buitentemp rond 18°C = 100, extremen lager."""
+        try:
+            weather_cfg = self.coordinator._config.get("weather_entity", "")
+            if not weather_cfg:
+                # Probeer generieke HA weather entity
+                for eid in ["weather.knmi_thuis", "weather.home", "weather.forecast_home"]:
+                    s = self.coordinator.hass.states.get(eid)
+                    if s:
+                        temp = s.attributes.get("temperature")
+                        if temp is not None:
+                            diff = abs(float(temp) - 18.0)
+                            return max(0, min(100, 100 - diff * 4))
+            else:
+                s = self.coordinator.hass.states.get(weather_cfg)
+                if s:
+                    temp = s.attributes.get("temperature")
+                    if temp is not None:
+                        diff = abs(float(temp) - 18.0)
+                        return max(0, min(100, 100 - diff * 4))
+        except Exception:
+            pass
+        return 60.0  # neutraal fallback
+
+    def _energy_score(self) -> float:
+        """Zelfconsumptie % → hogere zelfconsumptie = beter energieprestatie."""
+        try:
+            s = self.coordinator.hass.states.get("sensor.cloudems_self_consumption")
+            if s and s.state not in ("unavailable", "unknown"):
+                pct = float(s.state)
+                return min(100, pct * 1.2)  # 83% zelfcons = 100 score
+        except Exception:
+            pass
+        return 50.0
+
+    @property
+    def native_value(self):
+        t_score, _ = self._temp_score()
+        p_score = self._presence_score()
+        w_score = self._weather_score()
+        e_score = self._energy_score()
+        total = round(t_score * 0.40 + p_score * 0.20 + w_score * 0.20 + e_score * 0.20, 1)
+        return total
+
+    @property
+    def extra_state_attributes(self):
+        t_score, temp_details = self._temp_score()
+        p_score = self._presence_score()
+        w_score = self._weather_score()
+        e_score = self._energy_score()
+        total = round(t_score * 0.40 + p_score * 0.20 + w_score * 0.20 + e_score * 0.20, 1)
+        label = "Uitstekend" if total >= 80 else "Goed" if total >= 60 else "Matig" if total >= 40 else "Slecht"
+        return {
+            "score_totaal":        total,
+            "score_label":         label,
+            "score_temperatuur":   t_score,
+            "score_aanwezigheid":  p_score,
+            "score_weer":          w_score,
+            "score_energieprestatie": e_score,
+            "temperatuur_details": temp_details,
         }
 
 
@@ -6520,7 +6819,9 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
             "watchdog_failures":      wd.get("total_failures", 0),
         }
         shutters = (self.coordinator.data or {}).get("shutters", {})
-        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters}
+        # v4.6.256: expose inverter_data zodat solar card fallback werkt bij opstarten
+        inverter_data = (self.coordinator.data or {}).get("inverter_data", [])
+        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "inverter_data": inverter_data}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

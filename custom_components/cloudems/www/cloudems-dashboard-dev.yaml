@@ -1,47 +1,38 @@
-# CloudEMS DEV Dashboard — Nieuwe JS kaarten (in ontwikkeling)
-# Niet voor productie — gebruik cloudems-dashboard.yaml voor prod
 views:
-- title: "🧪 JS Cards Dev"
+- title: 🧪 JS Cards Dev
   path: dev-js-cards
   type: masonry
   max_columns: 3
   icon: mdi:flask
   cards:
-
   - type: markdown
-    content: |
-      ## 🧪 CloudEMS JS Cards — Development
+    content: '## 🧪 CloudEMS JS Cards — Development
+
       Nieuwe interactieve kaarten in test. Nog niet stabiel genoeg voor prod.
-      **Versie:** {{state_attr('sensor.cloudems_watchdog','cloudems_version')}}
 
-  # ── Solar Card ─────────────────────────────────────────────────────────────
+      **Versie:** {{state_attr(''sensor.cloudems_watchdog'',''cloudems_version'')}}
+
+      '
   - type: custom:cloudems-solar-card
-    title: "☀️ Zonnepanelen (JS)"
-
-  # ── Battery Card ───────────────────────────────────────────────────────────
+    title: ☀️ Zonnepanelen (JS)
   - type: custom:cloudems-battery-card
-    title: "🔋 Batterij (JS)"
-
-  # ── Boiler Card ────────────────────────────────────────────────────────────
+    title: 🔋 Batterij (JS)
   - type: custom:cloudems-boiler-card
     tank_liters: 80
     cold_water_temp: 10
     shower_temp: 38
     shower_liters_per_min: 8
     shower_duration_min: 8
-    title: "🚿 Warm Water (JS)"
-
-  # ── Shutter Card ───────────────────────────────────────────────────────────
+    title: 🚿 Warm Water (JS)
   - type: custom:cloudems-shutter-card
-    title: "🪟 Rolluiken (JS)"
-
-- title: "⚡ Alles (JS)"
+    title: 🪟 Rolluiken (JS)
+  - type: custom:cloudems-nilm-card
+  - type: custom:cloudems-pv-forecast-card
+- title: ⚡ Alles (JS)
   path: dev-beheer
   type: masonry
   max_columns: 1
   icon: mdi:view-dashboard-variant
   cards:
-
-  # ── Beheer Card ────────────────────────────────────────────────────────────
   - type: custom:cloudems-beheer-card
-    title: "⚡ CloudEMS"
+    title: ⚡ CloudEMS
