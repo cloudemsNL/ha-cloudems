@@ -412,6 +412,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.gas_predictor import GasPredictor as _GP, STORAGE_KEY_GAS_PREDICTOR as _SKEY_GP
         self._gas_predictor = _GP(Store(hass, 1, _SKEY_GP))
         self._gas_prediction: dict = {}
+        # v4.6.387: Gas meterstand ringbuffer — persists op HA server (cross-device)
+        self._store_gas_ring = Store(hass, 1, "cloudems_gas_ring_v1")
+        self._gas_ring: list = []   # [{ts: int (ms), val: float (m3)}, ...]
+        self._GAS_RING_MAX  = 3000  # max punten (~25u @ 30s interval)
+        self._GAS_RING_TTL  = 25 * 3600 * 1000  # 25 uur in ms
         self._gas_dhw_hint_sent: str = ""  # datum van laatste DHW-hint notificatie (YYYY-MM-DD)
         # v4.0.5: Tariefwijziging detector
         from .energy_manager.tariff_change_detector import TariffChangeDetector as _TCD, STORAGE_KEY_TARIFF_DETECTOR as _SKEY_TC
@@ -821,6 +826,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v1.15.0: new intelligence modules
         self._hp_cop:         Optional[object] = None
+        self._climate_epex:   Optional[object] = None
         self._sensor_sanity:  Optional[object] = None
         self._absence:        Optional[object] = None
         self._zone_presence:  Optional[ZonePresenceManager] = None
@@ -1924,6 +1930,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         await self._tariff_detector.async_load()
         # v4.0.5: Battery efficiency laden
         await self._battery_eff.async_load()
+        # v4.6.387: Gas ringbuffer laden
+        _ring_saved = await self._store_gas_ring.async_load()
+        if isinstance(_ring_saved, list):
+            _now_ms = int(time.time() * 1000)
+            self._gas_ring = [p for p in _ring_saved if isinstance(p, dict) and _now_ms - p.get("ts", 0) < self._GAS_RING_TTL]
+        # Backfill vanuit HA statistieken als ring leeg of te weinig punten
+        if len(self._gas_ring) < 5:
+            await self._backfill_gas_ring_from_recorder()
         # v4.5.9: TariffFetcher — actuele EB + markup (CBS API + leren)
         self._tariff_fetcher = TariffFetcher(
             self.hass,
@@ -2275,6 +2289,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             await self._battery_savings.async_setup()
         # v2.4.0: nieuwe modules
         from .energy_manager.gas_analysis import GasAnalyzer
+        from .energy_manager.climate_epex import ClimateEpexController, ClimateEpexDevice
         from .energy_manager.energy_budget import EnergyBudgetTracker
         from .energy_manager.appliance_roi import ApplianceROICalculator
         from .energy_manager.solar_dimmer import SolarDimmer
@@ -2283,6 +2298,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         await self._gas_analysis.async_setup()
         if hasattr(self._gas_analysis, "set_log_callback"):
             self._gas_analysis.set_log_callback(self._learning_backup.async_log_high)
+
+        # Climate EPEX compensatie
+        _ce_devices_cfg = self._config.get("climate_epex_devices", [])
+        if self._config.get("climate_epex_enabled") and _ce_devices_cfg:
+            _ce_devices = [ClimateEpexDevice.from_dict(d) for d in _ce_devices_cfg]
+            self._climate_epex = ClimateEpexController(self.hass, _ce_devices)
+            await self._climate_epex.async_setup()
+            self._climate_epex.set_log_callback(self._learning_backup.async_log_high)
+            _LOGGER.info("ClimateEpex: %d devices geladen", len(_ce_devices))
         # Haal periode-starts op uit HA history zodra HA volledig geladen is
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
         import homeassistant.core as _ha_core
@@ -2751,6 +2775,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if getattr(self, "_p1_reader", None):                _active_modules.append("P1")
         if getattr(self, "_peak_shaving", None):             _active_modules.append("PeakShaving")
         if getattr(self, "_gas_analysis", None):             _active_modules.append("GasAnalysis")
+        if getattr(self, "_climate_epex", None):             _active_modules.append("ClimateEpex")
         if getattr(self, "_pool_ctrl", None):                _active_modules.append("Pool")
         if getattr(self, "_provider_manager", None):         _active_modules.append("ProviderManager")
         if getattr(self, "_solar_learner", None):            _active_modules.append("SolarLearner")
@@ -6616,6 +6641,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 (getattr(self, "_ev_session",          None), "_async_save"),
                 (getattr(self, "_nilm_schedule",       None), "_async_save"),
                 (getattr(self, "_gas_analysis",        None), "async_maybe_save"),
+                (getattr(self, "_climate_epex",        None), "async_maybe_save"),
                 (getattr(self, "_energy_budget",       None), "async_maybe_save"),
                 (getattr(self, "_notification_engine", None), "async_maybe_save"),
                 # v4.3.5: nieuwe persistente modules
@@ -6716,12 +6742,24 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             gas_m3_cumulative = float(_gas_m3_val),
                             outside_temp_c    = float(_outside_t),
                         )
+                        # v4.6.387: Push naar persistente ringbuffer
+                        _ring_now = int(time.time() * 1000)
+                        _ring_last = self._gas_ring[-1] if self._gas_ring else None
+                        if not _ring_last or _ring_now - _ring_last["ts"] > 5000:
+                            self._gas_ring.append({"ts": _ring_now, "val": round(_gas_m3_val, 3)})
+                            _ring_cutoff = _ring_now - self._GAS_RING_TTL
+                            while self._gas_ring and self._gas_ring[0]["ts"] < _ring_cutoff:
+                                self._gas_ring.pop(0)
+                            if len(self._gas_ring) > self._GAS_RING_MAX:
+                                self._gas_ring = self._gas_ring[-self._GAS_RING_MAX:]
+                            self.hass.async_create_task(self._store_gas_ring.async_save(self._gas_ring))
                     _gas_price = self._read_gas_price()
                     self._gas_analysis.update_price(_gas_price)
                     _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price, current_m3=float(_gas_m3_val))
+
                     # Dagrecords voor drill-down in JS kaart (laatste 30 dagen)
                     # Als leeg: start backfill asynchroon (tijdstip onbekend bij eerste cyclus)
-                    if self._gas_analysis and not self._gas_analysis._records:
+                    if not self._gas_analysis._records:
                         if hasattr(self._gas_analysis, "_backfill_records_from_statistics"):
                             _eid_bf = self._gas_analysis._find_gas_sensor()
                             if _eid_bf:
@@ -6765,6 +6803,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     }
                 except Exception as _ga_err:
                     _LOGGER.debug("GasAnalyzer fout: %s", _ga_err)
+
+            # Climate EPEX compensatie tick
+            if self._climate_epex:
+                try:
+                    self._climate_epex.tick(price_info or {})
+                except Exception as _ce_err:
+                    _LOGGER.debug("ClimateEpex tick fout: %s", _ce_err)
 
             # v2.4.0: EnergyBudget tick
             energy_budget_data: dict = {}
@@ -7172,6 +7217,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "jaar_eur":  float(gas_analysis_data.get("gas_cost_year_eur")   or 0.0),
                     # Gasprijs €/m³
                     "gas_prijs_per_m3": self._read_gas_price(),
+                    # v4.6.388: fibonacci m³/uur — coordinator berekent, JS toont alleen resultaten
+                    "gas_fib_hours":     self._calc_gas_fib(),
                 },
                 "batteries":            self._collect_multi_battery_data(),
                 "micro_mobility":       micro_mobility_data,
@@ -7239,6 +7286,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # v2.2.3: systeemgezondheid
                 "system_health":        self._build_system_health(price_info),
                 # v2.4.0: nieuwe modules
+                "climate_epex_status":  self._climate_epex.get_status() if self._climate_epex else [],
+                "climate_epex_power_w": self._climate_epex.get_total_power_w() if self._climate_epex else 0.0,
                 "gas_analysis":         {
                     **gas_analysis_data,
                     "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
@@ -7653,6 +7702,113 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         except (ValueError, TypeError):
             return None
 
+
+    async def _backfill_gas_ring_from_recorder(self) -> None:
+        """Vul de gas ringbuffer vanuit HA statistieken (korte-termijn, uurlijks).
+        Gebruikt de gas_m3_cumulative waarden van de laatste 25 uur.
+        Geeft de fibonacci-sectie direct bruikbare data na herstart/eerste install.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+            from homeassistant.util import dt as dt_util
+            import datetime as _dt
+
+            # Gebruik dezelfde gas-sensor detectie als GasAnalyzer
+            gas_eid = None
+            if self._gas_analysis and hasattr(self._gas_analysis, "_find_gas_sensor"):
+                gas_eid = self._gas_analysis._find_gas_sensor()
+            if not gas_eid:
+                # Fallback: scan alle m³ sensoren > 100
+                for _st in self.hass.states.async_all("sensor"):
+                    if "cloudems" in _st.entity_id:
+                        continue
+                    if _st.attributes.get("unit_of_measurement") != "m³":
+                        continue
+                    try:
+                        if float(_st.state) > 100:
+                            gas_eid = _st.entity_id
+                            break
+                    except (ValueError, TypeError):
+                        pass
+            if not gas_eid:
+                _LOGGER.debug("Gas ring backfill: geen gas sensor gevonden")
+                return
+
+            now    = dt_util.now()
+            start  = now - _dt.timedelta(hours=26)
+            now_ms = int(time.time() * 1000)
+
+            recorder = get_instance(self.hass)
+            stats = await recorder.async_add_executor_job(
+                statistics_during_period,
+                self.hass, start, now, {gas_eid}, "hour", None, {"sum"}
+            )
+            rows = stats.get(gas_eid, [])
+            if not rows:
+                _LOGGER.debug("Gas ring backfill: geen statistieken voor %s", gas_eid)
+                return
+
+            new_points = []
+            for row in rows:
+                val = row.get("sum")
+                if val is None or val <= 0:
+                    continue
+                _start = row.get("start")
+                try:
+                    if isinstance(_start, (int, float)):
+                        ts_ms = int(_start * 1000)
+                    elif hasattr(_start, "timestamp"):
+                        ts_ms = int(_start.timestamp() * 1000)
+                    else:
+                        continue
+                except Exception:
+                    continue
+                if now_ms - ts_ms > self._GAS_RING_TTL:
+                    continue
+                new_points.append({"ts": ts_ms, "val": round(float(val), 3)})
+
+            if not new_points:
+                _LOGGER.debug("Gas ring backfill: %s heeft geen bruikbare sum-waarden", gas_eid)
+                return
+
+            # Merge met bestaande ring
+            existing = {p["ts"]: p for p in self._gas_ring}
+            for p in new_points:
+                existing[p["ts"]] = p
+            self._gas_ring = sorted(existing.values(), key=lambda x: x["ts"])
+            if len(self._gas_ring) > self._GAS_RING_MAX:
+                self._gas_ring = self._gas_ring[-self._GAS_RING_MAX:]
+            await self._store_gas_ring.async_save(self._gas_ring)
+            _LOGGER.info("Gas ring backfill: %d punten geladen vanuit recorder (%s)",
+                         len(new_points), gas_eid)
+        except Exception as _bf_err:
+            _LOGGER.warning("Gas ring backfill mislukt: %s", _bf_err)
+
+    def _calc_gas_fib(self) -> list:
+        """Bereken m³-verbruik en gemiddeld verbruik/uur voor fibonacci-intervallen.
+        Resultaat: [{"hours": int, "m3": float|None, "rate_m3h": float|None}, ...]
+        Klein formaat — veilig als HA state-attribuut (<1KB voor 7 items).
+        """
+        FIB_HOURS = [1, 2, 3, 5, 8, 13, 21]
+        ring = self._gas_ring
+        now_ms = int(time.time() * 1000)
+        current = ring[-1] if ring else None
+        result = []
+        for hours in FIB_HOURS:
+            target_ts = now_ms - hours * 3_600_000
+            best = None
+            for pt in ring:
+                if best is None or abs(pt["ts"] - target_ts) < abs(best["ts"] - target_ts):
+                    best = pt
+            if best is None or current is None or best is current:
+                result.append({"hours": hours, "m3": None, "rate_m3h": None})
+                continue
+            consumed = max(0.0, current["val"] - best["val"])
+            actual_h = (current["ts"] - best["ts"]) / 3_600_000
+            rate     = round(consumed / actual_h, 4) if actual_h > 0.01 else 0.0
+            result.append({"hours": hours, "m3": round(consumed, 4), "rate_m3h": rate})
+        return result
 
     def _read_gas_price(self) -> float:
         """Lees gasprijs van dynamische sensor of fall back naar vaste config waarde."""

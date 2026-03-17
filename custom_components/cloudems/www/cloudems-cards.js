@@ -504,9 +504,21 @@
         return [{ label: e.battery.name || 'Batterij', soc_pct: isNaN(s) ? null : s, power_w: pw, action: '' }];
       }
 
-      // Prio 3: sensor.cloudems_battery_power als laatste fallback
+      // Prio 3: sensor.cloudems_battery_power — leest batteries[] attribuut (alle providers)
       const battPwSt = this._hass.states['sensor.cloudems_battery_power'];
       if (battPwSt && battPwSt.state !== 'unavailable' && battPwSt.state !== 'unknown') {
+        const bats = battPwSt.attributes?.batteries || [];
+        if (bats.length > 0) {
+          // Gebruik per-batterij data als beschikbaar
+          const totalPw = bats.reduce((s, b) => s + (parseFloat(b.power_w) || 0), 0);
+          if (bats.length === 1) {
+            const b = bats[0];
+            const s = b.soc_pct != null ? b.soc_pct : soc;
+            return [{ label: b.label || 'Batterij', soc_pct: isNaN(s) ? null : s, power_w: parseFloat(b.power_w) || 0, action: b.action || (b.power_w < 0 ? 'discharge' : 'charge') }];
+          }
+          return bats.map(b => ({ label: b.label || 'Batterij', soc_pct: b.soc_pct ?? soc, power_w: parseFloat(b.power_w) || 0, action: b.action || '' }));
+        }
+        // Fallback: alleen state (totaal, geen per-batterij info)
         let pw = parseFloat(battPwSt.state) || 0;
         const unit = battPwSt.attributes?.unit_of_measurement || '';
         if (unit.toLowerCase() === 'kw') pw *= 1000;
@@ -643,27 +655,54 @@
       return this._getBoilerNodes().reduce((s, b) => s + b.power_w, 0);
     }
 
-    _getEvPower() {
-      if (!this._hass) return 0;
+    _getClimateNodes(filterType) {
+      if (!this._hass) return [];
+      const st = this._hass.states['sensor.cloudems_climate_epex_status'];
+      const devices = st?.attributes?.devices || [];
+      const types = Array.isArray(filterType) ? filterType : [filterType];
+      return devices
+        .filter(d => types.includes(d.device_type))
+        .slice(0, 3)
+        .map(d => ({ label: d.label || d.entity_id, power_w: Math.max(0, d.power_w || 0) }));
+    }
+    _getAircoNodes()     { return this._getClimateNodes('airco'); }
+    _getAircopower()     { return this._getAircoNodes().reduce((s,n)=>s+n.power_w,0); }
+    _getHeatPumpNodes()  { return this._getClimateNodes(['heat_pump','hybrid']); }
+    _getHeatPumpPower()  { return this._getHeatPumpNodes().reduce((s,n)=>s+n.power_w,0); }
+
+    _getEvNodes() {
+      if (!this._hass) return [{ label: 'EV', power_w: 0 }];
       const e = this._config.entities || {};
-      if (e.ev) return Math.max(0, this._getVal(e.ev));
-      // Lees uit cloudems_ev_sessie_leermodel → session_current_a * 230V
+      if (e.ev) return [{ label: e.ev.name || 'EV Lader', power_w: Math.max(0, this._getVal(e.ev)) }];
+      // Lees uit cloudems_ev_sessie_leermodel
       const st = this._hass.states['sensor.cloudems_ev_sessie_leermodel'];
       if (st && st.attributes?.session_active) {
         const a = parseFloat(st.attributes.session_current_a) || 0;
-        return a * 230;
+        return [{ label: st.attributes.vehicle_label || 'EV Lader', power_w: Math.max(0, a * 230) }];
       }
-      return 0;
+      return [{ label: 'EV Lader', power_w: 0 }];
+    }
+    _getEvPower() {
+      return this._getEvNodes().reduce((s, n) => s + n.power_w, 0);
     }
 
-    _getEbikePower() {
-      if (!this._hass) return 0;
+    _getEbikeNodes() {
+      if (!this._hass) return [{ label: 'E-bike', power_w: 0 }];
       const e = this._config.entities || {};
-      if (e.ebike) return Math.max(0, this._getVal(e.ebike));
-      // Lees uit cloudems_micro_mobiliteit → active_sessions[].power_w
+      if (e.ebike) return [{ label: e.ebike.name || 'E-bike', power_w: Math.max(0, this._getVal(e.ebike)) }];
+      // Lees uit cloudems_micro_mobiliteit → active_sessions[].{label, power_w}
       const st = this._hass.states['sensor.cloudems_micro_mobiliteit'];
-      if (!st) return 0;
-      return (st.attributes?.active_sessions || []).reduce((s, x) => s + (x.power_w || 0), 0);
+      const sessions = st?.attributes?.active_sessions || [];
+      if (sessions.length > 0) {
+        return sessions.slice(0, 3).map((s, i) => ({
+          label: s.label || `E-bike ${i + 1}`,
+          power_w: Math.max(0, s.power_w || 0),
+        }));
+      }
+      return [{ label: 'E-bike', power_w: 0 }];
+    }
+    _getEbikePower() {
+      return this._getEbikeNodes().reduce((s, n) => s + n.power_w, 0);
     }
 
     _getPoolPower() {
@@ -694,7 +733,8 @@
 
       // Apparaten met eigen node in de flow — nooit tonen onder Thuis
       const dedicated = ['boiler','water_heater','heat_pump','ev_charger','ev_lader',
-                         'pool','zwembad','ebike','e-bike','micro_mobility','micro_mobiliteit'];
+                         'pool','zwembad','ebike','e-bike','micro_mobility','micro_mobiliteit',
+                         'airco','heat_pump','hybrid','klimaat','climate'];
       if (dedicated.some(k => dt.includes(k) || lb.includes(k))) return true;
 
       // Batterijen horen nooit in NILM — ze zijn direct aan de hub gekoppeld
@@ -845,16 +885,22 @@
       const solarNodes  = this._getSolarNodes();
       const battNodes   = this._getBatteryNodes();
       const boilerNodes = this._getBoilerNodes();
+      const aircoNodes  = this._getAircoNodes();
+      const hpNodes     = this._getHeatPumpNodes();
+      const evNodes     = this._getEvNodes();
+      const ebikeNodes  = this._getEbikeNodes();
       const cloudCover  = this._getCloudCover();
-      const ev          = this._getEvPower();
-      const ebike       = this._getEbikePower();
+      const ev          = evNodes.reduce((s, n) => s + n.power_w, 0);
+      const ebike       = ebikeNodes.reduce((s, n) => s + n.power_w, 0);
       const pool        = this._getPoolPower();
       const layer2      = this._getFlowLayer2();
       const subs        = layer2.filter(n => n.isSub && n.children.length > 0);
 
-      const totalSolar = solarNodes.reduce((s, n) => s + n.w, 0);
+      const totalSolar  = solarNodes.reduce((s, n) => s + n.w, 0);
       const totalBattPw = battNodes.reduce((s, b) => s + b.power_w, 0);
       const totalBoiler = boilerNodes.reduce((s, b) => s + b.power_w, 0);
+      const totalAirco  = aircoNodes.reduce((s, n) => s + n.power_w, 0);
+      const totalHp     = hpNodes.reduce((s, n) => s + n.power_w, 0);
 
       const hour = new Date().getHours();
       const isNight = hour < 6 || hour > 21;
@@ -867,6 +913,8 @@
       this._histPush('batt',   Math.abs(totalBattPw));
       this._histPush('ev',     ev);
       this._histPush('ebike',  ebike);
+      this._histPush('airco',  totalAirco);
+      this._histPush('hp',     totalHp);
       this._histPush('pool',   pool);
       layer2.forEach((n, i) => this._histPush(`l2_${i}`, n.power_w));
 
@@ -875,6 +923,7 @@
       const COL_LEFT = 78, COL_HUB = 250, COL_R = 430;
       const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 105;
       const R_EV    = 122, R_HUB   = 172, R_BOI  = 235;
+      const R_AIRCO = 298, R_HP    = 361;
       const R_EBIKE = 232, R_POOL  = 302;
       const R_HOME  = 400, R_L2    = 480, R_L3   = 556;
       const hasL3 = subs.some(s => s.children.length > 0);
@@ -894,17 +943,20 @@
         bc: '#2ecc71', bd: '#e74c3c', batt: '#5dade2',
         home: '#27ae60', boiler: '#e67e22',
         ev: '#3bba4c', ebike: '#06b6d4', pool: '#38bdf8',
+        airco: '#38bdf8', hp: '#a78bfa',
         sub: '#a78bfa', text: '#e2e8f0',
       };
 
       // Single positions for solar/batt/boiler
       const solarX = COL_HUB, solarY = R_SUN;
-      const battX  = COL_R - 20, battY = R_BATT;
-      const bolX   = COL_R - 20, bolY  = R_BOI;
+      const battX  = COL_R - 20, battY  = R_BATT;
+      const bolX   = COL_R - 20, bolY   = R_BOI;
+      const aircoX = COL_R - 16, aircoY = R_AIRCO;
+      const hpX    = COL_R - 16, hpY    = R_HP;
 
       // Init dots
       const pipeKeys = [
-        'grid', 'solar', 'batt', 'boiler', 'home', 'ev', 'ebike', 'pool',
+        'grid', 'solar', 'batt', 'boiler', 'home', 'ev', 'ebike', 'pool', 'airco', 'hp',
         ...layer2.map((_, i) => `l2_${i}`),
         ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
       ];
@@ -1097,6 +1149,8 @@
       const [_heSol_x,  _heSol_y ] = hubEdge(solarX, solarY+46);
       const [_heBat_x,  _heBat_y ] = hubEdge(battX, battY);
       const [_heBol_x,  _heBol_y ] = hubEdge(bolX, bolY);
+      const [_heAirco_x,_heAirco_y] = hubEdge(aircoX, aircoY);
+      const [_heHp_x,   _heHp_y  ] = hubEdge(hpX, hpY);
       const [_heEv_x,   _heEv_y  ] = hubEdge(COL_LEFT+44, R_EV);
       const [_heEbike_x,_heEbike_y] = hubEdge(COL_LEFT+44, R_EBIKE);
       const [_hePool_x, _hePool_y ] = hubEdge(COL_LEFT+44, R_POOL);
@@ -1112,12 +1166,14 @@
 
       h += pipe(COL_LEFT+44, R_GRID, _heGrid_x, _heGrid_y, gc, gridActive);
       h += pipe(solarX, solarY+46, _heSol_x, _heSol_y, C.solar, solarActive);
-      h += pipe(battX, battY, _heBat_x, _heBat_y, bfc, battActive);
+      if (battNodes.length > 0) h += pipe(battX, battY, _heBat_x, _heBat_y, bfc, battActive);
       h += pipe(_heBol_x, _heBol_y, bolX, bolY, C.boiler, boilerActive);
+      if (aircoNodes.length > 0) h += pipe(_heAirco_x, _heAirco_y, aircoX, aircoY, C.airco, totalAirco>T);
+      if (hpNodes.length > 0)    h += pipe(_heHp_x,    _heHp_y,    hpX,    hpY,    C.hp,    totalHp>T);
       h += pipe(_heHome_x, _heHome_y, COL_HUB, R_HOME-17, C.home, homeActive);
-      h += pipe(COL_LEFT+44, R_EV,    _heEv_x,    _heEv_y,    C.ev,    ev>T);
-      h += pipe(COL_LEFT+44, R_EBIKE, _heEbike_x, _heEbike_y, C.ebike, ebike>T);
-      h += pipe(COL_LEFT+44, R_POOL,  _hePool_x,  _hePool_y,  C.pool,  pool>T);
+      if (evNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ev) h += pipe(COL_LEFT+44, R_EV, _heEv_x, _heEv_y, C.ev, ev>T);
+      if (ebikeNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ebike) h += pipe(COL_LEFT+44, R_EBIKE, _heEbike_x, _heEbike_y, C.ebike, ebike>T);
+      if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status']) h += pipe(COL_LEFT+44, R_POOL, _hePool_x, _hePool_y, C.pool, pool>T);
       layer2.forEach((node, i) =>
         h += pipe(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
       subs.forEach((s, si) => {
@@ -1130,12 +1186,14 @@
       // Arrows
       h += grid>T ? arw(COL_LEFT+44,R_GRID,_heGrid_x,_heGrid_y,gc,true) : arw(_heGrid_x,_heGrid_y,COL_LEFT+44,R_GRID,gc,gridActive);
       h += arw(solarX, solarY+46, _heSol_x, _heSol_y, C.solar, solarActive);
-      h += totalBattPw < -T ? arw(_heBat_x,_heBat_y,battX,battY,bfc,battActive) : arw(battX,battY,_heBat_x,_heBat_y,bfc,battActive);
+      if (battNodes.length > 0) { h += totalBattPw < -T ? arw(_heBat_x,_heBat_y,battX,battY,bfc,battActive) : arw(battX,battY,_heBat_x,_heBat_y,bfc,battActive); }
       h += arw(_heBol_x,_heBol_y,bolX,bolY,C.boiler,boilerActive);
+      if (aircoNodes.length > 0) h += arw(_heAirco_x,_heAirco_y,aircoX,aircoY,C.airco,totalAirco>T);
+      if (hpNodes.length > 0)    h += arw(_heHp_x,_heHp_y,hpX,hpY,C.hp,totalHp>T);
       h += arw(_heHome_x,_heHome_y,COL_HUB,R_HOME-17,C.home,homeActive);
-      h += arw(_heEv_x,_heEv_y,COL_LEFT+44,R_EV,C.ev,ev>T);
-      h += arw(_heEbike_x,_heEbike_y,COL_LEFT+44,R_EBIKE,C.ebike,ebike>T);
-      h += arw(_hePool_x,_hePool_y,COL_LEFT+44,R_POOL,C.pool,pool>T);
+      if (evNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ev) h += arw(_heEv_x,_heEv_y,COL_LEFT+44,R_EV,C.ev,ev>T);
+      if (ebikeNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ebike) h += arw(_heEbike_x,_heEbike_y,COL_LEFT+44,R_EBIKE,C.ebike,ebike>T);
+      if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status']) h += arw(_hePool_x,_hePool_y,COL_LEFT+44,R_POOL,C.pool,pool>T);
       layer2.forEach((node, i) =>
         h += arw(COL_HUB,R_HOME+17,L2_XS[i],R_L2-22,node.isSub?C.sub:node.color,node.power_w>T));
       subs.forEach(s => {
@@ -1151,11 +1209,58 @@
       const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
       const gridSub2  = grid > T ? 'import' : 'export';
       h += nodeBox(COL_LEFT, R_GRID,  88, 38, gc,       gridActive,   gridLabel,    this._fmt(Math.abs(grid)), gridSub2,  'grid',   'grid');
-      h += nodeBox(COL_LEFT, R_EV,    88, 38, C.ev,     ev>T,         '🚗 EV LADER', this._fmt(ev),            null,      'ev',     'ev');
-      h += nodeBox(COL_LEFT, R_EBIKE, 88, 38, C.ebike,  ebike>T,      '🚲 E-BIKE',   this._fmt(ebike),          null,      'ebike',  'ebike');
-      h += nodeBox(COL_LEFT, R_POOL,  88, 38, C.pool,   pool>T,       '🏊 ZWEMBAD',  this._fmt(pool),           null,      'pool',   'pool');
+      // EV multi-node — alleen als actieve sessie of geconfigureerd
+      if (ev > T || (this._config.entities||{}).ev) (() => {
+        const nodes = evNodes;
+        const total = ev;
+        const lbl = nodes.length > 1 ? `${nodes.length}× EV` : (nodes[0]?.label || 'EV Lader');
+        h += nodeBox(COL_LEFT, R_EV, 88, 38, C.ev, total>T, '🚗 ' + lbl.toUpperCase().slice(0,9), this._fmt(total), null, 'ev', 'ev');
+        if (nodes.length > 1) {
+          const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
+          h += `<text x="${COL_LEFT}" y="${R_EV+26}" text-anchor="middle" font-size="7.5"
+            fill="rgba(59,186,76,0.55)">${pill}</text>`;
+        }
+      })();
+      // E-bike multi-node — alleen als actieve sessie of geconfigureerd
+      if (ebike > T || (this._config.entities||{}).ebike) (() => {
+        const nodes = ebikeNodes;
+        const total = ebike;
+        const lbl = nodes.length > 1 ? `${nodes.length}× E-bike` : (nodes[0]?.label || 'E-bike');
+        h += nodeBox(COL_LEFT, R_EBIKE, 88, 38, C.ebike, total>T, '🚲 ' + lbl.toUpperCase().slice(0,9), this._fmt(total), null, 'ebike', 'ebike');
+        if (nodes.length > 1) {
+          const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
+          h += `<text x="${COL_LEFT}" y="${R_EBIKE+26}" text-anchor="middle" font-size="7.5"
+            fill="rgba(6,182,212,0.55)">${pill}</text>`;
+        }
+      })();
+      if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status'])
+        h += nodeBox(COL_LEFT, R_POOL, 88, 38, C.pool, pool>T, '🏊 ZWEMBAD', this._fmt(pool), null, 'pool', 'pool');
       h += nodeBox(bolX,     bolY,    76, 38, C.boiler, boilerActive, '🚿 BOILER',   this._fmt(totalBoiler),    null,      'boiler', 'boiler');
-      h += battBox();
+      // Airco nodes
+      (() => {
+        const nodes = aircoNodes; const total = totalAirco; const on = total > T;
+        const lbl = nodes.length > 1 ? `${nodes.length}× AIRCO` : (nodes[0]?.label||'Airco').toUpperCase().slice(0,9);
+        if (nodes.length > 0) {
+          h += nodeBox(aircoX, aircoY, 84, 38, C.airco, on, '❄️ ' + lbl, this._fmt(total), null, 'airco', 'airco');
+          if (nodes.length > 1) {
+            const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
+            h += `<text x="${aircoX}" y="${aircoY+26}" text-anchor="middle" font-size="7.5" fill="rgba(56,189,248,0.55)">${pill}</text>`;
+          }
+        }
+      })();
+      // Warmtepomp nodes
+      (() => {
+        const nodes = hpNodes; const total = totalHp; const on = total > T;
+        const lbl = nodes.length > 1 ? `${nodes.length}× WP` : (nodes[0]?.label||'Warmtepomp').toUpperCase().slice(0,9);
+        if (nodes.length > 0) {
+          h += nodeBox(hpX, hpY, 84, 38, C.hp, on, '🌡️ ' + lbl, this._fmt(total), null, 'hp', 'hp');
+          if (nodes.length > 1) {
+            const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
+            h += `<text x="${hpX}" y="${hpY+26}" text-anchor="middle" font-size="7.5" fill="rgba(167,139,250,0.55)">${pill}</text>`;
+          }
+        }
+      })();
+      if (battNodes.length > 0) h += battBox();
       const homeName = (e.home||{}).name || 'Thuis';
       h += nodeBox(COL_HUB, R_HOME, 64, 38, C.home, homeActive, homeName.toUpperCase(), this._fmt(home), null, 'home', 'home');
       layer2.forEach((node, i) => {
@@ -1173,7 +1278,9 @@
         { key:'batt',   color:bfc,     on:battActive,   pw:Math.abs(totalBattPw),
           x1:totalBattPw<-T?_heBat_x:battX, y1:totalBattPw<-T?_heBat_y:battY,
           x2:totalBattPw<-T?battX:_heBat_x, y2:totalBattPw<-T?battY:_heBat_y },
-        { key:'boiler', color:C.boiler,on:boilerActive, pw:totalBoiler,  x1:_heBol_x, y1:_heBol_y, x2:bolX, y2:bolY },
+        { key:'boiler', color:C.boiler,on:boilerActive,   pw:totalBoiler, x1:_heBol_x,   y1:_heBol_y,   x2:bolX,   y2:bolY },
+        ...(aircoNodes.length > 0 ? [{ key:'airco', color:C.airco, on:totalAirco>T, pw:totalAirco, x1:_heAirco_x, y1:_heAirco_y, x2:aircoX, y2:aircoY }] : []),
+        ...(hpNodes.length > 0    ? [{ key:'hp',    color:C.hp,    on:totalHp>T,    pw:totalHp,    x1:_heHp_x,    y1:_heHp_y,    x2:hpX,    y2:hpY    }] : []),
         { key:'home',   color:C.home,  on:homeActive,   pw:home,
           x1:_heHome_x, y1:_heHome_y, x2:COL_HUB, y2:R_HOME-17 },
         { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:_heEv_x,    y1:_heEv_y,    x2:COL_LEFT+44, y2:R_EV },
@@ -1591,21 +1698,49 @@
       }
 
       if (nid === 'ev') {
-        const ev = this._getEvPower();
+        const nodes = this._getEvNodes();
+        const total = nodes.reduce((s,n)=>s+n.power_w,0);
+        const metrics = nodes.length > 1
+          ? nodes.map((n,i) => ({l: n.label || `EV ${i+1}`, v: fmt(n.power_w)}))
+          : [{l:'Vermogen',v:fmt(total)},{l:'Sessie',v:total>T?'actief':'geen'}];
         return {
           title: 'EV & Mobiliteit', color: '#3bba4c',
-          metrics: [{l:'Vermogen',v:fmt(ev)},{l:'Sessie',v:ev>T?'actief':'geen'}],
-          note: ev > T ? `Laadt met ${fmt(ev)}.` : 'Geen actieve laadsessie.',
+          metrics,
+          note: total > T ? `Laadt totaal ${fmt(total)} (${nodes.length} lader${nodes.length!==1?'s':''}).` : 'Geen actieve laadsessie.',
         };
       }
 
       if (nid === 'ebike') {
-        const eb = this._getEbikePower();
+        const nodes = this._getEbikeNodes();
+        const total = nodes.reduce((s,n)=>s+n.power_w,0);
+        const metrics = nodes.length > 1
+          ? nodes.map((n,i) => ({l: n.label || `E-bike ${i+1}`, v: fmt(n.power_w)}))
+          : [{l:'Vermogen',v:fmt(total)},{l:'Status',v:total>T?'laden':'idle'}];
         return {
           title: 'E-bike & Scooter', color: '#06b6d4',
-          metrics: [{l:'Vermogen',v:fmt(eb)},{l:'Status',v:eb>T?'laden':'idle'}],
-          note: eb > T ? `Laadt met ${fmt(eb)}.` : 'Niet actief.',
+          metrics,
+          note: total > T ? `Laadt totaal ${fmt(total)} (${nodes.length} voertuig${nodes.length!==1?'en':''}).` : 'Niet actief.',
         };
+      }
+
+      if (nid === 'airco') {
+        const nodes = this._getAircoNodes();
+        const total = nodes.reduce((s,n)=>s+n.power_w,0);
+        const metrics = nodes.length > 1
+          ? nodes.map((n,i) => ({l: n.label||`Airco ${i+1}`, v: fmt(n.power_w)}))
+          : [{l:'Vermogen',v:fmt(total)},{l:'Status',v:total>T?'actief':'uit'}];
+        return { title:'❄️ Airco / Koeling', color:'#38bdf8', metrics,
+          note: total>T ? `Koelt met ${fmt(total)} totaal.` : 'Alle aircos uit.' };
+      }
+
+      if (nid === 'hp') {
+        const nodes = this._getHeatPumpNodes();
+        const total = nodes.reduce((s,n)=>s+n.power_w,0);
+        const metrics = nodes.length > 1
+          ? nodes.map((n,i) => ({l: n.label||`WP ${i+1}`, v: fmt(n.power_w)}))
+          : [{l:'Vermogen',v:fmt(total)},{l:'Status',v:total>T?'actief':'uit'}];
+        return { title:'🌡️ Warmtepomp', color:'#a78bfa', metrics,
+          note: total>T ? `Verwarmt met ${fmt(total)} totaal.` : 'Warmtepomp uit.' };
       }
 
       if (nid === 'pool') {
@@ -4299,7 +4434,7 @@
     { type: 'cloudems-overview-card',  name: 'CloudEMS Live Overzicht',  description: 'Hero-kaart met live energie-animatie' },
   );
 
-  console.info('%c CloudEMS Cards 2.2.1 %c geladen ',
+  console.info('%c CloudEMS Cards 2.2.2 %c geladen ',
     'background:#00b140;color:#fff;font-weight:700;border-radius:4px 0 0 4px;padding:2px 6px',
     'background:#222;color:#00b140;font-weight:600;border-radius:0 4px 4px 0;padding:2px 6px'
   );

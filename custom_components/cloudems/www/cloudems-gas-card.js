@@ -8,9 +8,10 @@ class CloudEMSGasCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass = null;
-    this._prev = '';
-    this._drill = null; // 'week' | 'maand' | 'jaar' | null
+    this._hass    = null;
+    this._prev    = '';
+    this._drill   = null;   // 'week' | 'maand' | 'jaar' | null
+    this._showFib = false;  // toggle m³/uur sectie
   }
 
   setConfig(c) {
@@ -203,6 +204,35 @@ class CloudEMSGasCard extends HTMLElement {
     const meterstand = stand !== null ? stand.toLocaleString('nl-NL', {minimumFractionDigits:2}) : '—';
     const kwhStr     = kwh !== null ? parseFloat(kwh).toLocaleString('nl-NL', {minimumFractionDigits:2}) : '—';
 
+    // ── Fibonacci m³/uur berekening ──────────────────────────────────────────
+    // gas_fib_hours: server-berekend door coordinator, veilig klein formaat
+    const fibRows = this._a(gs, 'gas_fib_hours', []);
+    const fibMax  = Math.max(...fibRows.map(r => r.m3 || 0), 0.001);
+    const hasAnyFibData = fibRows.some(r => r.m3 !== null);
+
+    const fibHtml = hasAnyFibData
+      ? '<div class="fib-section">' + fibRows.map(r => {
+          if (r.m3 === null) {
+            return `<div class="fib-row">
+              <span class="fib-label">laatste ${r.hours}u</span>
+              <div class="fib-bar-wrap"></div>
+              <span class="fib-m3" style="color:rgba(255,255,255,0.2)">—</span>
+              <span class="fib-rate" style="color:rgba(255,255,255,0.2)">geen data</span>
+            </div>`;
+          }
+          const barW = Math.min(100, Math.round((r.m3 / fibMax) * 100));
+          const norm = r.m3 / fibMax;
+          const barColor = norm < 0.33 ? '#4ade80' : norm < 0.66 ? '#fb923c' : '#f87171';
+          const rateStr = (r.rate_m3h < 0.001) ? '0.000 m³/h' : r.rate_m3h.toFixed(3) + ' m³/h';
+          return `<div class="fib-row">
+            <span class="fib-label">laatste ${r.hours}u</span>
+            <div class="fib-bar-wrap"><div class="fib-bar" style="width:${barW}%;background:${barColor}"></div></div>
+            <span class="fib-m3">${r.m3.toFixed(3)} m³</span>
+            <span class="fib-rate">${rateStr}</span>
+          </div>`;
+        }).join('') + '</div>'
+      : '<div class="fib-section"><div class="fib-nodata">⏳ Data wordt verzameld — beschikbaar na ~1 uur gebruik</div></div>';
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; font-family: var(--primary-font-family, sans-serif); }
@@ -246,6 +276,20 @@ class CloudEMSGasCard extends HTMLElement {
         .blabel { font-size: 12px; color: rgba(255,255,255,0.7); }
         .bval { font-size: 12px; color: rgba(255,255,255,0.9); text-align: right; font-weight: 600; }
         .bbest { text-align: center; font-size: 14px; }
+
+        /* ── m³/uur fibonacci sectie ── */
+        .fib-toggle { display: flex; align-items: center; gap: 8px; padding: 8px 16px 4px; cursor: pointer; border-top: 1px solid rgba(255,255,255,0.07); }
+        .fib-toggle-lbl { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.5); letter-spacing: .05em; text-transform: uppercase; flex: 1; }
+        .fib-toggle-chevron { font-size: 10px; color: rgba(255,255,255,0.3); }
+        .fib-section { padding: 4px 14px 12px; }
+        .fib-row { display: grid; grid-template-columns: 70px 1fr 72px 64px; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .fib-row:last-child { border-bottom: none; }
+        .fib-label { font-size: 12px; color: rgba(255,255,255,0.55); }
+        .fib-bar-wrap { background: rgba(255,255,255,0.06); border-radius: 3px; height: 5px; overflow: hidden; }
+        .fib-bar { height: 100%; border-radius: 3px; transition: width .5s cubic-bezier(.4,0,.2,1); }
+        .fib-m3 { font-size: 12px; color: rgba(255,255,255,0.85); text-align: right; }
+        .fib-rate { font-size: 11px; color: rgba(255,160,40,0.85); text-align: right; font-family: monospace; }
+        .fib-nodata { font-size: 11px; color: rgba(255,255,255,0.25); padding: 8px 0; text-align: center; }
       </style>
 
       <div class="card">
@@ -272,7 +316,23 @@ class CloudEMSGasCard extends HTMLElement {
         <div class="wbadge">${wbLabel}</div>
         <div class="bronnen">${bronRows}</div>
         ${elecPrijs != null ? `<div class="footer">Huidige stroomprijs: €${elecPrijs.toFixed(4)}/kWh</div>` : ''}
+
+        <div class="fib-toggle" id="fib-toggle">
+          <span class="fib-toggle-lbl">⏱ m³ per uur</span>
+          <span class="fib-toggle-chevron">${this._showFib ? '▲' : '▼'}</span>
+        </div>
+        ${this._showFib ? fibHtml : ''}
       </div>`;
+
+    // Toggle fibonacci sectie
+    const fibToggle = this.shadowRoot.getElementById('fib-toggle');
+    if (fibToggle) {
+      fibToggle.addEventListener('click', () => {
+        this._showFib = !this._showFib;
+        this._prev = '';
+        this._render();
+      });
+    }
 
     // Klik-events voor drill-down
     this.shadowRoot.querySelectorAll('.prow.clickable').forEach(row => {

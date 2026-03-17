@@ -68,6 +68,7 @@ from .const import (
     CONF_CLIMATE_ENABLED, CONF_CLIMATE_ZONES_ENABLED, CONF_CV_BOILER_ENTITY,
     CONF_CV_MIN_ZONES, CONF_CV_MIN_ON_MIN, CONF_CV_MIN_OFF_MIN, CONF_CV_SUMMER_CUTOFF_C,
     DEFAULT_CV_MIN_ZONES, DEFAULT_CV_MIN_ON_MIN, DEFAULT_CV_MIN_OFF_MIN, DEFAULT_CV_SUMMER_CUTOFF_C,
+    CONF_CLIMATE_EPEX_ENABLED, CONF_CLIMATE_EPEX_DEVICES,
     # v2.0 warm water cascade
     CONF_BOILER_GROUPS, CONF_BOILER_GROUPS_ENABLED,
     BOILER_MODE_LABELS, BOILER_MODE_AUTO, BOILER_MODE_SEQUENTIAL,
@@ -445,6 +446,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._inv_step  = 0
         self._bat_count = 0
         self._bat_step  = 0
+        self._ce_count  = 0
+        self._ce_step   = 0
 
     def _advanced(self) -> bool:
         return self._config.get(CONF_WIZARD_MODE) == WIZARD_MODE_ADVANCED
@@ -1721,30 +1724,50 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 8. E-mail / SMTP ──────────────────────────────────────────────────────
     # ── Klimaat wizard ────────────────────────────────────────────────────────
     async def async_step_climate(self, user_input=None):
-        """Stap 1 van klimaatwizard: inschakelen + CV-ketel entiteit opgeven."""
+        """Klimaat keuzemenu: Zone Control (TRV/thermostaat) of Airco/WP EPEX."""
         if user_input is not None:
-            self._config.update(user_input)
-            if user_input.get(CONF_CLIMATE_ENABLED) or self._config.get(CONF_CLIMATE_ZONES_ENABLED):
+            mode = user_input.get("climate_mode", "none")
+            self._config["climate_mode"] = mode
+            if mode == "zones":
                 return await self.async_step_climate_boiler()
+            if mode == "epex":
+                return await self.async_step_climate_epex_count()
+            # none: beide uit
+            self._config[CONF_CLIMATE_ENABLED] = False
+            self._config[CONF_CLIMATE_EPEX_ENABLED] = False
             return await self.async_step_boiler_groups()
 
+        # Bepaal huidige modus op basis van bestaande config
         ex = self._config
+        if ex.get(CONF_CLIMATE_EPEX_ENABLED):
+            current_mode = "epex"
+        elif ex.get(CONF_CLIMATE_ENABLED):
+            current_mode = "zones"
+        else:
+            current_mode = "none"
+
         return self.async_show_form(
             step_id="climate",
             data_schema=vol.Schema({
-                vol.Optional(CONF_CLIMATE_ENABLED, default=ex.get(CONF_CLIMATE_ENABLED, False)): bool,
+                vol.Required("climate_mode", default=current_mode): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="none",  label="🚫 Klimaat uitgeschakeld"),
+                        selector.SelectOptionDict(value="zones", label="🏠 Zone Control (TRV / thermostaat per kamer)"),
+                        selector.SelectOptionDict(value="epex",  label="❄️ Airco / Warmtepomp EPEX-sturing"),
+                    ], mode="list")
+                ),
             }),
             description_placeholders={
                 "info": (
-                    "CloudEMS ontdekt automatisch alle verwarmings- en "
-                    "koelapparaten per ruimte via de HA area-indeling. "
-                    "Je hoeft alleen de CV-ketel en eventuele extra instellingen op te geven."
+                    "**Zone Control** past virtuele thermostaten toe per kamer via HA area-indeling.\n\n"
+                    "**Airco / WP EPEX** past kleine temperatuuroffsets toe op basis van de EPEX-spotprijs "
+                    "— voorverwarmen in goedkope uren, zuiniger in dure uren. Ondersteunt meerdere apparaten."
                 )
             },
         )
 
     async def async_step_climate_boiler(self, user_input=None):
-        """Stap 2: CV-ketel entiteit + minimale zones."""
+        """Zone Control stap 1: CV-ketel entiteit + minimale zones."""
         if user_input is not None:
             self._config.update(user_input)
             return await self.async_step_climate_zones()
@@ -1770,10 +1793,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_climate_zones(self, user_input=None):
-        """Stap 3: Zone-ontdekking — kies per kamer of een virtual climate device gewenst is."""
+        """Zone Control stap 2: Zone-ontdekking — kies per kamer."""
         errors: dict = {}
 
-        # Discovery uitvoeren
         try:
             from .climate_discovery import async_suggest_zones
             suggested = await async_suggest_zones(self.hass)
@@ -1785,15 +1807,14 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             enabled_ids = user_input.get(CONF_CLIMATE_ZONES_ENABLED, [])
             self._config[CONF_CLIMATE_ZONES_ENABLED] = enabled_ids
             self._config[CONF_CLIMATE_ENABLED] = bool(enabled_ids)
+            self._config[CONF_CLIMATE_EPEX_ENABLED] = False
             if suggested and "climate_zones" not in self._config:
                 self._config["climate_zones"] = suggested
             return await self.async_step_boiler_groups()
 
-        # Sla suggesties op in config
         if suggested and "climate_zones" not in self._config:
             self._config["climate_zones"] = suggested
 
-        # Bouw zone-opties voor multi-select
         zone_options = [
             selector.SelectOptionDict(
                 value=z["zone_name"],
@@ -1802,20 +1823,17 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             for z in suggested
         ]
-
-        # Standaard alle zones aan
         default_zones = [z["zone_name"] for z in suggested]
 
         if not zone_options:
-            description = (
-                "*Geen fysieke climate-entiteiten gevonden. "
-                "Wijs climate-apparaten toe aan een HA-ruimte (Instellingen → Gebieden & zones) "
-                "voor automatische zone-indeling.*"
-            )
             return self.async_show_form(
                 step_id="climate_zones",
                 data_schema=vol.Schema({}),
-                description_placeholders={"discovery": description},
+                description_placeholders={"discovery": (
+                    "*Geen fysieke climate-entiteiten gevonden. "
+                    "Wijs climate-apparaten toe aan een HA-ruimte (Instellingen → Gebieden & zones) "
+                    "voor automatische zone-indeling.*"
+                )},
                 errors=errors,
             )
 
@@ -1824,14 +1842,84 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Optional(CONF_CLIMATE_ZONES_ENABLED, default=default_zones):
                     selector.SelectSelector(selector.SelectSelectorConfig(
-                        options=zone_options,
-                        multiple=True,
-                        mode="list",
+                        options=zone_options, multiple=True, mode="list",
                     )),
             }),
             description_placeholders={
                 "discovery": "Selecteer de kamers waarvoor CloudEMS een virtueel klimaatapparaat "
                              "aanmaakt. Alleen kamers met een fysieke thermostaat of TRV worden getoond.",
+            },
+        )
+
+    async def async_step_climate_epex_count(self, user_input=None):
+        """Airco/WP EPEX stap 1: hoeveel apparaten?"""
+        ex = self._config
+        existing_devices = ex.get(CONF_CLIMATE_EPEX_DEVICES, [])
+
+        if user_input is not None:
+            self._ce_count = int(user_input.get("ce_count", 1))
+            self._config[CONF_CLIMATE_EPEX_ENABLED] = True
+            self._config[CONF_CLIMATE_ENABLED] = False
+            self._config[CONF_CLIMATE_EPEX_DEVICES] = []
+            self._ce_step = 0
+            self._existing_ce_cfgs = list(existing_devices)
+            return await self.async_step_climate_epex_device()
+
+        opts = [selector.SelectOptionDict(value=str(i), label=str(i)) for i in range(1, 9)]
+        return self.async_show_form(
+            step_id="climate_epex_count",
+            data_schema=vol.Schema({
+                vol.Required("ce_count", default=str(max(1, len(existing_devices)))): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=opts, mode="list")
+                ),
+            }),
+            description_placeholders={
+                "current": ", ".join(d.get("label", d.get("entity_id", "")) for d in existing_devices) or "—",
+            },
+        )
+
+    async def async_step_climate_epex_device(self, user_input=None):
+        """Airco/WP EPEX: configureer apparaat N."""
+        i = self._ce_step + 1
+        existing_cfgs = getattr(self, "_existing_ce_cfgs", [])
+        existing = existing_cfgs[self._ce_step] if self._ce_step < len(existing_cfgs) else {}
+
+        if user_input is not None:
+            self._config[CONF_CLIMATE_EPEX_DEVICES].append({
+                "entity_id":    user_input["ce_entity"],
+                "label":        user_input.get("ce_label", f"Apparaat {i}"),
+                "device_type":  user_input.get("ce_type", "heat_pump"),
+                "power_entity": user_input.get("ce_power", ""),
+                "offset_c":     float(user_input.get("ce_offset", 0.5)),
+                "enabled":      True,
+            })
+            self._ce_step += 1
+            if self._ce_step < self._ce_count:
+                return await self.async_step_climate_epex_device()
+            return await self.async_step_boiler_groups()
+
+        type_opts = [
+            selector.SelectOptionDict(value="heat_pump", label="🔥 Warmtepomp"),
+            selector.SelectOptionDict(value="airco",     label="❄️ Airco / koeling"),
+            selector.SelectOptionDict(value="hybrid",    label="🔄 Hybride (WP + ketel)"),
+        ]
+        return self.async_show_form(
+            step_id="climate_epex_device",
+            data_schema=vol.Schema({
+                vol.Required("ce_entity", default=existing.get("entity_id") or vol.UNDEFINED):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["climate"])),
+                vol.Optional("ce_label", description={"suggested_value": existing.get("label", f"Apparaat {i}")}): str,
+                vol.Required("ce_type", default=existing.get("device_type", "heat_pump")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=type_opts, mode="list")),
+                vol.Optional("ce_power", default=existing.get("power_entity") or vol.UNDEFINED):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor"])),
+                vol.Optional("ce_offset", default=float(existing.get("offset_c", 0.5))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+            }),
+            description_placeholders={
+                "device_num": str(i),
+                "total":      str(self._ce_count),
+                "tip":        "Offset = maximale temperatuurverschuiving in °C (aanbevolen: 0.5°C).",
             },
         )
 
@@ -2223,6 +2311,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
         # Cheap-hours switches wizard
         self._cheap_count = 0
         self._cheap_step  = 0
+        # Climate EPEX wizard
+        self._ce_count = 0
+        self._ce_step  = 0
         self._existing_cheap_cfgs: list[dict] = []
 
     def _data(self) -> dict:
@@ -3389,68 +3480,174 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
     # ── Rolluiken opties ──────────────────────────────────────────────────────
     async def async_step_climate_opts(self, user_input=None):
-        """Klimaatbeheer — in/uitschakelen en per kamer virtual climate device kiezen."""
+        """Klimaatbeheer — keuze Zone Control of Airco/WP EPEX."""
         data = self._data()
 
-        # Discovery
+        if user_input is not None:
+            mode = user_input.get("climate_mode", "none")
+            if mode == "zones":
+                return await self.async_step_climate_zones_opts()
+            if mode == "epex":
+                return await self.async_step_climate_epex_count_opts()
+            # none
+            self._opts[CONF_CLIMATE_ENABLED] = False
+            self._opts[CONF_CLIMATE_EPEX_ENABLED] = False
+            return self._save(self._opts)
+
+        if data.get(CONF_CLIMATE_EPEX_ENABLED):
+            current_mode = "epex"
+        elif data.get(CONF_CLIMATE_ENABLED):
+            current_mode = "zones"
+        else:
+            current_mode = "none"
+
+        return self.async_show_form(
+            step_id="climate_opts",
+            data_schema=vol.Schema({
+                vol.Required("climate_mode", default=current_mode): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="none",  label="🚫 Klimaat uitgeschakeld"),
+                        selector.SelectOptionDict(value="zones", label="🏠 Zone Control (TRV / thermostaat per kamer)"),
+                        selector.SelectOptionDict(value="epex",  label="❄️ Airco / Warmtepomp EPEX-sturing"),
+                    ], mode="list")
+                ),
+            }),
+            description_placeholders={
+                "info": (
+                    "**Zone Control** beheert virtuele thermostaten per HA-ruimte.\n\n"
+                    "**Airco / WP EPEX** past temperatuuroffsets toe op basis van spotprijzen. "
+                    "Meerdere apparaten (WP's en airco's) worden ondersteund."
+                )
+            },
+        )
+
+    async def async_step_climate_zones_opts(self, user_input=None):
+        """Zone Control options: kies actieve kamers."""
+        data = self._data()
         try:
             from .climate_discovery import async_suggest_zones
             suggested = await async_suggest_zones(self.hass)
-        except Exception:  # noqa: BLE001
+        except Exception:
             suggested = []
 
         if user_input is not None:
             enabled_ids = user_input.get(CONF_CLIMATE_ZONES_ENABLED, [])
             self._opts[CONF_CLIMATE_ZONES_ENABLED] = enabled_ids
-            # climate_mgr_enabled wordt afgeleid: actief als er minstens 1 zone geselecteerd is
             self._opts[CONF_CLIMATE_ENABLED] = bool(enabled_ids)
+            self._opts[CONF_CLIMATE_EPEX_ENABLED] = False
             if suggested:
                 self._opts["climate_zones"] = suggested
             return self._save(self._opts)
 
-        # Bouw zone-opties voor multi-select, met gekoppelde apparaten per zone
         zone_options = []
         zone_device_info = []
         for z in suggested:
             ht = "CV" if z["zone_heating_type"] == "cv" else "Airco" if z["zone_heating_type"] == "airco" else "CV+Airco"
             zone_options.append(selector.SelectOptionDict(
-                value=z["zone_name"],
-                label=f"{z['zone_display_name']} ({ht})",
+                value=z["zone_name"], label=f"{z['zone_display_name']} ({ht})",
             ))
             devices = z.get("zone_climate_entities", [])
             if devices:
-                device_list = ", ".join(f"`{e}`" for e in devices)
-                zone_device_info.append(f"**{z['zone_display_name']}** ({ht}): {device_list}")
+                zone_device_info.append(f"**{z['zone_display_name']}** ({ht}): {', '.join(f'`{e}`' for e in devices)}")
 
         current_enabled = list(data.get(CONF_CLIMATE_ZONES_ENABLED, [z["zone_name"] for z in suggested]))
         device_info_text = ("\n\n**Gekoppelde apparaten per ruimte:**\n" + "\n".join(f"- {l}" for l in zone_device_info)) if zone_device_info else ""
 
         if not zone_options:
             return self.async_show_form(
-                step_id="climate_opts",
+                step_id="climate_zones_opts",
                 data_schema=vol.Schema({}),
-                description_placeholders={"discovery": "*Geen klimaatentiteiten gevonden in HA-ruimten. Wijs thermostaten/TRV\'s toe aan een HA-ruimte (Instellingen → Gebieden & zones).*"},
+                description_placeholders={"discovery": "*Geen klimaatentiteiten gevonden. Wijs thermostaten/TRV's toe aan een HA-ruimte.*"},
             )
 
         return self.async_show_form(
-            step_id="climate_opts",
+            step_id="climate_zones_opts",
             data_schema=vol.Schema({
                 vol.Optional(CONF_CLIMATE_ZONES_ENABLED, default=current_enabled):
                     selector.SelectSelector(selector.SelectSelectorConfig(
-                        options=zone_options,
-                        multiple=True,
-                        mode="list",
+                        options=zone_options, multiple=True, mode="list",
                     )),
             }),
             description_placeholders={
                 "discovery": (
-                    "Selecteer de ruimten waarvoor CloudEMS een virtuele thermostaat aanmaakt. "
-                    "Per ruimte worden alle klimaatapparaten in die HA-ruimte aangestuurd. "
-                    "Vink een ruimte uit om het virtuele device te verwijderen."
+                    "Selecteer de ruimten waarvoor CloudEMS een virtuele thermostaat aanmaakt."
                     + device_info_text
                 ),
             },
         )
+
+    async def async_step_climate_epex_count_opts(self, user_input=None):
+        """Airco/WP EPEX options stap 1: hoeveel apparaten?"""
+        data = self._data()
+        existing_devices = data.get(CONF_CLIMATE_EPEX_DEVICES, [])
+
+        if user_input is not None:
+            self._ce_count = int(user_input.get("ce_count", 1))
+            self._opts[CONF_CLIMATE_EPEX_ENABLED] = True
+            self._opts[CONF_CLIMATE_ENABLED] = False
+            self._opts[CONF_CLIMATE_EPEX_DEVICES] = []
+            self._ce_step = 0
+            self._existing_ce_cfgs = list(existing_devices)
+            return await self.async_step_climate_epex_device_opts()
+
+        opts = [selector.SelectOptionDict(value=str(i), label=str(i)) for i in range(1, 9)]
+        return self.async_show_form(
+            step_id="climate_epex_count_opts",
+            data_schema=vol.Schema({
+                vol.Required("ce_count", default=str(max(1, len(existing_devices)))): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=opts, mode="list")
+                ),
+            }),
+            description_placeholders={
+                "current": ", ".join(d.get("label", d.get("entity_id", "")) for d in existing_devices) or "—",
+            },
+        )
+
+    async def async_step_climate_epex_device_opts(self, user_input=None):
+        """Airco/WP EPEX options: configureer apparaat N."""
+        i = self._ce_step + 1
+        existing_cfgs = getattr(self, "_existing_ce_cfgs", [])
+        existing = existing_cfgs[self._ce_step] if self._ce_step < len(existing_cfgs) else {}
+
+        if user_input is not None:
+            self._opts[CONF_CLIMATE_EPEX_DEVICES].append({
+                "entity_id":    user_input["ce_entity"],
+                "label":        user_input.get("ce_label", f"Apparaat {i}"),
+                "device_type":  user_input.get("ce_type", "heat_pump"),
+                "power_entity": user_input.get("ce_power", ""),
+                "offset_c":     float(user_input.get("ce_offset", 0.5)),
+                "enabled":      True,
+            })
+            self._ce_step += 1
+            if self._ce_step < self._ce_count:
+                return await self.async_step_climate_epex_device_opts()
+            return self._save(self._opts)
+
+        type_opts = [
+            selector.SelectOptionDict(value="heat_pump", label="🔥 Warmtepomp"),
+            selector.SelectOptionDict(value="airco",     label="❄️ Airco / koeling"),
+            selector.SelectOptionDict(value="hybrid",    label="🔄 Hybride (WP + ketel)"),
+        ]
+        return self.async_show_form(
+            step_id="climate_epex_device_opts",
+            data_schema=vol.Schema({
+                vol.Required("ce_entity", default=existing.get("entity_id") or vol.UNDEFINED):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["climate"])),
+                vol.Optional("ce_label", description={"suggested_value": existing.get("label", f"Apparaat {i}")}): str,
+                vol.Required("ce_type", default=existing.get("device_type", "heat_pump")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=type_opts, mode="list")),
+                vol.Optional("ce_power", default=existing.get("power_entity") or vol.UNDEFINED):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor"])),
+                vol.Optional("ce_offset", default=float(existing.get("offset_c", 0.5))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.1, max=2.0)),
+            }),
+            description_placeholders={
+                "device_num": str(i),
+                "total":      str(self._ce_count),
+                "tip":        "Offset = maximale temperatuurverschuiving in °C (aanbevolen: 0.5°C).",
+            },
+        )
+
 
     async def async_step_shutter_count_opts(self, user_input=None):
         if user_input is not None:

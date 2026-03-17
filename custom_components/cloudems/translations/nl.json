@@ -400,27 +400,28 @@
         }
       },
       "climate": {
-        "title": "🌡️ Klimaat & Thermostaten",
-        "description": "CloudEMS kan thermostaten, TRV's en airco's intelligent aansturen op basis van EPEX-prijzen, zonne-overschot en aanwezigheid.",
+        "title": "🌡️ Klimaat & EPEX-sturing",
+        "description": "{info}",
         "data": {
-          "climate_mgr_enabled": "Klimaatbeheer activeren",
-          "cv_boiler_entity": "CV-ketel schakelaar / thermostaat"
+          "climate_mode": "Klimaatmodus"
         }
       },
       "climate_boiler": {
-        "title": "🔥 CV-ketel koppelen",
-        "description": "Koppel de entiteit waarmee CloudEMS de CV-ketel kan aansturen (switch, climate, of water_heater).",
+        "title": "🏠 Zone Control — CV-ketel",
+        "description": "Configureer de CV-ketel en zone-instellingen.",
         "data": {
-          "cv_boiler_entity": "CV-ketel entiteit (switch / climate / water_heater)",
-          "cv_min_zones": "Minimum zones met warmtevraag om ketel aan te zetten"
+          "cv_boiler_entity": "CV-ketel schakelaar / thermostaat",
+          "cv_min_zones": "Min. actieve zones voor CV aan",
+          "cv_min_on_min": "Min. aan-tijd (min)",
+          "cv_min_off_min": "Min. uit-tijd (min)",
+          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)"
         }
       },
       "climate_zones": {
-        "title": "🏠 Klimaatzones instellen",
-        "description": "CloudEMS heeft de volgende klimaatentiteiten gevonden in uw installatie. U kunt zones later verfijnen via cloudems.configure_zone.",
+        "title": "🏠 Zone Control — Ruimtes",
+        "description": "{discovery}",
         "data": {
-          "climate_zones": "Klimaatzones (automatisch ingevuld)",
-          "climate_zones_confirmed": "Klimaatzones bevestigd"
+          "climate_zones_enabled": "Actieve ruimtes"
         }
       },
       "boiler_groups": {
@@ -603,6 +604,24 @@
         "description": "Selecteer het merk van de boiler. CloudEMS vult automatisch de juiste sturingmodus, setpoints en veiligheidslimieten in.",
         "data": {
           "brand": "Merk / type"
+        }
+      },
+      "climate_epex_count": {
+        "title": "❄️ Airco / WP EPEX — Aantal apparaten",
+        "description": "Huidige apparaten: {current}\n\nHoeveel airco's of warmtepompen wil je configureren?",
+        "data": {
+          "ce_count": "Aantal apparaten"
+        }
+      },
+      "climate_epex_device": {
+        "title": "❄️ Airco / WP EPEX — Apparaat {device_num} van {total}",
+        "description": "💡 {tip}",
+        "data": {
+          "ce_entity": "Klimaatentiteit (climate.*)",
+          "ce_label": "Naam / label",
+          "ce_type": "Type apparaat",
+          "ce_power": "Vermogens­sensor (optioneel)",
+          "ce_offset": "Max. temperatuuroffset (°C)"
         }
       }
     },
@@ -810,9 +829,11 @@
         }
       },
       "climate_opts": {
-        "title": "🌡️ Klimaatbeheer per ruimte",
-        "description": "Selecteer de ruimten waarvoor CloudEMS een virtuele thermostaat aanmaakt. Per ruimte worden alle klimaatapparaten in die HA-ruimte aangestuurd. Vink een ruimte uit om het virtuele device te verwijderen.\n\n{discovery}",
-        "data": {}
+        "title": "🌡️ Klimaat & EPEX-sturing",
+        "description": "{info}",
+        "data": {
+          "climate_mode": "Klimaatmodus"
+        }
       },
       "shutter_count_opts": {
         "title": "🪟 Rolluiken — Aantal",
@@ -1178,6 +1199,31 @@
         },
         "data_description": {
           "bu_max_setpoint_entity": "Optioneel: number-entity die het hardware-maximum instelt vóór elke temperatuurwijziging (vereist voor Ariston Lydos Hybrid)."
+        }
+      },
+      "climate_zones_opts": {
+        "title": "🏠 Zone Control — Ruimtes",
+        "description": "{discovery}",
+        "data": {
+          "climate_zones_enabled": "Actieve ruimtes"
+        }
+      },
+      "climate_epex_count_opts": {
+        "title": "❄️ Airco / WP EPEX — Aantal apparaten",
+        "description": "Huidige apparaten: {current}",
+        "data": {
+          "ce_count": "Aantal apparaten"
+        }
+      },
+      "climate_epex_device_opts": {
+        "title": "❄️ Airco / WP EPEX — Apparaat {device_num} van {total}",
+        "description": "💡 {tip}",
+        "data": {
+          "ce_entity": "Klimaatentiteit (climate.*)",
+          "ce_label": "Naam / label",
+          "ce_type": "Type apparaat",
+          "ce_power": "Vermogens­sensor (optioneel)",
+          "ce_offset": "Max. temperatuuroffset (°C)"
         }
       }
     },

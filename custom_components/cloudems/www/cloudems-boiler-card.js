@@ -17,7 +17,7 @@
  *   title: "Warm water"
  */
 
-const BOILER_CARD_VERSION = "1.1.2";
+const BOILER_CARD_VERSION = "1.2.0";
 
 // ── Design tokens ────────────────────────────────────────────────────────────
 const S = `
@@ -1001,6 +1001,12 @@ class CloudemsBoilerCard extends HTMLElement {
             ${stall ? `<span class="chip chip-verify">⚠️ Stall</span>` : ''}
           </div>
 
+          <div class="boiler-actions">
+            <button class="action-btn btn-send"   data-action="send_now"      data-eid="${b.entity_id}">🚿 Nu sturen</button>
+            <button class="action-btn btn-pause"  data-action="pause_boost"   data-eid="${b.entity_id}">⏸ Pauze boost</button>
+            <button class="action-btn btn-resume" data-action="resume_boost"  data-eid="${b.entity_id}">▶ Hervat</button>
+          </div>
+
           <div class="decisions">
             <div class="decisions-title">📋 Beslissingen</div>
             ${buildDecisionsHtml(statusSensor.attributes?.log ?? [], label, b.entity_id)}
@@ -1031,6 +1037,27 @@ class CloudemsBoilerCard extends HTMLElement {
         const prev = parseInt(dv.textContent) || 0;
         if (prev !== usableL) animateCounter(dv, prev, usableL, 500, 0);
       }
+    });
+
+    // Action button handlers
+    sh.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.action;
+        const eid    = btn.dataset.eid;
+        if (!this._hass || !eid) return;
+        btn.disabled = true;
+        setTimeout(() => { btn.disabled = false; }, 2000);
+        if (action === 'send_now') {
+          this._hass.callService('cloudems', 'boiler_send_now', { entity_id: eid, on: true })
+            .catch(e => console.warn('CloudEMS boiler send_now failed', e));
+        } else if (action === 'pause_boost') {
+          this._hass.callService('cloudems', 'boiler_pause_boost', { entity_id: eid, seconds: 3600 })
+            .catch(e => console.warn('CloudEMS boiler pause_boost failed', e));
+        } else if (action === 'resume_boost') {
+          this._hass.callService('cloudems', 'boiler_resume_boost', { entity_id: eid })
+            .catch(e => console.warn('CloudEMS boiler resume_boost failed', e));
+        }
+      });
     });
 
     // Tab click handlers

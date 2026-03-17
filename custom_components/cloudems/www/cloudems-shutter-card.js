@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v2.0.0
 
-const SHUTTER_VERSION = "2.2.3";
+const SHUTTER_VERSION = "2.3.0";
 const SHUTTER_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -238,6 +238,10 @@ class CloudemsShutterCard extends HTMLElement {
           ${reason?`<span class="meta-chip">${esc(reason.length>40?reason.slice(0,40)+"…":reason)}</span>`:""}
         </div>
         ${shadow&&shadow!==act&&!autoEnabled?`<div class="shadow-hint">🤖 <span>Automaat zou: <strong>${esc(shadow)}</strong>${shadowReason?" — "+esc(shadowReason):""}</span></div>`:""}
+        ${c.show_orientation_learning!==false&&(shadow||s.orientation||s.sun_elevation_threshold!=null)?`<div style="margin:5px 0 0;padding:5px 8px;background:rgba(129,140,248,0.07);border-radius:8px;border:1px solid rgba(129,140,248,0.18)"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(129,140,248,0.6);margin-bottom:4px">🧭 Oriëntatie leren</div><div style="display:flex;flex-wrap:wrap;gap:6px">${s.orientation?`<span style="font-family:monospace;font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(129,140,248,0.12);color:rgba(129,140,248,0.9);border:1px solid rgba(129,140,248,0.2)">🧭 ${esc(s.orientation)}</span>`:""
+        }${s.sun_elevation_threshold!=null?`<span style="font-family:monospace;font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(129,140,248,0.12);color:rgba(129,140,248,0.9);border:1px solid rgba(129,140,248,0.2)">☀️ drempel ${s.sun_elevation_threshold}°</span>`:""
+        }${shadow?`<span style="font-family:monospace;font-size:10px;padding:2px 7px;border-radius:8px;background:rgba(125,211,252,0.08);color:var(--s-sky);border:1px solid rgba(125,211,252,0.2)">🤖 ${esc(shadow)}</span>`:""
+        }${shadowReason?`<span style="font-size:9px;color:var(--s-subtext);padding:2px 0">${esc(shadowReason.length>50?shadowReason.slice(0,50)+"…":shadowReason)}</span>`:""}</div></div>`:""}
         ${schedHtml}
       </div>`;
     }).join("");
@@ -313,32 +317,81 @@ class CloudemsShutterCard extends HTMLElement {
 
 
 class CloudemsShutterCardEditor extends HTMLElement {
-  constructor(){ super(); this.attachShadow({mode:"open"}); }
+  constructor(){ super(); this.attachShadow({mode:"open"}); this._hass=null; this._cfg={}; }
   setConfig(c){ this._cfg={...c}; this._render(); }
+  set hass(h){ this._hass=h; this._render(); }
   _fire(){
     this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:this._cfg},bubbles:true,composed:true}));
   }
   _render(){
     const cfg=this._cfg||{};
+    const h=this._hass;
+
+    // Build per-shutter learning rows if hass available
+    let shutterRows="";
+    if(h){
+      const st=h.states["sensor.cloudems_status"];
+      const shutters=(st?.attributes?.shutters?.shutters)||[];
+      if(shutters.length>0){
+        shutterRows=`<div class="section-title">🧠 Tijdleren per rolluik</div>`+shutters.map(s=>{
+          const safeName=s.entity_id.split(".").pop().replace(/-/g,"_");
+          const swId=`switch.cloudems_shutter_${safeName}_learning`;
+          const swState=h.states[swId];
+          const label=s.label||s.entity_id||safeName;
+          const isOn=swState?swState.state==="on":s.schedule_learning!==false;
+          const unavail=!swState;
+          return `<div class="row">
+            <label class="lbl" title="${swId}">${label}</label>
+            <button class="learn-btn ${isOn?"btn-on":"btn-off"}" data-switch="${swId}" data-state="${isOn?"on":"off"}" ${unavail?"disabled title='Switch niet gevonden'":""}>
+              🧠 ${isOn?"Leert":"Vast"}
+            </button>
+          </div>`;
+        }).join("");
+      }
+    }
+
     this.shadowRoot.innerHTML=`
 <style>
 .wrap{padding:8px;}
-.row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--secondary-text-color,#888);padding:8px 0 4px;}
+.row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);}
 .row:last-child{border-bottom:none;}
-.lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px;}
-input[type=text],input[type=number]{background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color,rgba(255,255,255,.15));border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:150px;box-sizing:border-box;}
+.lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+input[type=text]{background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color,rgba(255,255,255,.15));border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:150px;box-sizing:border-box;}
 input[type=checkbox]{width:18px;height:18px;accent-color:var(--primary-color,#03a9f4);cursor:pointer;}
+.learn-btn{font-size:11px;padding:4px 10px;border-radius:8px;cursor:pointer;border:1px solid;font-weight:600;transition:all .2s;}
+.btn-on{background:rgba(125,211,252,0.12);color:#7dd3fc;border-color:rgba(125,211,252,0.3);}
+.btn-off{background:rgba(248,113,113,0.12);color:#f87171;border-color:rgba(248,113,113,0.3);}
+.learn-btn:disabled{opacity:.4;cursor:not-allowed;}
 </style>
 <div class="wrap">
-        <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${cfg.title??"Rolluiken"}"></div>
-        <div class="row"><label class="lbl">Toon leervoortgang</label><input type="checkbox" name="show_learning" ${cfg.show_learning!==false?"checked":""}></div>
+  <div class="section-title">⚙️ Weergave</div>
+  <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${cfg.title??"Rolluiken"}"></div>
+  <div class="row"><label class="lbl">Toon leervoortgang</label><input type="checkbox" name="show_learning" ${cfg.show_learning!==false?"checked":""}></div>
+  <div class="row"><label class="lbl">Toon oriëntatie leren</label><input type="checkbox" name="show_orientation_learning" ${cfg.show_orientation_learning!==false?"checked":""}></div>
+  ${shutterRows}
 </div>`;
+
+    // Text / checkbox change handlers
     this.shadowRoot.querySelectorAll("input").forEach(el=>{
       el.addEventListener("change",()=>{
         const n=el.name, nc={...this._cfg};
         if(n==="title") nc[n]=el.value;
         if(n==="show_learning") nc[n]=el.checked;
+        if(n==="show_orientation_learning") nc[n]=el.checked;
         this._cfg=nc; this._fire();
+      });
+    });
+
+    // Per-shutter learning toggle buttons
+    this.shadowRoot.querySelectorAll(".learn-btn").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        if(!this._hass||btn.disabled) return;
+        const swId=btn.dataset.switch;
+        const cur=btn.dataset.state;
+        const svc=cur==="on"?"turn_off":"turn_on";
+        this._hass.callService("switch",svc,{entity_id:swId})
+          .catch(e=>console.warn("CloudEMS editor: toggle learning failed",e));
       });
     });
   }

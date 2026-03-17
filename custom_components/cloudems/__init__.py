@@ -52,6 +52,7 @@ LOVELACE_PRICE_URL          = f"/local/cloudems/cloudems-price-card.js?v={VERSIO
 LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={VERSION}"
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
+LOVELACE_CLIMATE_EPEX_URL   = f"/local/cloudems/cloudems-climate-epex-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -108,6 +109,7 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_PRICE_URL,        "cloudems-price-card.js"),
     (LOVELACE_ROOMS_URL,        "cloudems-rooms-card.js"),
     (LOVELACE_HOME_URL,         "cloudems-home-card.js"),
+    (LOVELACE_CLIMATE_EPEX_URL, "cloudems-climate-epex-card.js"),
     (f"/local/cloudems/cloudems-config-card.js?v={VERSION}", "cloudems-config-card.js"),
     (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",    "cloudems-gas-card.js"),
     (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
@@ -1192,6 +1194,28 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             setpoint_c = float(call.data["setpoint_c"])
             coordinator._boiler_ctrl.update_setpoint(entity_id, setpoint_c)
 
+    async def boiler_send_now(call: ServiceCall):
+        """Stuur direct een commando naar de boiler, zonder te wachten op de evaluatiecyclus."""
+        if coordinator._boiler_ctrl:
+            entity_id  = call.data["entity_id"]
+            on         = bool(call.data.get("on", True))
+            setpoint_c = call.data.get("setpoint_c")
+            setpoint_c = float(setpoint_c) if setpoint_c is not None else None
+            await coordinator._boiler_ctrl.send_now(entity_id, on, setpoint_c)
+
+    def boiler_pause_boost(call: ServiceCall):
+        """Pauzeer BOOST voor de opgegeven boiler."""
+        if coordinator._boiler_ctrl:
+            entity_id = call.data["entity_id"]
+            seconds   = float(call.data.get("seconds", 3600.0))
+            coordinator._boiler_ctrl.pause_boost(entity_id, seconds)
+
+    def boiler_resume_boost(call: ServiceCall):
+        """Hef BOOST-pauze op voor de opgegeven boiler."""
+        if coordinator._boiler_ctrl:
+            entity_id = call.data["entity_id"]
+            coordinator._boiler_ctrl.resume_boost(entity_id)
+
     hass.services.async_register(DOMAIN, "confirm_device",         confirm_device)
     hass.services.async_register(DOMAIN, "dismiss_device",         dismiss_device)
     hass.services.async_register(DOMAIN, "nilm_feedback",          nilm_feedback)
@@ -1356,6 +1380,12 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "download_energy_report", download_energy_report,
         schema=vol.Schema({vol.Optional("month", default=""): str}))
     hass.services.async_register(DOMAIN, "boiler_override",        boiler_override)
+    hass.services.async_register(DOMAIN, "boiler_send_now",        boiler_send_now,
+        schema=vol.Schema({vol.Required("entity_id"): str, vol.Optional("on", default=True): bool, vol.Optional("setpoint_c"): vol.Coerce(float)}))
+    hass.services.async_register(DOMAIN, "boiler_pause_boost",     boiler_pause_boost,
+        schema=vol.Schema({vol.Required("entity_id"): str, vol.Optional("seconds", default=3600.0): vol.Coerce(float)}))
+    hass.services.async_register(DOMAIN, "boiler_resume_boost",    boiler_resume_boost,
+        schema=vol.Schema({vol.Required("entity_id"): str}))
     hass.services.async_register(DOMAIN, "set_boiler_setpoint",    set_boiler_setpoint,
         schema=vol.Schema({
             vol.Required("entity_id"): str,

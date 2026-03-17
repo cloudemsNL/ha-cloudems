@@ -161,6 +161,7 @@ async def async_setup_entry(
         CloudEMSInsightsSensor(coordinator, entry),
         CloudEMSDecisionLogSensor(coordinator, entry),
         CloudEMSBoilerStatusSensor(coordinator, entry),
+        CloudEMSClimateEpexStatusSensor(coordinator, entry),
         CloudEMSPoolStatusSensor(coordinator, entry),
         # v4.6.89: eigen recorder-sensoren voor waarden die anders alleen uit externe
         # entities komen — altijd beschikbaar ook als cloud/device tijdelijk offline is
@@ -933,6 +934,48 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
                                data.get("decision_log", [])
                                if d.get("category") == "boiler"][:5],
             "_seq":           getattr(self.coordinator, "_coordinator_tick", 0),
+        }
+
+
+class CloudEMSClimateEpexStatusSensor(CoordinatorEntity, SensorEntity):
+    """Sensor: Climate EPEX Compensatie status."""
+    _attr_name = "CloudEMS Klimaat EPEX Status"
+    _attr_icon = "mdi:thermostat-auto"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_climate_epex_status"
+        self.entity_id = "sensor.cloudems_climate_epex_status"
+
+    @property
+    def device_info(self): return _device_info(self._entry)
+
+    @property
+    def native_value(self):
+        devices = (self.coordinator.data or {}).get("climate_epex_status", [])
+        if not devices:
+            return "inactief"
+        active = [d for d in devices if d.get("is_on")]
+        offsets = [d for d in devices if abs(d.get("applied_offset", 0)) > 0.05]
+        if offsets:
+            modes = set(d["mode"] for d in offsets)
+            if "cheap" in modes:
+                return f"{len(active)} actief · voorladen"
+            elif "dear" in modes:
+                return f"{len(active)} actief · bezuinigen"
+        return f"{len(active)}/{len(devices)} actief"
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        devices = data.get("climate_epex_status", [])
+        return {
+            "devices":      devices,
+            "total_power_w": data.get("climate_epex_power_w", 0.0),
+            "device_count": len(devices),
+            "active_count": sum(1 for d in devices if d.get("is_on")),
+            "offset_active": any(abs(d.get("applied_offset", 0)) > 0.05 for d in devices),
         }
 
 
@@ -4995,6 +5038,8 @@ class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
             "seasonal_forecast_m3": ga.get("seasonal_forecast_m3"),
             # Dagrecords voor drill-down (laatste 30 dagen)
             "day_records":          ga.get("day_records", []),
+            # v4.6.388: fibonacci m³/uur resultaten (server-berekend, veilig formaat)
+            "gas_fib_hours":        g.get("gas_fib_hours", []),
         }
         return attrs
 

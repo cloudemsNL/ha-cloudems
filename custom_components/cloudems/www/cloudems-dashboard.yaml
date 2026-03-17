@@ -911,6 +911,69 @@ views:
     card_mod:
       style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
         \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
+- title: Klimaat EPEX
+  path: cloudems-klimaat-epex
+  type: masonry
+  max_columns: 2
+  icon: "mdi:heat-pump"
+  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(56,189,248,0.07) 0%, transparent 60%), rgb(24,24,24)
+  card_mod:
+    style: "hui-view { padding: 12px 12px 24px !important; }\n"
+  cards:
+  - *id001
+  - type: custom:cloudems-climate-epex-card
+    title: "❄️ Airco & Warmtepomp EPEX"
+    sensor: sensor.cloudems_climate_epex_status
+    price_sensor: sensor.cloudems_price_current_hour
+  - type: markdown
+    title: "📊 EPEX Prijssturing — Uitleg"
+    content: |
+      **Hoe werkt de EPEX-sturing?**
+
+      CloudEMS past kleine temperatuuroffsets toe op basis van de EPEX-spotprijs:
+
+      | Situatie | Warmtepomp | Airco |
+      |---|---|---|
+      | 🟢 **Goedkoop uur** (< 85% daggemiddelde) | +offset (voorverwarmen) | −offset (voorkoelen) |
+      | ⚪ **Neutraal** | geen offset | geen offset |
+      | 🔴 **Duur uur** (> 120% daggemiddelde) | −offset (zuiniger) | +offset (minder koelen) |
+
+      De module **leert** wanneer jij verwarmt/koelt en past offsets alleen toe als het apparaat actief is.
+      Basissetpoints worden per apparaat en per uur van de dag bijgehouden via EMA-leren.
+
+      💡 *Configureer apparaten via Instellingen → CloudEMS → Klimaatbeheer → Airco/WP EPEX.*
+    card_mod:
+      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
+  - type: markdown
+    title: "🔧 Geconfigureerde Apparaten"
+    content: >
+      {% set s = state_attr('sensor.cloudems_climate_epex_status', 'devices') or [] %}
+      {% if not s %}
+      ⚙️ *Geen apparaten geconfigureerd. Ga naar **Instellingen → CloudEMS → 🌡️ Klimaatbeheer** en kies Airco/WP EPEX.*
+      {% else %}
+      | Apparaat | Type | Modus | Actie | Setpoint | Offset | Vermogen |
+      |---|---|---|---|---|---|---|
+      {% for d in s %}
+      {% set type_map = {'heat_pump':'🔥 WP', 'airco':'❄️ Airco', 'hybrid':'🔄 Hybride'} %}
+      {% set mode_map = {'cheap':'🟢 Goedkoop', 'dear':'🔴 Duur', 'neutral':'⚪ Neutraal', 'off':'⚫ Uit'} %}
+      {% set act_map  = {'heating':'🔴 Verwarmt', 'cooling':'🔵 Koelt', 'idle':'✅ Stand-by', 'off':'⚫ Uit'} %}
+      | **{{ d.label or d.entity_id }}** | {{ type_map.get(d.device_type, d.device_type) }} | {{ mode_map.get(d.mode, d.mode) }} | {{ act_map.get(d.action, d.action) }} | {{ d.target_temp or '—' }}°C | {{ '%+.1f'|format(d.applied_offset or 0) }}°C | {{ d.power_w|round(0)|int if d.power_w else '—' }}W |
+      {% endfor %}
+      {% endif %}
+    card_mod:
+      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
+  - type: markdown
+    content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
+      \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_status','version')\
+      \ or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n    </div>\n  </div>\n\
+      \  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\">\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
+      \ solid rgba(239,68,68,0.4);color:#f87171;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">🐛 Bug melden</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\"\
+      \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
+      \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
+    card_mod:
+      style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
+        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
+
 - title: EV & Mobiliteit
   path: cloudems-mobiliteit
   type: masonry
