@@ -461,17 +461,13 @@
         "description": "CloudEMS found {provider_count} vendor-managed battery integration(s): **{detected_providers}**.\n\nThese batteries are already controlled by the vendor. CloudEMS can supplement the control — opt-in only, so you stay in control.\n\nYou can change this later via Settings → Integrations → CloudEMS → Configure.",
         "data": {
           "zonneplan_enabled": "Enable Zonneplan Nexus control",
-          "zonneplan_restore_mode": "Auto-restore to previous mode",
-          "zonneplan_restore_after_min": "Restore time (min, 0 = never)",
           "zonneplan_min_soc": "Min. SoC for discharge (%)",
           "zonneplan_max_soc": "Max. SoC for charge (%)",
           "zonneplan_charge_w": "Default charge power (W)",
           "zonneplan_discharge_w": "Default discharge power (W)"
         },
         "data_description": {
-          "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
-          "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore."
+          "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}"
         }
       },
       "shutter_count": {
@@ -908,8 +904,6 @@
         "description": "Found: **{detected_providers}**\n\nAdjust opt-in control settings. CloudEMS never permanently overrides vendor control.",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus control",
-          "zonneplan_restore_mode": "Auto-restore to previous mode",
-          "zonneplan_restore_after_min": "Restore time (minutes)",
           "zonneplan_min_soc": "Min. SoC discharge (%)",
           "zonneplan_max_soc": "Max. SoC charge (%)",
           "zonneplan_charge_w": "Charge power (W)",

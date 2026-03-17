@@ -292,7 +292,14 @@
       },
       "advanced": {
         "title": "📡 Slimme meter",
-        "description": "CloudEMS detecteert je P1-bron automatisch."
+        "description": "CloudEMS detecteert je P1-bron automatisch.",
+        "data": {
+          "influxdb_url": "InfluxDB URL (optioneel, bijv. http://192.168.1.x:8086)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisatie",
+          "influxdb_bucket": "InfluxDB Bucket (standaard: cloudems)",
+          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)"
+        }
       },
       "p1_config": {
         "title": "📡 P1 slimme meter",
@@ -522,8 +529,6 @@
         "description": "CloudEMS heeft {provider_count} leverancier-gebonden batterij-integratie(s) gevonden: **{detected_providers}**.\n\nDeze batterijen worden al aangestuurd door de leverancier. CloudEMS kan de sturing aanvullen — als opt-in, zodat jij altijd de controle behoudt.\n\nJe kunt dit later aanpassen via Instellingen → Integraties → CloudEMS → Configureren.",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus sturing inschakelen",
-          "zonneplan_restore_mode": "Auto-herstel naar vorige modus",
-          "zonneplan_restore_after_min": "Hersteltijd (min, 0 = nooit)",
           "zonneplan_min_soc": "Min. SoC voor ontladen (%)",
           "zonneplan_max_soc": "Max. SoC voor laden (%)",
           "zonneplan_charge_w": "Standaard laadvermogen (W)",
@@ -532,12 +537,11 @@
           "zonneplan_ev_block_w": "EV-blokker drempel (W, 0 = uit)",
           "zonneplan_house_sensor": "Huisverbruik sensor (anti-rondpomp)",
           "zonneplan_min_house_load_w": "Min. huisverbruik voor ontladen (W)",
-          "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)"
+          "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)",
+          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
-          "zonneplan_restore_mode": "CloudEMS herstelt automatisch de vorige modus (bijv. Powerplay) na de ingestelde tijd.",
-          "zonneplan_restore_after_min": "0 = nooit automatisch herstellen.",
           "zonneplan_ev_sensor": "Sensor voor het EV-laadpaalvermogen. Laat leeg om de EV-blokker uit te schakelen.",
           "zonneplan_ev_block_w": "Als de EV-laadpaal meer verbruikt dan deze waarde, wordt ontladen geblokkeerd. 0 = EV-blokker uitgeschakeld.",
           "zonneplan_house_sensor": "Sensor voor het totale huisverbruik. Laat leeg om anti-rondpomp uit te schakelen.",
@@ -714,7 +718,12 @@
           "outside_temp_entity": "Buitentemperatuursensor (voor warmtevraag)",
           "battery_degradation_enabled": "Batterijdegradatie bijhouden",
           "congestion_enabled": "Netcongestiedetectie inschakelen",
-          "dsmr_source": "Meterbron"
+          "dsmr_source": "Meterbron",
+          "influxdb_url": "InfluxDB URL (optioneel, bijv. http://192.168.1.x:8086)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisatie",
+          "influxdb_bucket": "InfluxDB Bucket (standaard: cloudems)",
+          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)"
         },
         "data_description": {
           "congestion_threshold_w": "Importvermogen waarboven congestie wordt gemeld. Typisch gelijk aan het capaciteitstarief limiet.",
@@ -1028,11 +1037,9 @@
       },
       "managed_battery_opts": {
         "title": "🔋 Batterijen — Stap 1: Beheerde providers ({provider_count} gevonden)",
-        "description": "Gevonden: **{detected_providers}**\n\nCloudEMS overschrijft de leverancier-sturing **tijdelijk** — nooit permanent.\n\n**Auto-herstel:** als CloudEMS de batterijmodus aanpast (bijv. 'laad nu goedkoop'), keert hij na de ingestelde tijd automatisch terug naar de vorige modus. Zo blijft de Zonneplan-app altijd in controle als CloudEMS klaar is.\n\n*Volgende stap: hardware batterijen (SOC-sensor enz.)*",
+        "description": "Gevonden: **{detected_providers}**\n\nCloudEMS overschrijft de leverancier-sturing **tijdelijk** — nooit permanent.\n\n*Volgende stap: hardware batterijen (SOC-sensor enz.)*",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus sturing",
-          "zonneplan_restore_mode": "Auto-herstel naar vorige modus",
-          "zonneplan_restore_after_min": "Hersteltijd (minuten)",
           "zonneplan_min_soc": "Min. SoC ontladen (%)",
           "zonneplan_max_soc": "Max. SoC laden (%)",
           "zonneplan_charge_w": "Laadvermogen (W)",
@@ -1041,7 +1048,8 @@
           "zonneplan_ev_block_w": "EV-blokker drempel (W, 0 = uit)",
           "zonneplan_house_sensor": "Huisverbruik sensor (anti-rondpomp)",
           "zonneplan_min_house_load_w": "Min. huisverbruik voor ontladen (W)",
-          "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)"
+          "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)",
+          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",

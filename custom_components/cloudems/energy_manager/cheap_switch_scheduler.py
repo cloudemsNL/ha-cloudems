@@ -179,10 +179,14 @@ class CheapSwitchScheduler:
             domain = cfg.entity_id.split(".")[0]
             service = "turn_on"
             try:
-                await self._hass.services.async_call(
-                    domain, service,
-                    {"entity_id": cfg.entity_id},
-                    blocking=False,
+                from .command_verify import send_and_verify
+                _exp = "on" if service == "turn_on" else "off"
+                await send_and_verify(
+                    self._hass, domain, service, {"entity_id": cfg.entity_id},
+                    entity_id=cfg.entity_id,
+                    verify_fn=lambda s, e=_exp: s.state == e,
+                    description=f"goedkope uren {cfg.entity_id} → {_exp}",
+                    max_attempts=3, verify_delay=3.0,
                 )
                 self._last_triggered[cfg.entity_id] = now_ts
                 _LOGGER.info(

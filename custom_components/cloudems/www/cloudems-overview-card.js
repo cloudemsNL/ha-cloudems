@@ -17,13 +17,15 @@ const CSS = `
   *{box-sizing:border-box;margin:0;padding:0;}
   .card{background:var(--bg);border-radius:var(--r);border:1px solid var(--bdr);overflow:hidden;font-family:var(--sans);width:100%;box-sizing:border-box;}
 
-  /* NAV */
-  .nav{display:flex;background:var(--surf);border-bottom:1px solid var(--bdr);overflow-x:auto;scrollbar-width:none;}
+  /* NAV — zelfde stijl als solar card */
+  .nav{display:flex;gap:6px;padding:10px 12px 0;background:rgba(0,0,0,.3);border-bottom:2px solid rgba(255,255,255,.06);overflow-x:auto;scrollbar-width:none;}
   .nav::-webkit-scrollbar{display:none;}
-  .nav-btn{flex:none;padding:10px 14px;font-size:11px;font-weight:700;color:var(--sub);cursor:pointer;white-space:nowrap;
-    border-bottom:2px solid transparent;transition:all .2s;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--sans);}
-  .nav-btn:hover{color:var(--txt);background:rgba(255,255,255,.04);}
-  .nav-btn.active{color:var(--ind);border-bottom-color:var(--ind);}
+  .nav-btn{flex:none;padding:9px 10px 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--sub);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+    border-bottom:3px solid transparent;border-radius:8px 8px 0 0;cursor:pointer;
+    transition:all .15s;white-space:nowrap;font-family:var(--sans);}
+  .nav-btn:hover{color:var(--txt);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.15);}
+  .nav-btn.active{color:var(--ind);background:rgba(129,140,248,.1);border-color:rgba(129,140,248,.25);border-bottom-color:var(--ind);font-size:12px;}
 
   /* HEADER */
   .hdr{display:flex;align-items:center;gap:10px;padding:14px 18px 12px;border-bottom:1px solid var(--bdr);

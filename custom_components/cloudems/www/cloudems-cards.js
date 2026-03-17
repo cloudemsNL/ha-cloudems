@@ -890,9 +890,15 @@
       this._initDots(pipeKeys);
 
       // ── SVG helpers ───────────────────────────────────────────────────────
-      const pipe = (x1, y1, x2, y2, color, on) =>
-        `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-          stroke="${color}" stroke-width="2.5" stroke-linecap="round" opacity="${on ? .32 : .15}"/>`;
+      // Sankey-stijl: lijnbreedte proportioneel aan vermogen (W)
+      // power_w=0 → breedte 1.5px (inactief), max 8px bij >5000W
+      const pipe = (x1, y1, x2, y2, color, on, power_w=0) => {
+        const pw = Math.abs(power_w||0);
+        const sw = on ? Math.max(1.5, Math.min(8, 1.5 + pw/800)) : 1.5;
+        const op = on ? Math.max(0.5, Math.min(0.95, 0.3 + pw/6000)) : 0.15;
+        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
+          stroke="${color}" stroke-width="${sw.toFixed(1)}" stroke-linecap="round" opacity="${op.toFixed(2)}"/>`;
+      };
 
       const arw = (x1, y1, x2, y2, color, on) => {
         if (!on) return '';
@@ -1700,8 +1706,8 @@
       // Find full device data from nilm sensor for extra fields
       const allDevs = h?.states['sensor.cloudems_nilm_devices']?.attributes?.device_list || [];
       const running = h?.states['sensor.cloudems_nilm_running_devices']?.attributes?.device_list || [];
-      const fullDev = allDevs.find(d => (d.name||'').toLowerCase() === name.toLowerCase())
-                   || running.find(d => (d.name||'').toLowerCase() === name.toLowerCase())
+      const fullDev = allDevs.find(d => (d.name||'').toLowerCase() === name.toLowerCase() || (d.user_name||'').toLowerCase() === name.toLowerCase())
+                   || running.find(d => (d.name||'').toLowerCase() === name.toLowerCase() || (d.user_name||'').toLowerCase() === name.toLowerCase())
                    || {};
 
       const isExcluded  = fullDev.exclude_from_balance || false;
@@ -1718,6 +1724,28 @@
 
       const nidSafe = `nilm_${name.replace(/[^a-zA-Z0-9]/g,'_')}`;
 
+      // Energy + runtime uit fullDev
+      const todayKwh     = fullDev.today_kwh     || 0;
+      const yesterdayKwh = fullDev.yesterday_kwh  || 0;
+      const totalOnSec   = fullDev.total_on_seconds || 0;
+      const sessionCnt   = fullDev.session_count   || 0;
+      const avgDurMin    = fullDev.avg_duration_min || 0;
+      const activeH      = Math.floor(totalOnSec / 3600);
+      const activeM      = Math.floor((totalOnSec % 3600) / 60);
+      const activeStr    = activeH > 0 ? `${activeH}u ${activeM}m` : `${activeM}m`;
+      const roomDisp     = fullDev.room || room || '—';
+
+      // Mini sparkline uit _hist
+      const sparkKey = `nilm_${name.replace(/[^a-z0-9]/gi,'_')}`;
+      const hist = this._hist[sparkKey] || [];
+      const maxH2 = Math.max(...hist, 1);
+      const sparkSvg = hist.length > 2 ? `
+        <svg width="100%" height="28" viewBox="0 0 ${hist.length} 28" preserveAspectRatio="none" style="display:block;margin:4px 0">
+          <polyline points="${hist.map((v,i)=>`${i},${28-Math.round(v/maxH2*26)}`).join(' ')}"
+            fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"
+            style="filter:drop-shadow(0 0 2px ${color})"/>
+        </svg>` : '<div style="font-size:10px;color:rgba(255,255,255,.3);padding:4px 0">Onvoldoende data voor grafiek</div>';
+
       panel.innerHTML = `<div class="dp">
         <div class="dp-hdr">
           <span class="dp-title" style="color:${color}">
@@ -1730,12 +1758,34 @@
           <div class="dp-metric"><div class="dp-ml">Fase</div><div class="dp-mv" style="color:${phCol(phase)}">${phase}</div></div>
           <div class="dp-metric"><div class="dp-ml">Type</div><div class="dp-mv" style="font-size:11px">${type}</div></div>
           <div class="dp-metric"><div class="dp-ml">On events</div><div class="dp-mv">${events}×</div></div>
-          <div class="dp-metric"><div class="dp-ml">Kamer</div><div class="dp-mv" style="font-size:11px">${room}</div></div>
+          <div class="dp-metric"><div class="dp-ml">Kamer</div><div class="dp-mv" style="font-size:11px">${roomDisp}</div></div>
           <div class="dp-metric"><div class="dp-ml">Status</div><div class="dp-mv" style="font-size:11px;color:${confirmed?'#34d399':'#fbbf24'}">${confirmed?'✓ Bevestigd':'Lerend'}</div></div>
         </div>
+        <div style="padding:4px 10px 0;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 8px;text-align:center">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">VANDAAG</div>
+            <div style="font-size:13px;font-weight:700;color:${color}">${todayKwh.toFixed(2)} kWh</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 8px;text-align:center">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">GISTEREN</div>
+            <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.6)">${yesterdayKwh.toFixed(2)} kWh</div>
+          </div>
+          <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:6px 8px;text-align:center">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">ACTIEF</div>
+            <div style="font-size:13px;font-weight:700;color:rgba(255,255,255,.7)">${activeStr}</div>
+          </div>
+        </div>
+        <div style="padding:6px 10px 2px">
+          <div style="font-size:9px;color:rgba(255,255,255,.35);margin-bottom:2px">VERMOGEN LAATSTE MINUTEN</div>
+          ${sparkSvg}
+        </div>
         <div style="padding:0 10px 6px">
-          <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.4);margin-bottom:3px"><span>Betrouwbaarheid</span><span style="color:${confCol}">${conf}%</span></div>
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.4);margin-bottom:3px">
+            <span>Betrouwbaarheid</span>
+            <span style="color:${confCol}">${conf}%</span>
+          </div>
           <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div style="height:100%;width:${conf}%;background:${confCol};border-radius:2px"></div></div>
+          ${sessionCnt>0?`<div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:4px">${sessionCnt} sessies · gem. ${avgDurMin} min/sessie</div>`:''}
         </div>
         ${excBadge}
         <div class="dp-note" id="nf-${nidSafe}"></div>

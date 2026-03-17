@@ -292,7 +292,14 @@
       },
       "advanced": {
         "title": "📡 Smart meter",
-        "description": "CloudEMS auto-detects your P1 source."
+        "description": "CloudEMS auto-detects your P1 source.",
+        "data": {
+          "influxdb_url": "InfluxDB URL (optional, e.g. http://192.168.1.x:8086)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisation",
+          "influxdb_bucket": "InfluxDB Bucket (default: cloudems)",
+          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)"
+        }
       },
       "p1_config": {
         "title": "📡 P1 smart meter",
@@ -509,8 +516,6 @@
         "description": "CloudEMS found {provider_count} vendor-managed battery integration(s): **{detected_providers}**.\n\nThese batteries are already controlled by the vendor. CloudEMS can supplement the control — opt-in only, so you stay in control.\n\nYou can change this later via Settings → Integrations → CloudEMS → Configure.",
         "data": {
           "zonneplan_enabled": "Enable Zonneplan Nexus control",
-          "zonneplan_restore_mode": "Auto-restore to previous mode",
-          "zonneplan_restore_after_min": "Restore time (min, 0 = never)",
           "zonneplan_min_soc": "Min. SoC for discharge (%)",
           "zonneplan_max_soc": "Max. SoC for charge (%)",
           "zonneplan_charge_w": "Default charge power (W)",
@@ -519,12 +524,11 @@
           "zonneplan_ev_block_w": "EV blocker threshold (W, 0 = off)",
           "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
           "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
-          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)"
+          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)",
+          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
-          "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore.",
           "zonneplan_ev_sensor": "Sensor for EV charger power. Leave empty to disable the EV blocker.",
           "zonneplan_ev_block_w": "If the EV charger consumes more than this value, discharge is blocked. 0 = EV blocker disabled.",
           "zonneplan_house_sensor": "Sensor for total house consumption. Leave empty to disable anti-roundtrip.",
@@ -714,7 +718,12 @@
           "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
           "battery_degradation_enabled": "Track battery degradation",
           "congestion_enabled": "Enable grid congestion detection",
-          "dsmr_source": "Meter source"
+          "dsmr_source": "Meter source",
+          "influxdb_url": "InfluxDB URL (optional, e.g. http://192.168.1.x:8086)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisation",
+          "influxdb_bucket": "InfluxDB Bucket (default: cloudems)",
+          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
@@ -1033,8 +1042,6 @@
         "description": "Found: **{detected_providers}**\n\nAdjust opt-in control settings. CloudEMS never permanently overrides vendor control.",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus control",
-          "zonneplan_restore_mode": "Auto-restore to previous mode",
-          "zonneplan_restore_after_min": "Restore time (minutes)",
           "zonneplan_min_soc": "Min. SoC discharge (%)",
           "zonneplan_max_soc": "Max. SoC charge (%)",
           "zonneplan_charge_w": "Charge power (W)",
@@ -1043,7 +1050,8 @@
           "zonneplan_ev_block_w": "EV blocker threshold (W, 0 = off)",
           "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
           "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
-          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)"
+          "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)",
+          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",

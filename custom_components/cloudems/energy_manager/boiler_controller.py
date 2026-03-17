@@ -1669,6 +1669,22 @@ class BoilerController:
                 )
                 _boost_cheap_ok_h = _boost_allowed and not _boost_green_ok_h
 
+                # v4.6.298: HYBRID BOOST verboden als gas goedkoper is dan weerstandselement.
+                # Weerstandselement (BOOST) = 100% efficiëntie → elec_cost per kWh_th = _current_price
+                # Gas (CV)                  = GAS_BOILER_EFF_BOILER efficiëntie → _gas_th
+                # Als gas goedkoper: gebruik altijd GREEN (WP), nooit BOOST (weerstand).
+                _elec_resist_th_h = _current_price  # weerstandselement, COP=1
+                _gas_cheaper_than_boost_h = (
+                    b.has_gas_heating == "yes"
+                    and _elec_resist_th_h > _gas_th + GAS_VS_ELEC_MARGIN
+                    and not _is_negative
+                )
+                if _gas_cheaper_than_boost_h:
+                    # Blokkeer BOOST — weerstandselement is duurder dan gas
+                    _boost_cheap_ok_h = False
+                    _boost_by_surplus_h = _boost_by_surplus_h  # surplus override blijft
+                    # _boost_needed_h blijft — boven GREEN-cap mag altijd
+
                 if _boost_by_surplus_h or _boost_by_price_h or _boost_needed_h or _boost_cheap_ok_h:
                     b.force_green = False  # boost actief
                     if _above_green_max_h and not (_boost_by_surplus_h or _boost_by_price_h):

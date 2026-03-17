@@ -294,7 +294,12 @@
         "title": "📡 P1 smart meter",
         "description": "Optionally connect a P1/DSMR smart meter directly via TCP. Most users already have P1 data via the DSMR integration — only enable this if you want a direct TCP connection.",
         "data": {
-          "p1_enabled": "Enable direct P1 TCP connection"
+          "p1_enabled": "Enable direct P1 TCP connection",
+          "influxdb_url": "URL InfluxDB (optionnel)",
+          "influxdb_token": "Token API InfluxDB",
+          "influxdb_org": "Organisation InfluxDB",
+          "influxdb_bucket": "Bucket InfluxDB (défaut: cloudems)",
+          "cloud_cover_sensor": "Capteur couverture nuageuse (%, optionnel)"
         }
       },
       "p1_config": {
@@ -518,8 +523,6 @@
         "description": "CloudEMS a trouvé {provider_count} intégration(s) de batterie gérée par fournisseur : **{detected_providers}**.\n\nCes batteries sont déjà contrôlées par le fournisseur. CloudEMS peut compléter le contrôle — opt-in uniquement.",
         "data": {
           "zonneplan_enabled": "Activer le contrôle Zonneplan Nexus",
-          "zonneplan_restore_mode": "Restaurer automatiquement le mode précédent",
-          "zonneplan_restore_after_min": "Délai de restauration (min, 0 = jamais)",
           "zonneplan_min_soc": "SoC min. décharge (%)",
           "zonneplan_max_soc": "SoC max. charge (%)",
           "zonneplan_charge_w": "Puissance de charge par défaut (W)",
@@ -528,12 +531,11 @@
           "zonneplan_ev_block_w": "Seuil bloqueur EV (W, 0 = désactivé)",
           "zonneplan_house_sensor": "Capteur consommation maison (anti-pompage)",
           "zonneplan_min_house_load_w": "Consommation min. maison pour décharge (W)",
-          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)"
+          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)",
+          "zonneplan_auto_forecast": "Piloter automatiquement par groupe tarifaire"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
-          "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore.",
           "zonneplan_ev_sensor": "Capteur pour la puissance de la borne EV. Laisser vide pour désactiver le bloqueur EV.",
           "zonneplan_ev_block_w": "Si la borne EV consomme plus que cette valeur, la décharge est bloquée. 0 = bloqueur EV désactivé.",
           "zonneplan_house_sensor": "Capteur pour la consommation totale de la maison. Laisser vide pour désactiver l'anti-pompage.",
@@ -724,7 +726,12 @@
           "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
           "battery_degradation_enabled": "Suivre la dégradation de la batterie",
           "congestion_enabled": "Enable grid congestion detection",
-          "dsmr_source": "Source compteur"
+          "dsmr_source": "Source compteur",
+          "influxdb_url": "URL InfluxDB (optionnel)",
+          "influxdb_token": "Token API InfluxDB",
+          "influxdb_org": "Organisation InfluxDB",
+          "influxdb_bucket": "Bucket InfluxDB (défaut: cloudems)",
+          "cloud_cover_sensor": "Capteur couverture nuageuse (%, optionnel)"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
@@ -1044,8 +1051,6 @@
         "description": "Trouvées : **{detected_providers}**",
         "data": {
           "zonneplan_enabled": "Contrôle Zonneplan Nexus",
-          "zonneplan_restore_mode": "Restauration automatique",
-          "zonneplan_restore_after_min": "Délai de restauration (minutes)",
           "zonneplan_min_soc": "SoC min. (%)",
           "zonneplan_max_soc": "SoC max. (%)",
           "zonneplan_charge_w": "Puissance charge (W)",
@@ -1054,7 +1059,8 @@
           "zonneplan_ev_block_w": "Seuil bloqueur EV (W, 0 = désactivé)",
           "zonneplan_house_sensor": "Capteur consommation maison (anti-pompage)",
           "zonneplan_min_house_load_w": "Consommation min. maison pour décharge (W)",
-          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)"
+          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)",
+          "zonneplan_auto_forecast": "Piloter automatiquement par groupe tarifaire"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",

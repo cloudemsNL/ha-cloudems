@@ -56,9 +56,10 @@ class CloudEMSHomeCard extends HTMLElement {
 .hdr-sub{font-size:10px;color:rgba(255,255,255,0.35);margin-top:1px}
 .hdr-grid{font-size:18px;font-weight:700;text-align:right}
 .hdr-lbl{font-size:10px;color:rgba(255,255,255,0.35);text-align:right}
-.tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,0.07)}
-.tab{flex:0 0 auto;padding:6px 10px;font-size:10px;font-weight:600;text-align:center;cursor:pointer;color:rgba(255,255,255,0.3);border-bottom:2px solid transparent;transition:all 0.15s;white-space:nowrap}
-.tab.active{color:#fff;border-bottom-color:#EF9F27}
+.tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px 0;background:rgba(0,0,0,.3);border-bottom:2px solid rgba(255,255,255,.06)}
+.tab{flex:0 0 auto;padding:7px 9px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;text-align:center;cursor:pointer;color:rgba(255,255,255,.35);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-bottom:3px solid transparent;border-radius:7px 7px 0 0;transition:all .15s;white-space:nowrap}
+.tab:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.15)}
+.tab.active{color:#EF9F27;background:rgba(239,159,39,.1);border-color:rgba(239,159,39,.25);border-bottom-color:#EF9F27;font-size:11px}
 .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06)}
 .sc{background:rgb(22,22,22);padding:10px 13px;cursor:pointer;transition:background 0.15s}
 .sc:hover{background:rgb(30,30,30)}

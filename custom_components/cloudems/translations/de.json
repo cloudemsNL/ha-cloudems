@@ -290,7 +290,12 @@
         "title": "📡 P1 Smart Meter",
         "description": "Optional: direkte P1/DSMR-Verbindung. Nur aktivieren bei direkter TCP-Verbindung.",
         "data": {
-          "p1_enabled": "Direkte P1-Verbindung aktivieren"
+          "p1_enabled": "Direkte P1-Verbindung aktivieren",
+          "influxdb_url": "InfluxDB URL (optional)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisation",
+          "influxdb_bucket": "InfluxDB Bucket (Standard: cloudems)",
+          "cloud_cover_sensor": "Bewölkungssensor (%, optional)"
         }
       },
       "p1_config": {
@@ -491,8 +496,6 @@
         "description": "CloudEMS hat {provider_count} anbieterverwaltete Batterie-Integration(en) gefunden: **{detected_providers}**.\n\nDiese Batterien werden bereits vom Anbieter gesteuert. CloudEMS kann die Steuerung ergänzen — nur als Opt-in.",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus-Steuerung aktivieren",
-          "zonneplan_restore_mode": "Automatisch zum vorherigen Modus zurücksetzen",
-          "zonneplan_restore_after_min": "Wiederherstellungszeit (Min., 0 = nie)",
           "zonneplan_min_soc": "Min. SoC Entladen (%)",
           "zonneplan_max_soc": "Max. SoC Laden (%)",
           "zonneplan_charge_w": "Standard-Ladeleistung (W)",
@@ -501,12 +504,11 @@
           "zonneplan_ev_block_w": "EV-Sperre-Schwellenwert (W, 0 = aus)",
           "zonneplan_house_sensor": "Hausverbrauchssensor (Anti-Rundpumpen)",
           "zonneplan_min_house_load_w": "Mindest-Hausverbrauch zum Entladen (W)",
-          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)"
+          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)",
+          "zonneplan_auto_forecast": "Automatisch nach Tarifgruppe steuern"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
-          "zonneplan_restore_mode": "CloudEMS automatically restores the previous mode (e.g. Powerplay) after the set time.",
-          "zonneplan_restore_after_min": "0 = never automatically restore.",
           "zonneplan_ev_sensor": "Sensor für die EV-Ladeleistung. Leer lassen um die EV-Sperre zu deaktivieren.",
           "zonneplan_ev_block_w": "Wenn der EV-Ladepunkt mehr als diesen Wert verbraucht, wird das Entladen gesperrt. 0 = EV-Sperre deaktiviert.",
           "zonneplan_house_sensor": "Sensor für den gesamten Hausverbrauch. Leer lassen um Anti-Rundpumpen zu deaktivieren.",
@@ -717,7 +719,12 @@
           "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
           "battery_degradation_enabled": "Track battery degradation",
           "congestion_enabled": "Enable grid congestion detection",
-          "dsmr_source": "Messdatenquelle"
+          "dsmr_source": "Messdatenquelle",
+          "influxdb_url": "InfluxDB URL (optional)",
+          "influxdb_token": "InfluxDB API Token",
+          "influxdb_org": "InfluxDB Organisation",
+          "influxdb_bucket": "InfluxDB Bucket (Standard: cloudems)",
+          "cloud_cover_sensor": "Bewölkungssensor (%, optional)"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
@@ -1055,8 +1062,6 @@
         "description": "Gefunden: **{detected_providers}**",
         "data": {
           "zonneplan_enabled": "Zonneplan Nexus-Steuerung",
-          "zonneplan_restore_mode": "Auto-Wiederherstellung",
-          "zonneplan_restore_after_min": "Wiederherstellungszeit (Minuten)",
           "zonneplan_min_soc": "Min. SoC (%)",
           "zonneplan_max_soc": "Max. SoC (%)",
           "zonneplan_charge_w": "Ladeleistung (W)",
@@ -1065,7 +1070,8 @@
           "zonneplan_ev_block_w": "EV-Sperre-Schwellenwert (W, 0 = aus)",
           "zonneplan_house_sensor": "Hausverbrauchssensor (Anti-Rundpumpen)",
           "zonneplan_min_house_load_w": "Mindest-Hausverbrauch zum Entladen (W)",
-          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)"
+          "zonneplan_soc_reserve_high": "SoC-Reserve bei mehreren HIGH-Stunden (%)",
+          "zonneplan_auto_forecast": "Automatisch nach Tarifgruppe steuern"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",

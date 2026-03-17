@@ -38,7 +38,43 @@ const SOL_STYLES = `
   .sec{border-top:1px solid var(--sl-border);padding:12px 16px;}
   .sec-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--sl-muted);margin-bottom:8px;}
   .yield-section{padding:12px 18px 0;border-bottom:1px solid var(--sl-border);}
-  .yield-grid{display:flex;gap:2px;align-items:flex-end;height:48px;}
+  .fc-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .fc-nav-btn{background:none;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:var(--sl-font);}
+  .fc-nav-btn:hover{border-color:rgba(255,255,255,.3);color:#fff;}
+  .fc-nav-lbl{text-align:center;}
+  .fc-nav-day{font-size:12px;font-weight:700;color:var(--sl-text);}
+  .fc-nav-sub{font-size:9px;color:#3d5229;}
+  .fc-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:8px;}
+  .fc-stat{background:rgba(255,255,255,.04);border-radius:5px;padding:4px 6px;text-align:center;}
+  .fc-stat-l{font-size:8px;color:rgba(255,255,255,.35);margin-bottom:1px;}
+  .fc-stat-v{font-size:11px;font-weight:700;}
+  .fc-legend{display:flex;gap:10px;margin-bottom:6px;}
+  .fc-leg{display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.4);}
+  .fc-leg-dot{width:8px;height:5px;border-radius:1px;}
+  .fc-bars{display:flex;align-items:flex-end;gap:1px;height:60px;position:relative;}
+  .fc-grp{display:flex;align-items:flex-end;gap:0;flex:1;position:relative;}
+  .fc-bar{border-radius:1px 1px 0 0;transition:height .3s;}
+  .fc-now{position:absolute;top:0;bottom:0;left:50%;width:1px;background:#f0c040;z-index:3;}
+  .fc-now-dot{width:5px;height:5px;border-radius:50%;background:#f0c040;position:absolute;top:-2px;left:-2px;}
+  .fc-xlbl{display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.2);padding:2px 0 6px;}
+    .fc-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+  .fc-nav-btn{background:none;border:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.4);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:var(--sl-font);}
+  .fc-nav-btn:hover{border-color:rgba(255,255,255,.3);color:#fff;}
+  .fc-nav-day{font-size:12px;font-weight:700;color:var(--sl-text);text-align:center;}
+  .fc-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:7px;}
+  .fc-stat{background:rgba(255,255,255,.04);border-radius:5px;padding:4px 6px;text-align:center;}
+  .fc-stat-l{font-size:8px;color:rgba(255,255,255,.35);margin-bottom:1px;}
+  .fc-stat-v{font-size:11px;font-weight:700;}
+  .fc-legend{display:flex;gap:10px;margin-bottom:5px;}
+  .fc-leg{display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.4);}
+  .fc-leg-dot{width:8px;height:5px;border-radius:1px;}
+  .fc-bars{display:flex;align-items:flex-end;gap:1px;height:60px;position:relative;}
+  .fc-grp{display:flex;align-items:flex-end;flex:1;position:relative;}
+  .fc-bar{border-radius:1px 1px 0 0;}
+  .fc-now{position:absolute;top:0;bottom:0;left:50%;width:1px;background:#f0c040;z-index:3;}
+  .fc-now-dot{width:5px;height:5px;border-radius:50%;background:#f0c040;position:absolute;top:-2px;left:-2px;}
+  .fc-xlbl{display:flex;justify-content:space-between;font-size:8px;color:rgba(255,255,255,.2);padding:2px 0 5px;}
+    .yield-grid{display:flex;gap:2px;align-items:flex-end;height:48px;}
   .yield-col{display:flex;flex-direction:column;align-items:center;flex:1;gap:2px;}
   .yield-bar{border-radius:2px 2px 0 0;width:100%;min-height:2px;transition:height .5s ease;}
   .yield-bar.now{outline:1px solid var(--sl-gold);outline-offset:1px;}
@@ -77,6 +113,9 @@ const SOL_STYLES = `
     transition:all .15s;white-space:nowrap;}
   .tab-btn:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.15);}
   .tab-btn.active{color:#ffd600;background:rgba(255,214,0,.1);border-color:rgba(255,214,0,.25);border-bottom-color:#ffd600;font-size:12px;}
+  @keyframes pulse-tab{0%,100%{border-bottom-color:rgba(251,146,60,.4);color:rgba(255,255,255,.45);}50%{border-bottom-color:#fb923c;color:#fb923c;background:rgba(251,146,60,.08);}}
+  .tab-btn.dimmer-active{animation:pulse-tab 1.5s ease-in-out infinite;}
+  .tab-btn.dimmer-active.active{animation:none;}
   .tab-pane{display:none;}
   .tab-pane.active{display:block;}
   .accuracy{display:flex;align-items:center;gap:8px;padding:8px 18px;font-size:11px;color:var(--sl-subtext);border-top:1px solid var(--sl-border);}
@@ -87,7 +126,7 @@ const SOL_STYLES = `
 `;
 
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-const compassLabel = a => { const labels=["Z","ZZW","ZW","WZW","W","WNW","NW","NNW","N","NNO","NO","ONO","O","OZO","ZO","ZZO"]; return labels[Math.round(((a%360)+360)%360/22.5)%16]||"?"; };
+const compassLabel = a => { const labels=["N","NNO","NO","ONO","O","OZO","ZO","ZZO","Z","ZZW","ZW","WZW","W","WNW","NW","NNW"]; return labels[Math.round(((a%360)+360)%360/22.5)%16]||"?"; };
 const fmt = (w,thr=1000) => Math.abs(w)>=thr?(w/1000).toFixed(2)+" kW":Math.round(w)+" W";
 
 class CloudemsSolarCard extends HTMLElement {
@@ -115,6 +154,13 @@ class CloudemsSolarCard extends HTMLElement {
     if(j!==this._prev){this._prev=j;this._render();}
   }
 
+  _staleWarning(sensorId, maxAgeMin=5) {
+    const s = this._hass?.states[sensorId];
+    if (!s?.last_updated) return '';
+    const ageMin = (Date.now() - new Date(s.last_updated).getTime()) / 60000;
+    if (ageMin < maxAgeMin) return '';
+    return `<span style="font-size:9px;color:#f87171;opacity:0.7" title="Data is ${Math.round(ageMin)} min oud">⚠ ${Math.round(ageMin)}m oud</span>`;
+  }
   _render(){
     const sh=this.shadowRoot; if(!sh) return;
     const h=this._hass, c=this._cfg??{};
@@ -148,9 +194,29 @@ class CloudemsSolarCard extends HTMLElement {
 
     const fcA=fcS?.attributes||{};
     const fcKwh=parseFloat(fcS?.state||0)||0;
+    const _solarStale = this._staleWarning('sensor.cloudems_solar_system_intelligence', 5)
+                     || this._staleWarning('sensor.cloudems_solar_system', 5);
     const fcTomKwh=parseFloat(fcTS?.state||0)||0;
     const fcHourly=fcA.hourly||[];
+    const fcTomHourly=(fcTS?.attributes?.hourly)||[];
+    // Werkelijke productie per uur vandaag — uit solar_learner history (hourly_peak_w als proxy)
+    // Echte per-uur actual: gebruik _histPv die we bijhouden in de kaart
     const nowH=new Date().getHours();
+    if(!this._pvHist) this._pvHist = new Array(24).fill(0);
+    if(!this._pvHistDay) this._pvHistDay = new Date().getDate();
+    if(new Date().getDate() !== this._pvHistDay){ this._pvHist = new Array(24).fill(0); this._pvHistDay = new Date().getDate(); }
+    // Update huidig uur met live waarde (kWh = W / 360 per 10s sample)
+    this._pvHist[nowH] = Math.max(this._pvHist[nowH], totalW / 1000 * (10/3600));
+    const actualHourly = this._pvHist;
+    // Gisteren: gebruik solar_learner hourly_peak_w als referentie (geen echte gisteren data)
+    const lrn = h.states['sensor.cloudems_solar_system_intelligence']?.attributes?.inverters || [];
+    const yesterdayRef = new Array(24).fill(0);
+    lrn.forEach(inv => {
+      Object.entries(inv.hourly_peak_w||{}).forEach(([hr,w]) => {
+        yesterdayRef[parseInt(hr)] = (yesterdayRef[parseInt(hr)]||0) + (w/1000*0.8);
+      });
+    });
+    if(!this._chartDay) this._chartDay = 'today';
 
     // Self-consumption
     const scA=scS?.attributes||{};
@@ -183,85 +249,108 @@ class CloudemsSolarCard extends HTMLElement {
     const accErr=parseFloat(accS?.attributes?.last_day_error_pct??0);
     const accCol=accErr<15?"#86efac":accErr<30?"#fbbf24":"#f87171";
 
-    // ── Forecast bars ─────────────────────────────────────────────────────────
-    let yieldHtml="";
-    if(fcHourly.length>0){
-      const maxH=Math.max(...fcHourly.map(x=>x?.wh??x??0),1);
-      yieldHtml=`<div class="yield-section">
-        <div class="sec-title">☀️ Forecast vandaag per uur</div>
-        <div class="yield-grid">${fcHourly.map((h2,i)=>{
-          const wh=h2?.wh??h2??0;
-          const pct=Math.max((wh/maxH)*100,2);
-          const col=i===nowH?"#f0c040":i<nowH?"rgba(240,192,64,.18)":"rgba(134,239,172,.4)";
-          return `<div class="yield-col"><div class="yield-bar${i===nowH?" now":""}" style="height:${pct*.48}px;background:${col}"></div></div>`;
-        }).join("")}</div>
-        <div class="yield-label-row"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+    // ── Forecast bars — gisteren/vandaag/morgen navigatie ────────────────────
+    const _cd_key = this._chartDay || 'today';
+    const _fcByDay = {
+      yesterday: { label:'Gisteren', isTomorrow:false, isToday:false,
+        fc: yesterdayRef, ac: yesterdayRef },
+      today: { label:'Vandaag', isTomorrow:false, isToday:true,
+        fc: (() => { const arr=new Array(24).fill(0); fcHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=nowH&&h<24) arr[h]+=(x?.forecast_w??x?.wh??0); }); return arr; })(),
+        ac: actualHourly },
+      tomorrow: { label:'Morgen', isTomorrow:true, isToday:false,
+        fc: (() => { const arr=new Array(24).fill(0); fcTomHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=0&&h<24) arr[h]+=(x?.forecast_w??x?.wh??0); }); return arr; })(), ac:[] },
+    };
+    const _cd = _fcByDay[_cd_key];
+    const _fcA = _cd.fc; const _acA = _cd.ac.length?_cd.ac:new Array(24).fill(0);
+    const _ysA = _cd.isToday ? yesterdayRef : new Array(24).fill(0);
+    const _mxV = Math.max(..._fcA,..._acA,..._ysA,0.01);
+    const _BH = 60;
+    const _nKwh = _cd.isToday?(_acA[nowH]||0):0;
+    const _fKwh = _cd.isToday?(_fcA[nowH]||0):0;
+    const _dif = _fKwh>0?Math.round((_nKwh-_fKwh)/_fKwh*100):0;
+    const _totF=_fcA.reduce((a,b)=>a+b,0), _totA=_acA.reduce((a,b)=>a+b,0);
+    const _stHtml = _cd.isToday
+      ? `<div class="fc-stat"><div class="fc-stat-l">Uur ${nowH} nu</div><div class="fc-stat-v" style="color:#f0c040">${(_nKwh*1000).toFixed(0)} W</div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Verwacht</div><div class="fc-stat-v" style="color:#86efac">${(_fKwh*1000).toFixed(0)} W</div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Afwijking</div><div class="fc-stat-v" style="color:${_dif>=0?'#34d399':'#f87171'}">${_dif>=0?'+':''}${_dif}%</div></div>`
+      : _cd.isTomorrow
+      ? `<div class="fc-stat" style="grid-column:1/-1"><div class="fc-stat-l">Verwacht totaal morgen</div><div class="fc-stat-v" style="color:#86efac">${_totF.toFixed(1)} kWh</div></div>`
+      : `<div class="fc-stat"><div class="fc-stat-l">Werkelijk</div><div class="fc-stat-v" style="color:#f0c040">${_totA.toFixed(1)} kWh</div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Verwacht was</div><div class="fc-stat-v" style="color:rgba(255,255,255,.5)">${_totF.toFixed(1)} kWh</div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Afwijking</div><div class="fc-stat-v" style="color:${_totF>0&&(_totA-_totF)/_totF>=0?'#34d399':'#f87171'}">${_totF>0?((_totA-_totF)/_totF>=0?'+':'')+Math.round((_totA-_totF)/_totF*100)+'%':'—'}</div></div>`;
+    const _bH = Array.from({length:24},(_,i)=>{
+      const isNow=_cd.isToday&&i===nowH, isPast=_cd.isToday&&i<nowH;
+      const fh=Math.max((_fcA[i]||0)/_mxV*_BH,(_fcA[i]||0)>0?1:0);
+      const ah=Math.max((_acA[i]||0)/_mxV*_BH,(_acA[i]||0)>0?1:0);
+      const yh=Math.max((_ysA[i]||0)/_mxV*_BH,(_ysA[i]||0)>0?1:0);
+      const fcBg=isNow?'rgba(134,239,172,.6)':isPast?'rgba(134,239,172,.12)':'rgba(134,239,172,.4)';
+      const acBg=isNow?'#f0c040':isPast?'rgba(240,192,64,.5)':'rgba(240,192,64,.12)';
+      return `<div class="fc-grp">
+        <div class="fc-bar" style="width:33%;height:${fh.toFixed(1)}px;background:${fcBg}"></div>
+        <div class="fc-bar" style="width:33%;height:${ah.toFixed(1)}px;background:${acBg}"></div>
+        ${_cd.isToday?`<div class="fc-bar" style="width:33%;height:${yh.toFixed(1)}px;background:rgba(240,192,64,.15)"></div>`:'<div class="fc-bar" style="width:33%;height:0"></div>'}
+        ${isNow?'<div class="fc-now"><div class="fc-now-dot"></div></div>':''}
       </div>`;
-    }
+    }).join('');
+    const _prevLbl = _cd_key==='today'?'Gisteren':_cd_key==='tomorrow'?'Vandaag':'';
+    const _nextLbl = _cd_key==='today'?'Morgen':_cd_key==='yesterday'?'Vandaag':'';
+    const yieldHtml = `<div class="yield-section">
+      <div class="sec-title">☀️ Forecast per uur</div>
+      <div class="fc-nav">
+        <button class="fc-nav-btn" data-fcnav="prev" style="${_cd_key==='yesterday'?'opacity:.3;pointer-events:none':''}">← ${_prevLbl}</button>
+        <div class="fc-nav-lbl"><div class="fc-nav-day">${_cd.label}</div></div>
+        <button class="fc-nav-btn" data-fcnav="next" style="${_cd_key==='tomorrow'?'opacity:.3;pointer-events:none':''}${!fcTomHourly.length&&_cd_key==='today'?'opacity:.3;pointer-events:none':''}">${_nextLbl} →</button>
+      </div>
+      <div class="fc-stats">${_stHtml}</div>
+      <div class="fc-legend">
+        <div class="fc-leg"><div class="fc-leg-dot" style="background:rgba(134,239,172,.5)"></div>Verwacht</div>
+        <div class="fc-leg"><div class="fc-leg-dot" style="background:#f0c040"></div>Werkelijk</div>
+        ${_cd.isToday?'<div class="fc-leg"><div class="fc-leg-dot" style="background:rgba(240,192,64,.2)"></div>Gisteren</div>':''}
+      </div>
+      <div class="fc-bars">${_bH}</div>
+      <div class="fc-xlbl"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
+    </div>`;
 
     // ── Inverters ─────────────────────────────────────────────────────────────
-    let invHtml="";
+    let invHtml="", clippingHtml="";
     if(inverters.length>0){
+      // Omvormer + benutting samengevoegd
       invHtml=`<div class="inv-section">
         <div class="sec-title">Omvormers (${inverters.length})</div>
         ${inverters.map((inv,i)=>{
           const w=parseFloat(inv.current_w)||0;
-          const peak=inv.rated_power_w||inv.estimated_wp||0;
+          const peak=inv.peak_w||inv.rated_power_w||inv.estimated_wp||0;
           const util=peak?Math.min(Math.round(w/peak*100),100):0;
-          const utilCol=util>80?"#f59e0b":util>40?"#86efac":"#3d5229";
+          const utilCol=util>85?"#f59e0b":util>40?"#86efac":"rgba(134,239,172,.3)";
           const az=inv.azimuth_learned??inv.azimuth_compass??null;
           const tilt=inv.tilt_deg;
           const phase=inv.phase_display||inv.phase;
           const clip=inv.clipping;
           const orientConf=inv.orientation_confident;
+          const ceiling=inv.clipping_ceiling_w||peak;
+          const ceilPct=peak?Math.min(Math.round(ceiling/peak*100),100):100;
           return `<div class="inv-row" style="animation-delay:${i*.06}s">
             <div class="inv-top">
               <span class="inv-name">☀️ ${esc(inv.label||`Omvormer ${i+1}`)}</span>
-              <span class="inv-pwr">${Math.round(w)} W</span>
+              <span class="inv-pwr" style="color:#f0c040">${Math.round(w)} W${clip?" ⚡":""}</span>
             </div>
-            <div class="util-bar"><div class="util-fill" style="width:${util}%;background:${utilCol}"></div></div>
+            <div class="util-bar-wrap" style="position:relative;margin-bottom:3px">
+              <div class="util-bar"><div class="util-fill" style="width:${util}%;background:${utilCol}"></div></div>
+              ${ceilPct<100?`<div style="position:absolute;top:0;bottom:0;left:${ceilPct}%;width:2px;background:rgba(248,113,113,.6)"></div>`:""}
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(255,255,255,.3);margin-bottom:4px">
+              <span>${util}% benut</span>
+              <span>${peak?Math.round(peak)+" W":"—"}</span>
+            </div>
             <div class="inv-chips">
               ${peak?`<span class="chip">${Math.round(inv.estimated_wp||peak)} Wp</span>`:""}
-              ${az!==null?`<span class="chip orient">${compassLabel(az)} ${Math.round(az)}°${orientConf?"":" ~"}</span>`:""}
+              ${az!==null?`<span class="chip orient" title="${orientConf?'Bevestigd':'Nog aan het leren'}">${compassLabel(az)} ${Math.round(az)}°${orientConf?"":(" ~"+(inv.orientation_progress_pct!=null?` (${inv.orientation_progress_pct}%)`:""))}</span>`:``}
               ${tilt?`<span class="chip">∠${Math.round(tilt)}°</span>`:""}
               ${phase?`<span class="chip phase">Fase ${esc(phase)}</span>`:`<span class="chip">Fase unknown</span>`}
-              ${clip?`<span class="chip clip">⚡ Clipping</span>`:""}
             </div>
           </div>`;
         }).join("")}
-      </div>`;
-    }
-
-    // ── Benutting & Clipping ──────────────────────────────────────────────────
-    let clippingHtml="";
-    if(inverters.length>0){
-      const rows=inverters.map(inv=>{
-        const w=parseFloat(inv.current_w)||0;
-        const peak=inv.peak_w||inv.rated_power_w||inv.estimated_wp||0;
-        const util=peak?Math.min(Math.round(w/peak*100),100):0;
-        const ceiling=inv.clipping_ceiling_w||peak;
-        const ceilPct=peak?Math.min(Math.round(ceiling/peak*100),100):100;
-        const col=util>85?"#f59e0b":util>50?"#86efac":"rgba(134,239,172,.3)";
-        return `<div class="clip-row">
-          <div class="clip-row-top">
-            <strong>${esc(inv.label||"Omvormer")}</strong>
-            <span style="color:${inv.clipping?"#f59e0b":"#86efac"}">${Math.round(w)} W${inv.clipping?" ⚡":""}</span>
-          </div>
-          <div class="clip-bar-wrap">
-            <div class="clip-bar-fill" style="width:${util}%;background:${col}"></div>
-            ${ceilPct<100?`<div class="clip-bar-ceil" style="left:${ceilPct}%"></div>`:""}
-          </div>
-          <div class="clip-row-bot">
-            <span>${util}% benut</span>
-            <span>${peak?Math.round(peak)+" W":"—"}</span>
-          </div>
-        </div>`;
-      }).join("");
-      clippingHtml=`<div class="sec">
-        <div class="sec-title">📈 Benutting & Clipping-drempel</div>
-        ${rows}
-        ${clipAdvice?`<div style="font-size:11px;color:rgba(255,255,255,.35);font-style:italic;margin-top:4px">${esc(clipAdvice)}</div>`:""}
-        ${clipLostEur>0?`<div style="font-size:11px;color:rgba(255,255,255,.35);margin-top:6px">Verlies/jaar: €${clipLostEur.toFixed(0)} · Grootste verliezer: ${esc(clipWorst)}</div>`:""}
+        ${clipAdvice?`<div style="font-size:10px;color:rgba(255,255,255,.3);font-style:italic;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.04)">${esc(clipAdvice)}</div>`:""}
       </div>`;
     }
 
@@ -310,6 +399,14 @@ class CloudemsSolarCard extends HTMLElement {
     const sub=`${inverters.length} omvormer${inverters.length!==1?"s":""}${clipping?" · ⚡ Clipping":""}${peakW?` · piek ${Math.round(peakW)} W`:""}`;
 
     const activeTab = this._activeTab || 'live';
+    // Dimmer actief als minstens één switch.cloudems_zonnedimmer_N = on en pct < 100
+    const dimmerActive = [1,2,3,4].some(n => {
+      const sw = h.states[`switch.cloudems_zonnedimmer_${n}`];
+      const num = h.states[`number.cloudems_zonnedimmer_${n}`];
+      return sw?.state === 'on' && parseFloat(num?.state||100) < 99;
+    });
+    // Auto-switch naar dimmer tab als actief en gebruiker niet handmatig geswitcht
+    if(dimmerActive && !this._tabManualSet) this._activeTab = 'dimmer';
     sh.innerHTML=`<style>${SOL_STYLES}</style>
     <div class="card">
       <div class="hdr">
@@ -350,7 +447,7 @@ class CloudemsSolarCard extends HTMLElement {
         <button class="tab-btn ${activeTab==='live'?'active':''}" data-tab="live">☀️ Live</button>
         <button class="tab-btn ${activeTab==='analyse'?'active':''}" data-tab="analyse">📊 Analyse</button>
         <button class="tab-btn ${activeTab==='advies'?'active':''}" data-tab="advies">💡 Advies</button>
-        <button class="tab-btn ${activeTab==='dimmer'?'active':''}" data-tab="dimmer">⚡ Dimmer</button>
+        <button class="tab-btn ${activeTab==='dimmer'?'active':''}${dimmerActive?' dimmer-active':''}" data-tab="dimmer">⚡ Dimmer${dimmerActive?' 🟠':''}</button>
       </div>
 
       <div class="tab-pane ${activeTab==='live'?'active':''}">
@@ -521,9 +618,20 @@ class CloudemsSolarCard extends HTMLElement {
       ${accHtml}
     </div>`;
 
+    sh.querySelectorAll('[data-fcnav]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const dir = btn.dataset.fcnav;
+        const order = ['yesterday','today','tomorrow'];
+        const cur = order.indexOf(this._chartDay||'today');
+        const nxt = dir==='prev' ? Math.max(0,cur-1) : Math.min(2,cur+1);
+        this._chartDay = order[nxt];
+        this._prev = ''; this._render();
+      });
+    });
     sh.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         this._activeTab = btn.dataset.tab;
+        this._tabManualSet = true;
         this._prev = '';
         this._render();
       });

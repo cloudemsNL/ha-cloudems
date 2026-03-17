@@ -9,6 +9,8 @@ const CARD_VERSION = "4.6.171";
 const CAT_CONFIG = {
   battery:           { icon: "🔋", label: "Batterij",     color: "#4caf50" },
   battery_bde:       { icon: "🔋", label: "Batterij BDE",  color: "#4caf50" },
+  zonneplan_auto:    { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
+  zonneplan:         { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
   boiler:            { icon: "🚿", label: "Boiler",        color: "#ff8040" },
   decision_boiler:   { icon: "🚿", label: "Boiler",        color: "#ff8040" },
   ev:                { icon: "🚗", label: "EV",            color: "#2196f3" },
@@ -25,7 +27,7 @@ const ALL_CATS = Object.keys(CAT_CONFIG);
 // Categorie-groepen voor filter knoppen
 const FILTER_GROUPS = [
   { id: "all",     label: "Alles",     cats: ALL_CATS },
-  { id: "battery", label: "🔋 Batterij", cats: ["battery", "battery_bde"] },
+  { id: "battery", label: "🔋 Batterij", cats: ["battery", "battery_bde", "zonneplan_auto", "zonneplan"] },
   { id: "boiler",  label: "🚿 Boiler",  cats: ["boiler", "decision_boiler"] },
   { id: "ev",      label: "🚗 EV",      cats: ["ev", "ev_solar_plan", "decision_ev_solar_plan"] },
   { id: "shutter", label: "🪟 Rolluiken", cats: ["shutter", "decision_shutter"] },

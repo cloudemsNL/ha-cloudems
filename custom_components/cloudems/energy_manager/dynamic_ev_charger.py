@@ -76,11 +76,17 @@ class DynamicEVCharger:
             self.config.get(CONF_EV_MIN_SOC_THRESHOLD, DEFAULT_EV_MIN_SOC_THRESHOLD)
         )
         # v1.32: zelfkalibratie — rollend 30-daags EPEX-prijsvenster
-        # De cheap_threshold wordt automatisch bijgesteld naar het p35-percentiel
-        # van de afgelopen 30 dagen. Zo volgt de drempel seizoensschommelingen.
         self._price_history: list[float] = []   # uurprijzen, max 720 (30d)
         self._calibrated_threshold: float = self._cheap_threshold
         self._config_threshold = self._cheap_threshold   # originele config-waarde
+        # evcc-inspired: smartCostLimit — laad alleen als prijs < X ct/kWh
+        # None = uitgeschakeld (gedrag ongewijzigd)
+        self._smart_cost_limit: float | None = None
+        # evcc-inspired: plan met deadline — "wil Y% SoC om HH:MM"
+        self._plan_soc: float | None = None        # gewenste SoC % bij deadline
+        self._plan_time: float | None = None       # unix timestamp van deadline
+        self._plan_active: bool = False
+        self._plan_overrun: bool = False           # te laat om plan te halen
 
     # ── Main update called by coordinator ─────────────────────────────────────
 
@@ -188,6 +194,47 @@ class DynamicEVCharger:
             self._calibrated_threshold = new_threshold
             self._cheap_threshold = new_threshold
 
+    # ── Plan API (evcc-geïnspireerd) ──────────────────────────────────────────
+
+    def set_plan(self, plan_soc: float, plan_time: float) -> None:
+        """Stel een laadplan in: wil plan_soc% SoC om plan_time (unix ts)."""
+        self._plan_soc = plan_soc
+        self._plan_time = plan_time
+        self._plan_active = True
+        self._plan_overrun = False
+        import datetime as _dt
+        _LOGGER.info(
+            "EV plan: wil %.0f%% SoC om %s",
+            plan_soc, _dt.datetime.fromtimestamp(plan_time).strftime("%H:%M")
+        )
+
+    def clear_plan(self) -> None:
+        """Verwijder actief laadplan."""
+        self._plan_soc = None
+        self._plan_time = None
+        self._plan_active = False
+        self._plan_overrun = False
+
+    def set_smart_cost_limit(self, limit_eur_kwh: float | None) -> None:
+        """Stel smartCostLimit in (None = uitgeschakeld)."""
+        self._smart_cost_limit = limit_eur_kwh
+        _LOGGER.info("EV smartCostLimit: %s EUR/kWh", limit_eur_kwh)
+
+    def get_plan_status(self) -> dict:
+        """Geef plan-status voor dashboard."""
+        import time as _t
+        if self._plan_time is None:
+            return {"active": False}
+        hours_left = (self._plan_time - _t.time()) / 3600.0
+        return {
+            "active":               self._plan_active,
+            "plan_soc":             self._plan_soc,
+            "plan_time":            self._plan_time,
+            "hours_left":           round(hours_left, 2),
+            "overrun":              self._plan_overrun,
+            "smart_cost_limit_eur": self._smart_cost_limit,
+        }
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _clamp(self, amps: float) -> float:
@@ -199,6 +246,7 @@ class DynamicEVCharger:
             return float(self.coordinator.current_epex_price)
         except (AttributeError, TypeError, ValueError):
             return None
+
 
     def _get_battery_soc(self) -> float | None:
         """Get battery state-of-charge from HA sensor."""
@@ -235,11 +283,198 @@ class DynamicEVCharger:
         """Write the current setpoint to the EV charger number entity."""
         domain = entity_id.split(".")[0]
         try:
-            await self.hass.services.async_call(
-                domain,
-                "set_value",
-                {"entity_id": entity_id, "value": amps},
-                blocking=False,
+            from .command_verify import send_number
+            await send_number(
+                self.hass, entity_id, amps, tolerance=0.5,
+                description=f"EV lader stroom {entity_id} → {amps}A",
+                max_attempts=3, verify_delay=4.0,
+            )
+        except Exception as err:
+            _LOGGER.warning("DynamicEVCharger: set_value failed for %s: %s", entity_id, err)
+
+    def get_status(self) -> dict[str, Any]:
+        return {
+            "enabled": self._enabled,
+            "current_a": self.state.current_a,
+            "reason": self.state.reason,
+            "cheap_threshold_eur": self._cheap_threshold,
+            "cheap_threshold_config_eur": self._config_threshold,
+            "threshold_calibrated": self._calibrated_threshold != self._config_threshold,
+            "price_history_hours": len(self._price_history),
+            "always_on_current_a": self._always_on_current,
+            "solar_priority": self._solar_prio,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v1.8.0 — PID-gebaseerde EV-laadstroom controller
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EVChargingPIDController:
+    """
+    Regelt de EV-laadstroom via een PID-regelaar met solar-surplus als setpoint.
+
+    Doel: houd het netto netverbruik op 0W (of een configureerbare offset).
+    
+    Werking:
+      setpoint   = target_grid_w (standaard: 0W, = maximaal zonne-overschot benutten)
+      meting     = huidig netto netverbruik (positief = import)
+      output     = laadstroom in Ampere
+
+    Bij import (meting > setpoint):  stroom verlagen  (te veel import)
+    Bij export (meting < setpoint):  stroom verhogen  (er is surplus)
+
+    Parameters (instelbaar via HA number entities):
+      Kp = 0.05   Snelle reactie op surplus-wijzigingen
+      Ki = 0.008  Compensatie voor blijvende afwijking (bewolking)
+      Kd = 0.02   Demping bij snel wisselende bewolking
+
+    Voordelen t.o.v. threshold-gebaseerde logica:
+      - Gladde stroomregeling (geen harde sprongen)
+      - Past automatisch aan bij veranderende zonproductie
+      - Reageert sneller op bewolking
+      - Geen configureerbare drempelwaarden nodig
+    """
+
+    def __init__(
+        self,
+        min_a: float = 6.0,
+        max_a: float = 32.0,
+        kp: float = 0.05,
+        ki: float = 0.008,
+        kd: float = 0.02,
+        target_grid_w: float = 0.0,   # 0W = geen import/export
+        sample_time_s: float = 10.0,
+    ) -> None:
+        from .pid_controller import PIDController
+        self._pid = PIDController(
+            kp          = kp,
+            ki          = ki,
+            kd          = kd,
+            setpoint    = target_grid_w,
+            output_min  = min_a,
+            output_max  = max_a,
+            deadband    = 0.5,
+            sample_time = sample_time_s,
+            label       = "ev_charging",
+        )
+        self._min_a      = min_a
+        self._max_a      = max_a
+        self._target_w   = target_grid_w
+        self._last_a     = min_a
+        self._enabled    = False
+        self._auto_tuner = None
+
+    def enable(self, enabled: bool) -> None:
+        self._enabled = enabled
+        if not enabled:
+            self._pid.reset()
+
+    def set_pid_params(self, kp: float, ki: float, kd: float) -> None:
+        """Live update PID parameters (from HA number entities)."""
+        changed = (kp != self._pid.kp or ki != self._pid.ki or kd != self._pid.kd)
+        self._pid.kp = kp
+        self._pid.ki = ki
+        self._pid.kd = kd
+        if changed:
+            _LOGGER.info("EV PID params updated: Kp=%.3f Ki=%.3f Kd=%.3f", kp, ki, kd)
+
+    def set_target_grid_w(self, target_w: float) -> None:
+        """Update the grid target (0 = no import/export, negative = allow some export)."""
+        self._pid.update_setpoint(target_w)
+        self._target_w = target_w
+
+    def compute(self, grid_power_w: float) -> float | None:
+        """
+        Compute desired charging current based on current grid power.
+
+        Args:
+            grid_power_w: current net grid power (positive = import, negative = export)
+
+        Returns:
+            Desired charging current in Ampere, or None if too soon.
+        """
+        if not self._enabled:
+            return None
+
+        # PID: setpoint is target_grid_w, measurement is current grid power
+        # Positive error = we're exporting more than target → increase charging
+        # Negative error = we're importing → decrease charging
+        output = self._pid.compute(grid_power_w)
+        if output is not None:
+            self._last_a = round(output, 1)
+        return output
+
+    def start_auto_tune(self) -> None:
+        """Start auto-tuning relay experiment."""
+        from .pid_controller import PIDAutoTuner
+        relay_amp = (self._max_a - self._min_a) * 0.2   # 20% of range
+        self._auto_tuner = PIDAutoTuner(
+            self._pid,
+            relay_amplitude=relay_amp,
+            min_cycles=3,
+            label="ev_charging",
+        )
+        _LOGGER.info("EV PID auto-tune gestart (relay amplitude=%.1fA)", relay_amp)
+
+    def auto_tune_step(self, grid_power_w: float) -> float | None:
+        """Run one auto-tune step. Returns relay output or None if tuning not active."""
+        if self._auto_tuner and self._auto_tuner.active:
+            out = self._auto_tuner.step(grid_power_w)
+            if self._auto_tuner.done:
+                self._auto_tuner.apply_to_pid()
+                self._auto_tuner = None
+                _LOGGER.info("EV PID auto-tune voltooid, parameters toegepast")
+            return out
+        return None
+
+    @property
+    def pid_state(self) -> dict:
+        d = self._pid.to_dict()
+        d["auto_tuner"] = self._auto_tuner.to_dict() if self._auto_tuner else None
+        d["target_grid_w"] = self._target_w
+        d["last_output_a"] = self._last_a
+        return d
+    def _get_battery_soc(self) -> float | None:
+        """Get battery state-of-charge from HA sensor."""
+        entity_id = self.config.get(CONF_BATTERY_SENSOR)
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        if state and state.state not in ("unknown", "unavailable"):
+            try:
+                return float(state.state)
+            except ValueError:
+                pass
+        return None
+
+    def _get_solar_surplus_w(self) -> float:
+        """Return solar production minus current grid consumption (W)."""
+        solar_entity = self.config.get(CONF_SOLAR_SENSOR)
+        if not solar_entity:
+            return 0.0
+        state = self.hass.states.get(solar_entity)
+        if not state or state.state in ("unknown", "unavailable"):
+            return 0.0
+        try:
+            solar_w = float(state.state)
+            # Convert kW → W if unit is kW
+            if state.attributes.get("unit_of_measurement", "W") == "kW":
+                solar_w *= 1000
+            grid_w = getattr(self.coordinator, "current_power_w", 0.0) or 0.0
+            return max(0.0, solar_w - grid_w)
+        except (ValueError, TypeError):
+            return 0.0
+
+    async def _set_ev_current(self, entity_id: str, amps: float) -> None:
+        """Write the current setpoint to the EV charger number entity."""
+        domain = entity_id.split(".")[0]
+        try:
+            from .command_verify import send_number
+            await send_number(
+                self.hass, entity_id, amps, tolerance=0.5,
+                description=f"EV lader stroom {entity_id} → {amps}A",
+                max_attempts=3, verify_delay=4.0,
             )
         except Exception as err:
             _LOGGER.warning("DynamicEVCharger: set_value failed for %s: %s", entity_id, err)

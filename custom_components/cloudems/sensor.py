@@ -1114,12 +1114,44 @@ class CloudEMSEVPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorE
     def native_value(self):
         data = self.coordinator.data or {}
         ev = data.get("ev_session", {}) or {}
-        # session_current_a × 230V — zelfde berekening als _ev_w() in CostSensor
-        # session_phases bestaat niet in ev_session_learner output
         if ev.get("session_active"):
             amps = float(ev.get("session_current_a") or 0)
             return round(amps * 230.0, 0)
         return 0.0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        ev = (self.coordinator.data or {}).get("ev_session", {}) or {}
+        # evcc-inspired: sessie + statistieken
+        attrs = {
+            # Actieve sessie
+            "session_active":       ev.get("session_active", False),
+            "session_current_a":    ev.get("session_current_a"),
+            "session_kwh":          ev.get("session_kwh_so_far"),
+            "session_cost_eur":     ev.get("session_cost_so_far"),
+            "session_solar_pct":    ev.get("session_solar_pct"),
+            "session_solar_kwh":    ev.get("session_solar_kwh"),
+            "session_co2_g":        ev.get("session_co2_g"),
+            "session_price_per_kwh": ev.get("session_price_per_kwh"),
+            # Model
+            "model_ready":          ev.get("model_ready", False),
+            "predicted_kwh":        ev.get("predicted_kwh"),
+            "typical_start_hour":   ev.get("typical_start_hour"),
+            "typical_weekdays":     ev.get("typical_weekdays", []),
+            # Statistieken (evcc-stijl: total/365d/30d)
+            "stats":                ev.get("stats", {}),
+            # Plan
+            "plan_status": None,
+        }
+        # Plan status van dynamic_ev_charger
+        try:
+            _dyn_ev = getattr(self.coordinator, "_dynamic_ev_charger", None)
+            if _dyn_ev and hasattr(_dyn_ev, "get_plan_status"):
+                attrs["plan_status"] = _dyn_ev.get_plan_status()
+                attrs["smart_cost_limit_eur"] = getattr(_dyn_ev, "_smart_cost_limit", None)
+        except Exception:
+            pass
+        return _trim_attrs(attrs)
 
 
 class CloudEMSPoolStatusSensor(CoordinatorEntity, SensorEntity):
@@ -2033,7 +2065,8 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
             {
                 # v4.5.51: device_id en room zijn essentieel voor de JS-kaart
                 "device_id":     dv.get("device_id", dv.get("id", "")),
-                "name":          dv.get("name", "Unknown"),
+                "name":          dv.get("user_name") or dv.get("name", "Unknown"),
+                "user_name":     dv.get("user_name", ""),
                 "device_type":   dv.get("device_type", "unknown"),
                 "type":          dv.get("device_type", "unknown"),   # alias for card
                 "is_on":         dv.get("is_on", False),
@@ -2059,6 +2092,12 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 "time_mismatch": dv.get("time_mismatch", False),
                 # v4.5.51: kamer uit room_meter engine
                 "room":          _room_map.get(dv.get("device_id", dv.get("id", "")), ""),
+                # v4.6.314: energie + runtime voor detail panel
+                "today_kwh":     round((dv.get("energy") or {}).get("today_kwh", 0.0), 3),
+                "yesterday_kwh": round((dv.get("energy") or {}).get("yesterday_kwh", 0.0), 3),
+                "total_on_seconds": round((dv.get("energy") or {}).get("total_on_seconds", 0.0), 0),
+                "session_count": dv.get("session_count", 0),
+                "avg_duration_min": round(dv.get("avg_duration_min", 0.0), 1),
             }
             for dv in devices
         ]
@@ -3382,6 +3421,7 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "today_prices":       today_prices,   # .price = display-prijs (all-in of EPEX)
             "today_prices_base":  today_all,       # altijd kale EPEX (voor debugging)
             "tomorrow_prices":    tomorrow_prices,
+            "yesterday_prices":   ep.get("yesterday_prices", []),
             "tomorrow_available": ep.get("tomorrow_available", False),
             "next_hours":         _next_hours_display,
             "min_today":          min_display,
@@ -3991,6 +4031,20 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             # auto_forecast_enabled: lees van coordinator (switch-state is leidend)
             _auto_fc_enabled = getattr(self.coordinator, "_zonneplan_auto_forecast", False)
 
+            # Voeg action_label toe aan _forecast_data
+            if _forecast_data and "recommended_action" in _forecast_data:
+                _action_map = {
+                    "hold": "⏸ Home optimalisatie",
+                    "charge": "⚡ Laden",
+                    "discharge": "⬇ Ontladen",
+                    "powerplay": "🤖 Powerplay",
+                    "idle": "○ Idle",
+                }
+                _forecast_data["action_label"] = _action_map.get(
+                    _forecast_data.get("recommended_action", ""), 
+                    _forecast_data.get("recommended_action", "—")
+                )
+
             zonneplan_info = {
                 "available":           zp.get("available", False),
                 "detected":            True,
@@ -4022,6 +4076,12 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
                 "probe_key":             zp.get("probe_key"),
                 # Forecast + laatste beslissing (altijd aanwezig, ook zonder auto-sturing)
                 "forecast":            _forecast_data,
+                # Laatste sturing voor dashboard weergave
+                "last_sent_str":       (
+                    getattr(_zp_provider, "_last_sent_mode", None)
+                    if _zp_provider else None
+                ),
+                "last_decision_str":   _last_decision_str or None,
                 # Directe entity_ids voor dashboard sliders
                 "entity_deliver_to_home": _zp_eid("deliver_to_home"),
                 "entity_solar_charge":    _zp_eid("solar_charge"),
@@ -4264,6 +4324,8 @@ class CloudEMSInverterProfileSensor(CoordinatorEntity, SensorEntity):
             "tilt_source":            ti_source,
             "orientation_confident":  i.get("orientation_confident", False),
             "clear_sky_days":         i.get("clear_sky_samples", 0),
+            "orientation_progress_pct": min(100, round(i.get("clear_sky_samples", 0) / 3600 * 100, 1)),
+            "orientation_samples_needed": 3600,
             "clear_sky_days_needed":  i.get("orientation_samples_needed", 30),
             "orientation_progress_pct": i.get("orientation_learning_pct", 0),
             "peak_production_hour":   i.get("peak_production_hour"),
@@ -6057,7 +6119,13 @@ class CloudEMSWatchdogSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         attrs = dict((self.coordinator.data or {}).get("watchdog", {}))
         attrs["cloudems_version"] = VERSION
-        return attrs
+        # v4.6.333: audit log summary
+        try:
+            from .energy_manager.audit_log import get_audit_log
+            attrs["audit"] = get_audit_log().get_summary()
+        except Exception:
+            pass
+        return _trim_attrs(attrs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

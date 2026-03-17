@@ -194,6 +194,9 @@ class PVForecast:
         self._dirty:        bool  = False
         self._last_save:    float = 0.0
         self._backup             = None  # LearningBackup — injected via async_setup
+        # Cloud cover correctie (Ecowitt / weather entity)
+        self._live_cloud_cover_pct:  float | None = None
+        self._live_cloud_cover_hour: int | None   = None
 
     # Save interval: write to HA Store at most every 2 minutes when data changed.
     _SAVE_INTERVAL_S: int = 30   # v2.6: verlaagd van 120s — minder kans op verlies bij harde restart
@@ -628,6 +631,16 @@ class PVForecast:
         blended  = stat_frac * 0.4 + irr_frac * 0.6
         return blended, 0.9
 
+    def update_cloud_cover(self, cloud_cover_pct: float | None, hour: int | None = None) -> None:
+        """Update live cloud cover voor huidige uur (0-100%).
+        Bronnen: HA weather entity, Ecowitt, KNMI, etc.
+        Reduceer forecast proportioneel: 0% bewolkt = 100% zon, 100% bewolkt = 15% zon (diffuus licht)
+        """
+        if cloud_cover_pct is None:
+            return
+        self._live_cloud_cover_pct = float(max(0.0, min(100.0, cloud_cover_pct)))
+        self._live_cloud_cover_hour = hour if hour is not None else __import__("datetime").datetime.now().hour
+
     def _build_forecast(
         self, inverter_id: str, start: datetime, confidence_no_weather: float
     ) -> list[HourForecast]:
@@ -650,6 +663,18 @@ class PVForecast:
                 conf = confidence_no_weather
 
             forecast_w = round(max(0.0, p._peak_wp * blended), 1)
+
+            # Cloud cover correctie voor het huidige uur (live data van weather sensor/Ecowitt)
+            # Alleen toepassen als de cloud cover data vers is (huidig uur)
+            _cc = self._live_cloud_cover_pct
+            _cc_hour = self._live_cloud_cover_hour
+            if _cc is not None and _cc_hour == target.hour:
+                # 0% bewolkt = factor 1.0, 100% bewolkt = factor 0.15 (diffuus licht)
+                # Lineaire interpolatie: factor = 1.0 - 0.85 * (cc/100)
+                _cc_factor = max(0.15, 1.0 - 0.85 * (_cc / 100.0))
+                forecast_w = round(forecast_w * _cc_factor, 1)
+                conf = max(0.4, conf * (1.0 - _cc / 200.0))  # confidence daalt bij bewolking
+
             # Confidence interval: spread gebaseerd op confidence en historische spread
             # Lage confidence → bredere band; hoge confidence → smalle band
             spread_factor = max(0.15, 1.0 - conf) * 0.8  # 8-80% spread

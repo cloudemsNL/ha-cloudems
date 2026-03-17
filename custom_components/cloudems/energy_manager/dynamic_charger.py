@@ -133,10 +133,11 @@ class DynamicEVCharger:
         if not entity_id:
             return
         try:
-            await self.hass.services.async_call(
-                "number", "set_value",
-                {"entity_id": entity_id, "value": round(ampere, 1)},
-                blocking=False,
+            from .command_verify import send_number
+            await send_number(
+                self.hass, entity_id, round(ampere, 1), tolerance=0.5,
+                description=f"EV lader stroom {entity_id} → {round(ampere,1)}A",
+                max_attempts=3, verify_delay=4.0,
             )
         except Exception as err:
             _LOGGER.warning("DynamicEVCharger: kon stroom niet instellen: %s", err)

@@ -173,6 +173,10 @@ class SystemGuardian:
         self._check_modules(data, now)
         self._check_sensors(data, now)
         self._check_boiler_cascade(data, now)
+        self._check_zp_drift(data, now)
+        self._check_kirchhoff(data, now)
+        self._check_pv_forecast_accuracy(data, now)
+        self._check_battery_control_effect(data, now)
 
         # ── Bijsturing op basis van gevonden issues ───────────────────────────
         await self._apply_actions(now)
@@ -415,6 +419,203 @@ class SystemGuardian:
                             )
                         else:
                             self._resolve(f"sensor:boiler_temp:{eid}:stuck_on")
+
+    # ── 5. Zonneplan drift bewaker ────────────────────────────────────────────
+
+    def _check_zp_drift(self, data: dict, now: float) -> None:
+        """Detecteer als Zonneplan van de verwachte modus afgeweken is."""
+        try:
+            from .energy_manager.audit_log import get_audit_log
+            _audit = get_audit_log()
+        except Exception:
+            return
+
+        bs = data.get("battery_decision") or {}
+        zp_info = bs.get("zonneplan") or {}
+        active_mode = zp_info.get("active_mode") or ""
+        last_sent = zp_info.get("last_sent_str") or ""
+
+        if not active_mode or not last_sent:
+            return
+
+        # Vergelijk: last_sent_str is wat CloudEMS stuurde, active_mode is wat Zonneplan doet
+        # Extract base mode from last_sent (bijv. "hold (home_optimization)" → "home_optimization")
+        _sent_base = last_sent
+        if "(" in last_sent and ")" in last_sent:
+            _sent_base = last_sent.split("(")[-1].rstrip(")")
+
+        _expected = "home_optimization" if "hold" in last_sent.lower() else _sent_base
+
+        if _expected and active_mode and _expected not in active_mode.lower():
+            # Drift gedetecteerd
+            _drift_key = "zp_drift:mode_mismatch"
+            if _drift_key not in self._sensor_history:
+                self._sensor_history[_drift_key] = []
+            self._sensor_history[_drift_key].append(now)
+
+            # Alleen alarmen als drift al > 120s aanhoudt
+            drift_since = self._sensor_history[_drift_key][0] if self._sensor_history[_drift_key] else now
+            drift_s = now - drift_since
+
+            if drift_s > 120:
+                _audit.record_zp_drift(
+                    expected_mode=_expected,
+                    actual_mode=active_mode,
+                    drift_duration_s=drift_s,
+                    context={
+                        "solar_w": data.get("solar_power", 0),
+                        "grid_w": data.get("grid_power", 0),
+                    },
+                )
+                self._raise_issue(
+                    key     = _drift_key,
+                    level   = "warning",
+                    title   = "Zonneplan modus afwijking",
+                    message = (
+                        f"CloudEMS stuurde '{_expected}' maar Zonneplan staat op '{active_mode}' "
+                        f"({drift_s/60:.0f} minuten). CloudEMS stuurt opnieuw."
+                    ),
+                    action  = "notify",
+                    source  = "battery",
+                )
+        else:
+            # Geen drift — reset
+            if "zp_drift:mode_mismatch" in self._sensor_history:
+                del self._sensor_history["zp_drift:mode_mismatch"]
+            self._resolve("zp_drift:mode_mismatch")
+
+    # ── Battery control verify ────────────────────────────────────────────────
+
+    def _check_battery_control_effect(self, data: dict, now: float) -> None:
+        """Controleer na 60s of een battery-actie ook echt effect had."""
+        try:
+            from .energy_manager.audit_log import get_audit_log
+            _audit = get_audit_log()
+        except Exception:
+            return
+
+        # Lees verwachte actie van ZP provider
+        coord = getattr(self, "_coordinator", None)
+        if coord is None:
+            return
+        _zp = getattr(coord, "_zonneplan_bridge", None)
+        if _zp is None:
+            return
+
+        _expected = getattr(_zp, "_last_expected_action", "")
+        _action_ts = getattr(_zp, "_last_action_ts", 0.0)
+        _bat_w_at_cmd = getattr(_zp, "_last_battery_w_at_cmd", 0.0)
+
+        if not _expected or _action_ts == 0.0:
+            return
+
+        # Alleen checken als >60s geleden en nog niet gechecked
+        elapsed = now - _action_ts
+        if elapsed < 60 or elapsed > 300:
+            return
+
+        _check_key = f"bat_verify_{_action_ts:.0f}"
+        if _check_key in self._sensor_history:
+            return
+
+        battery_w_now = float(data.get("battery_power", 0) or 0)
+        soc_pct = None
+        bs = data.get("battery_decision") or {}
+        zp_info = bs.get("zonneplan") or {}
+        soc_pct = zp_info.get("soc_pct")
+
+        _audit.record_battery_verify(
+            expected_action=_expected,
+            battery_w_before=_bat_w_at_cmd,
+            battery_w_after=battery_w_now,
+            soc_pct=soc_pct,
+            context={
+                "solar_w": data.get("solar_power", 0),
+                "grid_w":  data.get("grid_power", 0),
+                "elapsed_s": elapsed,
+            },
+        )
+        self._sensor_history[_check_key] = [now]
+
+    # ── 6. Kirchhoff sanity check ──────────────────────────────────────────────
+
+    def _check_kirchhoff(self, data: dict, now: float) -> None:
+        """Controleer of energiebalans klopt: grid + solar + battery ≈ house."""
+        solar_w  = float(data.get("solar_power",  0) or 0)
+        grid_w   = float(data.get("grid_power",   0) or 0)
+        battery_w = float(data.get("battery_power", 0) or 0)
+        house_w  = float(data.get("house_power",  0) or 0)
+
+        # Sla over als we geen data hebben
+        if all(v == 0 for v in [solar_w, grid_w, house_w]):
+            return
+
+        # Kirchhoff: solar + grid_import - grid_export + battery_discharge - battery_charge = house
+        # In CloudEMS conventies: grid > 0 = import, battery > 0 = laden (uit net/solar)
+        # house = solar + grid_import - battery_charge
+        # Vereenvoudigd: |solar + grid - battery - house| < threshold
+        imbalance = abs(solar_w - grid_w - battery_w - house_w)
+        threshold = max(2000, house_w * 0.5)  # 50% tolerantie of 2kW
+
+        if imbalance > threshold:
+            self._raise_issue(
+                key     = "sensor:kirchhoff:imbalance",
+                level   = "warning",
+                title   = "Energiebalans klopt niet",
+                message = (
+                    f"Onbalans van {imbalance:.0f}W gedetecteerd "
+                    f"(solar={solar_w:.0f}W, grid={grid_w:.0f}W, "
+                    f"battery={battery_w:.0f}W, house={house_w:.0f}W). "
+                    f"Mogelijk zijn sensoren stale of verkeerd geconfigureerd."
+                ),
+                action  = "notify",
+                source  = "sensor",
+            )
+        else:
+            self._resolve("sensor:kirchhoff:imbalance")
+
+    # ── 7. PV forecast terugkoppeling ──────────────────────────────────────────
+
+    def _check_pv_forecast_accuracy(self, data: dict, now: float) -> None:
+        """Vergelijk PV forecast vs actual voor afgelopen uur — elk uur na zonsondergang."""
+        try:
+            from .energy_manager.audit_log import get_audit_log
+            import datetime as _dt
+            _audit = get_audit_log()
+
+            _hour = _dt.datetime.now().hour
+            # Alleen uitvoeren als zonsondergang voorbij (solar ≈ 0W)
+            solar_w = float(data.get("solar_power", 0) or 0)
+            if solar_w > 50:
+                return  # Nog zon — te vroeg
+
+            # Check of dit uur al gecontroleerd is
+            _check_key = f"pv_fc_check_{_hour}"
+            if _check_key in self._sensor_history:
+                return
+
+            # Lees forecast vs actual uit coordinator data
+            pv_fc = data.get("pv_forecast_hourly") or []
+            # Zoek vorig uur
+            _prev_h = (_hour - 1) % 24
+            fc_entry = next((e for e in pv_fc if e.get("hour") == _prev_h), None)
+            if not fc_entry:
+                return
+
+            fc_kwh = float(fc_entry.get("forecast_w", 0)) / 1000  # W → rough kWh
+            # Actual uit solar learner hourly_peak_w als proxy
+            invs = data.get("inverter_profiles") or []
+            actual_kwh = sum(
+                float(i.get("hourly_peak_w", {}).get(str(_prev_h), 0)) / 1000
+                for i in invs
+            )
+
+            if fc_kwh > 0.01 or actual_kwh > 0.01:
+                _audit.record_pv_forecast(_prev_h, fc_kwh, actual_kwh)
+                self._sensor_history[_check_key] = [now]
+
+        except Exception as exc:
+            _LOGGER.debug("CloudEMS guardian pv_forecast check fout: %s", exc)
 
     # ── 4. Boiler cascade bewaker ─────────────────────────────────────────────
 

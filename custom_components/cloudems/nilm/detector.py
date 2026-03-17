@@ -203,8 +203,9 @@ class AdaptiveNILMThreshold:
 class DeviceEnergy:
     """Per-device cumulative energy tracking."""
     device_id:    str
-    today_kwh:    float = 0.0
-    week_kwh:     float = 0.0
+    today_kwh:     float = 0.0
+    yesterday_kwh: float = 0.0
+    week_kwh:      float = 0.0
     month_kwh:    float = 0.0
     year_kwh:     float = 0.0
     total_kwh:    float = 0.0
@@ -239,7 +240,7 @@ class DeviceEnergy:
         month_k = now.strftime("%Y-%m")
         year_k  = now.strftime("%Y")
 
-        if self.last_reset_day   != day_k:   self.today_kwh  = 0.0; self.last_reset_day   = day_k
+        if self.last_reset_day   != day_k:   self.yesterday_kwh = self.today_kwh; self.today_kwh  = 0.0; self.last_reset_day   = day_k
         if self.last_reset_week  != week_k:  self.week_kwh   = 0.0; self.last_reset_week  = week_k
         if self.last_reset_month != month_k: self.month_kwh  = 0.0; self.last_reset_month = month_k
         if self.last_reset_year  != year_k:  self.year_kwh   = 0.0; self.last_reset_year  = year_k
@@ -262,6 +263,7 @@ class DeviceEnergy:
     def to_dict(self) -> dict:
         return {
             "today_kwh":    self.today_kwh,
+            "yesterday_kwh": self.yesterday_kwh,
             "week_kwh":     self.week_kwh,
             "month_kwh":    self.month_kwh,
             "year_kwh":     self.year_kwh,
@@ -1242,7 +1244,8 @@ class NILMDetector:
             for dev_id, edict in edata.items():
                 if dev_id in self._devices:
                     e = self._devices[dev_id].energy
-                    e.today_kwh   = edict.get("today_kwh",   0.0)
+                    e.today_kwh    = edict.get("today_kwh",    0.0)
+                    e.yesterday_kwh = edict.get("yesterday_kwh", 0.0)
                     e.week_kwh    = edict.get("week_kwh",    0.0)
                     e.month_kwh   = edict.get("month_kwh",   0.0)
                     e.year_kwh    = edict.get("year_kwh",    0.0)

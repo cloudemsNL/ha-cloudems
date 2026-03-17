@@ -85,6 +85,15 @@ const BAT_STYLES = `
   .zp-body{overflow:hidden;transition:max-height .3s ease;}
   .zp-row{display:grid;grid-template-columns:110px 1fr;gap:8px;padding:7px 18px;border-bottom:1px solid var(--b-border);align-items:center;}
   .zp-row:last-child{border-bottom:none;}
+  .zp-slider-row{padding:8px 18px;border-bottom:1px solid var(--b-border);}
+  .zp-slider-label{font-size:11px;color:var(--b-subtext);margin-bottom:4px;display:flex;justify-content:space-between;}
+  .zp-slider-label span{color:var(--b-text);font-weight:600;}
+  .zp-range{width:100%;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.1);border-radius:2px;outline:none;cursor:pointer;}
+  .zp-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#f0c040;cursor:pointer;}
+  .zp-range:disabled{opacity:.3;cursor:default;}
+  .zp-mode-row{padding:8px 18px;border-bottom:1px solid var(--b-border);display:flex;gap:6px;flex-wrap:wrap;}
+  .zp-mode-btn{padding:4px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-size:10px;cursor:pointer;}
+  .zp-mode-btn.active{background:rgba(240,192,64,.15);border-color:#f0c040;color:#f0c040;}
   .zp-key{font-size:12px;color:var(--b-subtext);}
   .zp-val{font-size:12px;color:var(--b-text);font-weight:600;}
   .zp-val.muted{color:var(--b-subtext);font-weight:400;}
@@ -131,12 +140,21 @@ class CloudemsBatteryCard extends HTMLElement {
     const j=JSON.stringify([soc?.state,soc?.last_changed,sch?.state,sch?.last_changed,zpSoc,pwr?.state]);
     if(j!==this._prev){this._prev=j;this._render();}
   }
-
+  _staleWarning(sensorId, maxAgeMin=5) {
+    const s = this._hass?.states[sensorId];
+    if (!s?.last_updated) return '';
+    const ageMin = (Date.now() - new Date(s.last_updated).getTime()) / 60000;
+    if (ageMin < maxAgeMin) return '';
+    return `<span style="font-size:9px;color:#f87171;opacity:0.7" title="Data is ${Math.round(ageMin)} min oud">⚠ ${Math.round(ageMin)}m oud</span>`;
+  }
   _render(){
     const sh=this.shadowRoot; if(!sh) return;
     const h=this._hass, c=this._cfg??{};
     if(!h){ sh.innerHTML=`<style>${BAT_STYLES}</style><div class="card"><div class="empty"><span class="empty-icon">🔋</span></div></div>`; return; }
 
+    // Data versheid
+    const _batStale = this._staleWarning('sensor.cloudems_batterij_epex_schema', 5);
+    const _zpStale  = this._staleWarning('sensor.cloudems_battery_decision', 5);
     const socS=h.states['sensor.cloudems_battery_so_c'];
     const pwrS=h.states['sensor.cloudems_battery_power'];
     const schS=h.states['sensor.cloudems_batterij_epex_schema']||h.states['sensor.cloudems_battery_schedule'];
@@ -163,6 +181,17 @@ class CloudemsBatteryCard extends HTMLElement {
     const disKwh=parseFloat(pA.discharge_kwh_today)||0;
     const schedule=schA.schedule||[];
     const zp=schA.zonneplan||{};
+    const hasSliders   = zp.has_sliders || false;
+    const hasCtrlMode  = zp.has_control_mode || false;
+    const eidDeliver   = zp.entity_deliver_to_home || '';
+    const eidSolar     = zp.entity_solar_charge || '';
+    const eidCtrl      = zp.entity_control_mode || '';
+    const maxDeliver   = parseFloat(zp.learned_max_deliver_w || 3000);
+    const maxSolar     = parseFloat(zp.learned_max_solar_w  || 3000);
+    // Current slider values from HA entities
+    const curDeliver   = eidDeliver ? (parseFloat(h.states[eidDeliver]?.state)||0) : 0;
+    const curSolar     = eidSolar   ? (parseFloat(h.states[eidSolar]?.state)||0)   : 0;
+    const curMode      = eidCtrl    ? (h.states[eidCtrl]?.state||'')               : '';
 
     const ac=actCls(action);
     const color=socColor(soc);
@@ -259,15 +288,25 @@ class CloudemsBatteryCard extends HTMLElement {
     // Zonneplan section
     const tariff=zp.tariff_group||'—';
     const zpDec=zp.forecast||{};
-    const actionStr=zpDec.action_label||schA.action||'—';
-    const priceCt=parseFloat(h.states['sensor.cloudems_price_current_hour']?.state||0)*100||0;
+    const _recAction=zpDec.recommended_action||zpDec.action||schA.action||'';
+    const _recLabels={'hold':'⏸ Wacht op PV','charge':'⚡ Laden','discharge':'⬇ Ontladen','powerplay':'🤖 Powerplay','idle':'○ Idle'};
+    const actionStr=zpDec.action_label||_recLabels[_recAction]||_recAction||'—';
+    const _epxS=h.states['sensor.cloudems_energy_epex_today'];
+    const _epxA=_epxS?.attributes||{};
+    const priceCt=(_epxA.current_price_display??parseFloat(h.states['sensor.cloudems_price_current_hour']?.state||0))*100||0;
+    const _taxPer=(_epxA.tax_per_kwh||0)*100;
     const btw=21;
-    const ebCt=priceCt/(1+btw/100);
+    const ebCt=_taxPer>0?_taxPer:priceCt/(1+btw/100);
     const fc8=zp.forecast?.forecast_8h||[];
     const dotCls=v=>v==='high'||v>0.7?'r':v==='medium'||v>0.4?'y':'g';
     const fc8html=fc8.length?`<div class="dots">${fc8.slice(0,8).map(v=>`<div class="dot ${dotCls(v)}"></div>`).join('')}</div>`:
       `<div class="dots">${Array.from({length:8},(_,i)=>i<3?'g':i<4?'y':'r').map(c=>`<div class="dot ${c}"></div>`).join('')}</div>`;
-    const lastDec=zp.last_decision_str||schA._last_decision_str||'—';
+    const _rawAction=zpDec.action||schA.action||'';
+    const _actionLabel={'hold':'⏸ Wacht op PV','charge':'⚡ Laden','discharge':'⬇ Ontladen','idle':'○ Idle'};
+    const _modeLabels={'home_optimization':'⏸ Home opt.','self_consumption':'♻ Zelfcons.','powerplay':'🤖 Powerplay','manual_control':'✋ Handmatig','charge':'⚡ Laden','discharge':'⬇ Ontladen','hold':'⏸ Hold','idle':'○ Idle'};
+    const _rawSent=zp.last_sent_str||'';
+    const _sentLabel=_rawSent?(_modeLabels[_rawSent]||_rawSent.replace('hold (','').replace(')','')):'';
+    const lastDec=_sentLabel||zp.last_decision_str||schA._last_decision_str||(_rawAction?_actionLabel[_rawAction]||_rawAction:'—');
 
     const zpHtml=`
       <div class="zp-toggle" id="zp-toggle">
@@ -275,12 +314,43 @@ class CloudemsBatteryCard extends HTMLElement {
         <span class="zp-arrow" id="zp-arrow">${this._zpOpen?'▲':'▼'}</span>
       </div>
       <div class="zp-body" id="zp-body" style="max-height:${this._zpOpen?'400px':'0'}">
-        <div class="zp-row"><span class="zp-key">Modus</span><span class="zp-val">${esc(zp.active_mode||'Thuisoptimalisatie')}</span></div>
+        ${zp.manual_override_active?`
+        <div class="zp-row" style="background:rgba(251,191,36,.08);border-radius:6px;padding:4px 8px;margin-bottom:4px">
+          <span style="font-size:11px;color:#fbbf24">✋ Handmatige override: <strong>${esc(zp.manual_override_mode||'')}</strong> — nog ${zp.manual_override_min_left||0} min</span>
+        </div>`:``}
+        <div class="zp-row"><span class="zp-key">Modus</span><span class="zp-val">${(()=>{
+          const _modeMap={'home_optimization':'🏠 Thuisoptimalisatie','self_consumption':'♻ Zelfconsumptie','powerplay':'🤖 Powerplay','manual_control':'✋ Handmatig'};
+          const _m=zp.active_mode||'';
+          return esc(_modeMap[_m]||_m||'Thuisoptimalisatie');
+        })()}</span></div>
         <div class="zp-row"><span class="zp-key">Tariefgroep</span><span class="zp-val ${tariff==='LOW'||tariff==='low'?'green':''}">${esc(tariff)}</span></div>
         <div class="zp-row"><span class="zp-key">Beslissing</span><span class="zp-val">${esc(actionStr)} · ${esc(lastDec)}</span></div>
         <div class="zp-row"><span class="zp-key">Prijs (all-in)</span><span class="zp-val">€${priceCt.toFixed(1)} ct · EB ${ebCt.toFixed(1)} ct · BTW ${btw}%</span></div>
         <div class="zp-row"><span class="zp-key">Forecast 8u</span>${fc8html}</div>
-        <div class="zp-row"><span class="zp-key">Laatste sturing</span><span class="zp-val muted">${esc(lastDec)}</span></div>
+        <div class="zp-row"><span class="zp-key">Laatste sturing</span><span class="zp-val muted">${esc(lastDec)} ${_batStale||_zpStale||''}</span></div>
+        ${hasCtrlMode && eidCtrl ? `
+        <div class="zp-mode-row" id="zp-mode-row">
+          ${['home_optimization','self_consumption','powerplay'].map(m =>
+            `<button class="zp-mode-btn ${curMode===m?'active':''}" data-mode="${m}">${
+              m==='home_optimization'?'🏠 Thuisopt.':m==='self_consumption'?'♻ Zelfcons.':'🤖 Powerplay'
+            }</button>`
+          ).join('')}
+        </div>`:''
+        }
+        ${hasSliders && eidDeliver ? `
+        <div class="zp-slider-row">
+          <div class="zp-slider-label">Levering thuis<span id="lbl-deliver">${Math.round(curDeliver)} W</span></div>
+          <input class="zp-range" type="range" id="sl-deliver" min="0" max="${Math.round(maxDeliver)}" step="50" value="${Math.round(curDeliver)}"
+            data-eid="${eidDeliver}"/>
+        </div>`:''
+        }
+        ${hasSliders && eidSolar ? `
+        <div class="zp-slider-row">
+          <div class="zp-slider-label">Solar laden<span id="lbl-solar">${Math.round(curSolar)} W</span></div>
+          <input class="zp-range" type="range" id="sl-solar" min="0" max="${Math.round(maxSolar)}" step="50" value="${Math.round(curSolar)}"
+            data-eid="${eidSolar}"/>
+        </div>`:''
+        }
       </div>`;
 
     const sub=socLow?`⚠️ Laag — ${soc.toFixed(1)}%`:`${soc.toFixed(1)}% · ${capKwh?(capKwh*soc/100).toFixed(2)+' kWh opgeslagen':''}`;
@@ -351,6 +421,50 @@ class CloudemsBatteryCard extends HTMLElement {
       if(arrow) arrow.textContent=this._zpOpen?'▲':'▼';
     });
     sh.querySelector('#rb-6')?.addEventListener('click',()=>{this._chartRange=6;this._drawChart();sh.querySelector('#rb-6').classList.add('active');sh.querySelector('#rb-24').classList.remove('active');});
+
+    // ── ZP Sliders ────────────────────────────────────────────────────────────
+    const _callSvc = (domain, svc, data) => {
+      this._hass?.callService(domain, svc, data);
+    };
+
+    // Slider: deliver_to_home
+    const slDeliver = sh.getElementById('sl-deliver');
+    if(slDeliver){
+      slDeliver.addEventListener('input', e => {
+        const lbl = sh.getElementById('lbl-deliver');
+        if(lbl) lbl.textContent = Math.round(e.target.value) + ' W';
+      });
+      slDeliver.addEventListener('change', e => {
+        const eid = slDeliver.dataset.eid;
+        if(eid) _callSvc('number', 'set_value', {entity_id: eid, value: parseFloat(e.target.value)});
+      });
+    }
+
+    // Slider: solar_charge
+    const slSolar = sh.getElementById('sl-solar');
+    if(slSolar){
+      slSolar.addEventListener('input', e => {
+        const lbl = sh.getElementById('lbl-solar');
+        if(lbl) lbl.textContent = Math.round(e.target.value) + ' W';
+      });
+      slSolar.addEventListener('change', e => {
+        const eid = slSolar.dataset.eid;
+        if(eid) _callSvc('number', 'set_value', {entity_id: eid, value: parseFloat(e.target.value)});
+      });
+    }
+
+    // Mode buttons
+    sh.querySelectorAll('.zp-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const eid = sh.querySelector('#zp-mode-row')?.closest('[data-ctrl-eid]')?.dataset.ctrlEid
+                 || this._hass?.states['sensor.cloudems_batterij_epex_schema']?.attributes?.zonneplan?.entity_control_mode
+                 || '';
+        if(eid) _callSvc('select', 'select_option', {entity_id: eid, option: btn.dataset.mode});
+        // Optimistic UI update
+        sh.querySelectorAll('.zp-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
     sh.querySelector('#rb-24')?.addEventListener('click',()=>{this._chartRange=24;this._drawChart();sh.querySelector('#rb-24').classList.add('active');sh.querySelector('#rb-6').classList.remove('active');});
 
     // Start interval countdown animation
@@ -420,19 +534,39 @@ class CloudemsBatteryCard extends HTMLElement {
       ctx.fillStyle=txtC; ctx.font='9px monospace'; ctx.fillText(lbl,2,y-3);
     });
     const xStep=(W-4)/(data.length-1);
+    // Teken elk segment correct aan beide kanten van de nul-lijn
+    // Bij zero-crossing: splits het segment op het exacte kruispunt
+    const drawSeg=(ax,ay,bx,by,val)=>{
+      if(Math.abs(val)<50){ return; }
+      const c=val>0?green:amber;
+      ctx.strokeStyle=c; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+      const grad=ctx.createLinearGradient(0,Math.min(ay,zY),0,Math.max(ay,zY)+1);
+      if(val>0){grad.addColorStop(0,c+'35');grad.addColorStop(1,'transparent');}
+      else{grad.addColorStop(0,'transparent');grad.addColorStop(1,c+'35');}
+      ctx.fillStyle=grad;
+      ctx.beginPath(); ctx.moveTo(ax,zY); ctx.lineTo(ax,ay); ctx.lineTo(bx,by); ctx.lineTo(bx,zY); ctx.closePath(); ctx.fill();
+    };
     for(let i=0;i<data.length-1;i++){
       const x0=2+i*xStep, y0=toY(data[i]);
       const x1=2+(i+1)*xStep, y1=toY(data[i+1]);
-      const col=data[i]<-50?green:data[i]>50?amber:gridC;
-      ctx.strokeStyle=col; ctx.lineWidth=1.5;
+      const v0=data[i], v1=data[i+1];
+      // Teken neutrale lijn altijd (als achtergrond)
+      ctx.strokeStyle=gridC; ctx.lineWidth=0.5;
       ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
-      if(Math.abs(data[i])>50){
-        const c=data[i]<0?green:amber;
-        const grad=ctx.createLinearGradient(0,Math.min(y0,zY),0,Math.max(y0,zY)+1);
-        if(data[i]<0){grad.addColorStop(0,c+'40');grad.addColorStop(1,'transparent');}
-        else{grad.addColorStop(0,'transparent');grad.addColorStop(1,c+'30');}
-        ctx.fillStyle=grad;
-        ctx.beginPath(); ctx.moveTo(x0,zY); ctx.lineTo(x0,y0); ctx.lineTo(x1,y1); ctx.lineTo(x1,zY); ctx.closePath(); ctx.fill();
+      // Zit er een zero-crossing in dit segment?
+      if((v0>50&&v1<-50)||(v0<-50&&v1>50)){
+        // Bereken het exacte kruispunt
+        const t=v0/(v0-v1); // 0..1 waar de waarde nul wordt
+        const xZ=x0+(x1-x0)*t;
+        // Eerste helft
+        drawSeg(x0,y0,xZ,zY,v0);
+        // Tweede helft
+        drawSeg(xZ,zY,x1,y1,v1);
+      } else {
+        // Geen crossing: teken het hele segment in de juiste kleur
+        const dominant=Math.abs(v0)>=Math.abs(v1)?v0:v1;
+        drawSeg(x0,y0,x1,y1,dominant);
       }
     }
     const fmtKw=v=>`${v>=0?'+':''}${(v/1000).toFixed(1)} kW`;

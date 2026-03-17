@@ -56,23 +56,32 @@ EMA_ALPHA           = 0.25     # learning rate for rolling averages
 
 @dataclass
 class EVSession:
-    start_ts:   float
-    end_ts:     float   = 0.0
-    kwh:        float   = 0.0
-    weekday:    int     = 0
-    start_hour: int     = 0
-    duration_h: float   = 0.0
-    cost_eur:   float   = 0.0
+    start_ts:        float
+    end_ts:          float = 0.0
+    kwh:             float = 0.0
+    weekday:         int   = 0
+    start_hour:      int   = 0
+    duration_h:      float = 0.0
+    cost_eur:        float = 0.0
+    # evcc-inspired: solar tracking + CO2
+    solar_kwh:       float = 0.0   # kWh direct van PV
+    solar_pct:       float = 0.0   # % van totaal dat zonne-energie was
+    co2_g:           float = 0.0   # gram CO2 (netmix + solar=0g)
+    price_per_kwh:   float = 0.0   # gemiddelde prijs per kWh
 
     def to_dict(self) -> dict:
         return {
-            "start_ts":   self.start_ts,
-            "end_ts":     self.end_ts,
-            "kwh":        round(self.kwh, 3),
-            "weekday":    self.weekday,
-            "start_hour": self.start_hour,
-            "duration_h": round(self.duration_h, 2),
-            "cost_eur":   round(self.cost_eur, 3),
+            "start_ts":     self.start_ts,
+            "end_ts":       self.end_ts,
+            "kwh":          round(self.kwh, 3),
+            "weekday":      self.weekday,
+            "start_hour":   self.start_hour,
+            "duration_h":   round(self.duration_h, 2),
+            "cost_eur":     round(self.cost_eur, 3),
+            "solar_kwh":    round(self.solar_kwh, 3),
+            "solar_pct":    round(self.solar_pct, 1),
+            "co2_g":        round(self.co2_g, 0),
+            "price_per_kwh": round(self.price_per_kwh, 4),
         }
 
     @classmethod
@@ -84,7 +93,11 @@ class EVSession:
             weekday    = d.get("weekday", 0),
             start_hour = d.get("start_hour", 0),
             duration_h = d.get("duration_h", 0.0),
-            cost_eur   = d.get("cost_eur", 0.0),
+            cost_eur     = d.get("cost_eur", 0.0),
+            solar_kwh    = d.get("solar_kwh", 0.0),
+            solar_pct    = d.get("solar_pct", 0.0),
+            co2_g        = d.get("co2_g", 0.0),
+            price_per_kwh = d.get("price_per_kwh", 0.0),
         )
 
 
@@ -140,10 +153,13 @@ class EVSessionLearner:
 
     # ── Main update ───────────────────────────────────────────────────────────
 
-    def update(self, current_a: float, price_eur_kwh: float) -> dict:
+    def update(self, current_a: float, price_eur_kwh: float,
+                solar_w: float = 0.0, grid_w: float = 0.0,
+                co2_g_per_kwh: float = 300.0) -> dict:
         """
-        Feed current EV charger output (A) and current price.
+        Feed current EV charger output (A), price, solar power, and CO2 intensity.
         Returns session state + learned model output.
+        co2_g_per_kwh: gram CO2 per kWh netmix (NL standaard ~300g, zonne=0g)
         """
         now  = datetime.now(timezone.utc)
         interval_h = 10.0 / 3600.0   # 10s in hours
@@ -160,8 +176,16 @@ class EVSessionLearner:
         # Accumulate active session
         if self._active is not None and current_a > 0.5:
             power_w = current_a * self._voltage
-            self._active.kwh      += power_w / 1000.0 * interval_h
-            self._active.cost_eur += (power_w / 1000.0 * interval_h) * price_eur_kwh
+            kwh_tick = power_w / 1000.0 * interval_h
+            self._active.kwh      += kwh_tick
+            self._active.cost_eur += kwh_tick * price_eur_kwh
+            # Solar fraction: hoeveel van het laadvermogen komt van PV
+            _solar_cover = min(power_w, max(0.0, solar_w))
+            _solar_kwh_tick = (_solar_cover / power_w * kwh_tick) if power_w > 0 else 0.0
+            _grid_kwh_tick  = kwh_tick - _solar_kwh_tick
+            self._active.solar_kwh += _solar_kwh_tick
+            # CO2: netmix voor grid-deel, 0g voor solar-deel
+            self._active.co2_g     += _grid_kwh_tick * co2_g_per_kwh
 
         # Session end
         if current_a <= 0.5 and self._last_current > 0.5 and self._active is not None:
@@ -169,12 +193,15 @@ class EVSessionLearner:
             sess.end_ts     = time.time()
             sess.duration_h = (sess.end_ts - sess.start_ts) / 3600.0
             if sess.kwh >= MIN_SESSION_KWH and sess.duration_h * 3600 >= MIN_SESSION_S:
+                # Bereken afgeleide statistieken
+                sess.solar_pct    = round(sess.solar_kwh / sess.kwh * 100, 1) if sess.kwh > 0 else 0.0
+                sess.price_per_kwh = round(sess.cost_eur / sess.kwh, 4) if sess.kwh > 0 else 0.0
                 self._sessions.append(sess)
                 self._recompute_model()
                 self._dirty = True
                 _LOGGER.info(
-                    "CloudEMS EV: sessie afgerond — %.2f kWh, %.1fh, €%.2f",
-                    sess.kwh, sess.duration_h, sess.cost_eur,
+                    "CloudEMS EV: sessie afgerond — %.2f kWh, %.1fh, €%.2f, ☀%.0f%%, CO2 %.0fg",
+                    sess.kwh, sess.duration_h, sess.cost_eur, sess.solar_pct, sess.co2_g,
                 )
             self._active = None
 
@@ -240,8 +267,42 @@ class EVSessionLearner:
                 sum(s.cost_eur for s in sess[-10:]) / min(len(sess), 10), 2
             ) if sess else None,
             "avg_kwh_per_session": round(self._avg_kwh, 2) if model_ready else None,
+            # evcc-inspired: aggregate statistics
+            "stats": self._build_stats(sess),
         }
 
+
+    def _build_stats(self, sess: list) -> dict:
+        """Bouw statistieken op zoals evcc: total/30d/365d met solar%, CO2, avg prijs."""
+        import time as _time
+        now = _time.time()
+
+        def _agg(sessions):
+            if not sessions:
+                return {"charged_kwh": 0.0, "solar_kwh": 0.0, "solar_pct": 0.0,
+                        "cost_eur": 0.0, "avg_price_per_kwh": 0.0,
+                        "co2_kg": 0.0, "sessions": 0}
+            total_kwh   = sum(s.kwh for s in sessions)
+            solar_kwh   = sum(s.solar_kwh for s in sessions)
+            cost        = sum(s.cost_eur for s in sessions)
+            co2_g       = sum(s.co2_g for s in sessions)
+            return {
+                "charged_kwh":      round(total_kwh, 2),
+                "solar_kwh":        round(solar_kwh, 2),
+                "solar_pct":        round(solar_kwh / total_kwh * 100, 1) if total_kwh > 0 else 0.0,
+                "cost_eur":         round(cost, 2),
+                "avg_price_per_kwh": round(cost / total_kwh, 4) if total_kwh > 0 else 0.0,
+                "co2_kg":           round(co2_g / 1000, 3),
+                "sessions":         len(sessions),
+            }
+
+        _30d  = [s for s in sess if now - s.start_ts <= 86400 * 30]
+        _365d = [s for s in sess if now - s.start_ts <= 86400 * 365]
+        return {
+            "total": _agg(sess),
+            "365d":  _agg(_365d),
+            "30d":   _agg(_30d),
+        }
 
 # ══════════════════════════════════════════════════════════════════════════════
 # EVDeparturePredictor — v1.0.0 (toegevoegd in v2.6)

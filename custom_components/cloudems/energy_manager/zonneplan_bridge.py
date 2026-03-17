@@ -90,6 +90,7 @@ class DecisionResult:
     soc_target:        float = 0.0
     soc_reachable:     float = 0.0
     human_reason:      str   = ""              # begrijpelijke omschrijving voor UI
+    executed:          Optional[str] = None    # modus die daadwerkelijk gestuurd is
 
 
 class ZPControlMode(str, Enum):
@@ -248,9 +249,10 @@ class ZonneplanProvider(BatteryProvider):
         self._entities:       dict[str, str]  = {}
         self._override_since: float           = 0.0
         self._saved_mode:     Optional[str]   = None
+        # Handmatige override: als gebruiker zelf een modus kiest, respecteer dat X minuten
+        self._manual_override_until: float    = 0.0   # unix ts tot wanneer CloudEMS wacht
+        self._manual_override_mode:  str      = ""    # welke modus de gebruiker koos
         # Configuratie-parameters
-        self._restore_min:    int    = int(config.get("zonneplan_restore_after_min", 60))
-        self._restore_mode:   bool   = config.get("zonneplan_restore_mode", True)
         self._min_soc:        float  = float(config.get("zonneplan_min_soc", 10.0))
         self._max_soc:        float  = float(config.get("zonneplan_max_soc", 95.0))
         self._charge_w:       float  = float(config.get("zonneplan_charge_w", 2500.0))
@@ -267,6 +269,10 @@ class ZonneplanProvider(BatteryProvider):
         self._price_floor:      float = float(config.get("zonneplan_price_floor_eur", 0.05))
         # Idempotentie: cache van laatste gestuurde waarden
         self._last_sent_mode:      Optional[str]   = None
+        self._startup_send_done:   bool            = False
+        self._last_expected_action: str             = ""
+        self._last_action_ts:       float           = 0.0
+        self._last_battery_w_at_cmd: float          = 0.0
         self._last_sent_deliver_w: Optional[float] = None
         self._last_sent_solar_w:   Optional[float] = None
         # Slider maxima direct uit HA entiteit-attributen ('max' attribuut van number entity)
@@ -311,19 +317,54 @@ class ZonneplanProvider(BatteryProvider):
         self._override_since = float(saved.get("override_since", 0.0))
         self._saved_mode     = saved.get("saved_mode")
         self._last_sent_mode = saved.get("last_sent_mode")
-        # slider maxima komen uit entiteit-attributen, niet uit opslag
-        # Lees slider maxima uit entiteit-attributen
+        self._startup_send_done: bool = False
         self._read_slider_maxima()
         _LOGGER.info(
             "ZonneplanProvider v2.1: detected=%s enabled=%s entities=%s slider_deliver=%.0fW slider_solar=%.0fW",
             self._detected, self._enabled, list(self._entities.keys()),
             self._slider_max_deliver_w, self._slider_max_solar_w,
         )
+        # v4.6.326: Na herstart direct home_optimization sturen (ook als SoC nog null is)
+        if self._enabled and self._detected and self._entities.get("control_mode"):
+            import asyncio
+            asyncio.ensure_future(self._async_startup_send())
+
+    async def _async_startup_send(self) -> None:
+        """Stuur home_optimization na herstart en verifieer via send_and_verify.
+        Blijft oneindig retrying totdat bevestigd — geen aanname dat commando aankomt.
+        """
+        import asyncio
+        from .command_verify import send_and_verify
+        target = ZPControlMode.HOME_OPTIMIZATION.value
+        # Wacht 10s zodat HA entities geladen zijn
+        await asyncio.sleep(10)
+
+        while True:
+            eid = self._entities.get("control_mode")
+            if not eid:
+                _LOGGER.debug("ZonneplanProvider startup: control_mode entity nog niet beschikbaar, retry 15s")
+                await asyncio.sleep(15)
+                continue
+
+            ok = await send_and_verify(
+                hass=self._hass,
+                domain="select", service="select_option",
+                service_data={"entity_id": eid, "option": target},
+                entity_id=eid,
+                verify_fn=lambda s: target in (s.state or "").lower() or "thuisoptimalisatie" in (s.state or "").lower(),
+                description=f"ZP startup → {target}",
+                backoff=[5, 10, 15, 30, 60],
+                max_attempts=0,  # oneindig
+                verify_delay=5.0,
+            )
+            if ok:
+                self._startup_send_done = True
+                self._last_sent_mode = target
+                await self._async_save()
+                return
 
     def update_config(self, config: dict) -> None:
         super().update_config(config)
-        self._restore_min     = int(config.get("zonneplan_restore_after_min", self._restore_min))
-        self._restore_mode    = config.get("zonneplan_restore_mode",   self._restore_mode)
         self._min_soc         = float(config.get("zonneplan_min_soc",  self._min_soc))
         self._max_soc         = float(config.get("zonneplan_max_soc",  self._max_soc))
         self._charge_w        = float(config.get("zonneplan_charge_w", self._charge_w))
@@ -710,7 +751,11 @@ class ZonneplanProvider(BatteryProvider):
 
         raw      = self._last_state.raw
         soc      = self._last_state.soc_pct or 50.0
-        tg       = raw.get("tariff_group", "normal") or "normal"
+        _tg_raw  = raw.get("tariff_group", "") or ""
+        # Cache laatste bekende tariefgroep — voorkomt "unknown" direkt na herstart
+        if _tg_raw and _tg_raw.lower() not in ("unknown", ""):
+            self._last_known_tariff = _tg_raw.lower()
+        tg = _tg_raw.lower() if _tg_raw and _tg_raw.lower() not in ("unknown", "") else getattr(self, "_last_known_tariff", "normal")
         _LOGGER.debug(
             "ZonneplanProvider decide_v3: SoC=%.0f%% (from_state=%s) tarief=%s mode=%s last_sent=%s",
             soc, self._last_state.soc_pct is not None,
@@ -1410,8 +1455,11 @@ class ZonneplanProvider(BatteryProvider):
 
         mc_eid = self._entities.get("manual_control")
         if mc_eid and self._last_state.raw.get("manual_control"):
-            await self._hass.services.async_call(
-                "switch", "turn_off", {"entity_id": mc_eid}, blocking=False
+            from .command_verify import send_switch
+            await send_switch(
+                self._hass, mc_eid, turn_on=False,
+                description=f"ZP manual_control uit {mc_eid}",
+                max_attempts=3, verify_delay=3.0,
             )
 
         self._override_since   = 0.0
@@ -1459,6 +1507,55 @@ class ZonneplanProvider(BatteryProvider):
                 reasons=["Provider niet beschikbaar of uitgeschakeld"],
             )
 
+        # Handmatige override: gebruiker heeft zelf een modus gekozen
+        # CloudEMS respecteert dit en overschrijft NIET totdat de timeout verloopt
+        _now_ts = time.time()
+        if self._manual_override_until > _now_ts:
+            _remaining_min = round((self._manual_override_until - _now_ts) / 60, 1)
+            _LOGGER.debug(
+                "ZonneplanProvider: handmatige override actief (%s, nog %.1f min)",
+                self._manual_override_mode, _remaining_min,
+            )
+            return DecisionResult(
+                action=ZPAction.HOLD,
+                confidence=1.0,
+                reasons=[f"Handmatige override: {self._manual_override_mode} (nog {_remaining_min:.0f}min)"],
+                human_reason=f"Je hebt handmatig '{self._manual_override_mode}' ingesteld. CloudEMS wacht nog {_remaining_min:.0f} minuten.",
+                executed=f"manual_override ({self._manual_override_mode})",
+            )
+        elif self._manual_override_until > 0:
+            # Override verlopen — reset
+            _LOGGER.info(
+                "ZonneplanProvider: handmatige override verlopen (%s) — CloudEMS neemt weer over",
+                self._manual_override_mode,
+            )
+            self._manual_override_until = 0.0
+            self._manual_override_mode  = ""
+
+        # Detecteer of gebruiker BUITEN CloudEMS om de modus heeft gewijzigd
+        # Als active_mode verschilt van last_sent_mode → gebruiker heeft manueel ingegrepen
+        _active = self._last_state.active_mode or ""
+        _expected = self._last_sent_mode or ""
+        if (_expected and _active and _active != _expected
+                and self._startup_send_done
+                and self._manual_override_until <= 0):
+            # Standaard override duur: 30 minuten
+            _override_min = 30
+            self._manual_override_until = _now_ts + _override_min * 60
+            self._manual_override_mode  = _active
+            _LOGGER.info(
+                "ZonneplanProvider: manuele override gedetecteerd — "
+                "Zonneplan staat op '%s' (CloudEMS verwachtte '%s'). "
+                "CloudEMS wacht %d minuten voor terugname.",
+                _active, _expected, _override_min,
+            )
+            return DecisionResult(
+                action=ZPAction.HOLD,
+                confidence=1.0,
+                reasons=[f"Manuele override gedetecteerd: {_active} ({_override_min}min respijt)"],
+                human_reason=f"Je hebt handmatig '{_active}' ingesteld. CloudEMS wacht {_override_min} minuten.",
+                executed=f"manual_override ({_active})",
+            )
 
         pv = self._build_pv_context(
             solar_now_w             = solar_now_w,
@@ -1485,6 +1582,10 @@ class ZonneplanProvider(BatteryProvider):
         )
 
         if result.action == ZPAction.CHARGE:
+            result.executed = f"charge ({result.charge_power_w or self._effective_charge_w:.0f}W)"
+            self._last_expected_action = "charge"
+            self._last_action_ts = __import__("time").time()
+            self._last_battery_w_at_cmd = float(self._last_state.power_w or 0)
             await self.async_set_charge(power_w=result.charge_power_w)
 
         elif result.action == ZPAction.DISCHARGE:
@@ -1492,11 +1593,26 @@ class ZonneplanProvider(BatteryProvider):
                 power_w=result.discharge_power_w,
                 bypass_antiround=result.bypass_antiround,
             )
+            result.executed = f"discharge ({result.discharge_power_w or self._effective_discharge_w:.0f}W)"
+            self._last_expected_action = "discharge"
+            self._last_action_ts = __import__("time").time()
+            self._last_battery_w_at_cmd = float(self._last_state.power_w or 0)
 
         elif result.action == ZPAction.HOLD:
-            if self._last_state.active_mode != ZPControlMode.HOME_OPTIMIZATION.value:
-                await self._send_control_mode(ZPControlMode.HOME_OPTIMIZATION.value)
+            if self._last_state.active_mode != ZPControlMode.HOME_OPTIMIZATION.value or not self._startup_send_done:
+                ok = await self._send_control_mode(ZPControlMode.HOME_OPTIMIZATION.value)
+                if ok:
+                    result.executed = ZPControlMode.HOME_OPTIMIZATION.value
+            else:
+                result.executed = f"hold ({self._last_state.active_mode})"
+            # Sla verwachte actie op voor battery_verify check in guardian
+            self._last_expected_action = "hold"
+            self._last_action_ts = __import__("time").time()
 
+        elif result.action == ZPAction.POWERPLAY:
+            result.executed = "powerplay"  # ZP AI bepaalt, geen sturing
+        else:
+            pass
         # POWERPLAY: niets doen, Zonneplan AI bepaalt
 
         # ── PV-surplus slider optimalisatie met hysterese ──────────────────────────
@@ -1556,7 +1672,6 @@ class ZonneplanProvider(BatteryProvider):
             elif not _surplus_low_condition:
                 self._surplus_low_since = 0.0
 
-        await self.async_maybe_restore()
         return result
 
     async def async_apply_forecast_decision(self) -> ZPAction:
@@ -1565,15 +1680,6 @@ class ZonneplanProvider(BatteryProvider):
         return result.action
 
 
-    async def async_maybe_restore(self) -> None:
-        if not self.is_available or not self._restore_mode or self._restore_min <= 0:
-            return
-        if self._override_since <= 0:
-            return
-        elapsed = (time.time() - self._override_since) / 60.0
-        if elapsed >= self._restore_min:
-            _LOGGER.info("ZonneplanProvider: auto-restore na %.0f min", elapsed)
-            await self.async_set_auto()
 
     async def async_force_slider_calibrate(self) -> dict:
         """Forceer een beslissing en schrijf sliders direct — negeert hysterese/debounce.
@@ -1699,20 +1805,6 @@ class ZonneplanProvider(BatteryProvider):
                 "description": "Laat CloudEMS de Zonneplan Nexus batterij aansturen.",
             },
             {
-                "key":     "zonneplan_restore_mode",
-                "label":   "Automatisch terugzetten naar vorige modus",
-                "type":    "bool",
-                "default": True,
-            },
-            {
-                "key":     "zonneplan_restore_after_min",
-                "label":   "Hersteltijd (minuten, 0 = nooit)",
-                "type":    "int",
-                "default": 60,
-                "min":     0,
-                "max":     1440,
-            },
-            {
                 "key":     "zonneplan_min_soc",
                 "label":   "Minimale SoC voor ontladen (%)",
                 "type":    "float",
@@ -1756,7 +1848,7 @@ class ZonneplanProvider(BatteryProvider):
                 "key":     "zonneplan_auto_forecast",
                 "label":   "Auto-forecast: CloudEMS stuurt automatisch op tariefgroep",
                 "type":    "bool",
-                "default": False,
+                "default": True,
                 "description": (
                     "Als ingeschakeld beslist CloudEMS elk coordinator-interval op basis van "
                     "de tariefgroep-forecast of de batterij moet laden, ontladen of standby staan. "
@@ -1866,6 +1958,10 @@ class ZonneplanProvider(BatteryProvider):
             "override_since_min": round((time.time() - self._override_since) / 60, 1)
                                   if self._override_since > 0 else None,
             "saved_mode":         self._saved_mode,
+            "manual_override_active": self._manual_override_until > time.time(),
+            "manual_override_mode":   self._manual_override_mode or None,
+            "manual_override_min_left": round((self._manual_override_until - time.time()) / 60, 1)
+                                        if self._manual_override_until > time.time() else None,
             "available_modes":    _AVAILABLE_MODES,
             "forecast":           self.get_forecast_summary(),
             "state":              self._last_state.to_dict(),
@@ -1913,11 +2009,14 @@ class ZonneplanProvider(BatteryProvider):
         # Idempotentie: check huidige staat
         current = self._last_state.active_mode
         if current == mode_val and self._last_sent_mode == mode_val:
-            _LOGGER.debug(
-                "ZonneplanProvider: mode al %s, geen call (idempotent: last_sent=%s, current=%s)",
-                mode_val, self._last_sent_mode, current,
-            )
-            return True
+            if self._startup_send_done:
+                _LOGGER.debug(
+                    "ZonneplanProvider: mode al %s, geen call (idempotent: last_sent=%s, current=%s)",
+                    mode_val, self._last_sent_mode, current,
+                )
+                return True
+            # Na herstart altijd één keer sturen, ook als modus al klopt
+            _LOGGER.info("ZonneplanProvider: startup-sturing %s (eenmalig na herstart)", mode_val)
 
         await self._save_current_mode()
         try:
@@ -1927,6 +2026,8 @@ class ZonneplanProvider(BatteryProvider):
                 blocking=False,
             )
             self._last_sent_mode = mode_val
+            self._startup_send_done = True
+            self._last_executed_mode = mode_val
             await self._async_save()
             return True
         except Exception as exc:

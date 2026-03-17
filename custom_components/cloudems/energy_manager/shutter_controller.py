@@ -1229,23 +1229,30 @@ class ShutterController:
         # Registreer dit commando zodat de state-listener het herkent als CloudEMS-actie
         self._cloudems_commands[entity_id] = time.monotonic()
 
+        from .command_verify import send_and_verify, send_cover_position
         if action == SHUTTER_ACTION_OPEN:
-            await self.hass.services.async_call(
-                "cover", "open_cover", {"entity_id": entity_id}, blocking=False
+            await send_and_verify(
+                self.hass, "cover", "open_cover", {"entity_id": entity_id},
+                entity_id=entity_id,
+                verify_fn=lambda s: s.state in ("open", "opening"),
+                description=f"rolluik open {entity_id}", max_attempts=3, verify_delay=4.0,
             )
         elif action == SHUTTER_ACTION_CLOSE:
-            await self.hass.services.async_call(
-                "cover", "close_cover", {"entity_id": entity_id}, blocking=False
+            await send_and_verify(
+                self.hass, "cover", "close_cover", {"entity_id": entity_id},
+                entity_id=entity_id,
+                verify_fn=lambda s: s.state in ("closed", "closing"),
+                description=f"rolluik sluit {entity_id}", max_attempts=3, verify_delay=4.0,
             )
         elif action == SHUTTER_ACTION_STOP:
             await self.hass.services.async_call(
                 "cover", "stop_cover", {"entity_id": entity_id}, blocking=False
-            )
+            )  # stop: geen verify nodig, motor stopt altijd
         elif action == SHUTTER_ACTION_POSITION and position is not None:
-            await self.hass.services.async_call(
-                "cover", "set_cover_position",
-                {"entity_id": entity_id, "position": position},
-                blocking=False,
+            await send_cover_position(
+                self.hass, entity_id, position,
+                description=f"rolluik positie {entity_id} → {position}%",
+                max_attempts=3, verify_delay=5.0,
             )
 
         # v4.6.153: learn from CloudEMS-initiated schedule actions (night_close / morning_open)

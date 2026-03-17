@@ -161,10 +161,16 @@ class PhaseLimiter:
             return
         domain = entity_id.split(".")[0]
         try:
-            await self.hass.services.async_call(
-                domain, service, {"entity_id": entity_id}, blocking=False
+            from .command_verify import send_and_verify
+            _exp = "on" if service == "turn_on" else "off"
+            await send_and_verify(
+                self.hass, domain, service, {"entity_id": entity_id},
+                entity_id=entity_id,
+                verify_fn=lambda s, e=_exp: s.state == e,
+                description=f"PhaseLimiter {entity_id} → {_exp}",
+                max_attempts=3, verify_delay=3.0,
             )
-            _LOGGER.debug("PhaseLimiter: %s → %s", entity_id, service)
+            _LOGGER.debug("PhaseLimiter: %s → %s (geverifieerd)", entity_id, service)
         except Exception as err:
             _LOGGER.warning("PhaseLimiter control failed (%s): %s", entity_id, err)
 

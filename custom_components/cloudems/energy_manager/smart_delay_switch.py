@@ -264,10 +264,15 @@ class SmartDelayScheduler:
     async def _turn_off(self, cfg: SmartDelayConfig) -> bool:
         domain = cfg.entity_id.split(".")[0]
         try:
-            await self._hass.services.async_call(
-                domain, "turn_off", {"entity_id": cfg.entity_id}, blocking=False
+            from .command_verify import send_and_verify
+            ok = await send_and_verify(
+                self._hass, domain, "turn_off", {"entity_id": cfg.entity_id},
+                entity_id=cfg.entity_id,
+                verify_fn=lambda s: s.state == "off",
+                description=f"smart_delay off {cfg.entity_id}",
+                max_attempts=3, verify_delay=3.0,
             )
-            return True
+            return ok
         except Exception as exc:
             _LOGGER.error("SmartDelay _turn_off %s: %s", cfg.entity_id, exc)
             return False
@@ -275,8 +280,13 @@ class SmartDelayScheduler:
     async def _turn_on(self, cfg: SmartDelayConfig) -> bool:
         domain = cfg.entity_id.split(".")[0]
         try:
-            await self._hass.services.async_call(
-                domain, "turn_on", {"entity_id": cfg.entity_id}, blocking=False
+            from .command_verify import send_and_verify
+            await send_and_verify(
+                self._hass, domain, "turn_on", {"entity_id": cfg.entity_id},
+                entity_id=cfg.entity_id,
+                verify_fn=lambda s: s.state == "on",
+                description=f"smart_delay on {cfg.entity_id}",
+                max_attempts=3, verify_delay=3.0,
             )
             self._rearm_ts[cfg.entity_id] = time.time()
             return True

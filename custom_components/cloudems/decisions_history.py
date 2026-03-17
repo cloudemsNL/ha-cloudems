@@ -21,6 +21,7 @@ MAX_SENSOR_ENTRIES = 60    # Max entries in sensor attribuut (HA size limit)
 HISTORY_FILENAME   = "cloudems_decisions_history.json"
 # Dedupliceer: sla beslissing alleen op als actie/reden gewijzigd is (per categorie)
 DEDUPE_WINDOW_S    = 30    # Minimaal interval per categorie voor identieke beslissingen
+DEDUPE_WINDOW_PER_CAT: dict[str, float] = {}  # Override per categorie (leeg = allen 30s)
 
 
 class DecisionsHistory:
@@ -42,7 +43,8 @@ class DecisionsHistory:
         last = self._last_per_category.get(category)
         if last:
             same = (last["action"] == action and last["reason"] == reason)
-            recent = (now - last["ts"]) < DEDUPE_WINDOW_S
+            _window = DEDUPE_WINDOW_PER_CAT.get(category, DEDUPE_WINDOW_S)
+            recent = (now - last["ts"]) < _window
             if same and recent:
                 return  # Skip duplicaat
 

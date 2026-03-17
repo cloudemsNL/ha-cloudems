@@ -173,6 +173,10 @@ from .energy_manager.sleep_detector import SleepDetector
 from .energy_manager.device_lifespan import enrich_devices_with_wear
 from .energy_manager.capacity_peak import CapacityPeakMonitor
 from .energy_manager.tariff_optimizer import NegativeTariffCatcher, ApplianceShiftAdvisor
+try:
+    from .energy_manager.influxdb_writer import InfluxDBWriter as _InfluxDBWriter
+except Exception:
+    _InfluxDBWriter = None
 from .energy_manager.weekly_insights import WeeklyComparison, BlueprintGenerator
 from .energy_manager.wash_cycle import ApplianceCycleManager
 from .energy_manager.smart_climate import SmartClimateManager
@@ -1081,6 +1085,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "rank_today":      rank,
             "is_cheap_hour":   is_cheap,
         }
+
+    def _get_yesterday_prices(self) -> list:
+        """Haal gisterprijzen uit _price_hour_history als [{hour, price}] lijst."""
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            yesterday = (_dt.now() - _td(days=1)).date()
+            ts_start = int(_dt(yesterday.year, yesterday.month, yesterday.day, 0).timestamp())
+            ts_end   = int(_dt(yesterday.year, yesterday.month, yesterday.day, 23, 59, 59).timestamp())
+            slots = [
+                {"hour": _dt.fromtimestamp(h["ts"]).hour, "price": round(float(h["price"]), 5)}
+                for h in self._price_hour_history
+                if ts_start <= h.get("ts", 0) <= ts_end and h.get("price") is not None
+            ]
+            # Sorteer op uur, dedup (bewaar laatste per uur)
+            by_hour = {}
+            for s in slots:
+                by_hour[s["hour"]] = s
+            return [by_hour[h] for h in sorted(by_hour)]
+        except Exception:
+            return []
 
     def _apply_price_components(self, price_info: dict) -> dict:
         """Verrijk price_info met all-in prijs (EB + BTW + leveranciersopslag).
@@ -2172,6 +2196,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         self._ev_session = EVSessionLearner(self.hass)
         await self._ev_session.async_setup()
+        # InfluxDB writer (optioneel)
+        self._influxdb = _InfluxDBWriter(self.hass, self._config) if _InfluxDBWriter else None
+        if self._influxdb and self._influxdb.enabled:
+            _LOGGER.info("CloudEMS InfluxDB: actief → %s/%s", self._config.get("influxdb_url",""), self._config.get("influxdb_bucket","cloudems"))
 
         self._nilm_schedule = NILMScheduleLearner(self.hass)
         await self._nilm_schedule.async_setup()
@@ -2864,7 +2892,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if _zp is not None and not _zp._entities:
                 _now = time.time()
                 _last = getattr(self, "_last_zp_redetect", 0)
-                if _now - _last > 300:
+                # v4.6.310: 30s ipv 5min — zodat na herstart binnen halve minuut sturing start
+                _redetect_interval = 30 if getattr(self, "_health_cycle_count", 0) < 20 else 300
+                if _now - _last > _redetect_interval:
                     self._last_zp_redetect = _now
                     try:
                         if await _zp.async_detect():
@@ -3189,6 +3219,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "prices_from_provider": True,  # markeer als all-in, geen markup meer toepassen
                     "contract_type":       "dynamic",
                     "slot_count":          len(_today_slots_raw),
+                    "yesterday_prices":    self._get_yesterday_prices(),
                 }
                 # current_price ook updaten voor modules die rechtstreeks _prices.current_price lezen
                 current_price = _cur
@@ -3200,6 +3231,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # EPEX price info (standaard: geen provider geconfigureerd)
                 price_info: dict = self._prices.get_price_info() if self._prices else {}
                 price_info["contract_type"] = CONTRACT_TYPE_FIXED if contract_type == CONTRACT_TYPE_FIXED else "dynamic"
+                price_info["yesterday_prices"] = self._get_yesterday_prices()
 
             # v1.13.0: apply tax/BTW/markup to produce all-in price fields
             # v4.5.1: bij provider-prijzen wordt in _apply_price_components geen markup opgestapeld
@@ -3471,6 +3503,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._last_solar_w   = round(float(data.get("solar_power", 0) or 0), 1)
             self._last_grid_w    = round(float(data.get("grid_power",  0) or 0), 1)
             self._last_house_w   = round(float(data.get("house_power", 0) or 0), 1)
+            # InfluxDB realtime
+            if self._influxdb and self._influxdb.enabled:
+                self._influxdb.write_realtime(data)
+                self.hass.async_create_task(self._influxdb.async_flush())
 
             # v4.5.7: geleerde battery-vertraging vanuit EnergyBalancer doorgeven
             # aan BatteryUncertaintyTracker zodat het burst-masker automatisch
@@ -3738,6 +3774,34 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 await self._pv_forecast.async_refresh_weather()
                 pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh()
                 pv_forecast_tomorrow_kwh = self._pv_forecast.get_total_forecast_tomorrow_kwh()
+                # Cloud cover correctie: lees van weather entity of aparte sensor
+                _cloud_eid = self._config.get("cloud_cover_sensor", "")
+                _weather_eid = self._config.get("weather_entity", "")
+                _cloud_pct = None
+                if _cloud_eid:
+                    _cs = self._safe_state(_cloud_eid)
+                    if _cs and _cs.state not in ("unavailable", "unknown"):
+                        try: _cloud_pct = float(_cs.state)
+                        except: pass
+                elif _weather_eid:
+                    _ws = self._safe_state(_weather_eid)
+                    if _ws:
+                        # HA weather entity + Ecowitt attributes
+                        _cloud_pct = (
+                            _ws.attributes.get("cloud_coverage")
+                            or _ws.attributes.get("cloudiness")
+                            or _ws.attributes.get("cloud_cover")
+                        )
+                # Ecowitt specifieke sensoren (betere granulariteit dan HA weather)
+                if _cloud_pct is None:
+                    for _ecowitt_key in ["sensor.ecowitt_solar_and_uvi_solar_radiation",
+                                         "sensor.ecowitt_cloud_ceiling"]:
+                        _ec = self._safe_state(_ecowitt_key)
+                        if _ec and _ec.state not in ("unavailable", "unknown"):
+                            break
+                if _cloud_pct is not None and hasattr(self._pv_forecast, "update_cloud_cover"):
+                    self._pv_forecast.update_cloud_cover(_cloud_pct)
+
                 inverter_profiles        = self._pv_forecast.get_all_profiles()
                 for inv_id in [p["inverter_id"] for p in inverter_profiles]:
                     for hf in self._pv_forecast.get_forecast(inv_id):
@@ -4318,7 +4382,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             ev_current_a = float(ev_st.state)
                         except (ValueError, TypeError):
                             ev_current_a = 0.0
-                ev_session_data = self._ev_session.update(ev_current_a, current_price or 0.0) if not self.learning_frozen else {}
+                ev_session_data = self._ev_session.update(
+                    ev_current_a,
+                    current_price or 0.0,
+                    solar_w=float(data.get("solar_power", 0) or 0),
+                    grid_w=float(data.get("grid_power", 0) or 0),
+                    co2_g_per_kwh=float(data.get("grid_co2_g_per_kwh", 300) or 300),
+                ) if not self.learning_frozen else {}
 
             # v1.10.3: NILM schedule learner (enriches device list with schedule metadata)
             nilm_devices_raw = self._nilm.get_devices_for_ha()
@@ -7329,6 +7399,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             except Exception as _ah_err:  # noqa: BLE001
                 _LOGGER.debug("CloudEMS AdaptiveHome bridge fire fout: %s", _ah_err)
 
+            # ── Long-term statistics (InfluxDB/Grafana compatible) ────────────
+            # Schrijf elk uur key metrics naar HA statistieken zodat
+            # InfluxDB en Grafana ze automatisch oppikken via HA API
+            _tick = getattr(self, "_coordinator_tick", 0)
+            if _tick % 360 == 1:  # ~elk uur (360 × 10s)
+                try:
+                    await self._write_long_term_stats(self._data)
+                except Exception as _lts_exc:
+                    _LOGGER.debug("CloudEMS long-term stats fout: %s", _lts_exc)
+
             return self._data
 
         except Exception as exc:
@@ -7480,13 +7560,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         return await self._provider.call_service(domain, service, entity_id, data)
 
 
-    def _read_state(self, entity_id: str) -> Optional[float]:
-        """Read HA state as float. Also feeds unit_of_measurement to the power calculator."""
+    def _read_state(self, entity_id: str, stale_threshold_s: float = 120.0) -> Optional[float]:
+        """Read HA state as float. Also feeds unit_of_measurement to the power calculator.
+        
+        Returns None if state is older than stale_threshold_s — prevents frozen sensor values
+        from being used as if they are live readings (issue #31 battery freeze).
+        """
         if not entity_id:
             return None
         state = self._safe_state(entity_id)
         if state is None or state.state in ("unavailable", "unknown", ""):
             return None
+        # Stale check: als de sensor al te lang niet geüpdatet is, beschouw als None
+        # zodat de balancer de Kirchhoff-schatting gebruikt ipv de bevroren waarde
+        try:
+            import datetime as _dt_rs
+            _age_s = (_dt_rs.datetime.now(_dt_rs.timezone.utc) - state.last_updated).total_seconds()
+            if _age_s > stale_threshold_s:
+                _LOGGER.debug(
+                    "CloudEMS _read_state: %s is stale (%.0fs oud) — gebruik balancer schatting",
+                    entity_id, _age_s
+                )
+                return None
+        except Exception:
+            pass  # geen last_updated beschikbaar — ga door
         # Feed UOM to power calculator so kW/W is determined from metadata first
         self._calc.observe_state(entity_id, state)
         try:
@@ -8626,6 +8723,71 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             candidates.append(entry.entity_id)
         # Geef de eerste kandidaat terug; meer verfijning kan later
         return candidates[0] if candidates else ""
+
+    async def _write_long_term_stats(self, data: dict) -> None:
+        """Schrijf key metrics naar HA long-term statistics.
+        
+        Hierdoor zijn alle metrics beschikbaar in InfluxDB, Grafana en
+        HA energiedashboard via de standaard Statistics API.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import (
+                async_import_statistics,
+                StatisticData,
+                StatisticMetaData,
+            )
+            from homeassistant.util import dt as dt_util
+            import datetime
+        except ImportError:
+            return  # recorder niet beschikbaar
+
+        now = dt_util.utcnow().replace(minute=0, second=0, microsecond=0)
+
+        # Key metrics om te exporteren
+        metrics = {
+            "cloudems:solar_energy":    float(data.get("solar_power", 0) or 0) / 1000 / 6,  # W → kWh per 10min cyclus
+            "cloudems:grid_import":     max(0.0, float(data.get("grid_power", 0) or 0)) / 1000 / 6,
+            "cloudems:grid_export":     max(0.0, -(float(data.get("grid_power", 0) or 0))) / 1000 / 6,
+            "cloudems:battery_charge":  max(0.0, float(data.get("battery_power", 0) or 0)) / 1000 / 6,
+            "cloudems:battery_discharge": max(0.0, -(float(data.get("battery_power", 0) or 0))) / 1000 / 6,
+            "cloudems:house_consumption": float(data.get("house_power", 0) or 0) / 1000 / 6,
+        }
+
+        # Prijs
+        pi = data.get("price_info") or data.get("energy_price") or {}
+        metrics["cloudems:price_all_in"] = float(pi.get("current_all_in") or pi.get("current_display") or 0)
+
+        # SoC batterij
+        bat_dec = data.get("battery_decision") or {}
+        soc = None
+        if bat_dec.get("soc_pct") is not None:
+            soc = float(bat_dec["soc_pct"])
+        if soc is not None:
+            metrics["cloudems:battery_soc"] = soc
+
+        _instance = get_instance(self.hass)
+        for stat_id, value in metrics.items():
+            if value is None:
+                continue
+            _unit = "kWh" if "energy" in stat_id or "charge" in stat_id or "discharge" in stat_id or "import" in stat_id or "export" in stat_id or "consumption" in stat_id else (
+                "%" if "soc" in stat_id else
+                "EUR/kWh" if "price" in stat_id else "W"
+            )
+            try:
+                metadata = StatisticMetaData(
+                    has_mean=True,
+                    has_sum=("energy" in stat_id or "charge" in stat_id or "discharge" in stat_id
+                             or "import" in stat_id or "export" in stat_id or "consumption" in stat_id),
+                    name=stat_id.replace("cloudems:", "CloudEMS ").replace("_", " ").title(),
+                    source="cloudems",
+                    statistic_id=stat_id,
+                    unit_of_measurement=_unit,
+                )
+                stat_data = [StatisticData(start=now, mean=value, sum=value if metadata.has_sum else None)]
+                async_import_statistics(self.hass, metadata, stat_data)
+            except Exception as _e:
+                _LOGGER.debug("CloudEMS stats write fout voor %s: %s", stat_id, _e)
 
     async def _set_ev_current(self, ampere: float):
         entity_id = self._config.get("ev_charger_entity","")

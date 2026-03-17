@@ -1,3 +1,195 @@
+## [4.6.337] - 2026-03-17
+### Fix + Feature — ZP override, executed, tarief cache
+- DISCHARGE en POWERPLAY zetten nu result.executed (waren altijd null)
+- _last_battery_w_at_cmd wordt nu gezet bij CHARGE en DISCHARGE voor battery verify
+- Tariefgroep cache: laatste bekende tariefgroep bewaard, geen "unknown" na herstart
+- Handmatige override detectie: als jij zelf een modus kiest, wacht CloudEMS 30 min
+- Override banner in battery card: toont hoelang CloudEMS nog wacht
+
+## [4.6.337] - 2026-03-17
+### Fix — Battery card: Zonneplan sliders ontbraken
+- Modus knoppen (Thuisoptimalisatie / Zelfconsumptie / Powerplay) toegevoegd
+- Slider deliver_to_home (levering thuis) met live W label
+- Slider solar_charge (solar laden) met live W label
+- Gebruikt entity IDs uit sensor.cloudems_batterij_epex_schema.attributes.zonneplan
+- Optimistische UI update bij modus wissel
+
+## [4.6.336] - 2026-03-17
+### Fix — PVForecast crash: _live_cloud_cover_pct niet geïnitialiseerd in __init__
+
+## [4.6.334] - 2026-03-17
+### Fix — _staleWarning outside class crash
+- _staleWarning helper stond buiten de class — TypeError: not a function
+- Correct geplaatst als class method voor _render()
+- _batStale/_zpStale variabelen nu binnen render scope
+
+## [4.6.333] - 2026-03-17
+### Feature — Zelf-lerend audit systeem
+- audit_log.py: nieuw zelf-lerend audit log voor alle sturings-events
+  - Registreert elk commando + verificatie-resultaat
+  - Detecteert ontbrekende context-velden automatisch
+  - PV forecast vs actual vergelijking per uur
+  - ZP drift + battery verify resultaten
+  - Ringbuffer 500 entries algemeen, 100 failures
+- command_verify.py: integreert audit_log bij elke send_and_verify
+- guardian.py: vijf nieuwe checks aangeroepen in async_evaluate
+  - _check_zp_drift: Zonneplan modus afwijking detectie
+  - _check_kirchhoff: energiebalans sanity check
+  - _check_pv_forecast_accuracy: forecast vs actual per uur
+  - _check_battery_control_effect: batterij-actie effect verificatie
+- sensor.py: audit samenvatting in watchdog sensor attributes
+- JS kaarten: _staleWarning() helper, toont "X min oud" bij stale data
+
+## [4.6.332] - 2026-03-17
+### Fix — GitHub issues #30, #31 + bewolkte dagen
+- Issue #30: compassLabel labels-array stond in verkeerde volgorde — N 173° ipv Z
+- Issue #31: battery freeze — _read_state geeft None als sensor >120s niet geüpdatet is
+- Bewolkte dagen: orientation chip toont leervoortgang % (bijv. "Z 173° ~ (16%)")
+- NILM detail: user_name (hernoemde apparaten) matcht nu ook in fullDev lookup
+- NILM sensor: name gebruikt display_name (user_name > name)
+- orientation_progress_pct toegevoegd aan inverter sensor data
+
+## [4.6.331] - 2026-03-17
+### Fix — Battery card labels
+- Modus: home_optimization → "🏠 Thuisoptimalisatie" etc.
+- Laatste sturing: leest last_sent_mode van provider
+- Beslissing: leest recommended_action uit forecast met leesbaar label
+- sensor.py: last_sent_str en action_label toegevoegd aan zonneplan_info
+
+## [4.6.330] - 2026-03-17
+### Fix — Beslissingen batterij filter
+- zonneplan_auto beslissingen nu zichtbaar onder Batterij filter in decisions card
+- CATEGORY_META uitgebreid met zonneplan_auto en zonneplan
+
+## [4.6.329] - 2026-03-17
+### Feature — send_and_verify overal toegepast
+- shutter_controller: open/close/positie geverifieerd
+- solar_dimmer: number/switch sturing geverifieerd
+- cheap_switch_scheduler: schakelaar aan/uit geverifieerd
+- smart_delay_switch: aan/uit geverifieerd
+- dynamic_charger + dynamic_ev_charger: stroomsterkte geverifieerd
+- phase_limiter: schakelaar geverifieerd
+- zonneplan_bridge: manual_control switch geverifieerd
+
+## [4.6.328] - 2026-03-17
+### Feature — Generieke send_and_verify utility
+- command_verify.py: universele send-en-verifieer module voor alle sturingen
+- send_and_verify(): stuur service → wacht → lees entity terug → retry bij mismatch
+- Helpers: send_select, send_switch, send_number, send_cover_position
+- ZP bridge startup gebruikt nu deze utility (oneindig retrying tot bevestigd)
+- Patroon voor alle toekomstige sturings-code: nooit aannemen dat een commando aankomt
+
+## [4.6.327] - 2026-03-17
+### Fix — Sturing na herstart: stuur en verifieer
+- Stuurt home_optimization na herstart en leest terug of Zonneplan entity echt op die modus staat
+- Blijft retrying (backoff 5/10/15/30/60s) totdat bevestigd
+- Geen aanname dat een commando aankomt — geldt als patroon voor alle sturingslogica
+
+## [4.6.326] - 2026-03-17
+### Fix — Direct sturing na herstart
+- Na herstart stuurt CloudEMS binnen 10s home_optimization naar Zonneplan
+- Ongeacht SoC (mag null zijn) — dit is een globale startpositie-sturing
+- Tot 5 pogingen met 15s tussentijd als de eerste mislukt
+
+## [4.6.325] - 2026-03-17
+### Fix — Mini-price badge wisselt bij toggle
+- Goedkoop/Normaal/Duur badge altijd op basis van all-in prijs, ongeacht excl/incl toggle
+
+## [4.6.324] - 2026-03-17
+### Fix — Prijsverloop tooltip en header
+- Tooltip totaal was dubbel (€0.43 ipv €0.23): price is al all-in, niet kale EPEX
+- Tooltip gebruikt nu slot.price_excl_tax als kale EPEX voor correcte uitsplitsing
+- Excl. in header toonde "—": betere fallback via today_prices_excl_tax slot
+
+## [4.6.323] - 2026-03-17
+### Fix — ZP executed altijd null
+- DecisionResult.executed veld toegevoegd — wordt nu gezet bij elk commando
+- HOLD stuurt altijd home_optimization bij startup (startup_send_done check)
+- "Laatste sturing" in battery card toont nu correcte waarde
+
+## [4.6.322] - 2026-03-17
+### Fix — Wizard tekst en labels
+- Auto-herstel tekst verwijderd uit wizard beschrijving (feature is weg)
+- zonneplan_auto_forecast label toegevoegd in NL/EN/DE/FR vertalingen
+
+## [4.6.321] - 2026-03-17
+### Fix
+- Solar card crash: clippingHtml not defined — stond in if-block, nu buiten gedeclareerd
+- Battery card prijs 0.0: leest nu sensor.cloudems_energy_epex_today.current_price_display
+
+## [4.6.320] - 2026-03-17
+### Fix — Solar card forecast + omvormer merge
+- Forecast vandaag: alleen uren >= nowH (get_forecast start bij huidig uur, rest is morgen)
+- Omvormer + benutting/clipping samengevoegd in één sectie per omvormer
+
+## [4.6.319] - 2026-03-17
+### Fix — Solar forecast grafiek verkeerde waarden
+- fcHourly heeft 48 entries (2 omvormers x 24 uur) — .map() pakte verkeerde uren
+- Fix: sommeer nu per uur (h.hour als sleutel) over alle omvormers
+
+## [4.6.318] - 2026-03-17
+### Fix — Solar card crash (nowH before initialization)
+- nowH werd gebruikt voor declaratie door refactor volgorde bug
+
+## [4.6.317] - 2026-03-17
+### Feature — Solar card forecast navigatie
+- Gisteren/Vandaag/Morgen navigatie in forecast grafiek
+- 3 balkjes per uur: verwacht (groen) / werkelijk (geel) / gisteren (vaag)
+- Huidig uur indicator (gele lijn)
+- Stat-rij: werkelijk vs verwacht + afwijking %
+- Dimmer tab knippert als actief (v4.6.316)
+
+## [4.6.316] - 2026-03-17
+### Feature — Solar card dimmer tab
+- Dimmer tab knippert oranje als dimmer actief is (< 100%)
+- Auto-switch naar dimmer tab bij activering (tenzij gebruiker handmatig een tab heeft gekozen)
+- Oranje indicator in tab label
+
+## [4.6.315] - 2026-03-17
+### Feature — NILM detail panel uitgebreid
+- Sparkline grafiek (vermogen laatste minuten)
+- kWh vandaag / gisteren
+- Totale actieve tijd (uren/minuten)
+- Sessies + gemiddelde sessieduur
+- Kamer fix: leest nu correct uit fullDev.room
+- DeviceEnergy: yesterday_kwh opgeslagen bij dagrollover
+
+## [4.6.314] - 2026-03-17
+### Fix — Prijsverloop balken buiten container
+- bar-area krijgt overflow:hidden — balken kunnen nooit meer buiten de track uitsteken
+- barWidth gecapped op 100% als extra zekerheid
+
+## [4.6.314] - 2026-03-17
+### Fix — Prijsverloop balkenschaling (opnieuw)
+- Fix van 4.6.308 was niet in 4.6.310 base meegenomen: barWidth = price/totalRange gaf >100% bij positieve prijzen. Nu: hasNeg ? price/totalRange : price/maxPrice.
+
+## [4.6.313] - 2026-03-17
+### Fix — Zonneplan altijd sturen na herstart
+- Na herstart wordt nu altijd éénmalig een commando gestuurd naar Zonneplan, ook als de modus al overeenkomt met de gewenste stand. Idempotentie-check geldt pas na de eerste succesvolle sturing.
+
+## [4.6.312] - 2026-03-17
+### Fix — Battery card "Laatste sturing"
+- "Laatste sturing: —" terwijl hold actief is: toont nu "⏸ Wacht op PV" bij hold, "⚡ Laden" bij charge etc.
+- Geen bug: hold = bewust geen commando, CloudEMS laat Zonneplan zijn modus behouden
+
+## [4.6.311] - 2026-03-17
+### Fix — Batterij tab titel tekst verwijderd
+
+## [4.6.310] - 2026-03-17
+### Fix
+- ZP re-detect interval 5min → 30s op startup — sturing start nu binnen 30s na herstart
+- Auto-herstel (zonneplan_restore_mode) verwijderd — CloudEMS blijft op laatste beslissing
+- zonneplan_auto_forecast default True — werkt direct na wizard zonder handmatige config
+- PV forecast grafiek: `wh` vs `forecast_w` key mismatch opgelost — bars nooit zichtbaar
+- Mini-price + prijsverloop: "incl. btw" → "all-in", "excl. btw" → "kale EPEX"
+- Home-card tab stijl gelijk aan solar card
+
+## [4.6.310] - 2026-03-17
+### Fix — Zonneplan auto-sturing en auto-herstel verwijderd
+- `zonneplan_auto_forecast` default True — CloudEMS stuurt nu direct na herstart zonder handmatige config
+- Auto-herstel (`zonneplan_restore_mode`, `async_maybe_restore`) volledig verwijderd — zinloos want CloudEMS blijft op laatste beslissing
+- Home-card tab stijl gelijk aan solar card
+
 ## [4.6.284] - 2026-03-16
 ### Fix — Boiler vermogen grafiek heeft nooit gewerkt
 - **Rootcause:** De history API werd aangeroepen met `minimal_response=true` en twee entity IDs gecombineerd. Met minimal_response gebruiken entries het formaat `{s, lc}` in plaats van `{state, last_changed, entity_id}`. Daardoor was `series[0]?.entity_id` altijd leeg → temp en power konden niet onderscheiden worden → beide grafieken bleven leeg.

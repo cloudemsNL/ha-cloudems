@@ -170,6 +170,25 @@ class SolarDimmer:
         domain = entity_id.split(".")[0]
         data = {"entity_id": entity_id, **(extra or {})}
         try:
-            await self.hass.services.async_call(domain, service, data, blocking=False)
+            from .command_verify import send_and_verify
+            # Bepaal verify op basis van domain/service
+            if domain == "number" and service == "set_value":
+                target_val = float(extra.get("value", 0)) if extra else 0.0
+                await send_and_verify(
+                    self.hass, domain, service, data, entity_id=entity_id,
+                    verify_fn=lambda s, v=target_val: abs(float(s.state or 0) - v) <= 2.0,
+                    description=f"dimmer {entity_id} → {target_val}",
+                    max_attempts=3, verify_delay=3.0,
+                )
+            elif domain == "switch":
+                target_state = "on" if service == "turn_on" else "off"
+                await send_and_verify(
+                    self.hass, domain, service, data, entity_id=entity_id,
+                    verify_fn=lambda s, t=target_state: s.state == t,
+                    description=f"dimmer switch {entity_id} → {target_state}",
+                    max_attempts=3, verify_delay=3.0,
+                )
+            else:
+                await self.hass.services.async_call(domain, service, data, blocking=False)
         except Exception as err:
             _LOGGER.warning("SolarDimmer service call failed: %s", err)
