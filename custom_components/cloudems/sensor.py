@@ -4067,8 +4067,10 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
                 "last_slider_write_min": zp.get("last_slider_write_min"),
                 "entities_mapped":     _entities_mapped,
                 # Slider kalibratie / max leren — nodig voor progress bar in dashboard
-                "learned_max_deliver_w": zp.get("learned_max_deliver_w"),
-                "learned_max_solar_w":   zp.get("learned_max_solar_w"),
+                # slider_max = werkelijke max van HA number entity (meest betrouwbaar)
+                # learned_max = gelerend via probing (kan None zijn)
+                "learned_max_deliver_w": zp.get("slider_max_deliver_w") or zp.get("learned_max_deliver_w"),
+                "learned_max_solar_w":   zp.get("slider_max_solar_w")   or zp.get("learned_max_solar_w"),
                 "probe_active":          zp.get("probe_active", False),
                 "probe_current_w":       zp.get("probe_current_w"),
                 "probe_confirmed_w":     zp.get("probe_confirmed_w"),

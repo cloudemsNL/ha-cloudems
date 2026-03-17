@@ -186,8 +186,13 @@ class CloudemsBatteryCard extends HTMLElement {
     const eidDeliver   = zp.entity_deliver_to_home || '';
     const eidSolar     = zp.entity_solar_charge || '';
     const eidCtrl      = zp.entity_control_mode || '';
-    const maxDeliver   = parseFloat(zp.learned_max_deliver_w || 3000);
-    const maxSolar     = parseFloat(zp.learned_max_solar_w  || 3000);
+    // Slider maxima: uit ZP entity attributen (meest betrouwbaar) → geleerde max → default
+    const _deliverEid = zp.entity_deliver_to_home;
+    const _solarEid   = zp.entity_solar_charge;
+    const _deliverMax = _deliverEid ? parseFloat(h.states[_deliverEid]?.attributes?.max || 0) : 0;
+    const _solarMax   = _solarEid   ? parseFloat(h.states[_solarEid]?.attributes?.max   || 0) : 0;
+    const maxDeliver = _deliverMax > 100 ? _deliverMax : parseFloat(zp.learned_max_deliver_w || 6000);
+    const maxSolar   = _solarMax   > 100 ? _solarMax   : parseFloat(zp.learned_max_solar_w  || 6000);
     // Current slider values from HA entities
     const curDeliver   = eidDeliver ? (parseFloat(h.states[eidDeliver]?.state)||0) : 0;
     const curSolar     = eidSolar   ? (parseFloat(h.states[eidSolar]?.state)||0)   : 0;

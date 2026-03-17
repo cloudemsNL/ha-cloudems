@@ -1,3 +1,8 @@
+## [4.6.338] - 2026-03-17
+### Fix — Slider max 3000W fout
+- Slider maxima lezen nu van HA entity attributes (st.attributes.max) i.p.v. geleerde waarde
+- Battery card leest direct van entity_deliver_to_home/entity_solar_charge voor meest accuraat max
+
 ## [4.6.337] - 2026-03-17
 ### Fix + Feature — ZP override, executed, tarief cache
 - DISCHARGE en POWERPLAY zetten nu result.executed (waren altijd null)
