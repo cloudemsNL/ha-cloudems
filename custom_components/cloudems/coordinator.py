@@ -2278,8 +2278,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.energy_budget import EnergyBudgetTracker
         from .energy_manager.appliance_roi import ApplianceROICalculator
         from .energy_manager.solar_dimmer import SolarDimmer
-        self._gas_analysis = GasAnalyzer(self.hass)
+        _gas_eid = self._config.get("gas_sensor", "") or ""
+        self._gas_analysis = GasAnalyzer(self.hass, gas_entity_id=_gas_eid)
         await self._gas_analysis.async_setup()
+        if hasattr(self._gas_analysis, "set_log_callback"):
+            self._gas_analysis.set_log_callback(self._learning_backup.async_log_high)
+        # Haal periode-starts op uit HA history zodra HA volledig geladen is
+        from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+        import homeassistant.core as _ha_core
+        async def _gas_bootstrap(_event=None):
+            if hasattr(self._gas_analysis, "_ensure_period_starts"):
+                await self._gas_analysis._ensure_period_starts()
+        if self.hass.state == _ha_core.CoreState.running:
+            self.hass.async_create_task(_gas_bootstrap())
+        else:
+            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _gas_bootstrap)
         self._energy_budget = EnergyBudgetTracker(self.hass, self._config)
         await self._energy_budget.async_setup()
         self._appliance_roi = ApplianceROICalculator(hass=self.hass)
@@ -6313,6 +6326,25 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         _gas_day_m3, _temp_c,
                     )
                     await self._gas_predictor.async_save()
+                # _gas_today_start: gasstand aan het begin van vandaag (voor dag_m3 berekening)
+                _today_key = _dt_gas.date.today().isoformat()
+                if not hasattr(self, "_gas_today_date") or self._gas_today_date != _today_key:
+                    # Nieuwe dag! Sla de huidige stand op als start van vandaag
+                    if _gas_today and _gas_today > 0:
+                        self._gas_today_start = _gas_today
+                        self._gas_today_date = _today_key
+                        _LOGGER.info("CloudEMS: gas dag-start voor %s = %.3f m³", _today_key, _gas_today)
+                elif not hasattr(self, "_gas_today_start") and _gas_today and _gas_today > 0:
+                    # Eerste keer na herstart — lees middernacht-waarde uit HA recorder
+                    _midnight_val = await self._async_read_gas_at_midnight()
+                    if _midnight_val and _midnight_val > 0 and _midnight_val <= _gas_today:
+                        self._gas_today_start = _midnight_val
+                        _LOGGER.info("CloudEMS: gas dag-start (recorder) = %.3f m³ → dag_m3 = %.3f m³",
+                                     _midnight_val, _gas_today - _midnight_val)
+                    else:
+                        # Recorder niet beschikbaar — gebruik huidige als start (dag_m3 = 0 vandaag)
+                        self._gas_today_start = _gas_today
+                    self._gas_today_date = _today_key
                 self._gas_yesterday_total = _gas_today or getattr(self, "_gas_yesterday_total", 0.0)
                 # Voorspelling bijwerken
                 _weather_eid = self._config.get("weather_entity", "weather.forecast_home")
@@ -6685,7 +6717,29 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             outside_temp_c    = float(_outside_t),
                         )
                     _gas_price = self._read_gas_price()
-                    _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price)
+                    self._gas_analysis.update_price(_gas_price)
+                    _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price, current_m3=float(_gas_m3_val))
+                    # Dagrecords voor drill-down in JS kaart (laatste 30 dagen)
+                    # Als leeg: start backfill asynchroon (tijdstip onbekend bij eerste cyclus)
+                    if self._gas_analysis and not self._gas_analysis._records:
+                        if hasattr(self._gas_analysis, "_backfill_records_from_statistics"):
+                            _eid_bf = self._gas_analysis._find_gas_sensor()
+                            if _eid_bf:
+                                import asyncio as _aio_bf
+                                _aio_bf.ensure_future(
+                                    self._gas_analysis._backfill_records_from_statistics(_eid_bf)
+                                )
+                    _day_records = [
+                        {
+                            "date":         r.date,
+                            "gas_m3":       round(r.gas_m3_delta, 3),
+                            "price_eur_m3": round(r.price_eur_m3, 4),
+                            "cost_eur":     round(r.gas_m3_delta * r.price_eur_m3, 2),
+                            "hdd":          round(r.hdd, 1),
+                        }
+                        for r in self._gas_analysis._records[-30:]
+                    ] if self._gas_analysis else []
+
                     gas_analysis_data = {
                         "gas_m3_today":           _gas_result.gas_m3_today,
                         "gas_m3_week":            _gas_result.gas_m3_week,
@@ -6707,6 +6761,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "records_count":          _gas_result.records_count,
                         "isolation_advice":       _gas_result.isolation_advice,
                         "isolation_saving_pct":   _gas_result.isolation_saving_pct,
+                        "day_records":            _day_records,
                     }
                 except Exception as _ga_err:
                     _LOGGER.debug("GasAnalyzer fout: %s", _ga_err)
@@ -7098,8 +7153,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "gas_data":             {
                     "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else self._read_gas_sensor()),
                     "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
-                    # Periode verbruik (m³) — gevuld door gas_analysis als beschikbaar
-                    "dag_m3":    float(gas_analysis_data.get("gas_m3_today")  or 0.0),
+                    # Dag-verbruik: lees direct van gas_analysis (today_gas_start_m3)
+                    # Als gas_analysis nog geen start heeft, bootstrappen via HA recorder
+                    # Dag-verbruik: gas_analysis heeft beste waarde, fallback op coordinator tracking
+                    "dag_m3":    float(gas_analysis_data.get("gas_m3_today") or (
+                        round(max(0.0, (
+                            (_gas_now := (self._p1_reader.latest.gas_m3 if self._p1_reader and self._p1_reader.latest else self._read_gas_sensor()) or 0.0)
+                            - getattr(self, "_gas_today_start", _gas_now)
+                        )), 3) if getattr(self, "_gas_today_start", 0.0) > 0 else 0.0
+                    )),
                     "week_m3":   float(gas_analysis_data.get("gas_m3_week")   or 0.0),
                     "maand_m3":  float(gas_analysis_data.get("gas_m3_month")  or 0.0),
                     "jaar_m3":   float(gas_analysis_data.get("gas_m3_year")   or 0.0),
@@ -7603,6 +7665,63 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except (ValueError, TypeError):
                     pass
         return float(self._config.get("gas_price_eur_m3") or 1.25)
+
+    async def _async_read_gas_at_midnight(self) -> Optional[float]:
+        """Lees gasstand op middernacht vandaag uit HA recorder statistics.
+        
+        Gebruikt voor het berekenen van dag_m3 na een herstart.
+        Geeft None terug als recorder niet beschikbaar is.
+        """
+        try:
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.statistics import statistics_during_period
+            from homeassistant.util import dt as dt_util
+            import datetime as _dt
+
+            # Gas entiteit
+            _eid = self._config.get("gas_sensor", "")
+            if not _eid:
+                # Probeer cloudems gasstand sensor
+                _eid = "sensor.cloudems_gasstand"
+
+            now = dt_util.now()
+            midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Zoek 2 uur rond middernacht
+            start = midnight - _dt.timedelta(hours=1)
+            end   = midnight + _dt.timedelta(hours=2)
+
+            _instance = get_instance(self.hass)
+            stats = await _instance.async_add_executor_job(
+                statistics_during_period,
+                self.hass,
+                start,
+                end,
+                {_eid},
+                "hour",
+                None,
+                {"state", "mean"},
+            )
+
+            if not stats or _eid not in stats or not stats[_eid]:
+                return None
+
+            # Neem de waarde die het dichtst bij middernacht ligt
+            best = None
+            best_diff = float('inf')
+            for row in stats[_eid]:
+                ts = row.get("start")
+                if ts is None:
+                    continue
+                diff = abs((ts - midnight).total_seconds())
+                val  = row.get("state") or row.get("mean")
+                if diff < best_diff and val is not None:
+                    best_diff = diff
+                    best = float(val)
+
+            return best
+        except Exception as _exc:
+            _LOGGER.debug("CloudEMS: gas midnight recorder fout (niet kritiek): %s", _exc)
+            return None
 
     def _read_gas_sensor(self) -> Optional[float]:
         """Read standalone gas sensor (m³) when P1 reader is not active.

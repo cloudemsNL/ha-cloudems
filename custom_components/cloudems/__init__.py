@@ -194,24 +194,48 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         current = {r.get("url", ""): r for r in current_items}
 
         # Stap 2: registreer/update ALLE CloudEMS JS-resources
+        _registered = 0
+        _updated = 0
         for url, keyword in _ALL_JS_RESOURCES:
             matches = [v for k, v in current.items() if keyword in k]
             if matches:
                 item = matches[0]
                 if item.get("url") != url:
-                    await resources.async_update_item(item["id"], {
+                    try:
+                        await resources.async_update_item(item["id"], {
+                            "res_type": LOVELACE_RESOURCE_TYPE,
+                            "url": url,
+                        })
+                        _updated += 1
+                        _LOGGER.info("CloudEMS: Lovelace resource bijgewerkt → %s", url)
+                    except Exception as _upd_err:
+                        # Update mislukt: verwijder en hermaak
+                        try:
+                            await resources.async_delete_item(item["id"])
+                            await resources.async_create_item({
+                                "res_type": LOVELACE_RESOURCE_TYPE,
+                                "url": url,
+                            })
+                            _registered += 1
+                            _LOGGER.info("CloudEMS: resource hergemaakt (update mislukt) → %s", url)
+                        except Exception as _rec_err:
+                            _LOGGER.error("CloudEMS: resource registratie mislukt voor %s: %s", keyword, _rec_err)
+                else:
+                    _LOGGER.debug("CloudEMS: Lovelace resource actueel: %s", keyword)
+            else:
+                try:
+                    await resources.async_create_item({
                         "res_type": LOVELACE_RESOURCE_TYPE,
                         "url": url,
                     })
-                    _LOGGER.info("CloudEMS: Lovelace resource bijgewerkt → %s", url)
-                else:
-                    _LOGGER.debug("CloudEMS: Lovelace resource al actueel: %s", url)
-            else:
-                await resources.async_create_item({
-                    "res_type": LOVELACE_RESOURCE_TYPE,
-                    "url": url,
-                })
-                _LOGGER.info("CloudEMS: Lovelace resource geregistreerd → %s", url)
+                    _registered += 1
+                    _LOGGER.info("CloudEMS: Lovelace resource geregistreerd → %s", url)
+                except Exception as _cr_err:
+                    _LOGGER.error("CloudEMS: kon resource niet registreren %s: %s", keyword, _cr_err)
+        _LOGGER.info(
+            "CloudEMS: Lovelace resources — %d geregistreerd, %d bijgewerkt, %d totaal",
+            _registered, _updated, len(_ALL_JS_RESOURCES)
+        )
 
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("CloudEMS: kon Lovelace resources niet registreren: %s", err)
@@ -898,15 +922,29 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     dst = pathlib.Path(hass.config.config_dir) / "www" / "cloudems"
 
     def _copy_www():
+        import hashlib
         try:
             dst.mkdir(parents=True, exist_ok=True)
+            _copied = 0
+            _skipped = 0
             for f in src.rglob("*"):
                 if f.is_file() and f.name != "cloudems-dashboard.yaml":
                     rel    = f.relative_to(src)
                     dest_f = dst / rel
                     dest_f.parent.mkdir(parents=True, exist_ok=True)
-                    if not dest_f.exists() or f.stat().st_mtime > dest_f.stat().st_mtime:
-                        shutil.copy2(f, dest_f)
+                    # Kopieer alleen als hash verschilt (of bestand ontbreekt)
+                    if dest_f.exists():
+                        src_hash = hashlib.md5(f.read_bytes()).hexdigest()
+                        dst_hash = hashlib.md5(dest_f.read_bytes()).hexdigest()
+                        if src_hash == dst_hash:
+                            _skipped += 1
+                            continue
+                    shutil.copy2(f, dest_f)
+                    _copied += 1
+            if _copied > 0:
+                _LOGGER.info("CloudEMS: %d www-bestanden bijgewerkt (%d ongewijzigd)", _copied, _skipped)
+            else:
+                _LOGGER.debug("CloudEMS: alle %d www-bestanden up-to-date", _skipped)
         except Exception as _err:
             _LOGGER.warning("CloudEMS: kon www/ niet kopiëren naar /config/www/: %s", _err)
 
@@ -925,6 +963,20 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             _LOGGER.warning("CloudEMS: kon cloudems-dashboard.yaml niet kopiëren naar /config/: %s", _err)
 
     await hass.async_add_executor_job(_copy_www)
+
+    # Periodieke check: elke 5 minuten controleren of www-bestanden nog up-to-date zijn.
+    # Dit vangt het geval op waarbij een nieuwe versie geïnstalleerd is zonder herstart.
+    async def _periodic_www_check(_now=None):
+        await hass.async_add_executor_job(_copy_www)
+
+    from homeassistant.helpers.event import async_track_time_interval
+    import datetime as _dt
+    _cancel_www = async_track_time_interval(
+        hass, _periodic_www_check, _dt.timedelta(minutes=5)
+    )
+    # Opslaan zodat we hem kunnen cancellen bij unload
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN]["_cancel_www_check"] = _cancel_www
 
     # Registreer als panel_custom (HA sidebar)
     try:

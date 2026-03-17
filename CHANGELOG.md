@@ -1,3 +1,52 @@
+## [4.6.346] - 2026-03-17
+### Fix — Prijsverloop card hersteld naar 4.6.338
+- Werkende versie van 338 teruggezet
+- Alleen PV werkelijk/verwacht labels verwijderd (zoals gevraagd)
+
+## [4.6.346] - 2026-03-17
+### Fix — Gas dag verbruik + sensor warnings
+- Coordinator tracked nu _gas_today_start bij dag-rollover
+- dag_m3 = huidige stand - start van vandaag (werkt meteen, geen async nodig)
+- state_class TOTAL_INCREASING voor monetary sensoren → TOTAL (HA waarschuwingen weg)
+
+## [4.6.345] - 2026-03-17
+### Fix — Gas verbruik bootstrap via HA recorder
+- GasAnalyzer leest dag/maand/jaar start uit HA long-term statistics bij verse installatie
+- Werkt meteen na herstart zonder dag-rollover te hoeven afwachten
+
+## [4.6.344] - 2026-03-17
+### Fix — Prijsverloop card JS syntax error
+- Orphaned });  overgebleven na PV-code verwijdering in 4.6.339
+- JavaScript syntax error voorkwam dat de kaart laadde
+
+## [4.6.343] - 2026-03-17
+### Fix — JS bestanden niet bijgewerkt na versie-wissel
+- www copy: forceer altijd alles te kopiëren als VERSION verschilt van vorige installatie
+- Versie bijgehouden in version.txt in www/cloudems/
+- Root cause: st_mtime vergelijking sloeg kopie over als bestand al bestond
+
+## [4.6.342] - 2026-03-17
+### Fix — Lovelace resource registratie robuuster
+- Fallback: als update mislukt, verwijder en hermaak de resource
+- Foutmelding in logs als registratie echt mislukt
+- Logging: totaal registered/updated bij elke startup
+
+## [4.6.341] - 2026-03-17
+### Fix — Gas verbruik 0.00
+- dag_m3 berekend via live (huidige stand - gisteren stand) — werkt meteen na herstart
+- Period starts: None fallback was last_gas_m3 (altijd 0) → nu correct 0.0 als onbekend
+
+## [4.6.340] - 2026-03-17
+### Fix — Gas sensoren
+- Gasanalyse toont nu dag-verbruik + kosten + efficiency (ipv alleen "Onbekend")
+- Efficiency "onbekend" is correct in lente/zomer (geen graaddagen)
+- Gas standsensor haalt dag/week/maand/jaar uit gas_analysis (nauwkeuriger)
+- Kosten per periode berekend uit actuele gasprijs
+
+## [4.6.339] - 2026-03-17
+### Fix — PV overlay verwijderd uit prijsverloop card
+- PV werkelijk/verwacht lijntjes passen niet op een prijsgrafiek
+
 ## [4.6.338] - 2026-03-17
 ### Fix — Slider max 3000W fout
 - Slider maxima lezen nu van HA entity attributes (st.attributes.max) i.p.v. geleerde waarde

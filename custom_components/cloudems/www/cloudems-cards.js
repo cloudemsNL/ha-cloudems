@@ -468,30 +468,51 @@
       return Math.round(w) + ' W';
     }
 
-    // ── Multi-battery nodes uit sensor.cloudems_battery_so_c ─────────────────
+    // ── Battery nodes voor flow card ──────────────────────────────────────────
+    // Vermogen komt uit sensor.cloudems_battery_so_c.all_batteries (zelfde data
+    // als coordinator gebruikt voor house_power berekening) zodat de hub-balans
+    // grid + solar = home + battery + boiler + ev altijd klopt.
+    // Voor accu's zonder all_batteries (SolarEdge etc.): sensor.cloudems_battery_power.
     _getBatteryNodes() {
       if (!this._hass) return [];
-      // Probeer battery_so_c sensor met all_batteries attribuut (multi-accu)
+
       const socState = this._hass.states['sensor.cloudems_battery_so_c'];
-      if (socState && socState.attributes && socState.attributes.all_batteries) {
-        return socState.attributes.all_batteries.map(b => ({
-          label:   b.label || 'Batterij',
-          soc_pct: b.soc_pct != null ? b.soc_pct : null,
-          power_w: b.power_w || 0,
-          action:  b.action || '',
-        }));
+      const soc = socState && socState.state !== 'unavailable' && socState.state !== 'unknown'
+        ? parseFloat(socState.state) : null;
+
+      // Prio 1: all_batteries attribuut — power_w per accu al correct door coordinator
+      if (socState?.attributes?.all_batteries?.length > 0) {
+        const subs = socState.attributes.all_batteries;
+        const totalPw = subs.reduce((s, b) => s + (b.power_w || 0), 0);
+        if (subs.length === 1) {
+          return [{ label: subs[0].label || 'Batterij', soc_pct: subs[0].soc_pct ?? soc, power_w: totalPw, action: subs[0].action || '' }];
+        }
+        const label = subs.map(b => b.label || 'Accu').join(' + ');
+        return [{ label, soc_pct: soc, power_w: totalPw, action: totalPw < 0 ? 'discharge' : 'charge' }];
       }
-      // Fallback: single battery uit config
+
+      // Prio 2: handmatig geconfigureerde entity
       const e = this._config.entities || {};
-      if (e.battery) {
+      if (e.battery && e.battery.entity) {
         const battState = this._hass.states[e.battery.entity];
-        const socSt     = e.battery.state_of_charge ? this._hass.states[e.battery.state_of_charge] : null;
+        const socSt = e.battery.state_of_charge ? this._hass.states[e.battery.state_of_charge] : null;
         let pw = battState ? parseFloat(battState.state) || 0 : 0;
         const unit = battState?.attributes?.unit_of_measurement || '';
         if (unit.toLowerCase() === 'kw') pw *= 1000;
         if (e.battery.invert_state) pw = -pw;
-        return [{ label: e.battery.name || 'Batterij', soc_pct: socSt ? parseFloat(socSt.state) : null, power_w: pw, action: '' }];
+        const s = socSt ? parseFloat(socSt.state) : soc;
+        return [{ label: e.battery.name || 'Batterij', soc_pct: isNaN(s) ? null : s, power_w: pw, action: '' }];
       }
+
+      // Prio 3: sensor.cloudems_battery_power als laatste fallback
+      const battPwSt = this._hass.states['sensor.cloudems_battery_power'];
+      if (battPwSt && battPwSt.state !== 'unavailable' && battPwSt.state !== 'unknown') {
+        let pw = parseFloat(battPwSt.state) || 0;
+        const unit = battPwSt.attributes?.unit_of_measurement || '';
+        if (unit.toLowerCase() === 'kw') pw *= 1000;
+        return [{ label: 'Batterij', soc_pct: isNaN(soc) ? null : soc, power_w: pw, action: pw < 0 ? 'discharge' : 'charge' }];
+      }
+
       return [];
     }
 

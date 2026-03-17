@@ -43,21 +43,17 @@ class CloudemsMiniPriceCard extends HTMLElement {
           || a.min_today_excl_tax || 0);
     const nowCt  = nowEur * 100;
 
-    // Dagstatistieken per toggle-stand
-    const avgCt = si
-      ? (parseFloat(a.avg_today_incl_tax || a.avg_today || 0)) * 100
-      : (parseFloat(a.avg_today_excl_tax || a.avg_today || 0)) * 100;
-    const minCt = si
-      ? (parseFloat(a.min_today_incl_tax || a.min_today || 0)) * 100
-      : (parseFloat(a.min_today_excl_tax || a.min_today || 0)) * 100;
-    const maxCt = si
-      ? (parseFloat(a.max_today_incl_tax || a.max_today || 0)) * 100
-      : (parseFloat(a.max_today_excl_tax || a.max_today || 0)) * 100;
-
     // Barchart: juiste prijzenreeks per toggle
     const prices = si
       ? (a.today_prices_incl_tax || a.today_prices || [])
       : (a.today_prices_excl_tax || a.today_prices_base || a.today_prices || []);
+
+    // Dagstatistieken altijd berekend uit de getoonde prijzenreeks
+    // Zo zijn de balkkleurdrempels altijd relatief aan de zichtbare prijzen
+    const _pVals = prices.map(p => parseFloat(p.price || 0) * 100).filter(v => !isNaN(v));
+    const avgCt = _pVals.length ? _pVals.reduce((a,b) => a+b, 0) / _pVals.length : 0;
+    const minCt = _pVals.length ? Math.min(..._pVals) : 0;
+    const maxCt = _pVals.length ? Math.max(..._pVals) : 0;
 
     const taxPer = (parseFloat(a.tax_per_kwh || 0)) * 100;
     const nowH   = new Date().getHours();

@@ -2268,7 +2268,7 @@ class CloudEMSDagkostenSensor(CoordinatorEntity, SensorEntity):
     """
     _attr_name  = "CloudEMS · Dagkosten Stroom"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class  = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "EUR"
     _attr_icon  = "mdi:cash-clock"
 
@@ -4686,7 +4686,7 @@ class CloudEMSSolarROISensor(CoordinatorEntity, SensorEntity):
     """
     _attr_name = "CloudEMS PV · Opbrengst & Terugverdientijd"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class  = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class  = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "EUR"
     _attr_icon = "mdi:cash-plus"
 
@@ -4965,17 +4965,37 @@ class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        g = (self.coordinator.data or {}).get("gas_data", {})
+        data = self.coordinator.data or {}
+        g = data.get("gas_data", {})
+        ga = data.get("gas_analysis", {})
+        prijs = float(g.get("gas_prijs_per_m3") or 1.25)
+        # Gebruik gas_analysis voor periode-data als beschikbaar (nauwkeuriger)
+        dag_m3   = float(ga.get("gas_m3_today")  or g.get("dag_m3")   or 0)
+        week_m3  = float(ga.get("gas_m3_week")   or g.get("week_m3")  or 0)
+        maand_m3 = float(ga.get("gas_m3_month")  or g.get("maand_m3") or 0)
+        jaar_m3  = float(ga.get("gas_m3_year")   or g.get("jaar_m3")  or 0)
         attrs = {
             "gas_kwh":           round(g.get("gas_kwh", 0.0), 3),
             "conversion_factor": 9.769,
             "source":            "P1 DSMR (OBIS 0-1:24.2.1)",
-            "gas_prijs_per_m3":  g.get("gas_prijs_per_m3", 1.25),
+            "gas_prijs_per_m3":  prijs,
+            # Periode verbruik m³
+            "dag_m3":    round(dag_m3, 3),
+            "week_m3":   round(week_m3, 3),
+            "maand_m3":  round(maand_m3, 3),
+            "jaar_m3":   round(jaar_m3, 3),
+            # Kosten €
+            "dag_eur":   round(dag_m3   * prijs, 2),
+            "week_eur":  round(week_m3  * prijs, 2),
+            "maand_eur": round(maand_m3 * prijs, 2),
+            "jaar_eur":  round(jaar_m3  * prijs, 2),
+            # Extra uit gas_analysis
+            "efficiency_rating":    ga.get("efficiency_rating"),
+            "records_count":        ga.get("records_count", 0),
+            "seasonal_forecast_m3": ga.get("seasonal_forecast_m3"),
+            # Dagrecords voor drill-down (laatste 30 dagen)
+            "day_records":          ga.get("day_records", []),
         }
-        # Periode verbruik m³ en kosten € — altijd opnemen (ook 0.0)
-        for key in ("dag_m3", "week_m3", "maand_m3", "jaar_m3",
-                    "dag_eur", "week_eur", "maand_eur", "jaar_eur"):
-            attrs[key] = round(float(g.get(key, 0.0)), 3)
         return attrs
 
 
@@ -5041,8 +5061,10 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
         gas_m3        = self._get_gas_price_m3()
         cfg           = self.coordinator._config
         boiler_eff    = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
-        hp_cop        = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
         has_hp        = bool(cfg.get(CONF_HEAT_PUMP_ENTITY, ""))
+        _hp_cop_data  = (self.coordinator.data or {}).get("heat_pump_cop", {})
+        _learned_cop  = _hp_cop_data.get("cop_current") if _hp_cop_data.get("reliable") else None
+        hp_cop        = float(_learned_cop or cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
 
         # Gas CV-ketel: €/kWh warmte
         gas_kwh_heat  = (gas_m3 / GAS_KWH_PER_M3) / GAS_BOILER_EFFICIENCY
@@ -5077,13 +5099,22 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
         gas_m3 = self._get_gas_price_m3()
         cfg = self.coordinator._config
         boiler_eff = float(cfg.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))
-        hp_cop     = float(cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
         has_hp     = bool(cfg.get(CONF_HEAT_PUMP_ENTITY, ""))
+
+        # Gebruik geleerde COP als beschikbaar, anders config/default
+        _hp_cop_data  = (self.coordinator.data or {}).get("heat_pump_cop", {})
+        _learned_cop  = _hp_cop_data.get("cop_current") if _hp_cop_data.get("reliable") else None
+        _cop_source   = "geleerd" if _learned_cop else ("config" if cfg.get(CONF_HEAT_PUMP_COP) else "default")
+        hp_cop        = float(_learned_cop or cfg.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))
+
+        # WP boiler COP: typisch 2.5-3.0 (lager dan lucht/water WP door condensatiewarmte)
+        _wp_boiler_cop = float(_hp_cop_data.get("cop_boiler") or cfg.get("heat_pump_boiler_cop", 2.8))
 
         gas_kwh_raw    = round(gas_m3 / GAS_KWH_PER_M3, 5)
         gas_kwh_heat   = round(gas_kwh_raw / GAS_BOILER_EFFICIENCY, 5)
         elec_boiler    = round(elec / boiler_eff, 5) if elec else None
         elec_hp        = round(elec / hp_cop, 5) if elec else None
+        elec_wp_boiler = round(elec / _wp_boiler_cop, 5) if elec else None
 
         # Savings: positief = elektrisch goedkoper, negatief = gas goedkoper
         savings_boiler = round(gas_kwh_heat - elec_boiler, 5) if elec_boiler else None
@@ -5133,8 +5164,11 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
             "elec_price_kwh":                 elec,
             "elec_boiler_per_kwh_heat":       elec_boiler,
             "elec_hp_per_kwh_heat":           elec_hp if has_hp else None,
+            "elec_wp_boiler_per_kwh_heat":    elec_wp_boiler if has_hp else None,
             "electric_boiler_efficiency_pct": round(boiler_eff * 100),
-            "heat_pump_cop":                  hp_cop if has_hp else None,
+            "heat_pump_cop":                  round(hp_cop, 2) if has_hp else None,
+            "heat_pump_cop_source":           _cop_source if has_hp else None,
+            "heat_pump_boiler_cop":           round(_wp_boiler_cop, 2) if has_hp else None,
             "has_heat_pump":                  has_hp,
             "cheapest_electric_source":       cheapest_elec_source,
             # Gas
@@ -6510,7 +6544,7 @@ class CloudEMSSystemHealthSensor(CoordinatorEntity, SensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class CloudEMSGasAnalysisSensor(CoordinatorEntity, SensorEntity):
-    """Toont CV-efficiëntie en seizoensprognose op basis van graaddagen-analyse."""
+    """Toont gasverbruik dag/maand/jaar + CV-efficiëntie."""
     _attr_name  = "CloudEMS · Gasanalyse"
     _attr_icon  = "mdi:gas-burner"
     _attr_has_entity_name = False
@@ -6525,12 +6559,35 @@ class CloudEMSGasAnalysisSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        d = (self.coordinator.data or {}).get("gas_analysis", {})
-        return d.get("efficiency_rating")
+        data = self.coordinator.data or {}
+        d = data.get("gas_analysis", {})
+        gd = data.get("gas_data", {})
+        # Toon dag-verbruik als primaire waarde, efficiëntie als extra
+        dag_m3 = float(d.get("gas_m3_today") or gd.get("dag_m3") or 0)
+        prijs = float(gd.get("gas_prijs_per_m3") or 1.25)
+        dag_eur = round(dag_m3 * prijs, 2)
+        rating = d.get("efficiency_rating") or "onbekend"
+        if dag_m3 > 0:
+            return f"{dag_m3:.3f} m³ · €{dag_eur:.2f} · {rating}"
+        return rating
 
     @property
     def extra_state_attributes(self) -> dict:
-        return (self.coordinator.data or {}).get("gas_analysis", {})
+        data = self.coordinator.data or {}
+        d = dict(data.get("gas_analysis", {}))
+        gd = data.get("gas_data", {})
+        prijs = float(gd.get("gas_prijs_per_m3") or 1.25)
+        # Voeg periode-verbruik toe
+        d["prijs_per_m3"] = prijs
+        d["dag_m3"]       = float(d.get("gas_m3_today")  or gd.get("dag_m3")  or 0)
+        d["week_m3"]      = float(d.get("gas_m3_week")   or gd.get("week_m3") or 0)
+        d["maand_m3"]     = float(d.get("gas_m3_month")  or gd.get("maand_m3") or 0)
+        d["jaar_m3"]      = float(d.get("gas_m3_year")   or gd.get("jaar_m3") or 0)
+        d["dag_eur"]      = round(d["dag_m3"]   * prijs, 2)
+        d["week_eur"]     = round(d["week_m3"]  * prijs, 2)
+        d["maand_eur"]    = round(d["maand_m3"] * prijs, 2)
+        d["jaar_eur"]     = round(d["jaar_m3"]  * prijs, 2)
+        return d
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6932,7 +6989,7 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
     _attr_icon              = "mdi:piggy-bank-outline"
     _attr_has_entity_name   = False
     _attr_native_unit_of_measurement = "EUR"
-    _attr_state_class       = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class       = SensorStateClass.TOTAL
     _attr_device_class      = "monetary"
 
     def __init__(self, coord, entry):
