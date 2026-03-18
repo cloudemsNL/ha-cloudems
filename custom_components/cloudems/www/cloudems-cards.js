@@ -368,6 +368,9 @@
           .cc { padding:14px 14px 10px }
           .ttl { color:#e2e8f0; font-size:12px; font-weight:700; margin-bottom:10px }
           svg { width:100%; display:block }
+          [data-nid] { transition: filter .15s, transform .15s; transform-origin: center; }
+          [data-nid]:hover { filter: brightness(1.25); transform: scale(1.08); }
+          [data-nid="p1_warn"]:hover { transform: none; }
           .leg { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px }
           .li { display:flex; align-items:center; gap:5px; font-size:11px; color:rgba(255,255,255,0.55) }
           .li strong { color:#e2e8f0 }
@@ -443,17 +446,29 @@
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     _getVal(entityConf) {
-      if (!entityConf || !entityConf.entity || !this._hass) return 0;
-      const state = this._hass.states[entityConf.entity];
-      if (!state) return 0;
+      if (!entityConf || !this._hass) return 0;
+      // Accepteer zowel string als object config
+      const eid = typeof entityConf === 'string' ? entityConf : entityConf.entity;
+      if (!eid) return 0;
+      const state = this._hass.states[eid];
+      // Entiteit niet gevonden of unavailable → 0 teruggeven, geen crash
+      if (!state || state.state === 'unavailable' || state.state === 'unknown') return 0;
       let v = parseFloat(state.state) || 0;
       // Auto-convert kW sensors to W so all internal values are in Watts
       const unit = (state.attributes && state.attributes.unit_of_measurement) || '';
       if (unit.toLowerCase() === 'kw') v = v * 1000;
       // Manual multiply factor (e.g. multiply: 1000 in config)
-      if (entityConf.multiply) v = v * entityConf.multiply;
-      if (entityConf.invert_state) v = -v;
+      if (typeof entityConf === 'object' && entityConf.multiply) v = v * entityConf.multiply;
+      if (typeof entityConf === 'object' && entityConf.invert_state) v = -v;
       return v;
+    }
+
+    _isEntityAvailable(entityConf) {
+      if (!entityConf || !this._hass) return false;
+      const eid = typeof entityConf === 'string' ? entityConf : entityConf?.entity;
+      if (!eid) return false;
+      const state = this._hass.states[eid];
+      return state && state.state !== 'unavailable' && state.state !== 'unknown';
     }
 
     _getSoc(entityConf) {
@@ -666,7 +681,20 @@
         .map(d => ({ label: d.label || d.entity_id, power_w: Math.max(0, d.power_w || 0) }));
     }
     _getAircoNodes()     { return this._getClimateNodes('airco'); }
-    _getAircopower()     { return this._getAircoNodes().reduce((s,n)=>s+n.power_w,0); }
+    _getAircoPower()     { return this._getAircoNodes().reduce((s,n)=>s+n.power_w,0); }
+    _getAircoAction()    {
+      const nodes = this._getAircoNodes();
+      if (!nodes.length) return 'idle';
+      const st = this._hass?.states['sensor.cloudems_climate_epex_status'];
+      const devs = st?.attributes?.devices || [];
+      const types = ['airco'];
+      const matching = devs.filter(d => types.includes(d.device_type));
+      if (!matching.length) return 'idle';
+      // Als minstens één verwarmt → heating; als minstens één koelt → cooling
+      if (matching.some(d => d.action === 'heating')) return 'heating';
+      if (matching.some(d => d.action === 'cooling')) return 'cooling';
+      return matching[0]?.action || 'idle';
+    }
     _getHeatPumpNodes()  { return this._getClimateNodes(['heat_pump','hybrid']); }
     _getHeatPumpPower()  { return this._getHeatPumpNodes().reduce((s,n)=>s+n.power_w,0); }
 
@@ -885,6 +913,20 @@
       const solarNodes  = this._getSolarNodes();
       const battNodes   = this._getBatteryNodes();
       const boilerNodes = this._getBoilerNodes();
+      // P1 uitval detectie — total_split = P1 offline
+      const _nilmSt     = this._hass?.states['sensor.cloudems_nilm_devices'];
+      const _phaseSrc   = _nilmSt?.attributes?.phase_sources || {};
+      const _p1Offline  = Object.values(_phaseSrc).length > 0 &&
+                          Object.values(_phaseSrc).every(s => s === 'total_split');
+
+      // v4.6.432: Generator / ATS
+      const _genData    = this._hass?.states['sensor.cloudems_status']?.attributes?.generator || {};
+      const genEnabled  = !!_genData.enabled;
+      const genActive   = !!_genData.active;
+      const genPowerW   = parseFloat(_genData.power_w || 0);
+      const genMaxW     = parseFloat(_genData.max_power_w || 5000);
+      const genGridLost = !!_genData.grid_lost;
+      const genAtsType  = _genData.ats_type || 'none';
       const aircoNodes  = this._getAircoNodes();
       const hpNodes     = this._getHeatPumpNodes();
       const evNodes     = this._getEvNodes();
@@ -922,6 +964,7 @@
       const W = 500;
       const COL_LEFT = 78, COL_HUB = 250, COL_R = 430;
       const R_SUN   = 30,  R_GRID  = 52,  R_BATT = 105;
+      const R_GEN   = 100;  // Generator node — links onder NET
       const R_EV    = 122, R_HUB   = 172, R_BOI  = 235;
       const R_AIRCO = 298, R_HP    = 361;
       const R_EBIKE = 232, R_POOL  = 302;
@@ -945,6 +988,7 @@
         ev: '#3bba4c', ebike: '#06b6d4', pool: '#38bdf8',
         airco: '#38bdf8', hp: '#a78bfa',
         sub: '#a78bfa', text: '#e2e8f0',
+        gen: '#f97316',   // oranje voor generator
       };
 
       // Single positions for solar/batt/boiler
@@ -998,7 +1042,9 @@
         const glow = on ? `filter:drop-shadow(0 0 8px ${color}50)` : '';
         const click = nid ? `data-nid="${nid}" data-npw="${val}" data-ncolor="${color}" style="${glow};cursor:pointer"` : `style="${glow}"`;
         const sp = sk ? this._sparkSvg(sk, x+5, y+bh-14, bw-10, 10, color) : '';
+        const tooltip = nid ? `<title>${label}${val?' — '+val:''}${sub2?' ('+sub2+')':''}</title>` : '';
         return `<g ${click}>
+          ${tooltip}
           <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
             fill="#111827" stroke="${on?color:'rgba(255,255,255,0.09)'}" stroke-width="${on?1.5:1}"/>
           <text x="${cx}" y="${cy-(sub2?8:3)}" text-anchor="middle" font-size="12" font-weight="700"
@@ -1117,6 +1163,7 @@
         const sp = this._sparkSvg(`l2_${idx}`, x+5, y+bh-14, bw-10, 10, C.sub);
         const glow = on ? `filter:drop-shadow(0 0 8px #a78bfa44)` : '';
         return `<g style="${glow};cursor:pointer" data-nid="sub_${idx}" data-nlabel="${node.label}" data-npw="${node.power_w}" data-ncolor="${C.sub}">
+          <title>${node.label} — ${Math.round(node.power_w)} W${node.phase?' (fase '+node.phase+')':''}</title>
           <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
             fill="#160f2a" stroke="${on?C.sub:'rgba(167,139,250,0.18)'}" stroke-width="${on?1.8:1}"/>
           <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="12" font-weight="700"
@@ -1143,6 +1190,13 @@
             letter-spacing="0.07em" fill="${on?color:'rgba(255,255,255,0.2)'}">${short.toUpperCase()}</text>
         </g>`;
       };
+
+      // P1 uitval banner
+      if (_p1Offline) {
+        h += `<rect x="5" y="4" width="${W-10}" height="20" rx="4" fill="rgba(220,38,38,0.88)"/>
+          <text x="${W/2}" y="18" text-anchor="middle" font-size="10" font-weight="700"
+            fill="#fff" letter-spacing="0.04em">⚠ P1 OFFLINE — data tijdelijk niet beschikbaar</text>`;
+      }
 
       // Pipes
       const [_heGrid_x, _heGrid_y] = hubEdge(COL_LEFT+44, R_GRID);
@@ -1203,12 +1257,57 @@
 
       h += `<g id="dots-layer"></g>`;
 
+      // v4.6.437: P1 uitval banner — toon overlay als P1 offline is
+      if (_p1Offline) {
+        h += `<g data-nid="p1_warn" style="cursor:pointer">
+          <rect x="0" y="${H-28}" width="${W}" height="28" rx="0" fill="rgba(220,38,38,0.15)"/>
+          <rect x="0" y="${H-28}" width="${W}" height="1" fill="rgba(220,38,38,0.5)"/>
+          <text x="${W/2}" y="${H-11}" text-anchor="middle" font-size="10" font-weight="700"
+            fill="#f87171" letter-spacing="0.06em">⚠ P1 METER OFFLINE — WACHTEN OP DATA</text>
+        </g>`;
+      }
+
       // Nodes
       h += solarNodeSvg();
       h += hubSvg();
       const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
       const gridSub2  = grid > T ? 'import' : 'export';
       h += nodeBox(COL_LEFT, R_GRID,  88, 38, gc,       gridActive,   gridLabel,    this._fmt(Math.abs(grid)), gridSub2,  'grid',   'grid');
+
+      // v4.6.432: Generator node — alleen tonen als geconfigureerd
+      if (genEnabled) {
+        const genColor = genActive ? C.gen : (genGridLost ? '#e74c3c' : 'rgba(255,255,255,0.2)');
+        const genLbl   = genActive ? '⚡ GENERATOR' : (genGridLost ? '⚡ NETUITVAL' : '⚡ STANDBY');
+        const genVal   = genActive ? this._fmt(genPowerW) : (genGridLost ? '!' : '0 W');
+        const genSub   = genActive ? `${Math.round(genPowerW/genMaxW*100)}% cap.` : (genAtsType === 'manual' ? 'MTS' : 'ATS');
+        const [_heGen_x, _heGen_y] = hubEdge(COL_LEFT+44, R_GEN);
+        // Pipe en pijl alleen als actief
+        if (genActive) {
+          h += pipe(COL_LEFT+44, R_GEN, _heGen_x, _heGen_y, C.gen, true, genPowerW);
+          h += arw(COL_LEFT+44, R_GEN, _heGen_x, _heGen_y, C.gen, true);
+        } else {
+          h += pipe(COL_LEFT+44, R_GEN, _heGen_x, _heGen_y, genGridLost ? '#e74c3c' : 'rgba(255,255,255,0.08)', false);
+        }
+        // Node
+        const genBw = 88, genBh = 44;
+        const genX = COL_LEFT - genBw/2, genY = R_GEN - genBh/2;
+        const genGlow = genActive ? `filter:drop-shadow(0 0 10px ${C.gen}55)` : '';
+        h += `<g style="${genGlow};cursor:pointer" data-nid="gen" data-ncolor="${genColor}" data-npw="${genPowerW}">
+          <rect x="${genX}" y="${genY}" width="${genBw}" height="${genBh}" rx="8"
+            fill="#111827" stroke="${genActive ? C.gen : genGridLost ? '#e74c3c' : 'rgba(255,255,255,0.09)'}" stroke-width="${genActive ? 1.5 : 1}"/>
+          <text x="${COL_LEFT}" y="${R_GEN-5}" text-anchor="middle" font-size="12" font-weight="700"
+            fill="${genActive ? C.text : 'rgba(255,255,255,0.3)'}">${genVal}</text>
+          <text x="${COL_LEFT}" y="${R_GEN+9}" text-anchor="middle" font-size="8" font-weight="600"
+            letter-spacing="0.07em" fill="${genColor}">${genLbl}</text>
+          <text x="${COL_LEFT}" y="${R_GEN+20}" text-anchor="middle" font-size="7.5"
+            fill="rgba(255,255,255,0.25)">${genSub}</text>
+        </g>`;
+        // Als net weg en generator aan: dim het NET-blok
+        if (genActive && !gridActive) {
+          h += `<rect x="${COL_LEFT-44}" y="${R_GRID-19}" width="88" height="38" rx="8"
+            fill="rgba(0,0,0,0.5)" stroke="none"/>`;
+        }
+      }
       // EV multi-node — alleen als actieve sessie of geconfigureerd
       if (ev > T || (this._config.entities||{}).ev) (() => {
         const nodes = evNodes;
@@ -1241,7 +1340,9 @@
         const nodes = aircoNodes; const total = totalAirco; const on = total > T;
         const lbl = nodes.length > 1 ? `${nodes.length}× AIRCO` : (nodes[0]?.label||'Airco').toUpperCase().slice(0,9);
         if (nodes.length > 0) {
-          h += nodeBox(aircoX, aircoY, 84, 38, C.airco, on, '❄️ ' + lbl, this._fmt(total), null, 'airco', 'airco');
+          const _aircoAction = this._getAircoAction();
+          const _aircoIcon = _aircoAction === 'heating' ? '🌡️' : '❄️';
+          h += nodeBox(aircoX, aircoY, 84, 38, C.airco, on, _aircoIcon + ' ' + lbl, this._fmt(total), null, 'airco', 'airco');
           if (nodes.length > 1) {
             const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
             h += `<text x="${aircoX}" y="${aircoY+26}" text-anchor="middle" font-size="7.5" fill="rgba(56,189,248,0.55)">${pill}</text>`;
@@ -1697,6 +1798,38 @@
         };
       }
 
+      if (nid === 'gen') {
+        const genD  = this._hass?.states['sensor.cloudems_status']?.attributes?.generator || {};
+        const genOn = !!genD.active;
+        const genW  = parseFloat(genD.power_w || 0);
+        const genMax = parseFloat(genD.max_power_w || 5000);
+        const headroom = parseFloat(genD.load_headroom_w || 0);
+        const fuelType = genD.fuel_type || 'onbekend';
+        const fuelCost = parseFloat(genD.fuel_cost_eur_kwh || 0);
+        const atsType  = genD.ats_type || 'none';
+        const restrictions = genD.restrictions || [];
+        const atsLabel = atsType === 'auto' ? 'Automatische ATS' : atsType === 'manual' ? 'Handmatige MTS' : 'Geen ATS';
+        return {
+          title: 'Generator & Noodstroom', color: genOn ? '#f97316' : '#6b7280',
+          metrics: [
+            {l:'Status',         v: genOn ? '⚡ Actief' : genD.grid_lost ? '🔴 Netuitval' : '⏸ Standby'},
+            {l:'Vermogen nu',    v: fmt(genW)},
+            {l:'Max. capaciteit',v: fmt(genMax)},
+            {l:'Resterende cap.',v: genOn ? fmt(headroom) : '—'},
+            {l:'Belasting',      v: genOn && genMax > 0 ? Math.round(genW/genMax*100)+'%' : '—'},
+            {l:'Brandstof',      v: fuelType},
+            {l:'Kosten/kWh',     v: fuelCost > 0 ? '€ '+fuelCost.toFixed(2) : '—'},
+            {l:'Schakeltype',    v: atsLabel},
+            ...(restrictions.length ? [{l:'Beperkingen', v: restrictions.join(', ')}] : []),
+          ],
+          note: genOn
+            ? `Generator levert ${fmt(genW)} · ${Math.round(genW/genMax*100)}% capaciteit.`
+            : genD.grid_lost
+              ? 'Netuitval gedetecteerd — generator nog niet actief.'
+              : 'Generator staat in standby — netvoeding actief.',
+        };
+      }
+
       if (nid === 'ev') {
         const nodes = this._getEvNodes();
         const total = nodes.reduce((s,n)=>s+n.power_w,0);
@@ -1729,8 +1862,11 @@
         const metrics = nodes.length > 1
           ? nodes.map((n,i) => ({l: n.label||`Airco ${i+1}`, v: fmt(n.power_w)}))
           : [{l:'Vermogen',v:fmt(total)},{l:'Status',v:total>T?'actief':'uit'}];
-        return { title:'❄️ Airco / Koeling', color:'#38bdf8', metrics,
-          note: total>T ? `Koelt met ${fmt(total)} totaal.` : 'Alle aircos uit.' };
+        const _act = this._getAircoAction();
+        const _actLabel = _act === 'heating' ? 'Verwarmt' : _act === 'cooling' ? 'Koelt' : 'Actief';
+        const _actIcon  = _act === 'heating' ? '🌡️' : '❄️';
+        return { title: _actIcon + ' Airco / Koeling', color:'#38bdf8', metrics,
+          note: total>T ? `${_actLabel} met ${fmt(total)} totaal.` : 'Alle aircos uit.' };
       }
 
       if (nid === 'hp') {

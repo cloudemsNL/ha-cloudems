@@ -103,6 +103,18 @@ class SelfConsumptionTracker:
                 HourlyConsumptionSlot(**h) for h in hourly_raw
             ]
         _LOGGER.info("SelfConsumptionTracker: geladen (%d uur-slots)", len(self._hourly))
+        # Herstel dagaccumulatie vanuit opgeslagen dagdata (overleeft herstart)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        saved_today = saved.get("today", {})
+        if saved_today.get("date") == today:
+            self._today_date      = today
+            self._today_pv_wh     = float(saved_today.get("pv_wh", 0.0))
+            self._today_export_wh = float(saved_today.get("export_wh", 0.0))
+            self._today_import_wh = float(saved_today.get("import_wh", 0.0))
+            _LOGGER.info(
+                "SelfConsumptionTracker: dag-data hersteld: PV %.2f kWh, export %.2f kWh",
+                self._today_pv_wh / 1000, self._today_export_wh / 1000,
+            )
 
     def tick(self, pv_w: float, import_w: float, export_w: float) -> None:
         """
@@ -270,6 +282,12 @@ class SelfConsumptionTracker:
                      "import_wh": s.import_wh, "samples": s.samples}
                     for s in self._hourly
                 ],
+                "today": {
+                    "date":       self._today_date,
+                    "pv_wh":      round(self._today_pv_wh, 2),
+                    "export_wh":  round(self._today_export_wh, 2),
+                    "import_wh":  round(self._today_import_wh, 2),
+                },
             })
             self._dirty     = False
             self._last_save = time.time()

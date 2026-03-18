@@ -298,7 +298,9 @@ class GasAnalyzer:
             })
 
         # Backfill dagrecords uit statistics als er geen records zijn (verse installatie/herschrijving)
-        if not self._records:
+        # Cooldown: max 1x per sessie proberen — voorkomt spam bij aanhoudende fouten
+        if not self._records and not getattr(self, "_backfill_attempted", False):
+            self._backfill_attempted = True
             await self._backfill_records_from_statistics(eid)
 
     async def _get_usage_since(self, entity_id: str, since: datetime) -> Optional[float]:
@@ -395,7 +397,14 @@ class GasAnalyzer:
                 ts = row.get("start")
                 s  = row.get("sum")
                 if ts and s is not None:
-                    day_key = ts.astimezone().strftime("%Y-%m-%d")
+                    try:
+                        if isinstance(ts, (int, float)):
+                            from datetime import datetime as _dt2, timezone as _tz2
+                            day_key = _dt2.fromtimestamp(ts, tz=_tz2.utc).strftime("%Y-%m-%d")
+                        else:
+                            day_key = ts.astimezone().strftime("%Y-%m-%d")
+                    except Exception:
+                        continue
                     day_sums[day_key].append(float(s))
 
             # Delta per dag = max(dag) - min(dag)

@@ -1221,7 +1221,7 @@ class NILMDetector:
                     confirmed      = dev_data.get("confirmed", False),
                     detection_count= dev_data.get("detection_count", 1),
                     last_seen      = dev_data.get("last_seen", time.time()),
-                    phase          = dev_data.get("phase","L1"),
+                    phase          = dev_data.get("phase","L1") if dev_data.get("phase","L1") in ("L1","L2","L3","ALL") else "L1",
                     on_events      = dev_data.get("on_events", 0),
                     pending_confirmation = dev_data.get("pending", False),
                     user_feedback  = dev_data.get("user_feedback",""),
@@ -1543,7 +1543,8 @@ class NILMDetector:
         # Tick energy on active devices
         ts = timestamp
         for dev in self._devices.values():
-            if dev.phase == phase:
+            # v4.6.413: ook phase=="ALL" devices ticken (smart_plug injected, battery)
+            if dev.phase == phase or dev.phase == "ALL":
                 dev.tick_energy(ts)
 
     # ── Classification ────────────────────────────────────────────────────────

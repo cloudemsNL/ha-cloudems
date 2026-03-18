@@ -134,6 +134,19 @@ class BatterySavingsTracker:
     async def async_setup(self) -> None:
         saved = await self._store.async_load() or {}
         self._load_state(saved)
+        # v4.6.420: als opgeslagen dagdata van gisteren (of eerder) is, voer
+        # rollover direct uit zodat vandaag schoon begint. Dit herstelt het geval
+        # waarbij de coordinator op middernacht gefreezesd was en de periodieke
+        # dagelijkse code de rollover heeft overgeslagen.
+        today_str = str(date.today())
+        if self._today.date_str and self._today.date_str != today_str:
+            _LOGGER.info(
+                "BatterySavingsTracker: opgeslagen dagdata is van %s (niet vandaag %s) "
+                "— rollover uitgevoerd bij startup.",
+                self._today.date_str, today_str,
+            )
+            self._rollover_day()
+            self._last_date = today_str
         _LOGGER.info(
             "BatterySavingsTracker: setup (jaar %d, saldering %d%%)",
             self._sal_ctx.year, round(self._sal_ctx.saldering_pct * 100)

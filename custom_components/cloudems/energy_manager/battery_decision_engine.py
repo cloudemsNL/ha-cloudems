@@ -100,6 +100,10 @@ class DecisionContext:
     off_peak_active:          bool            = False
     grid_import_w:            float           = 0.0
     grid_peak_limit_w:        float           = 0.0   # 0 = geen limiet geconfigureerd
+    # v4.6.416: verwacht resterend verbruik vandaag (uit energy_demand module)
+    # Gebruikt om te bepalen of accu genoeg heeft voor rest van de dag
+    expected_remaining_kwh:   float           = 0.0   # device + systeem vraag rest dag
+    system_demand_kwh:        float           = 0.0   # boiler + zones + EV (doel-gebaseerd)
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -135,6 +139,11 @@ class BatteryDecisionEngine:
             max(0.0, (ceil - soc) / 100.0 * ctx.battery_capacity_kwh)
             if soc is not None else ctx.battery_capacity_kwh
         )
+        # v4.6.416: demand-bewuste beschikbaarheid
+        # Als verwacht verbruik > beschikbare kWh → reserveer marge voor laden
+        _total_demand = ctx.expected_remaining_kwh + ctx.system_demand_kwh
+        _demand_gap   = max(0.0, _total_demand - available_kwh)
+        _needs_charge = _demand_gap > 0.5  # meer dan 500Wh tekort
 
         # Laag 1: veiligheidsgrenzen
         d = self._check_safety(ctx, soc, ceil, available_kwh, headroom_kwh)
@@ -393,10 +402,14 @@ class BatteryDecisionEngine:
         avail = max(0.0, (soc - MIN_SOC_DISCHARGE) / 100.0 * ctx.battery_capacity_kwh) if soc is not None else 0
         head  = max(0.0, (ceil - soc) / 100.0 * ctx.battery_capacity_kwh) if soc is not None else 0
 
+        # v4.6.416: demand-info in uitleg
+        _td   = ctx.expected_remaining_kwh + ctx.system_demand_kwh
+        _gap  = max(0.0, _td - avail)
         lines = [
             f"SOC: {soc:.0f}%{' ✅' if soc is not None and soc > SOC_LOW_THRESHOLD else ' ⚠️'}" if soc is not None else "SOC: onbekend",
             f"Laadplafond: {ceil:.0f}% (SoH: {ctx.soh_pct:.0f}%)" if ctx.soh_pct else f"Laadplafond: {ceil:.0f}%",
             f"Beschikbaar: {avail:.1f} kWh | Ruimte: {head:.1f} kWh",
+            *([ f"⚡ Verwacht verbruik: {_td:.1f} kWh (devices {ctx.expected_remaining_kwh:.1f} + systemen {ctx.system_demand_kwh:.1f}) — {'tekort {:.1f} kWh'.format(_gap) if _gap > 0.2 else 'voldoende ✅'}" ] if _td > 0.05 else []),
             f"Tariefgroep: {tg.upper()}",
             f"EPEX nu: €{price:.3f}/kWh {'🟢' if price is not None and price <= PRICE_CHEAP_EUR else ('🔴' if price is not None and price >= PRICE_EXPENSIVE_EUR else '🟡')}" if price is not None else "EPEX: onbekend",
             f"PV surplus: {ctx.pv_surplus_w:.0f}W",

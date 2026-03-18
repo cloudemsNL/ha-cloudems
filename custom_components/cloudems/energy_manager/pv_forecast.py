@@ -325,7 +325,23 @@ class PVForecast:
                 # Grote afwijking → boost alpha (max 0.45)
                 alpha = min(0.45, alpha * FAST_CORRECT_ALPHA_BOOST)
 
-            p.hourly_yield_fraction[hour_key] = round(prev * (1.0 - alpha) + frac * alpha, 4)
+            new_frac = round(prev * (1.0 - alpha) + frac * alpha, 4)
+
+            # v4.6.453: smoothing — voorkom outliers door per uur te begrenzen
+            # op max 1.5x het gemiddelde van de buururen (prevents 0.93 spike bij uur 11)
+            if n_hours >= 8:
+                hour_int = int(hour_key)
+                neighbors = []
+                for dh in (-2, -1, 1, 2):
+                    nk = str((hour_int + dh) % 24)
+                    if nk in p.hourly_yield_fraction and p.hourly_yield_fraction[nk] > 0:
+                        neighbors.append(p.hourly_yield_fraction[nk])
+                if neighbors:
+                    avg_neighbor = sum(neighbors) / len(neighbors)
+                    max_allowed  = min(1.0, avg_neighbor * 2.5)  # max 2.5x buurgemiddelde
+                    new_frac     = round(min(new_frac, max_allowed), 4)
+
+            p.hourly_yield_fraction[hour_key] = new_frac
 
             # Orientation learning — at most ONCE per minute, only when sun is up.
             # CLEAR_SKY_MIN_FRAC filters out night/standby readings.
@@ -662,7 +678,9 @@ class PVForecast:
             if irradiance is None:
                 conf = confidence_no_weather
 
-            forecast_w = round(max(0.0, p._peak_wp * blended), 1)
+            # v4.6.453: pas calib_factor toe — zonder calib is forecast ~1.6x te hoog
+            _calib = p._calib_factor if (p._calib_factor and 0.2 <= p._calib_factor <= 1.5) else 1.0
+            forecast_w = round(max(0.0, p._peak_wp * blended * _calib), 1)
 
             # Cloud cover correctie voor het huidige uur (live data van weather sensor/Ecowitt)
             # Alleen toepassen als de cloud cover data vers is (huidig uur)

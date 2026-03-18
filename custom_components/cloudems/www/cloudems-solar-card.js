@@ -208,20 +208,36 @@ class CloudemsSolarCard extends HTMLElement {
     // Update huidig uur met live waarde (kWh = W / 360 per 10s sample)
     this._pvHist[nowH] = Math.max(this._pvHist[nowH], totalW / 1000 * (10/3600));
     const actualHourly = this._pvHist;
-    // Gisteren: gebruik solar_learner hourly_peak_w als referentie (geen echte gisteren data)
+    // Gisteren: gebruik pv_forecast_accuracy hourly_actual_kwh als die beschikbaar is,
+    // anders solar_learner actual_kwh_per_hour. hourly_peak_w is GEEN gisteren-data.
     const lrn = h.states['sensor.cloudems_solar_system_intelligence']?.attributes?.inverters || [];
+    const accAttr = h.states['sensor.cloudems_solar_accuracy']?.attributes || {};
     const yesterdayRef = new Array(24).fill(0);
-    lrn.forEach(inv => {
-      Object.entries(inv.hourly_peak_w||{}).forEach(([hr,w]) => {
-        yesterdayRef[parseInt(hr)] = (yesterdayRef[parseInt(hr)]||0) + (w/1000*0.8);
+    // Probeer echte gisteren-uurdata uit accuracy sensor
+    const _ystHourly = accAttr.yesterday_hourly_kwh || accAttr.actual_hourly_kwh || null;
+    if(_ystHourly && typeof _ystHourly === 'object') {
+      Object.entries(_ystHourly).forEach(([hr,kwh]) => {
+        yesterdayRef[parseInt(hr)] = (yesterdayRef[parseInt(hr)]||0) + parseFloat(kwh||0);
       });
-    });
+    } else {
+      // Fallback: gebruik actual_kwh_per_hour uit learner als die beschikbaar is
+      lrn.forEach(inv => {
+        const akh = inv.actual_kwh_per_hour || inv.hourly_actual_kwh || {};
+        if(Object.keys(akh).length > 0) {
+          Object.entries(akh).forEach(([hr,kwh]) => {
+            yesterdayRef[parseInt(hr)] = (yesterdayRef[parseInt(hr)]||0) + parseFloat(kwh||0);
+          });
+        }
+        // hourly_peak_w is piek-vermogen, NIET energie — niet gebruiken voor gisteren
+      });
+    }
     if(!this._chartDay) this._chartDay = 'today';
 
     // Self-consumption
     const scA=scS?.attributes||{};
     const scPct=parseFloat(scS?.state||0)||0;
-    const pvTodayKwh=scA.pv_today_kwh||fcKwh;
+    const pvTodayKwh = (scA.pv_today_kwh != null && scA.pv_today_kwh !== undefined)
+      ? scA.pv_today_kwh : fcKwh;
     const selfKwh=scA.self_consumed_kwh;
     const exportKwh=scA.exported_kwh;
     const bestHour=scA.best_solar_hour;
@@ -255,10 +271,10 @@ class CloudemsSolarCard extends HTMLElement {
       yesterday: { label:'Gisteren', isTomorrow:false, isToday:false,
         fc: yesterdayRef, ac: yesterdayRef },
       today: { label:'Vandaag', isTomorrow:false, isToday:true,
-        fc: (() => { const arr=new Array(24).fill(0); fcHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=nowH&&h<24) arr[h]+=(x?.forecast_w??x?.wh??0); }); return arr; })(),
+        fc: (() => { const arr=new Array(24).fill(0); fcHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=nowH&&h<24) arr[h]+=((x?.forecast_w??x?.wh??0)/1000); }); return arr; })(),
         ac: actualHourly },
       tomorrow: { label:'Morgen', isTomorrow:true, isToday:false,
-        fc: (() => { const arr=new Array(24).fill(0); fcTomHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=0&&h<24) arr[h]+=(x?.forecast_w??x?.wh??0); }); return arr; })(), ac:[] },
+        fc: (() => { const arr=new Array(24).fill(0); fcTomHourly.forEach(x=>{ const h=x?.hour??-1; if(h>=0&&h<24) arr[h]+=((x?.forecast_w??x?.wh??0)/1000); }); return arr; })(), ac:[] },
     };
     const _cd = _fcByDay[_cd_key];
     const _fcA = _cd.fc; const _acA = _cd.ac.length?_cd.ac:new Array(24).fill(0);
@@ -439,7 +455,7 @@ class CloudemsSolarCard extends HTMLElement {
       })()}
       <div class="top-strip">
         <div class="top-box"><span class="top-label">Nu</span><span class="top-val" style="color:var(--sl-gold)">${Math.round(totalW)} W</span>${peakW?`<span class="top-sub">piek ${Math.round(peakW)} W</span>`:""}</div>
-        <div class="top-box"><span class="top-label">Vandaag</span><span class="top-val" style="color:var(--sl-green)">${fcKwh.toFixed(1)} kWh</span><span class="top-sub">verwacht</span></div>
+        <div class="top-box"><span class="top-label">Vandaag</span><span class="top-val" style="color:${scA.pv_today_kwh > 0.05 ? 'var(--sl-green)' : 'var(--sl-amber)'}">${scA.pv_today_kwh > 0.05 ? scA.pv_today_kwh.toFixed(1) : fcKwh.toFixed(1)} kWh</span><span class="top-sub">${scA.pv_today_kwh > 0.05 ? 'gemeten' : 'verwacht'}</span></div>
         <div class="top-box"><span class="top-label">Morgen</span><span class="top-val">${fcTomKwh.toFixed(1)} kWh</span><span class="top-sub">verwacht</span></div>
       </div>
 

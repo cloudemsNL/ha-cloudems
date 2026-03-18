@@ -55,11 +55,22 @@ class CloudEMSGasCard extends HTMLElement {
     const avg = v => v; // raw vergelijking — vandaag vs week/7 etc.
     const maxAvg = Math.max(dagM3, weekM3/7, maandM3/30, jaarM3/365, 0.001);
 
+    // Gisteren uit day_records
+    const yesterdayStr = (() => {
+      const d = new Date(); d.setDate(d.getDate() - 1);
+      return d.toISOString().split('T')[0];
+    })();
+    const yesterdayRec = dayRecords.find(r => r.date === yesterdayStr)
+                      || dayRecords.find(r => (r.date || r.day || '') === yesterdayStr);
+    const gisterM3  = yesterdayRec ? (yesterdayRec.gas_m3 ?? 0) : null;
+    const gisterEur = yesterdayRec ? (yesterdayRec.cost_eur ?? (gisterM3 != null ? gisterM3 * prijs : 0)) : null;
+
     const periodes = [
-      { id: 'dag',   label: 'Vandaag',    m3: dagM3,   eur: dagEur,   avg: dagM3,        hasBreak: false },
-      { id: 'week',  label: 'Laatste 7 dagen', m3: weekM3,  eur: weekEur,  avg: weekM3/7,   hasBreak: true  },
-      { id: 'maand', label: 'Deze maand', m3: maandM3, eur: maandEur, avg: maandM3/30,   hasBreak: true  },
-      { id: 'jaar',  label: 'Dit jaar',   m3: jaarM3,  eur: jaarEur,  avg: jaarM3/365,   hasBreak: true  },
+      { id: 'dag',      label: 'Vandaag',         m3: dagM3,    eur: dagEur,    avg: dagM3,       hasBreak: false },
+      { id: 'gisteren', label: 'Gisteren',         m3: gisterM3, eur: gisterEur, avg: gisterM3,    hasBreak: false },
+      { id: 'week',     label: 'Laatste 7 dagen',  m3: weekM3,   eur: weekEur,   avg: weekM3/7,    hasBreak: true  },
+      { id: 'maand',    label: 'Deze maand',        m3: maandM3,  eur: maandEur,  avg: maandM3/30,  hasBreak: true  },
+      { id: 'jaar',     label: 'Dit jaar',          m3: jaarM3,   eur: jaarEur,   avg: jaarM3/365,  hasBreak: true  },
     ];
 
     // ── Drill-down data berekenen ─────────────────────────────────────────────

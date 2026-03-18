@@ -2149,6 +2149,20 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
             })
 
+        # v4.6.427: tankvolume en ramp-max altijd configureerbaar — ook bij bekende merken
+        _default_tank    = int(bp.get("tank_liters", 0))
+        _default_rampmax = int(bp.get("cheap_ramp_max_c", 65))
+        schema_dict.update({
+            vol.Optional("tank_liters", default=_default_tank): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=500, step=5,
+                                              mode="slider", unit_of_measurement="L")
+            ),
+            vol.Optional("cheap_ramp_max_c", default=_default_rampmax): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                              mode="slider", unit_of_measurement="°C")
+            ),
+        })
+
         return self.async_show_form(
             step_id="boiler_unit",
             description_placeholders={
@@ -2212,11 +2226,66 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
         )
 
+    async def async_step_generator(self, user_input=None):
+        """Optionele stap: Generator / ATS configureren."""
+        if user_input is not None:
+            self._config.update({k: v for k, v in user_input.items() if v not in (None, "", False) or k == "generator_enabled"})
+            return await self.async_step_diagnostics()
+
+        existing = self._config
+        _gen_enabled = existing.get("generator_enabled", False)
+
+        schema_dict = {
+            vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            vol.Optional("generator_enabled", default=_gen_enabled): bool,
+        }
+
+        if _gen_enabled or True:  # altijd tonen voor duidelijkheid
+            schema_dict.update({
+                vol.Optional("generator_power_sensor"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class=["power"])
+                ),
+                vol.Optional("generator_status_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig()  # binary_sensor, sensor of input_boolean
+                ),
+                vol.Optional("generator_autostart_switch"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["switch", "button", "script"])
+                ),
+                vol.Optional("generator_max_power_w", default=int(existing.get("generator_max_power_w", 5000))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=500, max=30000, step=500, mode="slider", unit_of_measurement="W")
+                ),
+                vol.Optional("generator_type", default=existing.get("generator_type", "diesel")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "diesel",   "label": "🛢️ Diesel"},
+                        {"value": "benzine",  "label": "⛽ Benzine"},
+                        {"value": "propaan",  "label": "🔵 Propaan/LPG"},
+                        {"value": "aardgas",  "label": "🔥 Aardgas"},
+                        {"value": "overig",   "label": "⚡ Overig"},
+                    ], mode="list")
+                ),
+                vol.Optional("generator_fuel_cost_eur_kwh", default=float(existing.get("generator_fuel_cost_eur_kwh", 0.35))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0.05, max=2.0, step=0.01, mode="box", unit_of_measurement="€/kWh")
+                ),
+                vol.Optional("ats_type", default=existing.get("ats_type", "auto")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "auto",     "label": "🔄 Automatische ATS — CloudEMS leest status"},
+                        {"value": "manual",   "label": "🔧 Handmatige MTS — CloudEMS geeft melding"},
+                        {"value": "none",     "label": "➖ Geen ATS/MTS"},
+                    ], mode="list")
+                ),
+            })
+
+        return self.async_show_form(
+            step_id="generator",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={},
+        )
+
     async def async_step_diagnostics(self, user_input=None):
         """Optionele stap: GitHub log reporting instellen."""
         if user_input is not None:
             self._config.update(user_input)
-            return self._create()
+            return await self.async_step_generator()
 
         existing = self._config
         return self.async_show_form(
@@ -2297,6 +2366,38 @@ except AttributeError:
 
 class CloudEMSOptionsFlow(_OptionsBase):
 
+    def async_show_form(self, *, step_id: str, data_schema=None, errors=None,
+                        description_placeholders=None, last_step=None, **kwargs):
+        """Overschreven: voeg automatisch terug-knop toe aan elk formulier.
+
+        Submenus (step_id start met 'menu_') en de init-stap krijgen geen knop
+        want die hebben al een eigen navigatiemechanisme.
+        """
+        import voluptuous as _vol
+        from homeassistant.helpers import selector as _sel_mod
+        _BoolSel = _sel_mod.BooleanSelector
+        _skip = step_id.startswith("menu_") or step_id == "init"
+        if not _skip and data_schema is not None:
+            _back_field = {
+                _vol.Optional("back_to_menu", default=False,
+                              description={"suggested_value": False}): _BoolSel(),
+            }
+            # Voeg terug-veld toe aan het begin van het schema
+            try:
+                _existing = dict(data_schema.schema)
+                data_schema = _vol.Schema({**_back_field, **_existing})
+            except Exception:
+                pass  # Schema niet aanpasbaar — sla over
+
+        return super().async_show_form(
+            step_id=step_id,
+            data_schema=data_schema,
+            errors=errors or {},
+            description_placeholders=description_placeholders or {},
+            last_step=last_step,
+            **kwargs,
+        )
+
     def __init__(self, config_entry) -> None:
         # OptionsFlowWithConfigEntry stores config_entry as self.config_entry;
         # plain OptionsFlow does not call super().__init__() with the entry.
@@ -2325,6 +2426,288 @@ class CloudEMSOptionsFlow(_OptionsBase):
         """Return current entry options — works with both base classes."""
         entry = getattr(self, "config_entry", self._entry)
         return dict(entry.options)
+
+    async def async_step_lamp_auto_opts(self, user_input=None):
+        """Slimme lamp automatisering — los van lampcirculatie."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            lamps_raw = user_input.get("lamp_auto_lamps_raw", "")
+            # Sla ruwe JSON op — de engine parseert dit
+            import json as _json
+            try:
+                lamps_parsed = _json.loads(lamps_raw) if lamps_raw.strip() else []
+            except Exception:
+                lamps_parsed = data.get("lamp_auto_lamps", [])
+            return self._save({
+                "lamp_auto_enabled":  user_input.get("lamp_auto_enabled", False),
+                "lamp_auto_lamps":    lamps_parsed,
+            })
+
+        enabled = data.get("lamp_auto_enabled", False)
+
+        # Bouw suggestieslijst vanuit HA — toon als info in description
+        suggestion_info = "Lampen worden automatisch gevonden via HA-ruimtes. Stel per lamp de modus in via de CloudEMS lamp-automatisering kaart op het dashboard."
+
+        return self.async_show_form(
+            step_id="lamp_auto_opts",
+            data_schema=vol.Schema({
+                vol.Optional("lamp_auto_enabled", default=enabled): selector.BooleanSelector(),
+            }),
+            description_placeholders={"info": suggestion_info},
+        )
+
+    async def async_step_lamp_automation_opts(self, user_input=None):
+        """Slimme verlichting — globale instellingen + ruimte-filter."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Kies ruimte-filter → ga naar detail stap
+            area_filter = user_input.get("la_area_filter", "")
+            if area_filter and area_filter != "__alle__":
+                self._la_area_filter = area_filter
+                return await self.async_step_lamp_automation_detail_opts()
+            # Globale instellingen opslaan
+            la_cfg = data.get("lamp_automation", {}) or {}
+            new_la = {
+                **la_cfg,
+                "enabled":           user_input.get("la_enabled", False),
+                "forgotten_minutes": int(user_input.get("la_forgotten_minutes", 30)),
+            }
+            return self._save({"lamp_automation": new_la})
+
+        la_cfg    = data.get("lamp_automation", {}) or {}
+        lamp_list = la_cfg.get("lamps", [])
+
+        # Bouw lijst van unieke ruimtes voor filter
+        areas = sorted(set(
+            l.get("area_name", "") for l in lamp_list if l.get("area_name")
+        ))
+        area_options = [{"value": "__alle__", "label": "— Alle lampen —"}]
+        area_options += [{"value": a, "label": f"📍 {a}"} for a in areas]
+
+        schema_dict = {
+            vol.Optional("back_to_menu",        default=False): selector.BooleanSelector(),
+            vol.Optional("la_enabled",          default=la_cfg.get("enabled", False)): selector.BooleanSelector(),
+            vol.Optional("la_forgotten_minutes",default=int(la_cfg.get("forgotten_minutes", 30))): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=10, max=120, step=5, mode="slider",
+                                              unit_of_measurement="min")
+            ),
+        }
+        if area_options:
+            schema_dict[vol.Optional("la_area_filter", default="__alle__")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(options=area_options, mode="list")
+            )
+
+        return self.async_show_form(
+            step_id="lamp_automation_opts",
+            data_schema=vol.Schema(schema_dict),
+        )
+
+    async def async_step_lamp_automation_detail_opts(self, user_input=None):
+        """Slimme verlichting — per-lamp modus voor gefilterde ruimte."""
+        data      = self._data()
+        la_cfg    = data.get("lamp_automation", {}) or {}
+        lamp_list = la_cfg.get("lamps", [])
+        area      = getattr(self, "_la_area_filter", "")
+
+        # Filter op ruimte of toon alle lampen
+        filtered = [l for l in lamp_list
+                    if not area or l.get("area_name", "") == area]
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Update lamp configs
+            for lamp in lamp_list:
+                slug = lamp["entity_id"].replace(".", "_").replace("-", "_")
+                if f"mode_{slug}" in user_input:
+                    lamp["mode"]     = user_input[f"mode_{slug}"]
+                if f"excl_{slug}" in user_input:
+                    lamp["excluded"] = user_input[f"excl_{slug}"]
+            new_la = {**la_cfg, "lamps": lamp_list}
+            return self._save({"lamp_automation": new_la})
+
+        schema_dict = {
+            vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+        }
+        for lamp in filtered[:15]:   # max 15 per pagina
+            slug = lamp["entity_id"].replace(".", "_").replace("-", "_")
+            lbl  = lamp.get("label", lamp["entity_id"])
+            schema_dict[vol.Optional(f"mode_{slug}", default=lamp.get("mode", "manual"))] = selector.SelectSelector(
+                selector.SelectSelectorConfig(options=[
+                    {"value": "manual", "label": f"{lbl} — 👤 Handmatig (alleen leren)"},
+                    {"value": "semi",   "label": f"{lbl} — 🔔 Semi-auto (vraag bevestiging)"},
+                    {"value": "auto",   "label": f"{lbl} — 🤖 Automatisch (direct)"},
+                ], mode="list")
+            )
+            schema_dict[vol.Optional(f"excl_{slug}", default=lamp.get("excluded", False))] = selector.BooleanSelector()
+
+        return self.async_show_form(
+            step_id="lamp_automation_detail_opts",
+            data_schema=vol.Schema(schema_dict),
+        )
+
+    async def async_step_ups_count_opts(self, user_input=None):
+        """Hoeveel UPS systemen wil je configureren?"""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            count = int(user_input.get("ups_count", 0))
+            if count == 0:
+                return self._save({"ups_systems": []})
+            self._ups_count = count
+            self._ups_index = 0
+            self._ups_configs = list(data.get("ups_systems", []))
+            # Vul aan tot gewenst aantal
+            while len(self._ups_configs) < count:
+                self._ups_configs.append({})
+            return await self.async_step_ups_detail_opts()
+
+        existing = data.get("ups_systems", [])
+        return self.async_show_form(
+            step_id="ups_count_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("ups_count", default=len(existing)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=8, step=1, mode="slider")
+                ),
+            }),
+            description_placeholders={"info":
+                f"Huidige UPS: {len(existing)}. Stel 0 in om UPS-beheer uit te schakelen."
+            },
+        )
+
+    async def async_step_ups_detail_opts(self, user_input=None):
+        """Configureer één UPS systeem."""
+        data  = self._data()
+        idx   = getattr(self, "_ups_index", 0)
+        total = getattr(self, "_ups_count", 1)
+        cfgs  = getattr(self, "_ups_configs", [{}] * total)
+        existing = cfgs[idx] if idx < len(cfgs) else {}
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Sla deze UPS op
+            cfgs[idx] = {
+                "ups_id":         f"ups_{idx+1}",
+                "label":          user_input.get("ups_label", f"UPS {idx+1}"),
+                "brand":          user_input.get("ups_brand", "generic"),
+                "status_entity":  user_input.get("ups_status_entity", ""),
+                "battery_entity": user_input.get("ups_battery_entity", ""),
+                "runtime_entity": user_input.get("ups_runtime_entity", ""),
+                "power_entity":   user_input.get("ups_power_entity", ""),
+                "devices":        existing.get("devices", []),
+            }
+            self._ups_configs = cfgs
+            self._ups_index   = idx + 1
+            if self._ups_index < total:
+                return await self.async_step_ups_detail_opts()
+            # Alle UPS geconfigureerd
+            return self._save({"ups_systems": cfgs[:total]})
+
+        return self.async_show_form(
+            step_id="ups_detail_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Optional("ups_label", default=existing.get("label", f"UPS {idx+1}")): str,
+                vol.Optional("ups_brand", default=existing.get("brand", "generic")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "nut",     "label": "🔌 NUT (universeel — APC/Eaton/CyberPower/...)"},
+                        {"value": "apc",     "label": "🔵 APC (HA integratie)"},
+                        {"value": "eaton",   "label": "🟡 Eaton (HA integratie)"},
+                        {"value": "generic", "label": "⚡ Generiek (elke HA sensor)"},
+                    ], mode="list")
+                ),
+                vol.Optional("ups_status_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig()
+                ),
+                vol.Optional("ups_battery_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class=["battery"])
+                ),
+                vol.Optional("ups_runtime_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                ),
+                vol.Optional("ups_power_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class=["power"])
+                ),
+            }),
+            description_placeholders={
+                "info": f"UPS {idx+1} van {total}. Koppel minimaal de status-entiteit."
+            },
+        )
+
+    async def async_step_generator_opts(self, user_input=None):
+        """Generator / ATS opties voor bestaande installaties."""
+        data = self._data()
+        if hasattr(self, '_opts'):
+            data = {**data, **self._opts}
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save({**data, **user_input})
+
+        _gen_enabled = data.get("generator_enabled", False)
+        schema_dict = {
+            vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            vol.Optional("generator_enabled", default=_gen_enabled): bool,
+            vol.Optional("generator_power_sensor"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class=["power"])
+            ),
+            vol.Optional("generator_status_entity"): selector.EntitySelector(
+                selector.EntitySelectorConfig()
+            ),
+            vol.Optional("generator_autostart_switch"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["switch", "button", "script"])
+            ),
+            vol.Optional("generator_max_power_w", default=int(data.get("generator_max_power_w", 5000))): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=500, max=30000, step=500, mode="slider", unit_of_measurement="W")
+            ),
+            vol.Optional("generator_type", default=data.get("generator_type", "diesel")): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=[
+                    {"value": "diesel",  "label": "🛢️ Diesel"},
+                    {"value": "benzine", "label": "⛽ Benzine"},
+                    {"value": "propaan", "label": "🔵 Propaan/LPG"},
+                    {"value": "aardgas", "label": "🔥 Aardgas"},
+                    {"value": "overig",  "label": "⚡ Overig"},
+                ], mode="list")
+            ),
+            vol.Optional("generator_fuel_cost_eur_kwh", default=float(data.get("generator_fuel_cost_eur_kwh", 0.35))): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0.05, max=2.0, step=0.01, mode="box", unit_of_measurement="€/kWh")
+            ),
+            vol.Optional("ats_type", default=data.get("ats_type", "none")): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=[
+                    {"value": "auto",   "label": "🔄 Automatische ATS"},
+                    {"value": "manual", "label": "🔧 Handmatige MTS"},
+                    {"value": "none",   "label": "➖ Geen ATS/MTS"},
+                ], mode="list")
+            ),
+        }
+        return self.async_show_form(
+            step_id="generator_opts",
+            data_schema=vol.Schema(schema_dict),
+        )
+
+    async def async_step_menu_back(self, user_input=None):
+        """Terug naar het hoofdmenu."""
+        return await self.async_step_init()
+
+    def _check_back(self, user_input: dict):
+        """Terug naar menu als gebruiker op terug drukt."""
+        return user_input.get("back_to_menu", False)
+
+    def _back_schema(self, schema_dict: dict) -> dict:
+        """Voeg terug-knop toe aan een schema dict."""
+        return {
+            vol.Optional("back_to_menu", default=False,
+                         description={"suggested_value": False}): selector.BooleanSelector(),
+            **schema_dict,
+        }
 
     def _save(self, extra: dict) -> object:
         """Merge extra into options and save; triggers auto-reload via base class.
@@ -2356,35 +2739,190 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
         return self.async_create_entry(title="", data=merged)
 
+
+    async def _maybe_back(self, user_input):
+        """Universele back-check: als back_to_menu=True → terug naar init."""
+        if user_input and user_input.get("back_to_menu"):
+            return await self.async_step_init()
+        return None
+
     async def async_step_init(self, user_input=None):
+        """Hoofdmenu — kies een categorie."""
         if user_input is not None:
-            section = user_input.get("section", "sensors")
-            return await getattr(self, f"async_step_{section}")()
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            cat = user_input.get("category", "energie")
+            return await getattr(self, f"async_step_menu_{cat}")()
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
+                vol.Required("category", default="energie"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="energie",      label="⚡ Energie & Grid"),
+                        selector.SelectOptionDict(value="opwekking",    label="☀️ Opwekking & Opslag"),
+                        selector.SelectOptionDict(value="verbruik",     label="🏠 Verbruik & Comfort"),
+                        selector.SelectOptionDict(value="automatisering", label="🤖 Automatisering & NILM"),
+                        selector.SelectOptionDict(value="mobiliteit",   label="🚗 Mobiliteit & Laden"),
+                        selector.SelectOptionDict(value="systeem",      label="🔧 Systeem & Communicatie"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_energie(self, user_input=None):
+        """Submenu: Energie & Grid."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_energie",
+            data_schema=vol.Schema({
                 vol.Required("section", default="sensors"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
-                        selector.SelectOptionDict(value="sensors",        label="🔌 Grid Sensors"),
-                        selector.SelectOptionDict(value="phase_sensors",  label="⚡ Phase Sensors"),
-                        selector.SelectOptionDict(value="solar_ev_opts",  label="🔌 EV Laadpaal"),
-                        selector.SelectOptionDict(value="gas_opts",        label="🔥 Gas & Warmte"),
+                        selector.SelectOptionDict(value="sensors",      label="🔌 Grid Sensoren"),
+                        selector.SelectOptionDict(value="phase_sensors", label="⚡ Fase Sensoren"),
+                        selector.SelectOptionDict(value="prices_opts",  label="💶 Prijzen & Belasting"),
+                        selector.SelectOptionDict(value="budget_opts",  label="📊 Energiebudget"),
+                        selector.SelectOptionDict(value="advanced_opts", label="📡 P1 & Geavanceerd"),
+                        selector.SelectOptionDict(value="noodstroom",   label="⚡ Noodstroom & Backup"),
+                        selector.SelectOptionDict(value="__terug__",    label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_noodstroom(self, user_input=None):
+        """Submenu: Noodstroom & Backup."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_menu_energie()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="noodstroom",
+            data_schema=vol.Schema({
+                vol.Required("section", default="generator_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="generator_opts", label="🔧 Generator / Aggregaat"),
+                        selector.SelectOptionDict(value="ups_count_opts", label="🔋 UPS Systemen"),
+                        selector.SelectOptionDict(value="__terug__",      label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_opwekking(self, user_input=None):
+        """Submenu: Opwekking & Opslag."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_opwekking",
+            data_schema=vol.Schema({
+                vol.Required("section", default="inverters_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value="inverters_opts", label="🔆 PV Omvormers & Zonnebegrenzing"),
                         selector.SelectOptionDict(value="batteries_opts", label="🔋 Batterijen & Providers"),
-                        selector.SelectOptionDict(value="prices_opts",    label="💶 Prijzen & Belasting"),
-                        selector.SelectOptionDict(value="features_opts",  label="🚀 Features"),
-                        selector.SelectOptionDict(value="cheap_switches_opts", label="⚡ Goedkope Uren Schakelaars & Slimme Uitstel"),
-                        selector.SelectOptionDict(value="ai_opts",        label="🤖 AI & NILM"),
-                        selector.SelectOptionDict(value="nilm_shift_opts",   label="🔀 NILM Lastverschuiving"),
-                        selector.SelectOptionDict(value="budget_opts",         label="💶 Energiebudget"),
-                        selector.SelectOptionDict(value="nilm_devices_opts", label="🏷️ NILM Apparaten beheren"),
-                        selector.SelectOptionDict(value="advanced_opts",  label="📡 P1 & Advanced"),
-                        selector.SelectOptionDict(value="pool_opts",      label="🏊 Zwembad Controller"),
-                        selector.SelectOptionDict(value="lamp_circ_opts", label="💡 Lampcirculatie & Beveiliging"),
+                        selector.SelectOptionDict(value="__terug__",      label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_verbruik(self, user_input=None):
+        """Submenu: Verbruik & Comfort."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_verbruik",
+            data_schema=vol.Schema({
+                vol.Required("section", default="boiler_groups_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="boiler_groups_opts", label="🚿 Boiler Controller"),
                         selector.SelectOptionDict(value="climate_opts",       label="🌡️ Klimaatbeheer"),
                         selector.SelectOptionDict(value="shutter_count_opts", label="🪟 Rolluiken"),
-                        selector.SelectOptionDict(value="boiler_groups_opts", label="🚿 Boiler Controller"),
-                        selector.SelectOptionDict(value="mail_opts",          label="📧 E-mail rapporten"),
+                        selector.SelectOptionDict(value="pool_opts",          label="🏊 Zwembad Controller"),
+                        selector.SelectOptionDict(value="lamp_circ_opts",     label="💡 Lampcirculatie & Beveiliging"),
+                        selector.SelectOptionDict(value="lamp_automation_opts", label="🏠 Slimme Verlichting (auto)"),
+                        selector.SelectOptionDict(value="lamp_auto_opts",     label="🏠 Slimme Lamp Automatisering"),
+                        selector.SelectOptionDict(value="gas_opts",           label="🔥 Gas & Warmte"),
+                        selector.SelectOptionDict(value="__terug__",          label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_automatisering(self, user_input=None):
+        """Submenu: Automatisering & NILM."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_automatisering",
+            data_schema=vol.Schema({
+                vol.Required("section", default="ai_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="ai_opts",              label="🤖 AI & NILM"),
+                        selector.SelectOptionDict(value="nilm_shift_opts",      label="🔀 NILM Lastverschuiving"),
+                        selector.SelectOptionDict(value="nilm_devices_opts",    label="🏷️ NILM Apparaten beheren"),
+                        selector.SelectOptionDict(value="cheap_switches_opts",  label="⚡ Goedkope Uren Schakelaars"),
+                        selector.SelectOptionDict(value="features_opts",        label="🚀 Features"),
+                        selector.SelectOptionDict(value="__terug__",            label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_mobiliteit(self, user_input=None):
+        """Submenu: Mobiliteit & Laden."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_mobiliteit",
+            data_schema=vol.Schema({
+                vol.Required("section", default="solar_ev_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="solar_ev_opts",  label="🚗 EV Laadpaal"),
+                        selector.SelectOptionDict(value="ebike_opts",     label="🚲 E-bike & Micro-mobiliteit"),
+                        selector.SelectOptionDict(value="__terug__",      label="← Terug"),
+                    ], mode="list"))
+            }),
+        )
+
+    async def async_step_menu_systeem(self, user_input=None):
+        """Submenu: Systeem & Communicatie."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section")
+            if section == "__terug__":
+                return await self.async_step_init()
+            return await getattr(self, f"async_step_{section}")()
+        return self.async_show_form(
+            step_id="menu_systeem",
+            data_schema=vol.Schema({
+                vol.Required("section", default="mail_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="mail_opts",     label="📧 E-mail rapporten"),
+                        selector.SelectOptionDict(value="__terug__",     label="← Terug"),
                     ], mode="list"))
             }),
         )
@@ -2393,6 +2931,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._data()
         phase_count = int(data.get(CONF_PHASE_COUNT, 3))
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
 
         use_sep = bool(data.get(CONF_USE_SEPARATE_IE, False))
@@ -2419,6 +2959,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._data()
         phase_count = int(data.get(CONF_PHASE_COUNT, 3))
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
 
         schema: dict = {}
@@ -2444,10 +2986,42 @@ class CloudEMSOptionsFlow(_OptionsBase):
             },
         )
 
+    async def async_step_ebike_opts(self, user_input=None):
+        """🚲 E-bike & Micro-mobiliteit instellingen."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+
+        existing = data
+        return self.async_show_form(
+            step_id="ebike_opts",
+            data_schema=vol.Schema({
+                vol.Optional("ebike_entity_1", default=existing.get("ebike_entity_1", "")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor"])
+                ),
+                vol.Optional("ebike_label_1", default=existing.get("ebike_label_1", "")): str,
+                vol.Optional("ebike_entity_2", default=existing.get("ebike_entity_2", "")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain=["sensor"])
+                ),
+                vol.Optional("ebike_label_2", default=existing.get("ebike_label_2", "")): str,
+            }),
+            description_placeholders={
+                "info": (
+                    "🚲 E-bikes en scooters worden automatisch gedetecteerd via NILM (40–700W laadpatroon). "
+                    "Optioneel: koppel een vermogenssensor per voertuig voor nauwkeuriger sessietracking. "
+                    "Labels worden getoond op het dashboard."
+                )
+            },
+        )
+
     async def async_step_solar_ev_opts(self, user_input=None):
         """☀️ PV & EV Laden — opties voor PV sensor, laadpaal en zonnebegrenzing."""
         data = self._data()
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
         return self.async_show_form(
             step_id="solar_ev_opts",
@@ -2466,6 +3040,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         """🔥 Gas & Warmte — aparte sectie voor gas/boiler/warmtepomp."""
         data = self._data()
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
         # Import needed constants with safe fallback
         try:
@@ -2496,6 +3072,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_features_opts(self, user_input=None):
         data = self._data()
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
         phase_count = int(data.get(CONF_PHASE_COUNT, 1))
         schema: dict = {
@@ -2534,6 +3112,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = data.get("cheap_switches", []) or []
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._cheap_count = int(user_input.get("cheap_switch_count", 0))
             # Bewaar huidige configs voor pre-fill in detail-stap
             self._existing_cheap_cfgs = list(existing)
@@ -2585,6 +3165,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         ex_sd = existing.get("smart_delay") or {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             sd_enabled = bool(user_input.get("sd_enabled", False))
             switch_cfg = {
                 "entity_id":     user_input.get("switch_entity", ""),
@@ -2738,6 +3320,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         )
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._opts.setdefault("smart_delay_switches", []).append({
                 "entity_id":           user_input.get("switch_entity", ""),
                 "label":               user_input.get("switch_label",
@@ -2834,6 +3418,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         """🤖 AI & NILM instellingen."""
         data = self._data()
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             provider = user_input.get(CONF_AI_PROVIDER, AI_PROVIDER_NONE)
             user_input[CONF_OLLAMA_ENABLED] = (provider == AI_PROVIDER_OLLAMA)
             return self._save(user_input)
@@ -2860,6 +3446,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_budget_opts(self, user_input=None):
         """💶 Energiebudget — stel maandbudget in of schakel uit."""
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._opts["budget_enabled"]          = user_input.get("budget_enabled", True)
             self._opts["budget_elec_eur_month"]   = float(user_input.get("budget_elec_eur_month", 120.0))
             self._opts["budget_elec_kwh_month"]   = float(user_input.get("budget_elec_kwh_month", 300.0))
@@ -2894,6 +3482,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_nilm_shift_opts(self, user_input=None):
         """🔀 NILM Lastverschuiving — configureer include/exclude en drempel."""
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             # Parse include/exclude uit komma-gescheiden tekst
             def _parse_list(val: str) -> list:
                 return [s.strip() for s in (val or "").split(",") if s.strip()]
@@ -2964,6 +3554,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         """
         from homeassistant.loader import async_get_integration
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             # Nothing to save — this is an informational step
             return self.async_abort(reason="nilm_manage_via_services")
 
@@ -3011,6 +3603,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._inv_d()
         current_cfgs = data.get(CONF_INVERTER_CONFIGS, [])
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._inv_count = int(user_input.get(CONF_INVERTER_COUNT, 0))
             # Save existing configs BEFORE clearing, same as battery pattern
             self._existing_inv_cfgs = list(current_cfgs)
@@ -3047,6 +3641,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             _inv_keep = lambda k_ui, k_ex: user_input.get(k_ui) or existing.get(k_ex, "")
             self._opts[CONF_INVERTER_CONFIGS].append({
                 "entity_id":      user_input.get("inv_sensor"),
@@ -3092,6 +3688,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._opts_country = user_input.get(CONF_ENERGY_PRICES_COUNTRY, country)
             self._save({CONF_ENERGY_PRICES_COUNTRY: self._opts_country})
             return await self.async_step_prices_provider_opts()
@@ -3138,6 +3736,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     provider_options.append(selector.SelectOptionDict(value=k, label=v))
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             chosen_pp = user_input.get(CONF_PRICE_PROVIDER, current_price_provider)
 
             # Credentials nodig?
@@ -3188,6 +3788,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         ]
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
 
         return self.async_show_form(
@@ -3220,6 +3822,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         label   = PRICE_PROVIDER_LABELS.get(pending, pending)
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             creds = {k: user_input.get(k, "") for k in needed}
             self._apply_price_provider_opts(pending, creds)
             self._pending_price_provider = None
@@ -3275,6 +3879,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         hints = tmp_registry.get_wizard_hints()
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             # Sla Zonneplan provider-instellingen op
             for h in hints:
                 key_en = f"{h.provider_id}_enabled"
@@ -3351,6 +3957,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
         current_count = len(existing_cfgs)
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._inv_count = int(user_input.get(CONF_BATTERY_COUNT, 0))
             self._opts[CONF_BATTERY_COUNT]   = self._inv_count
             self._opts[CONF_BATTERY_CONFIGS] = []
@@ -3408,6 +4016,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing_type = existing.get("battery_type", "zonneplan" if hints else "manual")
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             bat_type = user_input.get("bat_type", "manual")
             # Sla type op bij de battery config (wordt later aangevuld)
             if not hasattr(self, "_battery_types"):
@@ -3441,6 +4051,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = existing_cfgs[self._inv_step] if self._inv_step < len(existing_cfgs) else {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             _bat_keep = lambda k_ui, k_ex: user_input.get(k_ui) or existing.get(k_ex, "")
             self._opts[CONF_BATTERY_CONFIGS].append({
                 "battery_type":     "manual",
@@ -3484,6 +4096,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._data()
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             mode = user_input.get("climate_mode", "none")
             if mode == "zones":
                 return await self.async_step_climate_zones_opts()
@@ -3531,6 +4145,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
             suggested = []
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             enabled_ids = user_input.get(CONF_CLIMATE_ZONES_ENABLED, [])
             self._opts[CONF_CLIMATE_ZONES_ENABLED] = enabled_ids
             self._opts[CONF_CLIMATE_ENABLED] = bool(enabled_ids)
@@ -3582,6 +4198,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing_devices = data.get(CONF_CLIMATE_EPEX_DEVICES, [])
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._ce_count = int(user_input.get("ce_count", 1))
             self._opts[CONF_CLIMATE_EPEX_ENABLED] = True
             self._opts[CONF_CLIMATE_ENABLED] = False
@@ -3610,6 +4228,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         existing = existing_cfgs[self._ce_step] if self._ce_step < len(existing_cfgs) else {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._opts[CONF_CLIMATE_EPEX_DEVICES].append({
                 "entity_id":    user_input["ce_entity"],
                 "label":        user_input.get("ce_label", f"Apparaat {i}"),
@@ -3651,6 +4271,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
 
     async def async_step_shutter_count_opts(self, user_input=None):
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             self._shutter_count = int(user_input.get(CONF_SHUTTER_COUNT, 0))
             self._existing_shutter_cfgs = list(self._data().get(CONF_SHUTTER_CONFIGS, []))
             self._opts[CONF_SHUTTER_COUNT]   = self._shutter_count
@@ -3726,6 +4348,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         if existing_cfgs is None:
             existing_cfgs = self._data().get(CONF_SHUTTER_CONFIGS, [])
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             cover_eid = user_input.get("shutter_entity", "")
             area_id, area_name = self._get_area_for_entity(cover_eid)
             self._opts[CONF_SHUTTER_CONFIGS].append({
@@ -3804,6 +4428,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_advanced_opts(self, user_input=None):
         data = self._data()
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             return self._save(user_input)
         return self.async_show_form(
             step_id="advanced_opts",
@@ -3855,6 +4481,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         heat_power_def    = pool_cfg.get("heat_power_entity")   or _find_power_sensor(heat_eid)
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             new_pool = {
                 "filter_entity":       user_input.get("pool_filter_entity", ""),
                 "heat_entity":         user_input.get("pool_heat_entity", ""),
@@ -3901,6 +4529,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._data()
         lc_cfg = data.get("lamp_circulation", {}) or {}
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             new_lc = {
                 "light_entities":  [],  # auto-discovery: alle light.* entiteiten
                 "excluded_ids":    user_input.get("lc_excluded_ids", []),
@@ -3945,6 +4575,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         current_hidden: list = data.get(CONF_HIDDEN_TABS, list(CLOUDEMS_TABS_HIDDEN_DEFAULT))
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             hidden = user_input.get("hidden_tabs", [])
             result = self._save({CONF_HIDDEN_TABS: hidden})
             # Apply immediately via HA's lovelace storage if available
@@ -3992,6 +4624,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         enabled = data.get(CONF_BOILER_GROUPS_ENABLED, False)
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             action = user_input.get("bg_action", "add_group")
 
             if action == "add_group":
@@ -4053,6 +4687,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
     async def async_step_boiler_group_add(self, user_input=None):
         """Voeg een nieuwe cascade-groep toe."""
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             groups = list(self._opts.get(CONF_BOILER_GROUPS, []))
             unit_count = int(user_input.get("bg_unit_count", 1))
             new_group = {
@@ -4099,6 +4735,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         units  = group.get("units", [])
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             action = user_input.get("bge_action", "save")
 
             if action == "add_unit":
@@ -4188,6 +4826,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         group  = groups[g_idx] if g_idx < len(groups) else {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             brand = user_input.get("brand", "unknown")
             self._opts["_bg_brand_preset"] = brand
             return await self.async_step_boiler_group_unit()
@@ -4217,6 +4857,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         bp = BOILER_BRAND_PRESETS.get(brand_key, BOILER_BRAND_PRESETS["unknown"])
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             units.append({
                 "entity_id":            user_input.get("bu_entity", ""),
                 "temp_sensor":          user_input.get("bu_temp_sensor", ""),
@@ -4333,6 +4975,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         unit    = units[u_idx] if u_idx < len(units) else {}
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             # Haal merk-preset op als gebruiker een ander merk kiest
             brand_key = user_input.get("bu_brand", unit.get("brand", "unknown"))
             bp = BOILER_BRAND_PRESETS.get(brand_key, BOILER_BRAND_PRESETS["unknown"])
@@ -4504,6 +5148,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
         data = self._data()
 
         if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
             enabled = user_input.get(CONF_MAIL_ENABLED, False)
             if enabled:
                 if not user_input.get(CONF_MAIL_HOST, "").strip():
@@ -4528,7 +5174,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         errors["base"] = "mail_connection_failed"
                         _LOGGER.warning("CloudEMS mail test mislukt: %s", _err)
             if not errors:
-                return self._save(user_input)
+                # v4.6.432: eerst generator opties
+                self._opts = {**self._data(), **user_input}
+                return await self.async_step_generator_opts()
 
         return self.async_show_form(
             step_id="mail_opts",

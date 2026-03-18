@@ -95,6 +95,14 @@ views:
   cards:
   - *id001
   - type: "custom:cloudems-decisions-card"
+- title: "💡 Advies"
+  path: cloudems-advies
+  icon: mdi:lightbulb-on
+  cards:
+  - type: custom:cloudems-demand-card
+    entity: sensor.cloudems_energy_demand
+  - type: custom:cloudems-version-card
+
 - title: Prijzen & Kosten
   path: cloudems-prijzen
   type: masonry
@@ -109,6 +117,7 @@ views:
     title: Gas
   - type: "custom:cloudems-prijsverloop-card"
     title: Stroom prijzen & kosten
+  - type: custom:cloudems-version-card
 - title: Solar & PV
   path: cloudems-zon
   type: masonry
@@ -350,10 +359,7 @@ views:
         \ rgb(163,163,163) !important;\n}\n"
   - type: markdown
     title: 📅 Geleerde Apparaat Schema's
-    content: "{% set scheds = state_attr('sensor.cloudems_nilm_apparaat_schemas', 'schedules') or [] %}\n{% set ready = scheds | selectattr('ready') | list %}\n{% if ready | length == 0 %}\n*Schema's worden\
-      \ geleerd.*\n{% else %}\n| Apparaat | Piek dag | Piek uur |\n|---|---|---|\n{%- set seen = namespace(names=[]) -%}\n{%- for s in ready -%}\n  {%- set lbl = s.get('label') or s.get('device_type', '?')\
-      \ -%}\n  {%- if lbl not in seen.names -%}\n    {%- set seen.names = seen.names + [lbl] %}\n| {{ lbl }} | {{ s.get('peak_weekday') or '?' }} | {{ ('%02d:00' % s.get('peak_hour', 0)) if s.get('peak_hour')\
-      \ != none else '?' }} |\n  {%- endif -%}\n{%- endfor %}\n{% endif %}\n"
+    content: "{% set scheds = state_attr('sensor.cloudems_nilm_apparaat_schemas', 'schedules') or [] %}\n{% set ready = scheds | selectattr('ready') | list %}\n{% if ready | length == 0 %}\n*Schema's worden geleerd — na ~2 weken verschijnen hier weekpatronen per apparaat.*\n{% else %}\n| Apparaat | Piek dag | Piek uur | Gebruik | Altijd aan |\n|---|---|---|---|---|\n{%- set seen = namespace(names=[]) -%}\n{%- for s in ready -%}\n{%- set lbl = s.get('label') or s.get('device_type','?') -%}\n{%- if lbl not in seen.names -%}\n{%- set seen.names = seen.names + [lbl] -%}\n{%- set pct = ((s.get('on_ratio',0)*100)|round(0)|int) -%}\n{%- set always = s.get('always_on', false) -%}\n| {{ lbl }} | {{ s.get('peak_weekday') or '—' }} | {{ ('%02d:00' % s.get('peak_hour',0)) if s.get('peak_hour') != none else '—' }} | {{ pct }}% | {{ '✅ ja' if always else '—' }} |\n{%- endif -%}\n{%- endfor %}\n{% endif %}\n"
     card_mod:
       style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
         \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
@@ -832,85 +838,15 @@ views:
 - title: Klimaat
   path: cloudems-klimaat
   type: masonry
-  max_columns: 2
+  max_columns: 1
   icon: "mdi:home-thermometer"
   background: url(/local/cloudems/images/bg-klimaat.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(128,203,196,0.07) 0%, transparent 60%), rgb(24,24,24)
   card_mod:
     style: "hui-view { padding: 12px 12px 24px !important; }\n"
   cards:
   - *id001
-  - type: conditional
-    conditions:
-    - condition: state
-      entity: switch.cloudems_module_klimaat
-      state: 'off'
-    card:
-      type: markdown
-      content: "⚠️ **\U0001F321️ Klimaat module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-      card_mod:
-        style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-  - type: markdown
-    title: 🔍 Gevonden Klimaatapparaten
-    content: "{% set ce = state_attr('sensor.cloudems_climate', 'climate_entities') or {} %}\n{% set sc = state_attr('sensor.cloudems_climate', 'smart_climate') or {} %}\n{% set beheerde_ids = sc.get('zones',\
-      \ []) | map(attribute='name') | list %}\n{% set by_area = ce.get('by_area', {}) %}\n{% if not by_area %}\nℹ️ *Geen klimaatapparaten gevonden. Controleer of je thermostaten correct zijn geconfigureerd.*\n\
-      {% else %}\nCloudEMS detecteert **{{ ce.get('count', 0) }} apparaten** — alleen-lezen tot je ze activeert.\n\n{% set type_icon = {'vt':'\U0001F321️','trv':'\U0001F527','airco':'❄️','unknown':'❓'}\
-      \ %}\n{% set type_label = {'vt':'Versatile Therm.','trv':'TRV/Radiator','airco':'Airco/Warmtepomp','unknown':'Onbekend type'} %}\n{% for area, devices in by_area.items() %}\n---\n| Apparaat | Type\
-      \ | Nu | Doel | Status |\n|---|---|---|---|---|\n{% for d in devices %}\n{% set ti = type_icon.get(d.type, '❓') %}\n{% set tl = type_label.get(d.type, d.type) %}\n{% set beheerd = d.name in beheerde_ids\
-      \ %}\n{% set status = '✅ beheerd' if beheerd else '\U0001F441️ alleen-lezen' %}\n| `{{ d.entity_id.split('.')[-1] }}` **{{ d.name }}** | {{ ti }} {{ tl }} | {{ d.current_temp or '—' }}°C | {{ d.target_temp\
-      \ or '—' }}°C | {{ status }} |\n{% endfor %}\n{% endfor %}\n\n\U0001F4A1 *Activeer apparaten via de **CloudEMS wizard** (opties → Klimaatbeheer) om ze te laten aansturen.*\n{% endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    title: 🏠 Actieve Zones — Live Beheer
-    content: "{% set sc = state_attr('sensor.cloudems_climate', 'smart_climate') or {} %}\n{% set zones = sc.get('zones', []) %}\n{% if not sc.get('enabled') or not zones %}\n*Geen actieve zones. Activeer\
-      \ apparaten via CloudEMS wizard → Klimaatbeheer.*\n{% else %}\n| Zone | Preset | Temp | Doel | Bron | Aanwezigheid | Vraag |\n|---|---|---|---|---|---|---|\n{% for z in zones %}\n{% set pie = {'comfort':'\U0001F3E0\
-      ','eco':'\U0001F33F','boost':'\U0001F525','sleep':'\U0001F634','away':'\U0001F697','solar':'☀️','houtfire':'\U0001FAB5','eco_window':'\U0001FA9F'} %}\n{% set src_icon = {'extern':'\U0001F4E1','thermostat':'\U0001F527\
-      ','cache':'\U0001F4BE','onbekend':'❓'} %}\n{% set heat = '\U0001F534' if z.heat_demand else ('\U0001F535' if z.cool_demand else '✅') %}\n{% set pres = z.get('presence', {}) %}\n{% set pi = '\U0001F464\
-      ' if pres.get('status') == 'thuis' else ('\U0001F697' if pres.get('status') == 'weg' else '❓') %}\n{% set ts = z.get('temp_sensors', []) %}\n{% set bron = src_icon.get(z.get('temp_source',''), '❓')\
-      \ %}\n{% if ts %}{% set bron = bron + ' ' + (ts | first).split('.')[-1] %}{% endif %}\n| **{{ z.name }}** | {{ pie.get(z.preset,'❓') }} {{ z.preset }} | {{ z.current_temp or '—' }}°C | **{{ z.target_temp\
-      \ }}°C** | {{ bron }} | {{ pi }} {{ pres.get('status','—') }} | {{ heat }} |\n{% endfor %}\n\n{% for z in zones %}\n• **{{ z.name }}**: {{ z.reason }}{% if z.get('override') %} ⚡ *override: {{ z.override\
-      \ }}*{% endif %}\n{% endfor %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    title: 🌡️ Externe Temperatuursensoren
-    content: "{% set sc = state_attr('sensor.cloudems_climate', 'smart_climate') or {} %}\n{% set zones = sc.get('zones', []) %}\nCloudEMS leest ruimtetemperatuur in deze volgorde:\n**1. \U0001F4E1 Externe\
-      \ sensor** (los thermometer) → **2. \U0001F527 Ingebouwd in TRV/thermostat** → **3. \U0001F4BE Laatste bekende waarde**\n\n{% if zones %}\n| Zone | Geconfigureerde sensoren | Actieve bron | Temperatuur\
-      \ |\n|---|---|---|---|\n{% for z in zones %}\n{% set ts = z.get('temp_sensors', []) %}\n{% set bron = z.get('temp_source', 'onbekend') %}\n{% set bron_icon = {'extern':'\U0001F4E1 extern','thermostat':'\U0001F527\
-      \ TRV ingebouwd','cache':'\U0001F4BE cache','onbekend':'❓'} %}\n| **{{ z.name }}** | {% if ts %}{{ ts | join(', ') }}{% else %}*niet geconfigureerd*{% endif %} | {{ bron_icon.get(bron, bron) }} |\
-      \ {{ z.current_temp or '—' }}°C |\n{% endfor %}\n\n\U0001F4A1 *Sensoren koppelen via CloudEMS wizard (opties → Klimaatbeheer → zone bewerken).*\n{% else %}\n*Activeer eerst zones via CloudEMS wizard\
-      \ → Klimaatbeheer.*\nWerkt met elke HA temperatuursensor: Zigbee, Z-Wave, Bluetooth, ESPHome, DSMR.\nMeerdere sensoren per zone = automatisch gemiddelde.\n{% endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    title: 🔥 CV-Ketel
-    content: "{% set d = state_attr('sensor.cloudems_climate', 'boiler') or {} %}\n{% set on = d.get('boiler_on', false) %}\n{% set n = d.get('zones_calling', 0) %}\n{% if on %}\U0001F534 **BRANDER AAN**\
-      \ — {{ n }} zone{{ 's' if n != 1 else '' }}: *{{ d.get('calling_zones', []) | join(', ') }}*\n{% else %}\U0001F535 **Brander uit** — {{ d.get('reason', '—') }}{% endif %}\n\n{% set pred = state_attr('sensor.cloudems_climate',\
-      \ 'predictive') or {} %}\n{% if pred %}---\n**Pre-heat leermodel**\n| Zone | Opwarmsnelheid | Pre-heat | Metingen |\n|---|---|---|---|\n{% for zone, info in pred.items() %}| {{ zone }} | {{ info.rate_k_min\
-      \ }}°C/min | {{ info.offset_min }} min eerder | {{ info.samples }} |\n{% endfor %}{% endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    title: 📅 Geleerd Aanwezigheidspatroon
-    content: "{% set sc = state_attr('sensor.cloudems_climate', 'smart_climate') or {} %}\n{% set zones = sc.get('zones', []) %}\n{% set zone = zones | first if zones else none %}\n{% if zone and zone.get('presence_heatmap')\
-      \ %}\n{% set hm = zone.presence_heatmap %}\n{% set dagen = ['Ma','Di','Wo','Do','Vr','Za','Zo'] %}\nAanwezigheid **{{ zone.name }}** — \U0001F7E2 thuis · \U0001F534 weg · \U0001F7E1 onzeker · ⬜ onvoldoende\
-      \ data\n\n| Uur | Ma | Di | Wo | Do | Vr | Za | Zo |\n|---|---|---|---|---|---|---|---|\n{% for h in range(24) %}| **{{ '%02d'|format(h) }}** | {% for d in range(7) %}{% set key = d|string + '_' +\
-      \ h|string %}{% set b = hm.get(key, {}) %}{% set s = b.get('score', 0.5) %}{% set r = b.get('reliable', false) %}{% if not r %}⬜{% elif s >= 0.55 %}\U0001F7E2{% elif s <= 0.35 %}\U0001F534{% else\
-      \ %}\U0001F7E1{% endif %} | {% endfor %}\n{% endfor %}\n{% else %}*Heatmap zichtbaar na 2 weken gebruik.*{% endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
-      \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_status','version')\
-      \ or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n    </div>\n  </div>\n\
-      \  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\">\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
-      \ solid rgba(239,68,68,0.4);color:#f87171;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">\U0001F41B Bug melden</a>\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=feature_request.md\"\
-      \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\"\
-      >\U0001F4A1 Feature verzoek</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
-      \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
+  - type: custom:cloudems-klimaat-card
+    title: "🌡️ Klimaatbeheer"
 - title: Klimaat EPEX
   path: cloudems-klimaat-epex
   type: masonry
@@ -925,43 +861,7 @@ views:
     title: "❄️ Airco & Warmtepomp EPEX"
     sensor: sensor.cloudems_climate_epex_status
     price_sensor: sensor.cloudems_price_current_hour
-  - type: markdown
-    title: "📊 EPEX Prijssturing — Uitleg"
-    content: |
-      **Hoe werkt de EPEX-sturing?**
 
-      CloudEMS past kleine temperatuuroffsets toe op basis van de EPEX-spotprijs:
-
-      | Situatie | Warmtepomp | Airco |
-      |---|---|---|
-      | 🟢 **Goedkoop uur** (< 85% daggemiddelde) | +offset (voorverwarmen) | −offset (voorkoelen) |
-      | ⚪ **Neutraal** | geen offset | geen offset |
-      | 🔴 **Duur uur** (> 120% daggemiddelde) | −offset (zuiniger) | +offset (minder koelen) |
-
-      De module **leert** wanneer jij verwarmt/koelt en past offsets alleen toe als het apparaat actief is.
-      Basissetpoints worden per apparaat en per uur van de dag bijgehouden via EMA-leren.
-
-      💡 *Configureer apparaten via Instellingen → CloudEMS → Klimaatbeheer → Airco/WP EPEX.*
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
-  - type: markdown
-    title: "🔧 Geconfigureerde Apparaten"
-    content: >
-      {% set s = state_attr('sensor.cloudems_climate_epex_status', 'devices') or [] %}
-      {% if not s %}
-      ⚙️ *Geen apparaten geconfigureerd. Ga naar **Instellingen → CloudEMS → 🌡️ Klimaatbeheer** en kies Airco/WP EPEX.*
-      {% else %}
-      | Apparaat | Type | Modus | Actie | Setpoint | Offset | Vermogen |
-      |---|---|---|---|---|---|---|
-      {% for d in s %}
-      {% set type_map = {'heat_pump':'🔥 WP', 'airco':'❄️ Airco', 'hybrid':'🔄 Hybride'} %}
-      {% set mode_map = {'cheap':'🟢 Goedkoop', 'dear':'🔴 Duur', 'neutral':'⚪ Neutraal', 'off':'⚫ Uit'} %}
-      {% set act_map  = {'heating':'🔴 Verwarmt', 'cooling':'🔵 Koelt', 'idle':'✅ Stand-by', 'off':'⚫ Uit'} %}
-      | **{{ d.label or d.entity_id }}** | {{ type_map.get(d.device_type, d.device_type) }} | {{ mode_map.get(d.mode, d.mode) }} | {{ act_map.get(d.action, d.action) }} | {{ d.target_temp or '—' }}°C | {{ '%+.1f'|format(d.applied_offset or 0) }}°C | {{ d.power_w|round(0)|int if d.power_w else '—' }}W |
-      {% endfor %}
-      {% endif %}
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; }\n"
   - type: markdown
     content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
       \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_status','version')\
@@ -1443,27 +1343,7 @@ views:
     cards:
     - type: "custom:cloudems-shutter-card"
       title: 🪟 Rolluiken
-    - type: markdown
-      title: 🪟 Rolluiken — Status & Beslissing (legacy)
-      content: "{%- set shutters = (state_attr('sensor.cloudems_status','shutters') or {}).get('shutters', []) -%}\n{%- if not shutters -%}\n⚙️ **Nog geen rolluiken geconfigureerd.**\n\nKoppel je rolluiken\
-        \ via **CloudEMS → Configureren → Rolluiken**.\n{%- else %}\n{% for s in shutters %}\n{%- set pos = s.get('position', -1) %}\n{%- set act = s.get('last_action','') %}\n{%- set reason = s.get('last_reason','')\
-        \ %}\n{%- set shadow = s.get('shadow_action','') %}\n{%- set shadow_reason = s.get('shadow_reason','') %}\n{%- set auto = s.get('auto_enabled', true) %}\n{%- set override = s.get('override_active',\
-        \ false) %}\n{%- if act == 'open' %}{%- set act_icon = '\U0001F53C' %}\n{%- elif act == 'close' %}{%- set act_icon = '\U0001F53D' %}\n{%- elif act == 'position' %}{%- set act_icon = '↕️' %}\n{%-\
-        \ else %}{%- set act_icon = '⏸' %}\n{%- endif %}\n{%- if not auto %}{%- set status_lbl = '\U0001F534 UIT' %}\n{%- elif override %}{%- set status_lbl = '\U0001F7E0 Override' %}\n{%- else %}{%- set\
-        \ status_lbl = '\U0001F7E2 AAN' %}\n{%- endif %}\n---\n#### {{ act_icon }} **{{ s.get('label','?') }}** · {{ pos ~ '%' if pos >= 0 else '—' }} · {{ status_lbl }}\n{%- if reason %}\n\U0001F4AC *{{\
-        \ reason }}*\n{%- endif %}\n{%- if shadow and shadow != act and not auto %}\n\U0001F916 Automaat zou: **{{ shadow }}**{% if shadow_reason %} — *{{ shadow_reason }}*{% endif %}\n{%- endif %}\n{%\
-        \ endfor %}\n{%- endif %}"
-    - type: "custom:cloudems-entity-list"
-      show_empty: false
-      card:
-        type: entities
-        title: 🎮 Handmatige bediening
-        show_header_toggle: false
-      filter:
-        include:
-        - entity_id: button.cloudems_shutter_*
-      sort:
-        method: friendly_name
+
   - type: vertical-stack
     cards:
     - type: "custom:cloudems-chip-card"
@@ -1565,230 +1445,36 @@ views:
 - title: Lampen
   path: cloudems-lampen
   type: masonry
-  max_columns: 2
+  max_columns: 1
   icon: "mdi:lightbulb-group"
   background: url(/local/cloudems/images/bg-overzicht.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,238,88,0.07) 0%, transparent 60%), rgb(24,24,24)
   card_mod:
     style: "hui-view { padding: 12px 12px 24px !important; }\n"
   cards:
   - *id001
-  - type: conditional
-    conditions:
-    - condition: state
-      entity: switch.cloudems_module_lampcirculatie
-      state: 'off'
-    card:
-      type: markdown
-      content: "⚠️ **\U0001F4A1 Lampcirculatie module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-      card_mod:
-        style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-  - type: horizontal-stack
-    cards:
-    - type: "custom:mushroom-template-card"
-      primary: "{% set s = states('sensor.cloudems_lampcirculatie_status') %} {% if s in ['unavailable','unknown',''] %}Niet beschikbaar {% else %}{{ s }}{% endif %}"
-      secondary: Circulatie Status
-      icon: "mdi:lightbulb-group"
-      icon_color: "{% set s = states('sensor.cloudems_lampcirculatie_status') %} {% if 'actief' in s | lower %}orange{% elif 'test' in s | lower %}purple{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}"
-    - type: "custom:mushroom-template-card"
-      primary: "{% set s = states('binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom') %} {% if s == 'on' %}Thuis{% elif s == 'off' %}Weg{% else %}Onbekend{% endif %}"
-      secondary: Aanwezigheid
-      icon: "mdi:home-account"
-      icon_color: "{% set s = states('binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom') %} {% if s == 'on' %}green{% elif s == 'off' %}red{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}"
-  - type: "custom:mushroom-template-card"
-    primary: "{% set lc = state_attr('sensor.cloudems_lampcirculatie_status', 'mode') %} {% set test = state_attr('sensor.cloudems_lampcirculatie_status', 'test_mode') %} {% set neg = state_attr('sensor.cloudems_lampcirculatie_status',\
-      \ 'neg_price_active') %} {% set sun = state_attr('sensor.cloudems_lampcirculatie_status', 'sun_derived_night') %} {% if test %}\U0001F52C TESTMODUS ACTIEF {% elif lc == 'circulation' and neg %}\U0001F512\
-      \ Beveiliging ACTIEF ⚡ negatieve prijs {% elif lc == 'circulation' %}\U0001F512 Inbraakbeveiliging ACTIEF {% elif lc == 'night_off' and sun %}\U0001F319 Nacht (zon onder horizon) {% elif lc == 'night_off'\
-      \ %}\U0001F319 Nachtmodus {% elif lc == 'energy_saving' %}⚡ Energiebesparing — wacht... {% else %}✅ Standby — niemand weg {% endif %}"
-    secondary: "{{ state_attr('sensor.cloudems_lampcirculatie_status', 'advice') }}"
-    icon: "{% set lc = state_attr('sensor.cloudems_lampcirculatie_status', 'mode') %} {% if lc in ['circulation', 'test'] %}mdi:shield-lock {% elif lc == 'night_off' %}mdi:weather-night {% elif lc == 'energy_saving'\
-      \ %}mdi:lightning-bolt {% else %}mdi:lightbulb-group-outline {% endif %}"
-    icon_color: "{% set lc = state_attr('sensor.cloudems_lampcirculatie_status', 'mode') %} {% set test = state_attr('sensor.cloudems_lampcirculatie_status', 'test_mode') %} {% set neg = state_attr('sensor.cloudems_lampcirculatie_status',\
-      \ 'neg_price_active') %} {% if test %}purple {% elif lc == 'circulation' and neg %}green {% elif lc == 'circulation' %}orange {% elif lc == 'night_off' %}blue {% elif lc == 'energy_saving' %}yellow\
-      \ {% else %}grey {% endif %}"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n"
-  - type: "custom:mushroom-template-card"
-    primary: "{% set labels = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_on_labels') %} {% set mimicry = state_attr('sensor.cloudems_lampcirculatie_status', 'mimicry_active') %} {% if labels\
-      \ and labels | length > 0 %}\n  \U0001F4A1 Aan: {{ labels | join(', ') }}{% if mimicry %} ✨ mimicry{% endif %}\n{% else %}\n  \U0001F4A1 Geen lamp actief\n{% endif %}"
-    secondary: "{% set s = state_attr('sensor.cloudems_lampcirculatie_status', 'next_switch_in_s') %} {% if s and s > 0 %}Volgende wissel over {{ (s // 60) }}m {{ (s % 60) }}s {% else %}—{% endif %}"
-    icon: "mdi:lightbulb-on"
-    icon_color: "{% set labels = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_on_labels') %} {% if labels and labels | length > 0 %}amber{% else %}grey{% endif %}"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n"
-  - type: horizontal-stack
-    cards:
-    - type: "custom:mushroom-template-card"
-      primary: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'neg_price_active') %}\n  ⚡ Actief\n{% else %}\n  —\n{% endif %}"
-      secondary: Negatieve prijs
-      icon: "mdi:currency-eur-off"
-      icon_color: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'neg_price_active') %}green{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n"
-    - type: "custom:mushroom-template-card"
-      primary: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'mimicry_active') %}\n  ✨ Actief\n{% else %}\n  —\n{% endif %}"
-      secondary: Gedragsmimicry
-      icon: "mdi:brain"
-      icon_color: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'mimicry_active') %}purple{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n"
-    - type: "custom:mushroom-template-card"
-      primary: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'sun_derived_night') %}\n  \U0001F319 Zon onder\n{% else %}\n  ☀️ Dag\n{% endif %}"
-      secondary: Zon status
-      icon: "mdi:weather-sunset"
-      icon_color: "{% if state_attr('sensor.cloudems_lampcirculatie_status', 'sun_derived_night') %}blue{% else %}yellow{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n"
-  - type: horizontal-stack
-    cards:
-    - type: "custom:mushroom-template-card"
-      primary: "{% set r = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_registered') | int(0) %} {% set e = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_excluded') | int(0) %}\
-        \ {{ r }} gevonden{% if e > 0 %} / {{ e }} uitgesloten{% endif %}"
-      secondary: Lampen in HA
-      icon: "mdi:lightbulb-multiple"
-      icon_color: blue
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255); --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent; --ha-card-border-color: transparent;\n}"
-    - type: "custom:mushroom-template-card"
-      primary: "{{ state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_with_phase') | default('—') }}"
-      secondary: Fase bekend
-      icon: "mdi:lightning-bolt-circle"
-      icon_color: "{% set n = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_with_phase') %} {% set t = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_active') %} {% if n and t and\
-        \ n >= t %}green{% elif n and n > 0 %}orange{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255); --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent; --ha-card-border-color: transparent;\n}"
-    - type: "custom:mushroom-template-card"
-      primary: "{% set c = state_attr('sensor.cloudems_lampcirculatie_status', 'occupancy_confidence') %} {% if c is not none %}{{ (c * 100) | round(0) }}%{% else %}—{% endif %}"
-      secondary: Afwezigheid zekerheid
-      icon: "mdi:home-off"
-      icon_color: "{% set c = state_attr('sensor.cloudems_lampcirculatie_status', 'occupancy_confidence') %} {% if c and c > 0.7 %}red{% elif c and c > 0.5 %}orange{% else %}grey{% endif %}"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255); --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent; --ha-card-border-color: transparent;\n}"
-  - type: horizontal-stack
-    cards:
-    - type: button
-      name: 🔬 Test Lampcirculatie
-      icon: "mdi:play-circle"
-      tap_action:
-        action: perform-action
-        perform_action: cloudems.lamp_circulation_test
-      card_mod:
-        style: "ha-card {\n  background: rgb(42,31,61) !important;\n  border: 1px solid rgba(150,100,255,0.3) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --primary-color: rgb(156,111,255);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color:\
-          \ rgba(150,100,255,0.7) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(150,100,255,0.2) !important;\n  transform: translateY(-1px) !important;\n}"
-    - type: button
-      name: ⏹ Stop Test
-      icon: "mdi:stop-circle"
-      tap_action:
-        action: perform-action
-        perform_action: cloudems.lamp_circulation_stop_test
-      card_mod:
-        style: "ha-card {\n  background: rgb(46,26,26) !important;\n  border: 1px solid rgba(229,57,53,0.3) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --primary-color: rgb(229,57,53);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color:\
-          \ rgba(229,57,53,0.7) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(229,57,53,0.2) !important;\n  transform: translateY(-1px) !important;\n}"
-  - type: "custom:mushroom-template-card"
-    primary: "{% set en = state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} {% if en %}✅ Lampcirculatie INGESCHAKELD {% else %}❌ Lampcirculatie UITGESCHAKELD {% endif %}"
-    secondary: "{% set en = state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} {% if en %}Klik Uitschakelen om de inbraakbeveiliging en energiebesparing te stoppen. {% else %}Klik Inschakelen\
-      \ om de inbraakbeveiliging en energiebesparing te starten. {% endif %}"
-    icon: "{% set en = state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} {% if en %}mdi:shield-check{% else %}mdi:shield-off{% endif %}"
-    icon_color: "{% set en = state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} {% if en %}green{% else %}red{% endif %}"
-    card_mod:
-      style: "ha-card {\n  background: {%- if state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} rgba(0,80,20,0.4) {%- else %} rgba(80,0,0,0.4) {%- endif %} !important;\n  border: 1px solid\
-        \ {%- if state_attr('sensor.cloudems_lampcirculatie_status', 'enabled') %} rgba(0,177,64,0.4) {%- else %} rgba(229,57,53,0.4) {%- endif %} !important;\n  border-radius: 16px !important;\n  box-shadow:\
-        \ 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n}"
-  - type: horizontal-stack
-    cards:
-    - type: button
-      name: ✅ Inschakelen
-      icon: "mdi:shield-lock"
-      tap_action:
-        action: perform-action
-        perform_action: cloudems.lamp_circulation_set_enabled
-        data:
-          enabled: true
-      card_mod:
-        style: "ha-card {\n  background: rgb(26,46,26) !important;\n  border: 1px solid rgba(0,177,64,0.4) !important;\n  border-radius: 16px !important;\n  --primary-text-color: rgb(255,255,255);\n  --primary-color:\
-          \ rgb(0,177,64);\n  --card-background-color: transparent;\n}\nha-card:hover { border-color: rgba(0,177,64,0.8) !important; transform: translateY(-1px) !important; }"
-    - type: button
-      name: ❌ Uitschakelen
-      icon: "mdi:shield-lock-outline"
-      tap_action:
-        action: perform-action
-        perform_action: cloudems.lamp_circulation_set_enabled
-        data:
-          enabled: false
-      card_mod:
-        style: "ha-card {\n  background: rgb(46,26,26) !important;\n  border: 1px solid rgba(229,57,53,0.4) !important;\n  border-radius: 16px !important;\n  --primary-text-color: rgb(255,255,255);\n  --primary-color:\
-          \ rgb(229,57,53);\n  --card-background-color: transparent;\n}\nha-card:hover { border-color: rgba(229,57,53,0.8) !important; transform: translateY(-1px) !important; }"
-    - type: button
-      name: ⚙️ Lampen uitsluiten
-      icon: "mdi:cog"
-      tap_action:
-        action: navigate
-        navigation_path: /config/integrations
-      card_mod:
-        style: "ha-card {\n  background: rgb(26,34,51) !important;\n  border: 1px solid rgba(100,160,255,0.3) !important;\n  border-radius: 16px !important;\n  --primary-text-color: rgb(255,255,255);\n\
-          \  --primary-color: rgb(100,160,255);\n  --card-background-color: transparent;\n}\nha-card:hover { border-color: rgba(100,160,255,0.8) !important; transform: translateY(-1px) !important; }"
+  - type: custom:cloudems-lamp-card
+    title: "💡 Lampcirculatie"
   - type: markdown
-    content: "{%- set tip = state_attr('sensor.cloudems_lampcirculatie_status', 'phase_tip') -%}\n{%- if tip and tip != '' and tip != 'None' -%}\n⚡ **Fase-detectie:** {{ tip }}\n{%- endif -%}\n"
-    card_mod:
-      style: "ha-card {\n  background: {% if state_attr('sensor.cloudems_lampcirculatie_status', 'phase_tip') %} rgb(26,46,26) {% else %} transparent {% endif %} !important;\n  border: 0 !important;\n \
-        \ box-shadow: none !important;\n  padding: 0 !important;\n  margin: 0 !important;\n  min-height: 0 !important;\n}\nha-card:empty { display: none !important; }"
-  - type: markdown
-    content: "\n**\U0001F512 Inbraakbeveiliging** — Dynamische circulatie met willekeurige tijden (2-8 min)\nen wisselend 1-3 lampen tegelijk. Geen enkel herhaalbaar patroon.\n\n**⚡ Energiebesparing** —\
-      \ Alle lampen automatisch uit bij gedetecteerde afwezigheid.\n\n**\U0001F319 Seizoensintelligentie** — Nacht wordt bepaald op basis van `sun.sun` (zon onder\nde horizon), zodat de circulatie automatisch\
-      \ later start in de zomer en eerder in\nde winter.\n\n**✨ Gedragsmimicry** — CloudEMS leert welke lampen bewoners normaal aandoen op\nwelk tijdstip. Die lampen krijgen een hogere kans om gekozen te\
-      \ worden, zodat het\ngedrag realistischer lijkt.\n\n**\U0001F3D8️ Buurt-correlatie** — Als buur-lampen worden gedetecteerd, verschuift CloudEMS\nde eigen schakelmoment zodat de timing niet gelijktijdig\
-      \ valt.\n\n**\U0001F6B6 PIR-bypass** — Lampen gekoppeld aan een bewegingsmelder worden tijdelijk\nuitgesloten als de PIR recent actief was (iemand in de kamer).\n\n**\U0001F4B6 Negatieve prijs** —\
-      \ Bij negatieve EPEX-prijs wordt de circulatieduur verlengd:\ngratis stroom én maximale beveiligingstijd.\n\n**⚡ Fase-detectie** — Bij elke schakelactie leert CloudEMS passief de netfase\nvan de lamp.\
-      \ Start de **Test** om dit direct te triggeren.\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(26,26,46) !important;\n  border: 1px solid rgba(255,200,0,0.15) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  padding: 4px;\n}\n"
-  - type: markdown
-    title: ⚡ Lamp Fase-detectie + Gedragspatroon
-    content: "{% set lamps = state_attr('sensor.cloudems_lampcirculatie_status', 'lamp_phases') %}\n{% set on_ids = state_attr('sensor.cloudems_lampcirculatie_status', 'lamps_on') or [] %}\n{% if lamps\
-      \ %}\n| Lamp | Status | Fase | ~W | Mimicry |\n|------|--------|------|----|---------| \n{%- for l in lamps %}\n{%- set status = 'uitgesloten' if l.excluded else ('**AAN**' if l.entity_id in on_ids\
-      \ else 'uit') -%}{%- set fase = l.phase if l.phase else '?' -%}{%- set watt = (l.power_w | int | string ~ ' W') if l.power_w else '-' -%}{%- set mp = ((l.mimicry or 0) * 100) | round(0) | int -%}{%-\
-      \ set bar = '█' * (mp // 10) ~ '░' * (10 - mp // 10) %}\n| {{ l.label }} | {{ status }} | {{ fase }} | {{ watt }} | `{{ bar }}` {{ mp }}% |\n{%- endfor %}\n*Mimicry = kans dat bewoners dit licht nu\
-      \ zelf aan zouden doen.*\n{% else %}\n*Geen lampen gevonden. CloudEMS detecteert automatisch alle `light.*` entiteiten na herstart.*\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(163,163,163);\n  --primary-color: rgb(240,165,0);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color:\
-        \ rgba(240,165,0,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(240,165,0,0.12) !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background:\
-        \ transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n \
-        \ padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background: rgba(240,165,0,0.1)\
-        \ !important;\n  color: rgb(240,165,0) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform: uppercase !important;\n\
-        \  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(240,165,0,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px solid rgba(255,255,255,0.05)\
-        \ !important;\n  padding: 7px 10px !important;\n  font-family: 'Courier New', Courier, monospace !important;\n  font-size: 12px !important;\n  letter-spacing: 0 !important;\n}\nha-markdown-element\
-        \ tr:hover td {\n  background: rgba(240,165,0,0.06) !important;\n  color: rgb(255,255,255) !important;\n}\nha-markdown-element strong { color: rgb(240,165,0) !important; font-weight: 700 !important;\
-        \ }\nha-markdown-element code {\n  background: rgba(240,165,0,0.12) !important;\n  color: rgb(240,165,0) !important;\n  padding: 1px 4px !important;\n  border-radius: 3px !important;\n  font-size:\
-        \ 11px !important;\n}\n"
-  - type: markdown
-    content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
-      \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_system_health','version')\
-      \ or '4.3.0' }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n    </div>\n  </div>\n  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\"\
-      >\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
-      \ solid rgba(239,68,68,0.4);color:#f87171;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">\U0001F41B Bug melden</a>\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=feature_request.md\"\
-      \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\"\
-      >\U0001F4A1 Feature verzoek</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
-      \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
+    title: "🏠 Slimme Verlichting"
+    content: >
+      {% set la = state_attr('sensor.cloudems_slimme_verlichting_status', 'lamps') or [] %}
+      {% set actions = state_attr('sensor.cloudems_slimme_verlichting_status', 'actions') or [] %}
+      {% if la | length == 0 %}
+      ⚙️ **Nog niet geconfigureerd.** Ga naar Instellingen → CloudEMS → Verbruik → Slimme Verlichting.
+      {% else %}
+      | Lamp | Ruimte | Modus | Presence |
+      |---|---|---|---|
+      {% for l in la %}
+      | {{ l.label }} | {{ l.area or '—' }} | {{ '🤖 Auto' if l.mode == 'auto' else ('💬 Semi' if l.mode == 'semi' else '👋 Handmatig') }} | {{ '✅' if l.has_presence else '—' }} |
+      {% endfor %}
+      {% if actions | length > 0 %}
+
+      **Laatste acties:**
+      {% for a in actions[-5:] | reverse %}
+      - {{ '💡' if a.action == 'on' else '🌙' }} **{{ a.label }}** {{ 'aan' if a.action == 'on' else 'uit' }} — *{{ a.reason }}* ({{ a.mode }})
+      {% endfor %}
+      {% endif %}
+      {% endif %}
 - title: ERE Certificaten
   path: cloudems-ere
   type: masonry
@@ -2114,532 +1800,32 @@ views:
 - title: Diagnose
   path: cloudems-diagnose
   type: masonry
-  max_columns: 2
+  max_columns: 1
   icon: "mdi:stethoscope"
   background: url(/local/cloudems/images/bg-diagnose.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(239,154,154,0.06) 0%, transparent 60%), rgb(24,24,24)
   card_mod:
     style: "hui-view { padding: 12px 12px 24px !important; }\n"
   cards:
   - *id001
+  - type: custom:cloudems-diagnose-card
   - type: markdown
-    title: 💚 Systeem Gezondheid
-    content: "{%- set score = states('sensor.cloudems_system_health') | float(0) | round(1) -%}\n{%- set pct = (score / 10 * 100) | round(0) | int -%}\n{%- set bars = (score | round(0) | int) -%}\n{%- set\
-      \ color = '\U0001F7E2' if score >= 8 else ('\U0001F7E1' if score >= 5 else '\U0001F534') -%}\n{%- set label = 'Uitstekend' if score >= 9 else ('Goed' if score >= 7 else ('Matig' if score >= 5 else\
-      \ ('Slecht' if score >= 3 else 'Kritiek'))) -%}\n{{ color }} **{{ score }}/10** — {{ label }}\n\n`{{ '█' * bars }}{{ '░' * (10 - bars) }}` {{ pct }}%\n\n| Aspect | Waarde |\n|--------|--------|\n\
-      | Score | **{{ score }}/10** |\n| Status | {{ label }} |\n| Versie | v{{ state_attr('sensor.cloudems_system_health','version') or '?' }} |\n| Uptime | {{ state_attr('sensor.cloudems_system_health','uptime_h')\
-      \ | round(1) if state_attr('sensor.cloudems_system_health','uptime_h') else '—' }} uur |\n| Update cycli | {{ state_attr('sensor.cloudems_system_health','update_count') or '—' }} |\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(0,177,64,0.3) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color:\
-        \ rgb(163,163,163); --card-background-color: transparent; --ha-card-border-color: transparent; }\n.card-header { background: transparent !important; border-bottom: 1px solid rgba(0,177,64,0.15)\
-        \ !important; color: rgb(0,212,78) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }\nha-markdown-element code { font-family: 'Courier New',\
-        \ Courier, monospace !important; letter-spacing: 0 !important; background: rgba(0,177,64,0.1) !important; color: rgb(0,212,78) !important; padding: 4px 10px !important; border-radius: 6px !important;\
-        \ font-size: 13px !important; display: block !important; }\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th { background: rgba(0,177,64,0.1)\
-        \ !important; color: rgb(0,212,78) !important; font-size: 10px !important; font-weight: 700 !important; text-transform: uppercase !important; padding: 8px 10px !important; }\nha-markdown-element\
-        \ td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; padding: 6px 10px !important; font-size: 12px !important; }\nha-markdown-element strong { color:\
-        \ rgb(255,255,255) !important; }\n"
-  - type: markdown
-    title: 🔁 Watchdog — Crashmonitor
-    content: "{% set wd     = states('sensor.cloudems_watchdog') %}\n{% set cons   = state_attr('sensor.cloudems_watchdog', 'consecutive_failures') | int(0) %}\n{% set total  = state_attr('sensor.cloudems_watchdog',\
-      \ 'total_failures') | int(0) %}\n{% set rests  = state_attr('sensor.cloudems_watchdog', 'total_restarts') | int(0) %}\n{% set lf_ago = state_attr('sensor.cloudems_watchdog', 'last_failure_ago') %}\n\
-      {% set lf_msg = state_attr('sensor.cloudems_watchdog', 'last_failure_msg') %}\n{% set lr_ago = state_attr('sensor.cloudems_watchdog', 'last_restart_ago') %}\n{% set ls_ago = state_attr('sensor.cloudems_watchdog',\
-      \ 'last_success_ago') %}\n{% set nxt    = state_attr('sensor.cloudems_watchdog', 'next_restart_in_s') | int(0) %}\n{% set max_c  = state_attr('sensor.cloudems_watchdog', 'max_consecutive') | int(3)\
-      \ %}\n{% set hist   = state_attr('sensor.cloudems_watchdog', 'history') or [] %}\n{% if wd == 'ok' %}\n\U0001F7E2 **Systeem gezond** — laatste succes {{ ls_ago or 'onbekend' }}\n{% elif wd == 'warning'\
-      \ %}\n\U0001F7E1 **Waarschuwing** — {{ cons }}/{{ max_c }} opeenvolgende fouten\n{% elif wd == 'critical' %}\n\U0001F534 **Kritiek** — herstart getriggerd ({{ rests }}× totaal)\n{% else %}\n⏳ Watchdog\
-      \ start op...\n{% endif %}\n\n| Gegeven | Waarde |\n|---|---|\n| Status | {{ wd }} |\n| Opeenvolgende fouten | {{ cons }}/{{ max_c }} |\n| Totaal fouten (ooit) | {{ total }} |\n| Automatische herstarts\
-      \ | **{{ rests }}** |\n| Laatste fout | {{ lf_ago or '—' }} |\n| Laatste herstart | {{ lr_ago or 'Nooit' }} |\n| Laatste succes | {{ ls_ago or '—' }} |\n{% if nxt > 0 %}| Volgende herstart na | {{\
-      \ nxt }}s backoff |{% endif %}\n\n{% if lf_msg %}\n**Laatste foutmelding:**\n```\n{{ lf_msg }}\n```\n{% endif %}\n\n{% if hist %}\n**Crashgeschiedenis (laatste {{ hist | length }}):**\n| Tijdstip\
-      \ | Fout | # |\n|---|---|---:|\n{%- for e in hist | reverse %}\n| `{{ e.ts[11:19] if e.ts else '?' }}` | {{ e.error[:60] }}{% if e.error | length > 60 %}…{% endif %} | {{ e.consecutive }} |\n{%- endfor\
-      \ %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background:\
-        \ rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.06em !important;\n  text-transform: uppercase\
-        \ !important;\n  padding: 7px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px\
-        \ solid rgba(255,255,255,0.04) !important;\n  padding: 6px 10px !important;\n  font-size: 12px !important;\n}\nha-markdown-element code {\n  background: rgba(239,68,68,0.12) !important;\n  color:\
-        \ rgb(252,165,165) !important;\n  padding: 4px 8px !important;\n  border-radius: 6px !important;\n  font-size: 11px !important;\n  display: block !important;\n  white-space: pre-wrap !important;\n\
-        \  word-break: break-word !important;\n}\nha-markdown-element strong { color: rgb(255,255,255) !important; }\n"
-  - type: entities
-    title: 🔧 Systeem
-    entities:
-    - entity: sensor.cloudems_grid_net_power
-      name: Net vermogen (W)
-    - entity: sensor.cloudems_grid_import_power
-      name: Afname (W)
-    - entity: sensor.cloudems_grid_export_power
-      name: Teruglevering (W)
-    - entity: sensor.cloudems_energy_price_current_hour
-      name: EPEX prijs nu
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: 🚦 Netcongestie
-    entities:
-    - entity: sensor.cloudems_grid_congestion_utilisation
-      name: Netbenutting (%)
-    - type: attribute
-      entity: sensor.cloudems_grid_congestion_utilisation
-      attribute: active
-      name: Congestie actief
-    - type: attribute
-      entity: sensor.cloudems_grid_congestion_utilisation
-      attribute: today_events
-      name: Events vandaag
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 🛡️ Sensor Kwaliteitscheck
-    content: "{% set crit  = state_attr('sensor.cloudems_sensor_sanity', 'has_critical') %}\n{% set warn  = state_attr('sensor.cloudems_sensor_sanity', 'has_warning') %}\n{% set summ  = state_attr('sensor.cloudems_sensor_sanity',\
-      \ 'summary') %}\n{% set issues = state_attr('sensor.cloudems_sensor_sanity', 'issues') or [] %}\n{% if crit %}\n\U0001F534 **Kritieke sensorproblemen gedetecteerd**\n{% elif warn %}\n\U0001F7E1 **Waarschuwingen\
-      \ gedetecteerd**\n{% else %}\n\U0001F7E2 **Alle sensoren OK**\n{% endif %}\n\n{% if summ and summ != 'Alle sensoren OK' and summ != 'All sensors OK' %}> {{ summ }}{% endif %}\n\n{% if issues %}\n\
-      | Sensor | Probleem | Ernst |\n|---|---|---|\n{% for i in issues %}\n| `{{ i.entity_id or i.sensor or '?' }}` | {{ i.issue or i.message or '?' }} | {{ '\U0001F534 kritiek' if i.critical else '\U0001F7E1\
-      \ waarschuwing' }} |\n{% endfor %}\n{% else %}\n_Geen actieve sensorproblemen._\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 📊 EMA Sensor Diagnostiek
-    content: "{% set spikes  = states('sensor.cloudems_ema_diagnostics') | int(0) %}\n{% set frozen  = state_attr('sensor.cloudems_ema_diagnostics', 'frozen_sensors') or [] %}\n{% set slow    = state_attr('sensor.cloudems_ema_diagnostics',\
-      \ 'slow_sensors') or [] %}\n{% set tracked = state_attr('sensor.cloudems_ema_diagnostics', 'tracked_sensors') | int(0) %}\n{% set summ    = state_attr('sensor.cloudems_ema_diagnostics', 'summary')\
-      \ %}\n{% if tracked > 0 %}\n{% if spikes == 0 and frozen | length == 0 %}\U0001F7E2{% else %}\U0001F7E1{% endif %} **{{ tracked }} sensoren gevolgd · {{ spikes }} spikes geblokkeerd**\n\n{% if summ\
-      \ %}> {{ summ }}{% endif %}\n\n| Categorie | Aantal |\n|---|---|\n| Gevolgde sensoren | {{ tracked }} |\n| Geblokkeerde spikes (totaal) | {{ spikes }} |\n| Bevroren sensoren | {{ frozen | length }}\
-      \ |\n| Trage sensoren | {{ slow | length }} |\n\n{% if frozen %}\n**⚠️ Bevroren sensoren** (leveren geen updates):\n{% for s in frozen %}\n- `{{ s }}`\n{% endfor %}\n{% endif %}\n{% if slow %}\n**⏳\
-      \ Trage sensoren** (vertraging > verwacht):\n{% for s in slow %}\n- `{{ s }}`\n{% endfor %}\n{% endif %}\n{% else %}\n⏳ EMA diagnostiek start zodra sensoren data leveren.\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: conditional
-    conditions:
-    - condition: state
-      entity: sensor.cloudems_p1_power
-      state_not: unavailable
-    - condition: state
-      entity: sensor.cloudems_p1_power
-      state_not: unknown
-    card:
-      type: markdown
-      title: 📡 P1 Direct Netmeting
-      content: "{% set p = states('sensor.cloudems_p1_power') | float(0) %}\n{% set d = state_attr('sensor.cloudems_p1_power', 'tariff') %}\n{% set t1i = state_attr('sensor.cloudems_p1_power', 't1_import_kwh')\
-        \ | float(0) %}\n{% set t2i = state_attr('sensor.cloudems_p1_power', 't2_import_kwh') | float(0) %}\n{% set t1e = state_attr('sensor.cloudems_p1_power', 't1_export_kwh') | float(0) %}\n{% set t2e\
-        \ = state_attr('sensor.cloudems_p1_power', 't2_export_kwh') | float(0) %}\n{% if p > 0 %}\U0001F534 **Importeert {{ p | round(0) | int }} W**\n{% elif p < 0 %}\U0001F7E2 **Exporteert {{ (p | abs)\
-        \ | round(0) | int }} W**\n{% else %}⚪ **Nulstand**{% endif %}\n\n| Teller | Waarde |\n|---|---|\n| Tarief 1 import | {{ t1i | round(3) }} kWh |\n| Tarief 2 import | {{ t2i | round(3) }} kWh |\n\
-        | Tarief 1 export | {{ t1e | round(3) }} kWh |\n| Tarief 2 export | {{ t2e | round(3) }} kWh |\n"
-      card_mod:
-        style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-          \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-          }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-          }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-          \  font-weight: 600 !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: 🔬 NILM Diagnostics
-    entities:
-    - entity: sensor.cloudems_nilm_diagnostics
-      name: Classificatiescore (%)
-    - entity: sensor.cloudems_nilm_sensor_input
-      name: Invoermodus
-    - type: attribute
-      entity: sensor.cloudems_nilm_diagnostics
-      attribute: events_total
-      name: Events totaal
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px 16px 0 0 !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4)\
-        \ !important;\n  border-bottom: none !important;\n  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\n"
-  - type: markdown
-    title: 📊 Geleerde apparaten — vermogen & activiteit
-    content: "{% set devs = state_attr('sensor.cloudems_nilm_running_devices', 'devices') or [] %}\n{% set all_devs = devs | sort(attribute='power_w', reverse=true) %}\n{% if not all_devs %}\n*Nog geen\
-      \ NILM-apparaten geleerd. CloudEMS leert automatisch na ~24 uur.*\n{% else %}\n| Apparaat | Type | Vermogen | Aan? | Detecties | Confid. |\n|---|---|---|---|---|---|\n{% for d in all_devs %}| **{{\
-      \ d.get('name','?') }}** | {{ d.get('device_type','?') | replace('_',' ') }} | {{ d.get('power_w', 0) | round(0) | int }}W{% if d.get('power_min') and d.get('power_max') and d.get('power_min') !=\
-      \ d.get('power_max') %} ({{ d.get('power_min',0)|round(0)|int }}–{{ d.get('power_max',0)|round(0)|int }}W){% endif %} | {{ '\U0001F7E2' if d.get('is_on') else '⚫' }} | {{ d.get('on_events', 0) }}×\
-      \ | {{ (d.get('confidence', 0) * 100) | round(0) | int }}% |\n{% endfor %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 0 0 16px 16px !important;\n  border-top: 1px solid rgba(255,255,255,0.04)\
-        \ !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n  --primary-text-color: rgb(255,255,255);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entity
-    entity: sensor.cloudems_system_pid_diagnostics
-    name: PID Diagnostics (EV uitgang A)
-    icon: "mdi:chart-bell-curve-cumulative"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n\
-        \  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow:\
-        \ 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n}\n"
-  - type: entity
-    entity: sensor.cloudems_sensor_hints
-    name: Sensor configuratie hints
-    icon: "mdi:lightbulb-alert"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n\
-        \  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow:\
-        \ 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n}\n"
-  - type: entities
-    title: 📐 Vermogensschaal Diagnostiek
-    entities:
-    - entity: sensor.cloudems_power_scale_info
-      name: Schaalstatus
-    - type: attribute
-      entity: sensor.cloudems_power_scale_info
-      attribute: scale_factor
-      name: Schaalfactor
-    - type: attribute
-      entity: sensor.cloudems_power_scale_info
-      attribute: unit_detected
-      name: Gedetecteerde eenheid
-    - type: attribute
-      entity: sensor.cloudems_power_scale_info
-      attribute: advice
-      name: Advies
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: ⚡ Alle fase details
-    entities:
-    - entity: sensor.cloudems_grid_phase_l1_current
-      name: L1 stroom (A)
-    - entity: sensor.cloudems_grid_phase_l1_voltage
-      name: L1 spanning (V)
-    - entity: sensor.cloudems_grid_phase_l2_current
-      name: L2 stroom (A)
-    - entity: sensor.cloudems_grid_phase_l2_voltage
-      name: L2 spanning (V)
-    - entity: sensor.cloudems_grid_phase_l3_current
-      name: L3 stroom (A)
-    - entity: sensor.cloudems_grid_phase_l3_voltage
-      name: L3 spanning (V)
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 🤖 Ollama AI · Diagnostics
-    content: "{% set e = 'sensor.cloudems_ollama_diagnostics' %}\n{% set s = states(e) %}\n{% if s in ('unavailable', 'unknown') %}\n⏳ _Sensor wordt geladen... even geduld na herstart._\n{% else %}\n{%\
-      \ set err = state_attr(e, 'last_error') %}\n{% set model = state_attr(e, 'model') or '—' %}\n{% set host = state_attr(e, 'host') or '—' %}\n{% set port = state_attr(e, 'port') or '—' %}\n{% set found\
-      \ = state_attr(e, 'active_model_found') %}\n{% set mode = state_attr(e, 'nilm_active_mode') or '—' %}\n{% set total = state_attr(e, 'calls_total') | int(0) %}\n{% set success = state_attr(e, 'calls_success')\
-      \ | int(0) %}\n{% set failed = state_attr(e, 'calls_failed') | int(0) %}\n{% set rate = state_attr(e, 'success_rate_pct') | float(0) %}\n{% set last_ms = state_attr(e, 'last_response_ms') %}\n{% set\
-      \ avg_ms = state_attr(e, 'avg_response_ms') %}\n{% set last_ok = state_attr(e, 'last_success_ts') %}\n{% set check_ts = state_attr(e, 'last_check_ts') %}\n{% set enabled = state_attr(e, 'enabled')\
-      \ %}\n{% if not enabled %}\n⚫ **Ollama is niet ingeschakeld.**\nActiveer via Instellingen → CloudEMS → Configureren → AI & NILM.\n{% else %}\n**Status:** {% if s == 'online' %}\U0001F7E2 Online{%\
-      \ elif s == 'offline' %}\U0001F534 Offline{% elif s == 'error' %}\U0001F7E0 Fout{% elif s == 'timeout' %}\U0001F7E0 Timeout{% else %}⚪ {{ s }}{% endif %} &nbsp;·&nbsp; **NILM:** {% if mode == 'ollama'\
-      \ %}\U0001F7E2 Ollama{% elif mode == 'database' %}\U0001F7E1 Database (fallback){% elif mode == 'cloud_ai' %}\U0001F535 Cloud AI{% else %}{{ mode }}{% endif %}\n\n**Host:** `{{ host }}:{{ port }}`\
-      \ &nbsp;·&nbsp; **Model:** `{{ model }}`{% if s == 'online' %}{% if found %} ✅{% else %} ⚠️ niet gevonden{% endif %}{% endif %}\n\n**Check:** {{ check_ts or '_nog niet_' }} &nbsp;·&nbsp; **Fout:**\
-      \ {{ err or '_geen_' }}\n\n**Oproepen:** {{ total }} totaal · {{ success }} ok ({{ rate | round(0) }}%) · {{ failed }} mislukt &nbsp;·&nbsp; **Respons:** {% if last_ms %}{{ last_ms }}ms (nu) · {{\
-      \ avg_ms }}ms (gem.){% else %}—{% endif %}\n{% if s in ('offline', 'error', 'timeout') %}\n\n---\n⚠️ **Ollama niet bereikbaar — database wordt als fallback gebruikt.**\nReden: `{{ err or 'onbekend'\
-      \ }}`\n- Ollama gestopt? → `systemctl status ollama`\n- Verkeerd adres? → Instellingen → CloudEMS → AI & NILM\n- Model ontbreekt? → `ollama pull {{ model }}`\n- Firewall blokkeert poort `{{ port }}`?\n\
-      {% endif %}\n{% endif %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background:\
-        \ rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform: uppercase\
-        \ !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px\
-        \ solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06) !important;\n  color: rgb(255,255,255) !important;\n\
-        }\nha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element code {\n \
-        \ background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element\
-        \ blockquote {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n  border-radius: 0 8px 8px 0 !important;\n  color:\
-        \ rgb(163,163,163) !important;\n}\n"
-  - type: markdown
-    content: "{% set e = 'sensor.cloudems_ollama_diagnostics' %}\n{% set s = states(e) %}\n{% if s not in ('unavailable', 'unknown', 'disabled') and state_attr(e, 'enabled') %}\n**\U0001F4E6 Geladen modellen:**\n\
-      {% set models = state_attr(e, 'models_available') %}\n{% set active = state_attr(e, 'model') %}\n{% if models and models | length > 0 %}\n{% for m in models %}- `{{ m }}`{% if active and active in\
-      \ m %} ✅{% endif %}\n{% endfor %}\n{% else %}\n_Geen modellen gevonden of Ollama offline._\n{% endif %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background:\
-        \ rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform: uppercase\
-        \ !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px\
-        \ solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06) !important;\n  color: rgb(255,255,255) !important;\n\
-        }\nha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element code {\n \
-        \ background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element\
-        \ blockquote {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n  border-radius: 0 8px 8px 0 !important;\n  color:\
-        \ rgb(163,163,163) !important;\n}\n"
-  - type: markdown
-    content: "{% set e = 'sensor.cloudems_ollama_diagnostics' %}\n{% set s = states(e) %}\n{% if s not in ('unavailable', 'unknown', 'disabled') and state_attr(e, 'enabled') %}\n**\U0001F550 Recente classificaties\
-      \ (laatste 10):**\n{% set calls = state_attr(e, 'recent_calls') %}\n{% if calls and calls | length > 0 %}\n{% for c in calls[:10] %}`{{ c.ts }}` · {{ c.phase }} · **{{ c.delta_w }}W** → {{ c.result\
-      \ }}{% if c.ms %} _({{ c.ms }}ms)_{% endif %}\n{% endfor %}\n{% else %}\n_Nog geen Ollama oproepen in deze sessie._\n{% endif %}\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-        }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-        }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-        \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background:\
-        \ rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform: uppercase\
-        \ !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px\
-        \ solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06) !important;\n  color: rgb(255,255,255) !important;\n\
-        }\nha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element code {\n \
-        \ background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element\
-        \ blockquote {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n  border-radius: 0 8px 8px 0 !important;\n  color:\
-        \ rgb(163,163,163) !important;\n}\n"
-  - type: entities
-    title: 🎛️ Besturing & Schakelentiteiten
-    entities:
-    - entity: switch.cloudems_slim_ev_laden
-      name: Slim EV laden
-      icon: "mdi:ev-station"
-    - entity: number.cloudems_ev_doel_laadstroom
-      name: EV doel laadstroom (A)
-      icon: "mdi:current-ac"
-    - entity: select.cloudems_epex_prijszone
-      name: EPEX prijszone
-      icon: "mdi:map-marker-radius"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: entities
-    title: 🧠 NILM Modellen
-    entities:
-    - entity: switch.cloudems_nilm_actief
-      name: NILM Actief
-      icon: "mdi:home-analytics"
-    - entity: switch.cloudems_hybridnilm_actief
-      name: HybridNILM (smart plug + context)
-      icon: "mdi:layers-triple"
-    - entity: switch.cloudems_nilm_sessietracking_hmm
-      name: HMM Sessietracking
-      icon: "mdi:state-machine"
-    - entity: switch.cloudems_nilm_bayesian_classifier
-      name: Bayesian Classifier
-      icon: "mdi:chart-bell-curve-cumulative"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --primary-color: rgb(0,177,64);\n\
-        \  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n}\n.card-header {\n  background: transparent !important;\n  border-bottom:\
-        \ 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding:\
-        \ 14px 16px 12px !important;\n}\n"
-  - type: vertical-stack
-    title: 🌡️ Slim Klimaatbeheer
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_zone_klimaat_kosten_vandaag
-        state_not: unavailable
-      card:
-        type: "custom:cloudems-entity-list"
-        card:
-          type: entities
-          title: 🏠 Zones — temperatuur & kosten
-          show_header_toggle: false
-        filter:
-          include:
-          - entity_id: sensor.cloudems_zone_*
-            not:
-              entity_id: sensor.cloudems_zone_klimaat_kosten*
-        sort:
-          method: name
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_zone_klimaat_kosten_vandaag
-        state_not: unavailable
-      card:
-        type: entity
-        entity: sensor.cloudems_zone_klimaat_kosten_vandaag
-        name: 💶 Klimaatkosten vandaag
-    - type: markdown
-      title: 🌡️ Zone details
-      content: "{% set zc = state_attr('sensor.cloudems_zone_klimaat_kosten_vandaag', 'zones') or [] %}\n| Zone | Preset | Temp | Doel | Bron | Kosten/dag | Kosten/mnd |\n|------|--------|------|------|------|-----------|-----------|\n\
-        {% for z in zc -%}\n| {{ z.name }} | {{ z.preset }} | {{ state_attr('sensor.cloudems_zone_' ~ z.name | lower | replace(' ','_'), 'huidige_temp') | default('?') }}°C | {{ state_attr('sensor.cloudems_zone_'\
-        \ ~ z.name | lower | replace(' ','_'), 'doeltemperatuur') | default('?') }}°C | {{ z.bron }} | €{{ z.kosten_vandaag }} | €{{ z.kosten_maand }} |\n{% endfor %}\n"
-    - type: markdown
-      title: 🔥 CV-ketel status
-      content: "{%- set boiler = state_attr('sensor.cloudems_zone_klimaat_kosten_vandaag', 'boiler') or {} -%}\n**Status:** {{ '\U0001F525 AAN' if boiler.get('boiler_on', false) else '⭕ UIT' }}\n**Zones\
-        \ die vragen:** {{ boiler.get('zones_calling', 0) }} ({{ boiler.get('zones', 'geen') }})\n**Reden:** {{ boiler.get('reason', 'onbekend') }}\n"
-    - type: markdown
-      title: 🎮 Zone presets instellen
-      content: "Gebruik de CloudEMS service via Ontwikkelaarstools of een automatisering:\n\n```\nperform_action: cloudems.set_zone_preset\ndata:\n  area_id: woonkamer   # of \"all\"\n  preset: boost  \
-        \      # comfort / eco / boost / away\n  hours: 2\n```\n"
-      card_mod:
-        style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; }\nha-markdown-element code { font-size: 11px !important;\
-          \ }\n"
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_zone_klimaat_kosten_vandaag
-        state_not: unavailable
-      card:
-        type: markdown
-        title: 🪵 Houtkachel advies
-        content: "{%- set zc = state_attr('sensor.cloudems_zone_klimaat_kosten_vandaag', 'zones') or [] -%}\n{%- for z in zc if z.kachel_advies is defined -%}\n**{{ z.name }}:** {{ z.kachel_advies }}\n\
-          Besparing: ~€{{ z.kachel_besparing_dag }}/dag\n{% endfor %}\n"
-  - title: 🆕 Slimme Features
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_slaapstand_actief
-        state_not: unavailable
-      card:
-        type: entities
-        title: 😴 Slaapstand Detector
-        entities:
-        - entity: switch.cloudems_slaapstand_actief
-          name: Slaapstand inschakelen
-        - entity: sensor.cloudems_slaapstand
-          name: Status
-        card_mod:
-          style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; --primary-text-color: rgb(163,163,163); --card-background-color:\
-            \ transparent; }\n.card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07)\
-            \ !important; }\n"
-    - type: markdown
-      title: ⚡ Kwartier-piek Bewaker
-      content: "{% set d = state_attr('sensor.cloudems_kwartier_piek', 'warning_active') %}\n{% set avg = states('sensor.cloudems_kwartier_piek') | int(0) %}\n{% set peak = state_attr('sensor.cloudems_kwartier_piek',\
-        \ 'month_peak_w') | int(0) %}\n{% set rem = state_attr('sensor.cloudems_kwartier_piek', 'minutes_remaining') | float(0) %}\n{% if d %}⚠️ **WAARSCHUWING** — piekgrens dreigt overschreden!{% else\
-        \ %}✅ Geen piekwaarschuwing{% endif %}\n\n| | Waarde |\n|---|---|\n| 15-min gemiddelde | **{{ avg }} W** |\n| Maandpiek tot nu | **{{ peak }} W** |\n| Resterend in kwartier | {{ rem | round(0) |\
-        \ int }} min |\n"
-      card_mod:
-        style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; --primary-text-color: rgb(163,163,163); --card-background-color:\
-          \ transparent; }\n.card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07)\
-          \ !important; }\n"
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_weekly_comparison
-        state_not: unavailable
-      card:
-        type: markdown
-        title: 📅 Wekelijkse Vergelijking
-        content: "{% set d = state_attr('sensor.cloudems_weekly_comparison', 'kwh_delta_pct') %}\n{% set tw = state_attr('sensor.cloudems_weekly_comparison', 'this_week_kwh') | float(0) %}\n{% set lw =\
-          \ state_attr('sensor.cloudems_weekly_comparison', 'last_week_kwh') | float(0) %}\n{% set tc = state_attr('sensor.cloudems_weekly_comparison', 'this_week_cost') | float(0) %}\n{% set lc = state_attr('sensor.cloudems_weekly_comparison',\
-          \ 'last_week_cost') | float(0) %}\n{% set dp = d | float(0) %}\n{% set arr = '▲' if dp > 0 else '▼' %}\n| | Deze week | Vorige week | Δ |\n|---|---|---|---|\n| Verbruik | **{{ tw }} kWh** | {{\
-          \ lw }} kWh | {% if d %}{{ arr }} {{ dp | abs | round(0) | int }}%{% else %}—{% endif %} |\n| Kosten | **€{{ tc }}** | €{{ lc }} | {% set cp = state_attr('sensor.cloudems_weekly_comparison', 'cost_delta_pct')\
-          \ | float(0) %}{% if cp %}{{ '▲' if cp > 0 else '▼' }} {{ cp | abs | round(0) | int }}%{% else %}—{% endif %} |\n| Zonne | **{{ state_attr('sensor.cloudems_weekly_comparison', 'this_week_solar')\
-          \ | float(0) }} kWh** | {{ state_attr('sensor.cloudems_weekly_comparison', 'last_week_solar') | float(0) }} kWh | — |\n"
-        card_mod:
-          style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; --primary-text-color: rgb(163,163,163); --card-background-color:\
-            \ transparent; }\n.card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07)\
-            \ !important; }\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th { background: rgba(0,177,64,0.1) !important; color: rgb(0,212,78)\
-            \ !important; font-size: 10px !important; }\n"
-    - type: markdown
-      title: 🔧 Apparaat Levensduur
-      content: "{% set devs = state_attr('sensor.cloudems_nilm_devices','device_list') or [] %}\n{% set worn = devs | selectattr('wear_status', 'ne', none) | selectattr('wear_status', 'in', ['warn', 'alert'])\
-        \ | list %}\n{% if worn %}\n⚠️ **{{ worn | length }} apparaten** naderen einde levensduur:\n\n| Apparaat | Cycli | Verwacht | Slijtage |\n|---|---|---|---|\n{% for d in worn | sort(attribute='wear_pct',\
-        \ reverse=true) %}\n| {{ d.name }} | {{ d.on_events | int }} | {{ d.expected_cycles | int }} | {% if d.wear_status == 'alert' %}\U0001F534{% else %}\U0001F7E1{% endif %} {{ d.wear_pct | round(0)\
-        \ | int }}% |\n{% endfor %}\n{% else %}\n✅ Alle apparaten binnen verwachte levensduur.\n{% for d in devs | selectattr('wear_pct', 'ne', none) | list %}\n- **{{ d.name }}**: {{ d.on_events | int\
-        \ }} / {{ d.expected_cycles | int }} cycli ({{ d.wear_pct | round(0) | int }}%)\n{% endfor %}\n{% endif %}\n"
-      card_mod:
-        style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; --primary-text-color: rgb(163,163,163); --card-background-color:\
-          \ transparent; }\n.card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07)\
-          \ !important; }\n"
-    - type: entities
-      title: 🤖 Blueprint Generator
-      entities:
-      - type: button
-        name: Genereer HA automations
-        icon: "mdi:robot"
-        action_name: Genereren
-        tap_action:
-          action: perform-action
-          perform_action: cloudems.generate_blueprints
-      footer:
-        type: markdown
-        content: '*Genereert automation blueprints in `/config/blueprints/automation/cloudems/` voor wassen-verschuiver, negatief tarief, slaapstand en piekwaarschuwing.*'
-      card_mod:
-        style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,255,255,0.06) !important; border-radius: 16px !important; --primary-text-color: rgb(163,163,163); --card-background-color:\
-          \ transparent; }\n.card-header { color: rgb(255,255,255) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07)\
-          \ !important; }\n"
-  - type: entities
-    title: 🔘 Actieknoppen
-    entities:
-    - entity: button.cloudems_bijwerken
-      name: Data vernieuwen
-      icon: "mdi:refresh"
-    - entity: button.cloudems_diagnoserapport
-      name: Diagnoserapport genereren
-      icon: "mdi:file-document-outline"
-    - type: button
-      name: 📥 Energierapport downloaden
-      icon: "mdi:chart-bar"
-      action_name: Genereren
-      tap_action:
-        action: perform-action
-        perform_action: cloudems.download_energy_report
-    - entity: button.cloudems_buy_me_a_coffee
-      name: ☕ Steun de ontwikkelaar
-      icon: "mdi:coffee"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-        \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-        \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-        \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-        \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-  - type: markdown
-    title: 📥 Rapport downloaden
-    content: "{% set url = states('sensor.cloudems_last_report_url') %}\n{% set label = state_attr('sensor.cloudems_last_report_url', 'label') %}\n{% if url and url != 'geen' %}\n✅ Rapport klaar — **{{\
-      \ label }}**\n\n<a href=\"{{ url }}\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:8px;background:rgb(0,177,64);color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;margin-top:6px;\"\
-      >\U0001F4E5 Rapport openen / downloaden</a>\n\n*Klik Opslaan als PDF in je browser om een PDF te maken.*\n{% else %}\nKlik op **\U0001F4E5 Energierapport downloaden** hierboven om een rapport te genereren.\n\
-      \n*Het rapport bevat verbruik, kosten, zonne-energie, top-apparaten en CO₂ van de afgelopen maand.*\n{% endif %}\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(0,177,64,0.25) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-        \  --primary-text-color: rgb(163,163,163);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n}\n.card-header { color: rgb(255,255,255) !important; font-size: 12px\
-        \ !important; font-weight: 600 !important; padding: 14px 16px 12px !important; border-bottom: 1px solid rgba(255,255,255,0.07) !important; }\nha-markdown-element { padding: 12px 16px 14px !important;\
-        \ }\n"
-  - type: markdown
-    content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
-      \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_status','version')\
-      \ or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n    </div>\n  </div>\n\
-      \  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\">\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
-      \ solid rgba(239,68,68,0.4);color:#f87171;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">\U0001F41B Bug melden</a>\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=feature_request.md\"\
-      \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\"\
-      >\U0001F4A1 Feature verzoek</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
-      \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
-    card_mod:
-      style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
-        \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
-  - type: markdown
-    title: ⚡ Systeembelasting
-    content: "{%- set mode  = states('sensor.cloudems_performance') -%}\n{%- set avg   = state_attr('sensor.cloudems_performance', 'avg_ms') | float(0) | round(0) -%}\n{%- set p95   = state_attr('sensor.cloudems_performance',\
-      \ 'p95_ms') | float(0) | round(0) -%}\n{%- set maxms = state_attr('sensor.cloudems_performance', 'max_ms') | float(0) | round(0) -%}\n{%- set ivl   = state_attr('sensor.cloudems_performance', 'interval_s')\
-      \ | int(10) -%}\n{%- set nilm  = state_attr('sensor.cloudems_performance', 'nilm_enabled') -%}\n{%- set learn = state_attr('sensor.cloudems_performance', 'nilm_learning') -%}\n{%- set rec   = state_attr('sensor.cloudems_performance',\
-      \ 'recovery_progress') | int(0) -%}\n{%- set recn  = state_attr('sensor.cloudems_performance', 'recovery_needed') | int(5) -%}\n{%- set color = '\U0001F7E2' if mode == 'NORMAL' else ('\U0001F7E1'\
-      \ if mode == 'REDUCED' else ('\U0001F7E0' if mode == 'MINIMAL' else '\U0001F534')) -%}\n\n{{ color }} **{{ mode }}** — cyclus interval {{ ivl }}s\n\n| Meting | Waarde |\n|--------|--------|\n| Gemiddeld\
-      \ | **{{ avg }} ms** |\n| P95 | {{ p95 }} ms |\n| Maximum | {{ maxms }} ms |\n| Interval | {{ ivl }} s |\n| NILM | {{ '✅ aan' if nilm else '⏸ gepauzeerd' }} |\n| Leren | {{ '✅ aan' if learn else '⏸\
-      \ gepauzeerd' }} |\n{%- if mode != 'NORMAL' %}\n| Herstel | {{ rec }}/{{ recn }} cycli |\n{%- endif %}\n\n{%- if mode == 'CRITICAL' %}\n\n\U0001F534 **Kritieke belasting** — CloudEMS heeft de werklast\
-      \ gereduceerd om HA stabiel te houden.\n{%- elif mode == 'MINIMAL' %}\n\n\U0001F7E0 **Hoge belasting** — NILM gepauzeerd, interval verlengd naar {{ ivl }}s.\n{%- elif mode == 'REDUCED' %}\n\n\U0001F7E1\
-      \ **Verhoogde belasting** — NILM leren gepauzeerd.\n{%- endif %}\n"
-    card_mod:
-      style: "ha-card { background: rgb(34,34,34) !important; border: 1px solid rgba(255,200,0,0.2) !important; border-radius: 16px !important; box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important; --primary-text-color:\
-        \ rgb(163,163,163); --card-background-color: transparent; --ha-card-border-color: transparent; }\n.card-header { background: transparent !important; border-bottom: 1px solid rgba(255,200,0,0.15)\
-        \ !important; color: rgb(255,200,0) !important; font-size: 12px !important; font-weight: 600 !important; padding: 14px 16px 12px !important; }\nha-markdown-element table { width: 100% !important;\
-        \ border-collapse: collapse !important; }\nha-markdown-element th { background: rgba(255,200,0,0.08) !important; color: rgb(255,200,0) !important; font-size: 10px !important; font-weight: 700 !important;\
-        \ text-transform: uppercase !important; padding: 8px 10px !important; }\nha-markdown-element td { color: rgb(163,163,163) !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important;\
-        \ padding: 6px 10px !important; font-size: 12px !important; }\nha-markdown-element strong { color: rgb(255,255,255) !important; }\n"
+    title: "🔌 Groepenkast Monitor"
+    content: "{% set cm = state_attr('sensor.cloudems_status','circuit_monitor') or {} %}
+{% set alerts = cm.get('alerts',{}) %}
+{% if not cm %}
+⏳ *Circuit monitor nog niet actief.*
+{% elif not alerts %}
+✅ **Alle fasen normaal** — geen uitgevallen groepen gedetecteerd.
+{% else %}
+{% for ph, a in alerts.items() %}
+🚨 **Fase {{ a.phase }} — {{ 'Totaaluitval' if a.type == 'total_zero' else 'Inactief' }}**
+- Gemeten: {{ a.power_w | round(1) }} W
+- Al {{ (a.inactive_s // 60) if a.inactive_s else (a.since_s // 60) }} min inactief
+{% if a.devices %}- Getroffen: {{ a.devices[:4] | join(', ') }}{% endif %}
+{% endfor %}
+{% endif %}
+"
+  - type: custom:cloudems-version-card
 - title: Configuratie
   path: cloudems-config
   type: masonry

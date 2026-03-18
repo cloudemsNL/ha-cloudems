@@ -53,6 +53,11 @@ LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={V
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
 LOVELACE_CLIMATE_EPEX_URL   = f"/local/cloudems/cloudems-climate-epex-card.js?v={VERSION}"
+LOVELACE_LAMP_URL           = f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}"
+LOVELACE_DEMAND_URL         = f"/local/cloudems/cloudems-demand-card.js?v={VERSION}"
+LOVELACE_DIAGNOSE_URL        = f"/local/cloudems/cloudems-diagnose-card.js?v={VERSION}"
+LOVELACE_VERSION_URL         = f"/local/cloudems/cloudems-version-card.js?v={VERSION}"
+LOVELACE_KLIMAAT_URL        = f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -112,8 +117,14 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_CLIMATE_EPEX_URL, "cloudems-climate-epex-card.js"),
     (f"/local/cloudems/cloudems-config-card.js?v={VERSION}", "cloudems-config-card.js"),
     (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",    "cloudems-gas-card.js"),
+    (f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}",   "cloudems-lamp-card.js"),
+    (LOVELACE_DEMAND_URL,       "cloudems-demand-card.js"),
+    (LOVELACE_DIAGNOSE_URL,      "cloudems-diagnose-card.js"),
+    (LOVELACE_VERSION_URL,       "cloudems-version-card.js"),
+    (f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}", "cloudems-klimaat-card.js"),
     (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
     (LOVELACE_MINI_PRICE_URL,   "cloudems-mini-price-card.js"),
+    (f"/local/cloudems/cloudems-lamp-auto-card.js?v={VERSION}", "cloudems-lamp-auto-card.js"),
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -503,6 +514,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _flush_on_stop)
     )
 
+    # v4.6.445: Lamp automation — afhandelen van semi-auto bevestigings-acties
+    async def _handle_lamp_action(event) -> None:
+        action = event.data.get("action", "")
+        if not action.startswith(("LAMP_YES_", "LAMP_NO_", "LAMP_AUTO_")):
+            return
+        coordinator = hass.data.get(DOMAIN, {}).get("coordinator")
+        if coordinator and hasattr(coordinator, "_lamp_auto"):
+            coordinator._lamp_auto.handle_confirmation_response(action)
+
+    hass.bus.async_listen("mobile_app_notification_action", _handle_lamp_action)
+
     # v2.4.18: registreer CloudEMS als energy platform voor HA energiedashboard
     try:
         from homeassistant.components import energy as _energy_component
@@ -878,15 +900,25 @@ async def _async_reload_cloudems_dashboards(hass: HomeAssistant) -> None:
         try:
             import json as _json  # noqa: PLC0415
             import glob as _glob  # noqa: PLC0415
+            import asyncio as _asyncio  # noqa: PLC0415
             storage_dir = hass.config.config_dir + "/.storage/"
-            for f in _glob.glob(storage_dir + "lovelace.*"):
+            # v4.6.421: gebruik executor voor blocking I/O (glob + open) zodat de
+            # event loop niet geblokkeerd wordt — HA waarschuwde hierover.
+            loop = _asyncio.get_event_loop()
+            _storage_files = await loop.run_in_executor(
+                None, lambda: _glob.glob(storage_dir + "lovelace.*")
+            )
+            for f in _storage_files:
                 slug_from_file = f.replace(storage_dir + "lovelace.", "")
                 if slug_from_file in reloaded:
                     continue
                 if slug_from_file == "dashboards":
                     continue
                 try:
-                    raw = _json.loads(open(f, encoding="utf-8").read())
+                    raw_bytes = await loop.run_in_executor(
+                        None, lambda _f=f: _json.loads(open(_f, encoding="utf-8").read())
+                    )
+                    raw = raw_bytes
                     views = raw.get("data", {}).get("config", {}).get("views", [])
                     if any(str(v.get("path", "")).startswith("cloudems-") for v in views):
                         # Slug gevonden via storage file — zoek het dashboard object

@@ -179,6 +179,11 @@ except Exception:
     _InfluxDBWriter = None
 from .energy_manager.weekly_insights import WeeklyComparison, BlueprintGenerator
 from .energy_manager.wash_cycle import ApplianceCycleManager
+from .energy_manager.generator_manager import GeneratorManager
+from .energy_manager.lamp_automation import LampAutomationEngine, ROOM_DEFAULT_MODE
+from .energy_manager.circuit_monitor import CircuitMonitor
+from .energy_manager.ups_manager import UPSManager
+from .energy_manager.lamp_automation import LampAutomationEngine
 from .energy_manager.smart_climate import SmartClimateManager
 from .energy_manager.ebike_manager import EBikeManager
 from .energy_manager.ere_manager import EREManager
@@ -378,6 +383,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Watchdog — bewaakt crashes en herstart automatisch
         # entry_id wordt ingevuld via async_setup() zodra de config entry bekend is
         self._watchdog: Optional[CloudEMSWatchdog] = None
+
+        # v4.6.445: Lamp Automation Engine
+        self._lamp_auto: Optional[LampAutomationEngine] = None
+
+        # v4.6.432: Generator / ATS state
+        self._generator_active:   bool  = False   # True = draait op generator
+        self._generator_power_w:  float = 0.0
+        self._ats_last_notified:  float = 0.0     # timestamp laatste MTS-melding
+        self._gen_autostart_sent: bool  = False   # auto-start commando verstuurd
 
         self._store_devices = Store(hass, 1, STORAGE_KEY_NILM_DEVICES)
         self._store_energy  = Store(hass, 1, STORAGE_KEY_NILM_ENERGY)
@@ -692,6 +706,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._peak_shaving      = None
         self._boiler_ctrl       = None
         self._decisions_history = None
+        self._energy_demand_calc = None
         self._storage_backend   = None
         self._telemetry         = None
         self._pool_ctrl         = None
@@ -1085,11 +1100,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if cur is not None and price_info.get("avg_today") is not None:
             is_cheap = cur < price_info["avg_today"]
 
+        # v4.6.437: voeg uurprijzen toe zodat boiler_controller legionella kan plannen
+        # prices_today is een lijst van 24 prijzen (index = uur), gesorteerd op uur
+        _hourly_list = []
+        if prices_today:
+            # today_all is [{hour, price, ...}] — zet om naar lijst van 24
+            _by_hour = {int(s.get("hour", 0)): float(s.get("price", 0)) for s in (today_all or [])}
+            if not _by_hour:
+                _by_hour = {i: prices_today[i] for i in range(len(prices_today))}
+            _hourly_list = [_by_hour.get(h, 0.0) for h in range(24)]
+
+        # Morgen prijzen
+        _tomorrow_list = []
+        try:
+            _tom_slots = self._prices._tomorrow_slots() if hasattr(self._prices, "_tomorrow_slots") else []
+            if _tom_slots:
+                _tom_by_hour = {int(s.get("hour", 0)): float(s.get("price", 0)) for s in _tom_slots}
+                _tomorrow_list = [_tom_by_hour.get(h, 0.0) for h in range(24)]
+        except Exception:
+            pass
+
+        _all_in = price_info.get("current_all_in") or price_info.get("result_all_in_eur_kwh") or cur
         return {
             **price_info,
-            "prev_hour_price": prev,
-            "rank_today":      rank,
-            "is_cheap_hour":   is_cheap,
+            "prev_hour_price":        prev,
+            "rank_today":             rank,
+            "is_cheap_hour":          is_cheap,
+            "hourly_prices":          _hourly_list,
+            "hourly_prices_tomorrow": _tomorrow_list if _tomorrow_list else None,
+            "current_all_in":         round(_all_in, 5) if _all_in is not None else cur,
+            "is_negative_all_in":     (_all_in is not None and _all_in < 0),
         }
 
     def _get_yesterday_prices(self) -> list:
@@ -2508,6 +2548,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # De lazy re-discovery in de update-loop vult de lampenlijst zodra HA volledig geladen is.
         from .energy_manager.lamp_circulation import LampCirculationController
         self._lamp_circulation = LampCirculationController(self.hass)
+
+        # v4.6.445: Lamp Automation Engine — los van circulatie
+        self._lamp_auto = LampAutomationEngine(self.hass, self._config)
+        _la_cfg = self._config.get("lamp_auto_lamps", [])
+        if _la_cfg:
+            self._lamp_auto.configure(_la_cfg)
         if _lamp_entities:
             self._lamp_circulation.configure(
                 light_entities = _lamp_entities,
@@ -2723,6 +2769,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._appliance_cycles = ApplianceCycleManager(self.hass, self._config)
         await self._appliance_cycles.async_setup()
 
+        # v4.6.432: Generator / ATS manager
+        self._generator_mgr = GeneratorManager(self.hass, self._config)
+        self._generator_mgr_enabled = bool(self._config.get("generator_enabled"))
+
+        # v4.6.445: Lamp automation engine
+        self._lamp_auto = LampAutomationEngine(self.hass, self._config)
+        await self._async_configure_lamp_automation()
+
+        # v4.6.447: Circuit monitor
+        self._circuit_monitor = CircuitMonitor(self.hass, self._config)
+        self._async_configure_circuit_monitor()
+
+        # v4.6.450: UPS manager
+        self._ups_manager = UPSManager(self.hass, self._config)
+        self._async_configure_ups()
+
         # v2.6: E-bike integratie (Bosch / Specialized / Yamaha / Smartphix / Generiek)
         self._ebike = EBikeManager(self.hass, self._config)
         await self._ebike.async_setup()
@@ -2893,6 +2955,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._decisions_history is None:
                 from .decisions_history import DecisionsHistory
                 self._decisions_history = DecisionsHistory(self.hass.config.config_dir)
+            if self._energy_demand_calc is None:
+                from .energy_manager.energy_demand import EnergyDemandCalculator
+                self._energy_demand_calc = EnergyDemandCalculator(self.hass)
             if self._storage_backend is None:
                 from .storage_backend import init_storage_backend
                 self._storage_backend = init_storage_backend(self.hass.config.config_dir)
@@ -3231,7 +3296,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
                 price_info = {
                     "current":             _cur,
-                    "is_negative":         _cur <= 0.0,
+                    "is_negative":         _cur <= 0.0,  # EPEX-basis — boiler gebruikt dit intern
+                    "is_negative_all_in":  False,  # wordt hieronder ingevuld na _enrich_price_info
                     "min_today":           round(min(_today_prices), 5) if _today_prices else None,
                     "max_today":           round(max(_today_prices), 5) if _today_prices else None,
                     "avg_today":           _avg_today,
@@ -3533,6 +3599,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._nilm.inject_battery(total_battery_w, "Thuisbatterij")
             else:
                 self._nilm.update_battery_power(total_battery_w)
+
+            # v4.6.413: FIX kWh tellers — smart_plug en injected devices gaan niet
+            # via update_power() en missen daardoor tick_energy(). Hier expliciet
+            # tick_energy aanroepen voor alle devices die niet via een fase-match getickt worden.
+            _now_ts = __import__("time").time()
+            for _sp_dev in self._nilm._devices.values():
+                if getattr(_sp_dev, "source", "") in ("smart_plug", "injected") and _sp_dev.is_on and _sp_dev.current_power > 0:
+                    _sp_dev.tick_energy(_now_ts)
             # v1.16: persist so consumption categories can subtract battery from totals
             self._last_battery_w = total_battery_w
 
@@ -4129,6 +4203,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "mimicry_active": False, "neg_price_active": False,
                         "sun_derived_night": False, "lamp_phases": [],
                     }
+            # ── Lamp Automation Engine ───────────────────────────────────────
+            if self._lamp_auto and self._lamp_auto.enabled:
+                try:
+                    _sun_below = self._data.get("sun_below_horizon", False)
+                    _la_actions = await self._lamp_auto.async_tick(
+                        absence_state      = _occ_state,
+                        sun_below_horizon  = bool(_sun_below),
+                        lamp_learner       = self._lamp_circulation,
+                        hour               = datetime.now().hour,
+                        dow                = datetime.now().weekday(),
+                    )
+                    self._data["lamp_auto"] = self._lamp_auto.get_status()
+                except Exception as _la_exc:
+                    _LOGGER.debug("LampAutomation fout: %s", _la_exc)
+
             # ── Rolluiken evaluatie ───────────────────────────────────────────
             if self._shutter_ctrl is not None and getattr(self, "_shutter_enabled", False):
                 try:
@@ -5535,6 +5624,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     off_peak_active          = bool(_op_status and _op_status.is_off_peak_now) if '_op_status' in dir() else False,
                     grid_import_w            = _grid_imp_w,
                     grid_peak_limit_w        = _ps_limit_w,
+                    # v4.6.416: energy demand — verwacht verbruik rest van de dag
+                    expected_remaining_kwh   = float((self.data or {}).get("energy_demand", {}).get("device_total_kwh", 0.0)),
+                    system_demand_kwh        = float((self.data or {}).get("energy_demand", {}).get("system_total_kwh", 0.0)),
                 )
                 _bde_result  = self._battery_decision_engine.evaluate(_bde_ctx)
                 _bde_explain = self._battery_decision_engine.explain(_bde_ctx)
@@ -6158,6 +6250,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _LOGGER.debug("CloudEMS: pv_accuracy finalize_day failed: %s", _fe)
                     self._acc_date = today_str
                     _acc = self._pv_accuracy.get_data()
+                    # v4.6.453: bewaar gisteren uurdata voor solar card history
+                    _yst_kwh = getattr(self, "_pv_yesterday_hourly_kwh", {})
                     pv_accuracy_data = {
                         "mape_14d_pct":       _acc.mape_14d,
                         "mape_30d_pct":       _acc.mape_30d,
@@ -6171,6 +6265,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "consecutive_over":   _acc.consecutive_over,
                         "consecutive_under":  _acc.consecutive_under,
                         "monthly_bias":       _acc.monthly_bias,
+                        "yesterday_hourly_kwh": _yst_kwh,
                     }
                     await self._pv_accuracy.async_maybe_save()
                 except Exception as _pvacc_err:
@@ -6533,6 +6628,74 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._data["appliance_cycles"] = _wash_result
             except Exception as _wc_err:
                 _LOGGER.debug("WashCycle fout: %s", _wc_err)
+
+            # v4.6.432: Generator / ATS manager
+            try:
+                if getattr(self, "_generator_mgr", None):
+                    _gen_status = self._generator_mgr.update(
+                        self._data,
+                        self.hass.states.async_all().__class__  # hass states as dict
+                        if False else {s.entity_id: s for s in self.hass.states.async_all()},
+                    )
+                    self._generator_active  = _gen_status.active
+                    self._generator_power_w = _gen_status.power_w
+                    self._data["generator"] = _gen_status.to_dict()
+                    # Notificaties
+                    _gen_alerts = await self._generator_mgr.async_handle_notifications(self._data)
+                    for _ga in _gen_alerts:
+                        _LOGGER.info("Generator alert: %s — %s", _ga["title"], _ga["message"])
+                        if _ga.get("persistent"):
+                            self.hass.components.persistent_notification.async_create(
+                                message=_ga["message"],
+                                title=_ga["title"],
+                                notification_id=f"cloudems_{_ga['key']}",
+                            )
+            except Exception as _gen_err:
+                _LOGGER.debug("GeneratorManager fout: %s", _gen_err)
+
+            # v4.6.445: Lamp automation engine
+            try:
+                if getattr(self, "_lamp_auto", None) and self._lamp_auto._enabled:
+                    _absence   = (self._data.get("absence_state") or
+                                  self._data.get("absence", {}).get("state", "unknown"))
+                    _sun_down  = bool(self._data.get("is_night") or
+                                      not self._data.get("sun_above_horizon", True))
+                    _hour_now  = datetime.now().hour
+                    _lc        = getattr(self, "_lamp_circulation", None)
+                    _gen_st    = getattr(self, "_generator_active", False)
+                    _ups_st    = (self._data.get("generator") or {}).get("ups_active", False)
+                    _lamp_auto_result = await self._lamp_auto.async_tick(
+                        _absence, _sun_down, _hour_now, _lc,
+                        generator_active=_gen_st,
+                        ups_active=_ups_st,
+                    )
+                    self._data["lamp_automation"] = _lamp_auto_result
+            except Exception as _la_err:
+                _LOGGER.debug("LampAutomation tick fout: %s", _la_err)
+
+            # v4.6.447: Circuit monitor tick
+            try:
+                if getattr(self, "_circuit_monitor", None):
+                    _circuit_result = self._circuit_monitor.update(self._data)
+                    self._data["circuit_monitor"] = _circuit_result
+                    if _circuit_result.get("alerts"):
+                        await self._circuit_monitor.async_notify_alerts(
+                            _circuit_result["alerts"]
+                        )
+            except Exception as _cm_err:
+                _LOGGER.debug("CircuitMonitor tick fout: %s", _cm_err)
+
+            # v4.6.450: UPS manager tick
+            try:
+                if getattr(self, "_ups_manager", None) and self._ups_manager._enabled:
+                    _hass_states_ups = {s.entity_id: s for s in self.hass.states.async_all()}
+                    _ups_result = await self._ups_manager.async_tick(
+                        generator_active=self._generator_active,
+                        hass_states=_hass_states_ups,
+                    )
+                    self._data["ups"] = _ups_result
+            except Exception as _ups_err:
+                _LOGGER.debug("UPSManager tick fout: %s", _ups_err)
 
             # v2.6: E-bike (multi-merk)
             try:
@@ -7069,6 +7232,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "undefined_power_w":    max(0.0, round(float(_house_w_final) - _total_on_w, 1))
                                         if _total_on_w > 0 else None,
                 "undefined_power_name": self._undefined_power_name or "Onverklaard vermogen",
+                # v4.6.427: wasbeurt cyclus data koppelen aan NILM sensor
+                "appliance_cycles":     self._data.get("appliance_cycles") if self._data else None,
                 "energy_price":         self._enrich_price_info(price_info),
                 "ai_status":            self._build_ai_status(),
                 "cost_per_hour":        round(cost_ph, 4),
@@ -7121,6 +7286,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "inverter_profiles":    inverter_profiles,
                 "peak_shaving":         peak_data,
                 "boiler_status":        self._boiler_ctrl.get_status() if self._boiler_ctrl else [],
+                "energy_demand":        self._calc_energy_demand(data, price_info),
                 "pool":                 pool_data,          # ← v1.25.8 zwembad controller
                 "lamp_circulation":     lamp_circ_data,     # ← v1.25.9 intelligente lampenbeveiliging
                 "shutters":             self._shutter_ctrl.get_status() if self._shutter_ctrl else {},  # ← v3.9.0 rolluiken
@@ -7788,26 +7954,56 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     def _calc_gas_fib(self) -> list:
         """Bereken m³-verbruik en gemiddeld verbruik/uur voor fibonacci-intervallen.
         Resultaat: [{"hours": int, "m3": float|None, "rate_m3h": float|None}, ...]
-        Klein formaat — veilig als HA state-attribuut (<1KB voor 7 items).
+        FIX 3: validatie en debug logging toegevoegd.
         """
         FIB_HOURS = [1, 2, 3, 5, 8, 13, 21]
         ring = self._gas_ring
         now_ms = int(time.time() * 1000)
         current = ring[-1] if ring else None
+
+        # FIX 3: Log ring-buffer status voor diagnose (alleen als er weinig data is)
+        if len(ring) < 5:
+            _LOGGER.warning(
+                "GasAnalyzer fibonacci: ring-buffer heeft maar %d punten — "
+                "wacht op meer P1-gas meetpunten (gasmeters pulsen soms slechts 1x/uur). "
+                "Oldest: %s, Newest: %s",
+                len(ring),
+                str(ring[0]) if ring else "leeg",
+                str(ring[-1]) if ring else "leeg",
+            )
+            return [{"hours": h, "m3": None, "rate_m3h": None, "debug": "te weinig data"} for h in FIB_HOURS]
+
         result = []
         for hours in FIB_HOURS:
             target_ts = now_ms - hours * 3_600_000
+            # FIX 3: zoek het punt dat het dichtst bij de doeltijd ligt
+            # maar wees strenger: het punt mag niet verder dan 50% van het interval afwijken
+            max_deviation_ms = hours * 3_600_000 * 0.5
             best = None
             for pt in ring:
-                if best is None or abs(pt["ts"] - target_ts) < abs(best["ts"] - target_ts):
+                dev = abs(pt["ts"] - target_ts)
+                if dev > max_deviation_ms:
+                    continue
+                if best is None or dev < abs(best["ts"] - target_ts):
                     best = pt
             if best is None or current is None or best is current:
-                result.append({"hours": hours, "m3": None, "rate_m3h": None})
+                result.append({"hours": hours, "m3": None, "rate_m3h": None,
+                                "debug": f"geen punt binnen {hours*0.5:.0f}u van {hours}u grens"})
                 continue
             consumed = max(0.0, current["val"] - best["val"])
             actual_h = (current["ts"] - best["ts"]) / 3_600_000
-            rate     = round(consumed / actual_h, 4) if actual_h > 0.01 else 0.0
+            if actual_h < 0.1:
+                result.append({"hours": hours, "m3": None, "rate_m3h": None, "debug": "tijdsverschil te klein"})
+                continue
+            # FIX 3: sanity check — gasverbruik mag niet negatief zijn of onrealistisch hoog
+            if consumed < 0 or consumed > 50:
+                _LOGGER.warning("GasAnalyzer fibonacci %dh: onrealistisch verbruik %.3f m³ — skip", hours, consumed)
+                result.append({"hours": hours, "m3": None, "rate_m3h": None, "debug": "onrealistisch verbruik"})
+                continue
+            rate = round(consumed / actual_h, 4) if actual_h > 0.01 else 0.0
             result.append({"hours": hours, "m3": round(consumed, 4), "rate_m3h": rate})
+        _LOGGER.debug("GasAnalyzer fibonacci: %d van %d intervallen berekend (ring=%d punten)",
+                      sum(1 for r in result if r["m3"] is not None), len(FIB_HOURS), len(ring))
         return result
 
     def _read_gas_price(self) -> float:
@@ -8245,6 +8441,23 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Surplus kan nooit groter zijn dan totale PV-productie
         return min(raw, solar_w)
 
+    def _calc_energy_demand(self, data: dict, price_info: dict) -> dict:
+        """Bereken energievraag per subsysteem en retourneer als dict voor sensor."""
+        if self._energy_demand_calc is None:
+            return {}
+        try:
+            result = self._energy_demand_calc.calculate(
+                data        = data,
+                price_info  = price_info,
+                config      = self._config,
+                boiler_ctrl = self._boiler_ctrl,
+                zone_climate= getattr(self, "_zone_climate", None),
+            )
+            return result.to_sensor_dict()
+        except Exception as e:
+            _LOGGER.debug("EnergyDemand berekening fout: %s", e)
+            return {}
+
     @staticmethod
     def _calc_self_consumption(solar_w: float, export_w: float) -> tuple[float, float]:
         """Zelfconsumptie- en zelfvoorzieningsratio (0-100%).
@@ -8674,17 +8887,41 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         """
         tips: list[str] = []
 
-        price = price_info.get("current")
+        # v4.6.442: gebruik current_display (all-in als gebruiker dat wil, anders EPEX)
+        price_raw = price_info.get("current")
+        price = price_info.get("current_display") or price_raw
+        avg   = price_info.get("avg_today_incl_tax") if price_info.get("price_include_tax") or price_info.get("price_include_btw") else price_info.get("avg_today", 0)
+        price_label = price_info.get("price_label", "€/kWh")
         if price is not None:
             if price < 0:
-                tips.append(f"⚡ Negatieve prijs ({price:.4f} €/kWh): overweeg zware lasten in te schakelen of PV te begrenzen.")
+                tips.append(f"⚡ Negatieve prijs ({price:.4f} €/kWh {price_label}): overweeg zware lasten in te schakelen of PV te begrenzen.")
             elif price_info.get("in_cheapest_3h"):
-                tips.append(f"💰 Je bent nu in de goedkoopste 3 uur (prijs {price:.4f} €/kWh). Goed moment voor vaatwasser/boiler.")
-            elif price > price_info.get("avg_today", 0) * 1.5:
-                tips.append(f"💸 Dure stroom: prijs {price:.4f} €/kWh is {((price/max(price_info.get('avg_today',0.001),0.001)-1)*100):.0f}% boven daaggemiddelde.")
+                tips.append(f"💰 Je bent nu in de goedkoopste 3 uur (prijs {price:.4f} €/kWh {price_label}). Goed moment voor vaatwasser/boiler.")
+            elif avg and price > avg * 1.5:
+                tips.append(f"💸 Dure stroom: prijs {price:.4f} €/kWh is {((price/max(avg,0.001)-1)*100):.0f}% boven daaggemiddelde.")
 
         if solar_surplus > 500:
-            tips.append(f"☀️ PV-surplus {solar_surplus:.0f}W: zet boiler/EV aan om exportverlies te minimaliseren.")
+            # v4.6.430: als boiler geconfigureerd is, toon wat CloudEMS doet i.p.v. een actietip
+            _boiler_active = False
+            _boiler_tip = ""
+            if getattr(self, "_boiler_ctrl", None):
+                _decisions = getattr(self._boiler_ctrl, "_last_decisions", []) or []
+                for _bd in _decisions:
+                    _sp = _bd.get("active_setpoint_c") or _bd.get("setpoint_c", 0)
+                    _on = _bd.get("want_on") or _bd.get("is_heating")
+                    _lbl = _bd.get("label", "Boiler")
+                    if _on and _sp:
+                        _boiler_active = True
+                        _boiler_tip = f"☀️ PV-surplus {solar_surplus:.0f}W: boiler '{_lbl}' wordt verwarmd naar {_sp:.0f}°C."
+                        break
+                    elif _sp:
+                        _boiler_active = True
+                        _boiler_tip = f"☀️ PV-surplus {solar_surplus:.0f}W: boiler '{_lbl}' staat klaar op {_sp:.0f}°C (setpoint)."
+                        break
+            if _boiler_active and _boiler_tip:
+                tips.append(_boiler_tip)
+            else:
+                tips.append(f"☀️ PV-surplus {solar_surplus:.0f}W: zet boiler/EV aan om exportverlies te minimaliseren.")
 
         for inv in inverter_data:
             if inv.get("clipping"):
@@ -8706,6 +8943,65 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 tips.append("⏳ CloudEMS leert je installatie kennen. Tips verschijnen zodra EPEX-prijzen beschikbaar zijn.")
 
         return " | ".join(tips)
+
+    async def _async_configure_lamp_automation(self) -> None:
+        """Bouw lamp-automation config op vanuit wizard + HA areas."""
+        try:
+            cfg = self._config
+            lc_cfg = cfg.get("lamp_circulation", {}) or {}
+            lamp_auto_cfg = cfg.get("lamp_automation", {}) or {}
+            lamp_list = lamp_auto_cfg.get("lamps", [])
+
+            if not lamp_list:
+                # Auto-ontdekking: bouw prefill op basis van HA areas
+                ha_areas    = {a.id: {"name": a.name} for a in self.hass.data.get("area_registry", type("", (), {"async_get": lambda s: []})()).async_get() or []} if hasattr(self.hass, "data") else {}
+                ha_entities = {}
+                try:
+                    from homeassistant.helpers import entity_registry as er
+                    ent_reg = er.async_get(self.hass)
+                    from homeassistant.helpers import area_registry as ar
+                    area_reg = ar.async_get(self.hass)
+                    ha_areas = {a.id: {"name": a.name} for a in area_reg.async_list_areas()}
+                    for entry in ent_reg.entities.values():
+                        if entry.entity_id.startswith("light.") and not entry.disabled:
+                            ha_entities[entry.entity_id] = {
+                                "name":         entry.name or entry.original_name or entry.entity_id,
+                                "area_id":      entry.area_id or "",
+                                "device_class": getattr(entry, "device_class", ""),
+                            }
+                    for entry in ent_reg.entities.values():
+                        if entry.entity_id.startswith("binary_sensor.") and not entry.disabled:
+                            ha_entities[entry.entity_id] = {
+                                "name":         entry.name or entry.original_name or entry.entity_id,
+                                "area_id":      entry.area_id or "",
+                                "device_class": getattr(entry, "device_class", "") or getattr(entry, "original_device_class", "") or "",
+                            }
+                except Exception as _err:
+                    _LOGGER.debug("LampAuto: entity/area registry niet beschikbaar: %s", _err)
+
+                lamp_list = self._lamp_auto.auto_configure_from_ha(ha_areas, ha_entities)
+
+            self._lamp_auto.configure(lamp_list)
+            _LOGGER.info("LampAutomation: geconfigureerd met %d lampen", len(lamp_list))
+        except Exception as err:
+            _LOGGER.warning("LampAutomation setup fout: %s", err)
+
+    def _async_configure_circuit_monitor(self) -> None:
+        """Initialiseer circuit monitor op basis van fase-count."""
+        try:
+            phase_count = int(self._config.get("phase_count", 3))
+            self._circuit_monitor.configure(phase_count=phase_count)
+        except Exception as err:
+            _LOGGER.debug("CircuitMonitor configure: %s", err)
+
+    def _async_configure_ups(self) -> None:
+        """Laad UPS configuraties vanuit wizard."""
+        try:
+            ups_cfgs = self._config.get("ups_systems", []) or []
+            if ups_cfgs:
+                self._ups_manager.configure(ups_cfgs)
+        except Exception as err:
+            _LOGGER.debug("UPSManager configure: %s", err)
 
     # ── Decision log ──────────────────────────────────────────────────────────
 
@@ -8758,7 +9054,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Schrijf naar DecisionsHistory ring buffer (JSON + sensor attribuut)
         # Alle categorieën worden opgeslagen — JS card filtert per categorie.
         # Uitgesloten: interne/technische categorieën die geen gebruikerswaarde hebben.
-        _HISTORY_EXCLUDE = {"clipping", "solar_dim", "ev_pid", "p1_update"}
+        _HISTORY_EXCLUDE = {"ev_pid", "p1_update"}  # clipping+solar_dim nu wél gelogd
         _hist = getattr(self, "_decisions_history", None)
         if _hist is not None and category not in _HISTORY_EXCLUDE:
             _hist.add(

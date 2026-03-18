@@ -263,6 +263,11 @@ class BoilerState:
     # Voor resistive boilers met een lager maximum: stel in op bijv. 60.0 of 65.0.
     # Voor heat_pump/hybrid: max_setpoint_boost_c heeft dezelfde rol en heeft prioriteit.
     hardware_max_c:      float = 0.0
+    # v4.6.405: tankvolume in liters. 0 = leer automatisch via EMA op basis van kWh/°C.
+    tank_liters:         float = 0.0
+    _learned_tank_l:     float = 0.0   # geleerd via EMA — wordt gepersisteerd
+    _cycle_start_temp_c: Optional[float] = None  # temp bij start verwarmingscyclus
+    _cycle_start_kwh:    float = 0.0             # kWh bij start verwarmingscyclus
     preset_on:           str   = "boost"
     preset_off:          str   = "green"
     # v4.6.5: Ariston Lydos e.d. begrenzen setpoint per modus via een apart number-entity
@@ -291,6 +296,20 @@ class BoilerState:
     # v4.5.90: tijdelijk per evaluatieronde — True = gebruik preset_off (green/WP-element)
     #          False = gebruik preset_on (boost/weerstandselement)
     force_green:         bool  = False
+    # v4.6.405: demand-boost feedback
+    _demand_boost_ts:    float = 0.0   # timestamp van laatste demand-boost besluit
+    _temp_before_demand: Optional[float] = None  # temp op moment van demand-boost
+    # FIX 5: runtime-velden die voorheen via getattr(b, ..., default) werden gelezen
+    _ramp_on_min_acc:    float = 0.0   # geaccumuleerde AAN-minuten voor volgende ramp-stap
+    _prev_temp_for_dip:  Optional[float] = None  # vorige temp voor dip-detectie (geen flow sensor)
+    # v4.6.403: gradueel setpoint voor hybrid bij goedkope stroom.
+    # Stijgt in stappen van cheap_ramp_step_c wanneer stroom significant goedkoper is dan gas,
+    # daalt terug naar max_setpoint_green_c als prijs normaal/duur wordt.
+    # Voorkomt dat setpoint in één sprong naar 75°C gaat (veilig bij HA/internet uitval).
+    _cheap_ramp_setpoint_c: float = 0.0   # 0.0 = niet geïnitialiseerd (wordt gezet op green_max)
+    cheap_ramp_step_c:      float = 5.0   # °C per stap omhoog
+    cheap_ramp_max_c:       float = 65.0  # maximum via ramp (nooit hoger dan max_setpoint_boost_c)
+    cheap_ramp_ratio:       float = 0.6   # stroom moet ≤ ratio × gas_th zijn om te rampen
     # Deprecated veld — gebruik boiler_type="heat_pump" of "hybrid"
     heat_pump_boiler:    bool  = False
 
@@ -395,12 +414,23 @@ class BoilerState:
         return max(0.0, sp - self.current_temp_c)
 
     @property
+    def _effective_tank_liters(self) -> float:
+        """Gebruik geconfigureerd tankvolume, anders geleerd, anders standaard 80L."""
+        if self.tank_liters > 0:
+            return self.tank_liters
+        if self._learned_tank_l > 20:
+            return self._learned_tank_l
+        return 80.0  # veilige fallback
+
+    @property
     def minutes_to_setpoint(self) -> Optional[float]:
         if self.current_temp_c is None or self.temp_deficit_c <= 0:
             return 0.0
         if self.power_w <= 0:
             return None
-        kwh_needed = self.temp_deficit_c * 50 * 4.18 / 3600
+        # FIX 3: gebruik geconfigureerd of geleerd tankvolume ipv hardcoded 50L
+        # Q = m * c * ΔT, c_water = 0.001163 kWh/(kg·°C), 1L water ≈ 1kg
+        kwh_needed = self.temp_deficit_c * self._effective_tank_liters * 0.001163
         return (kwh_needed / (self.power_w / 1000.0)) * 60
 
 
@@ -722,6 +752,51 @@ class BoilerLearner:
 
     # ── Status ────────────────────────────────────────────────────────────────
 
+    def get_demand_boost_threshold_min(self) -> float:
+        """
+        Geleerde drempel (minuten) voor demand-boost.
+        Start op 90 min. Pas aan op basis van correct/incorrect ratio:
+          - ratio > 0.75 → drempel omlaag (boost vaker nuttig → eerder boosten)
+          - ratio < 0.40 → drempel omhoog (boost vaak overbodig → minder snel boosten)
+        Bereik: 45–150 minuten. Minimaal 10 metingen voor aanpassing.
+        """
+        stats = self._g().get("demand_boost_stats", {})
+        correct   = int(stats.get("correct",   0))
+        incorrect = int(stats.get("incorrect", 0))
+        total = correct + incorrect
+        if total < 10:
+            return 90.0  # te weinig data — gebruik standaard
+        ratio = correct / total
+        # Lineaire mapping: ratio 0.40→0.75 geeft drempel 150→45 min
+        if ratio >= 0.75:
+            threshold = 45.0
+        elif ratio <= 0.40:
+            threshold = 150.0
+        else:
+            # Interpoleer
+            threshold = 150.0 - (ratio - 0.40) / 0.35 * 105.0
+        threshold = round(max(45.0, min(150.0, threshold)), 0)
+        _LOGGER.debug(
+            "BoilerLearner [%s]: demand_boost drempel %.0f min "
+            "(correct=%d, incorrect=%d, ratio=%.2f)",
+            self._gid, threshold, correct, incorrect, ratio,
+        )
+        return threshold
+
+    def get_demand_boost_stats(self) -> dict:
+        """Geef demand-boost statistieken terug voor de sensor."""
+        stats = self._g().get("demand_boost_stats", {})
+        correct   = int(stats.get("correct",   0))
+        incorrect = int(stats.get("incorrect", 0))
+        total = correct + incorrect
+        return {
+            "correct":   correct,
+            "incorrect": incorrect,
+            "total":     total,
+            "ratio":     round(correct / total, 2) if total > 0 else None,
+            "threshold_min": self.get_demand_boost_threshold_min(),
+        }
+
     def get_learn_status(self, boilers: list) -> dict:
         events  = self._g().get("delivery_events", {})
         now     = time.time()
@@ -830,30 +905,93 @@ class BoilerLearner:
         days = self.legionella_days_since(entity_id)
         return days is None or days >= LEGIONELLA_INTERVAL_DAYS
 
+    def legionella_register_boost_high(self, entity_id: str, temp_c: float, duration_s: float) -> bool:
+        """
+        FIX 3: Registreer een BOOST-cyclus die hoog genoeg was voor legionella.
+        Als de boiler tijdens BOOST >= LEGIONELLA_TEMP_C bereikt voor voldoende tijd,
+        telt dat als een geldige legionella-cyclus — voorkomt dubbele planning.
+        Geeft True als cyclus hiermee als voltooid is geregistreerd.
+        """
+        if temp_c < LEGIONELLA_TEMP_C or duration_s < LEGIONELLA_CONFIRM_S:
+            return False
+        leg = self._leg_g(entity_id)
+        last_ts = float(leg.get("last_completed_ts", 0))
+        # Niet dubbel registreren binnen 12u
+        if time.time() - last_ts < 43200:
+            return False
+        leg["last_completed_ts"] = time.time()
+        leg["confirm_ticks"]     = 0
+        leg["via_boost"]         = True
+        self._g().setdefault("legionella", {})[entity_id] = leg
+        self._save()
+        _LOGGER.info(
+            "BoilerLearner [%s] %s: legionella afgedekt via BOOST-cyclus (%.1f°C, %.0fs)",
+            self._gid, entity_id, temp_c, duration_s,
+        )
+        return True
+
     def legionella_deadline(self, entity_id: str) -> bool:
         """True als de cyclus forceer-nodig is (LEGIONELLA_DEADLINE_DAYS overschreden)."""
         days = self.legionella_days_since(entity_id)
         return days is None or days >= LEGIONELLA_DEADLINE_DAYS
 
-    def legionella_planned_hour(self, entity_id: str, hourly_prices: list) -> int:
+    def legionella_planned_hour(
+        self,
+        entity_id:     str,
+        hourly_prices: list,
+        tomorrow_prices: list | None = None,
+        days_until_needed: int = 99,
+    ) -> int:
         """
-        Kies het goedkoopste uur van vandaag voor de legionella-cyclus.
-        Herplan elke dag opnieuw. Geeft het geplande uur terug (0-23).
+        FIX 5: Kies het beste uur voor de legionella-cyclus.
+
+        Prioritering:
+          1. Negatieve prijsuren (gratis/betaald krijgen) — altijd ideaal
+          2. Nachtelijke uren (0-6) in top-N goedkoopst
+          3. Goedkoopste uur van de dag ongeacht tijdstip
+
+        Als legionella dringend nodig (≤2 dagen) en er zijn negatieve prijzen
+        morgen maar niet vandaag → plan voor morgen en geef -1 terug als signaal.
         """
-        leg  = self._leg_g(entity_id)
+        leg   = self._leg_g(entity_id)
         today = datetime.now().strftime("%Y-%m-%d")
         if leg.get("plan_day") == today and leg.get("planned_hour", -1) >= 0:
             return int(leg["planned_hour"])
 
-        # Kies één van de goedkoopste N uren, bij voorkeur 's nachts (0-6)
         if not hourly_prices:
             planned = 2  # fallback: 02:00
         else:
-            ranked  = sorted(range(len(hourly_prices)), key=lambda i: hourly_prices[i])
-            cheapest_n = ranked[:LEGIONELLA_PRICE_RANK]
-            # Voorkeur: nachtelijk uur (0-6), anders gewoon goedkoopst
-            night = [h for h in cheapest_n if 0 <= h <= 6]
-            planned = night[0] if night else cheapest_n[0]
+            # Stap 1: negatieve uren (prijs ≤ 0) — bij voorkeur nacht
+            neg_hours = [h for h, p in enumerate(hourly_prices) if p <= 0.0]
+            neg_night = [h for h in neg_hours if 0 <= h <= 6]
+            if neg_night:
+                planned = neg_night[0]
+                _LOGGER.info("BoilerLearner [%s] %s: legionella op negatief-prijs uur %02d:00",
+                             self._gid, entity_id, planned)
+            elif neg_hours:
+                planned = neg_hours[0]
+                _LOGGER.info("BoilerLearner [%s] %s: legionella op negatief-prijs uur %02d:00 (niet nacht)",
+                             self._gid, entity_id, planned)
+            else:
+                # Stap 2: goedkoopste N uren, voorkeur nacht
+                ranked     = sorted(range(len(hourly_prices)), key=lambda i: hourly_prices[i])
+                cheapest_n = ranked[:LEGIONELLA_PRICE_RANK]
+                night      = [h for h in cheapest_n if 0 <= h <= 6]
+                planned    = night[0] if night else cheapest_n[0]
+
+                # Stap 3: als urgent (≤2 dagen) en morgen negatieve prijzen
+                # → sla vandaag over, plan morgen (signaal via via_boost hint in status)
+                if days_until_needed <= 2 and tomorrow_prices:
+                    neg_tomorrow = [h for h, p in enumerate(tomorrow_prices) if p <= 0.0]
+                    if neg_tomorrow and min(tomorrow_prices) < min(hourly_prices) * 0.5:
+                        # Morgen significant goedkoper — sla over als er nog tijd is
+                        leg["prefer_tomorrow"] = True
+                        _LOGGER.info(
+                            "BoilerLearner [%s] %s: legionella uitgesteld naar morgen "                            "(negatieve prijs uur %02d:00, urgent=%d dagen)",
+                            self._gid, entity_id, neg_tomorrow[0], days_until_needed,
+                        )
+                    else:
+                        leg["prefer_tomorrow"] = False
 
         leg["planned_hour"] = planned
         leg["plan_day"]     = today
@@ -889,6 +1027,9 @@ class BoilerLearner:
     def get_legionella_status(self, entity_id: str) -> dict:
         leg = self._leg_g(entity_id)
         days = self.legionella_days_since(entity_id)
+        # v4.6.438: bouw history lijst van voltooide cycli (laatste 49 = 7 weken)
+        raw_hist = self._g().get("legionella_history", {}).get(entity_id, [])
+        history = [{"date": h} for h in raw_hist[-49:]] if raw_hist else []
         return {
             "days_since":    days,
             "needed":        self.legionella_needed(entity_id),
@@ -896,6 +1037,8 @@ class BoilerLearner:
             "planned_hour":  leg.get("planned_hour", -1),
             "confirm_ticks": leg.get("confirm_ticks", 0),
             "confirm_pct":   round(leg.get("confirm_ticks", 0) / LEGIONELLA_CONFIRM_S * 100, 1),
+            "via_boost":     bool(leg.get("via_boost", False)),
+            "history":       history,
         }
 
     # ── 7. Kalkdetectie (limescale score) ────────────────────────────────────
@@ -1029,7 +1172,12 @@ class BoilerController:
         self._power_dirty = False
         self._power_last_save = 0.0
         # v4.6.125: persisteer laatste bekende temp per boiler — overleeft herstart + Ariston 429
-        self._temp_store = Store(hass, 1, "cloudems_boiler_last_temp_v1")
+        self._temp_store  = Store(hass, 1, "cloudems_boiler_last_temp_v1")
+        self._ramp_store  = Store(hass, 1, "cloudems_boiler_ramp_state_v1")
+        # FIX 1: ramp-snelheid op basis van AAN-periodes, niet cycli
+        # _ramp_on_since: timestamp waarop boiler voor ramp-doeleinden AAN ging
+        # _ramp_on_minutes_acc: geaccumuleerde minuten dat boiler AAN was in huidige ramp-stap
+        self._ramp_min_on_per_step: float = 30.0  # minuten AAN vereist voor +1 ramp-stap
 
     def _build_boiler(self, cfg: dict) -> BoilerState:
         # v4.6.16: brand-veld → auto-defaults voor bekende merken.
@@ -1218,6 +1366,44 @@ class BoilerController:
         if saved:
             _LOGGER.info("BoilerController: vermogensgeheugen geladen (%d boilers)", len(saved))
 
+        # FIX 5: herstel ramp-setpoints na herstart
+        # FIX 3: herstel geleerde tankvolumes na herstart
+        _saved_ramp = await self._ramp_store.async_load() or {}
+        for b in list(self._boilers) + [b for g in self._groups for b in g.boilers]:
+            _ramp_data = _saved_ramp.get(b.entity_id, {})
+            if _ramp_data:
+                _green_base = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                _saved_sp   = float(_ramp_data.get("ramp_setpoint_c", _green_base))
+                # v4.6.425: bij herstart altijd starten op green_base, ongeacht het opgeslagen
+                # ramp-setpoint. De watertemperatuur staat na een herstart nog op de werkelijke
+                # boilertemperatuur — als we direct naar 75°C zouden springen terwijl het water
+                # op 53°C staat, verwarmt de boiler door bij verbindingsverlies of crash.
+                # Gebruik het opgeslagen setpoint alleen als de watertemp er al dichtbij zit (< 5°C).
+                _current_temp = getattr(b, "current_temp_c", None) or _green_base
+                _temp_margin  = 5.0  # °C — als water al binnen dit bereik zit, herstel opgeslagen sp
+                if _saved_sp > _green_base and _current_temp < (_saved_sp - _temp_margin):
+                    # Water is ver van het opgeslagen setpoint → start veilig op green_base
+                    b._cheap_ramp_setpoint_c = _green_base
+                    _LOGGER.info(
+                        "BoilerController [%s]: herstart veilig — ramp reset naar %.0f°C "
+                        "(opgeslagen %.0f°C, watertemp %.1f°C)",
+                        b.label, _green_base, _saved_sp, _current_temp,
+                    )
+                else:
+                    # Water is al warm genoeg — herstel opgeslagen ramp-setpoint
+                    b._cheap_ramp_setpoint_c = max(_green_base, min(_saved_sp, b.cheap_ramp_max_c))
+                _learned_l = float(_ramp_data.get("learned_tank_l", 0.0))
+                if 20.0 <= _learned_l <= 500.0:
+                    b._learned_tank_l = _learned_l
+                # FIX 5: herstel ramp-on accumulator
+                b._ramp_on_min_acc = float(_ramp_data.get("ramp_on_min_acc", 0.0))
+                _LOGGER.info(
+                    "BoilerController [%s]: ramp=%.0f°C, tankvolume=%.0fL, "
+                    "ramp-acc=%.0f min hersteld",
+                    b.label, b._cheap_ramp_setpoint_c,
+                    b._learned_tank_l, b._ramp_on_min_acc,
+                )
+
     async def _save_temp(self, entity_id: str, temp_c: float) -> None:
         """Sla laatste bekende temperatuur op — overleeft herstart + Ariston 429."""
         try:
@@ -1240,6 +1426,26 @@ class BoilerController:
         )
         self._power_dirty     = False
         self._power_last_save = _time.time()
+
+    async def _async_save_ramp(self) -> None:
+        """Persisteer ramp-setpoint en geleerd tankvolume — max 1x per 5 minuten."""
+        import time as _time
+        if not hasattr(self, "_ramp_last_save"):
+            self._ramp_last_save = 0.0
+        if (_time.time() - self._ramp_last_save) < 300:
+            return
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        data  = {}
+        for b in all_b:
+            if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0:
+                data[b.entity_id] = {
+                    "ramp_setpoint_c":  round(b._cheap_ramp_setpoint_c, 1),
+                    "learned_tank_l":   round(b._learned_tank_l, 1),
+                    "ramp_on_min_acc":  round(b._ramp_on_min_acc, 1),  # FIX 5: persisteer teller
+                }
+        if data:
+            await self._ramp_store.async_save(data)
+            self._ramp_last_save = _time.time()
 
     # ── Hoofdevaluatie ────────────────────────────────────────────────────────
 
@@ -1265,7 +1471,9 @@ class BoilerController:
 
         # Tijdens PV-surplus: gebruik maximaal setpoint om zoveel mogelijk zonne-energie op te slaan
         surplus_active = effective_surplus >= surplus_threshold_w
-        _is_neg      = bool(price_info.get("is_negative", False))
+        _is_neg        = bool(price_info.get("is_negative", False))
+        _current_price = float(price_info.get("current", 0.25) or 0.25)
+        _avg_price     = float(price_info.get("avg_today", 0.25) or 0.25)
         # v4.6.6: bij negatieve prijs OF groot surplus (≥2× drempel) → hardware-max setpoint (bijv. 75°C)
         _big_surplus = effective_surplus >= surplus_threshold_w * 2.0
         _max_charge  = _is_neg or _big_surplus
@@ -1275,23 +1483,53 @@ class BoilerController:
             if b._manual_override_until > time.time():
                 pass
             elif b.boiler_type == BOILER_TYPE_VARIABLE:
-                # Variable boilers hebben intern vast setpoint — niet aanraken
                 b.active_setpoint_c = b.setpoint_c
             elif surplus_active and MODE_PV_SURPLUS in b.modes:
                 if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
                     _hw_max = b.hw_ceiling
-                    # Negatief of groot surplus → hardware-max (75°C); normaal surplus → surplus_setpoint_c
                     _target = _hw_max if _max_charge else min(b.surplus_setpoint_c, _hw_max)
                     b.active_setpoint_c = min(_target, b.hw_ceiling)
                 else:
-                    # Resistive/variable: begrensd door hardware_max_c als ingesteld, anders 78°C
                     _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
                     b.active_setpoint_c = min(_target, b.hw_ceiling)
-            elif _is_neg and b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-                # Negatieve prijs zonder (groot) PV-surplus: ook naar hardware-max
-                b.active_setpoint_c = b.hw_ceiling
+            elif b.boiler_type == BOILER_TYPE_HYBRID:
+                # v4.6.403: gradueel setpoint voor hybrid.
+                # Ramp-up: negatieve prijs ODER stroom veel goedkoper dan gas (ratio).
+                # Ramp-down: prijs normaal/duur → terug naar green_max in stappen.
+                # Dit voorkomt dat bij HA/internet-uitval de boiler op 75°C blijft doorverwarmen.
+                _gas_p   = price_info.get("gas_price_eur_m3", 1.25)
+                _gas_th  = _gas_p / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
+                _cop_r   = _cop_from_temp(b.outside_temp_c, b.cop_curve_override) * COP_DHW_FACTOR
+                _wp_th   = _current_price / max(_cop_r, 0.1)  # WP-kosten per kWh thermisch
+                # Ramp-up als: negatieve prijs OF WP significant goedkoper dan gas
+                _ramp_up = _is_neg or (_wp_th <= _gas_th * b.cheap_ramp_ratio and not _current_price > _avg_price * 1.1)
+                _green_base = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                _rmax    = min(b.cheap_ramp_max_c, b.max_setpoint_boost_c, b.hw_ceiling)
+                # Initialiseer ramp op eerste cyclus
+                if b._cheap_ramp_setpoint_c < _green_base:
+                    b._cheap_ramp_setpoint_c = _green_base
+                if _ramp_up:
+                    # FIX 1: stap omhoog alleen na voldoende AAN-tijd (standaard 30 min)
+                    _ramp_on_acc = getattr(b, "_ramp_on_min_acc", 0.0)
+                    if _ramp_on_acc >= self._ramp_min_on_per_step:
+                        b._cheap_ramp_setpoint_c = min(b._cheap_ramp_setpoint_c + b.cheap_ramp_step_c, _rmax)
+                        b._ramp_on_min_acc = 0.0  # reset teller na stap
+                        _LOGGER.debug(
+                            "BoilerController [%s]: ramp stap → %.0f°C (na %.0f min AAN)",
+                            b.label, b._cheap_ramp_setpoint_c, _ramp_on_acc,
+                        )
+                else:
+                    # Ramp-down: stap terug naar green_base — ook op basis van AAN-tijd
+                    _ramp_on_acc = getattr(b, "_ramp_on_min_acc", 0.0)
+                    if _ramp_on_acc >= self._ramp_min_on_per_step or b._cheap_ramp_setpoint_c > _green_base + b.cheap_ramp_step_c:
+                        b._cheap_ramp_setpoint_c = max(b._cheap_ramp_setpoint_c - b.cheap_ramp_step_c, _green_base)
+                        b._ramp_on_min_acc = 0.0
+                    # Als prijs ineens heel duur wordt: direct terug naar green_base
+                    if _current_price > _avg_price * 1.5:
+                        b._cheap_ramp_setpoint_c = _green_base
+                        b._ramp_on_min_acc = 0.0
+                b.active_setpoint_c = b._cheap_ramp_setpoint_c
             elif _is_neg:
-                # Resistive bij negatieve prijs: naar hardware-max
                 b.active_setpoint_c = b.hw_ceiling
             else:
                 _sp = self._delta_t_setpoint(b, b.setpoint_c)
@@ -1316,7 +1554,32 @@ class BoilerController:
                         else:
                             _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
                             b.active_setpoint_c = min(_target, b.hw_ceiling)
-                    elif _is_neg and b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+                    elif b.boiler_type == BOILER_TYPE_HYBRID:
+                        # v4.6.403: zelfde graduele ramp als standalone
+                        _gas_pg  = price_info.get("gas_price_eur_m3", 1.25)
+                        _gas_thg = _gas_pg / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
+                        _cop_rg  = _cop_from_temp(b.outside_temp_c, b.cop_curve_override) * COP_DHW_FACTOR
+                        _wp_thg  = _current_price / max(_cop_rg, 0.1)
+                        _ramp_up_g = _is_neg or (_wp_thg <= _gas_thg * b.cheap_ramp_ratio and not _current_price > _avg_price * 1.1)
+                        _green_bg  = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                        _rmax_g    = min(b.cheap_ramp_max_c, b.max_setpoint_boost_c, b.hw_ceiling)
+                        if b._cheap_ramp_setpoint_c < _green_bg:
+                            b._cheap_ramp_setpoint_c = _green_bg
+                        if _ramp_up_g:
+                            _ramp_on_g = getattr(b, "_ramp_on_min_acc", 0.0)
+                            if _ramp_on_g >= self._ramp_min_on_per_step:
+                                b._cheap_ramp_setpoint_c = min(b._cheap_ramp_setpoint_c + b.cheap_ramp_step_c, _rmax_g)
+                                b._ramp_on_min_acc = 0.0
+                        else:
+                            _ramp_on_g = getattr(b, "_ramp_on_min_acc", 0.0)
+                            if _ramp_on_g >= self._ramp_min_on_per_step or b._cheap_ramp_setpoint_c > _green_bg + b.cheap_ramp_step_c:
+                                b._cheap_ramp_setpoint_c = max(b._cheap_ramp_setpoint_c - b.cheap_ramp_step_c, _green_bg)
+                                b._ramp_on_min_acc = 0.0
+                            if _current_price > _avg_price * 1.5:
+                                b._cheap_ramp_setpoint_c = _green_bg
+                                b._ramp_on_min_acc = 0.0
+                        b.active_setpoint_c = b._cheap_ramp_setpoint_c
+                    elif _is_neg and b.boiler_type == BOILER_TYPE_HEAT_PUMP:
                         b.active_setpoint_c = b.hw_ceiling
                     elif _is_neg:
                         b.active_setpoint_c = b.hw_ceiling
@@ -1507,15 +1770,22 @@ class BoilerController:
             or solar_surplus_w > surplus_threshold_w * 0.8
         )
 
-        # v4.6.5: heat_pump/hybrid met GREEN-mode temperatuurcap (bijv. Ariston GREEN = max 53°C).
+        # v4.6.394: heat_pump/hybrid met GREEN-mode temperatuurcap (bijv. Ariston GREEN = max 53°C).
         # Pas active_setpoint_c aan naar de modus-specifieke grens zodat needs_heat en
         # temp_deficit_c de werkelijk haalbare temperatuur weerspiegelen:
-        #   • Geen boost beschikbaar → gaan GREEN gebruiken → cap op max_setpoint_green_c
-        #   • Boost beschikbaar (surplus / goedkoop uur) → gaan BOOST gebruiken → cap op max_setpoint_boost_c
-        # Dit voorkomt dat CloudEMS denkt dat de boiler 26°C tekort heeft terwijl de boiler
-        # gewoon op zijn GREEN-maximum (53°C) staat.
+        #   • Geen actieve boost-reden → GREEN gebruiken → cap op max_setpoint_green_c
+        #   • Actieve boost-reden (surplus / goedkoop uur / negatieve prijs) → cap op max_setpoint_boost_c
+        # LET OP: _boost_allowed (boost_n==0) telt hier NIET mee — dat geeft alleen aan of boost
+        # technisch toegestaan is, niet of er een actieve reden is om te boosen.
+        # Zonder dit onderscheid zou active_setpoint_c (bijv. 54°C) nooit bijgesneden worden
+        # naar de GREEN-grens (53°C), en zou CloudEMS onnodig BOOST kiezen.
         if btype in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID) and b.max_setpoint_green_c > 0:
-            _mode_cap = b.max_setpoint_boost_c if _boost_allowed else b.max_setpoint_green_c
+            _has_boost_reason = (
+                _is_negative
+                or price_info.get(f"in_cheapest_{boost_n}h", False)
+                or solar_surplus_w > surplus_threshold_w * 0.8
+            )
+            _mode_cap = b.max_setpoint_boost_c if _has_boost_reason else b.max_setpoint_green_c
             if b.active_setpoint_c > _mode_cap + 0.5:
                 b.active_setpoint_c = _mode_cap
             # Herbereken deficit met de gecorrigeerde setpoint
@@ -1662,30 +1932,66 @@ class BoilerController:
                 _boost_by_surplus_h = solar_surplus_w > surplus_threshold_w * 0.8
                 _boost_by_price_h   = _is_negative
                 _boost_needed_h     = _above_green_max_h
-                _boost_green_ok_h   = (
-                    b.max_setpoint_green_c > 0
-                    and _has_temp
-                    and b.current_temp_c < b.max_setpoint_green_c - 1.0
-                )
-                _boost_cheap_ok_h = _boost_allowed and not _boost_green_ok_h
+                # v4.6.402: _boost_cheap_ok_h verwijderd voor HYBRID.
+                # GREEN (WP, COP≈2.8) is bij dezelfde stroomprijs altijd goedkoper dan BOOST.
+                _boost_cheap_ok_h = False  # nooit puur op prijs — GREEN is goedkoper
 
-                # v4.6.298: HYBRID BOOST verboden als gas goedkoper is dan weerstandselement.
-                # Weerstandselement (BOOST) = 100% efficiëntie → elec_cost per kWh_th = _current_price
-                # Gas (CV)                  = GAS_BOILER_EFF_BOILER efficiëntie → _gas_th
-                # Als gas goedkoper: gebruik altijd GREEN (WP), nooit BOOST (weerstand).
-                _elec_resist_th_h = _current_price  # weerstandselement, COP=1
-                _gas_cheaper_than_boost_h = (
-                    b.has_gas_heating == "yes"
-                    and _elec_resist_th_h > _gas_th + GAS_VS_ELEC_MARGIN
-                    and not _is_negative
-                )
-                if _gas_cheaper_than_boost_h:
-                    # Blokkeer BOOST — weerstandselement is duurder dan gas
-                    _boost_cheap_ok_h = False
-                    _boost_by_surplus_h = _boost_by_surplus_h  # surplus override blijft
-                    # _boost_needed_h blijft — boven GREEN-cap mag altijd
+                # v4.6.404: Demand-based BOOST voor hybrid.
+                # Als GREEN structureel de setpoint niet tijdig haalt (geleerde opwarmsnelheid)
+                # EN stroom is goedkoper dan gas (anders verwarmt CV sowieso)
+                # EN er binnenkort veel warm water verwacht wordt (geleerd verbruikspatroon)
+                # → dan is BOOST nu goedkoper dan gas-fallback straks.
+                _boost_demand_h = False
+                if (not _boost_by_surplus_h and not _boost_by_price_h and not _boost_needed_h
+                        and _has_temp):
+                    try:
+                        # Zoek learner: boiler zit in groep → gebruik die learner.
+                        # Standalone boiler → gebruik eerste beschikbare groep-learner (gedeeld verbruikspatroon).
+                        _learner = next(
+                            (g.learner for g in self._groups
+                             if g.learner and any(gb.entity_id == b.entity_id for gb in g.boilers)),
+                            next((g.learner for g in self._groups if g.learner), None),
+                        )
+                        if _learner is None:
+                            raise ValueError("geen learner beschikbaar")
+                        # Geleerde opwarmsnelheid GREEN (WP): °C/h
+                        _green_rate   = _learner.get_heat_rate(b)  # °C/h van WP
+                        _mts_green    = (_deficit / _green_rate * 60.0) if _green_rate > 0 else None
+                        # Verwachte warm-waterverbruik komend uur (0..1 schaal)
+                        _hour_now     = datetime.now().hour
+                        _demand_soon  = _learner.should_preheat(_hour_now, _mts_green)
+                        # Stroom goedkoper dan gas?
+                        _wp_th_h      = _current_price / max(_cop_hyb, 0.1)
+                        _gas_th_boost = _gas_th_h  # gas-kosten per kWh thermisch
+                        _stroom_gdk   = _wp_th_h < _gas_th_boost * 0.9  # marge: 10%
+                        # GREEN haalt setpoint niet op tijd?
+                        # FIX 2: gebruik geleerde drempel i.p.v. hardcoded 90 min
+                        _demand_threshold = _learner.get_demand_boost_threshold_min()
+                        # FIX 5: gebruik minutes_to_heat() (geleerde opwarmsnelheid) i.p.v. heat_up_hours
+                        _mts_learned = _learner.minutes_to_heat(b)
+                        _mts_for_check = _mts_learned if _mts_learned is not None else _mts_green
+                        _green_too_slow = (
+                            _mts_for_check is not None
+                            and _mts_for_check > _demand_threshold
+                        )
+                        if _demand_soon and _stroom_gdk and _green_too_slow:
+                            _boost_demand_h = True
+                            _mts_display = _mts_for_check or _mts_green or 0
+                            _LOGGER.info(
+                                "BoilerController [%s]: BOOST demand-based: "
+                                "WP %.0f min nodig (drempel=%.0f min, geleerd=%s), "
+                                "verbruik verwacht, WP=%.1fct vs gas=%.1fct/kWh_th",
+                                b.label, _mts_display, _demand_threshold,
+                                f"{_mts_learned:.0f} min" if _mts_learned else "n.v.t.",
+                                _wp_th_h * 100, _gas_th_boost * 100,
+                            )
+                            # FIX 2: Sla moment + temp op voor feedback-loop
+                            b._demand_boost_ts    = now
+                            b._temp_before_demand = b.current_temp_c
+                    except Exception as _dem_err:
+                        _LOGGER.debug("BoilerController demand-boost check fout: %s", _dem_err)
 
-                if _boost_by_surplus_h or _boost_by_price_h or _boost_needed_h or _boost_cheap_ok_h:
+                if _boost_by_surplus_h or _boost_by_price_h or _boost_needed_h or _boost_cheap_ok_h or _boost_demand_h:
                     b.force_green = False  # boost actief
                     if _above_green_max_h and not (_boost_by_surplus_h or _boost_by_price_h):
                         reason = f"Hybrid boost verplicht: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
@@ -1693,6 +1999,8 @@ class BoilerController:
                         reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W"
                     elif _boost_by_price_h:
                         reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
+                    elif _boost_demand_h:
+                        reason = f"Hybrid boost: warm water verwacht, WP te traag, stroom goedkoper dan gas"
                     else:
                         reason = f"Hybrid boost: {_deficit:.1f}°C tekort, GREEN-cap ({b.max_setpoint_green_c:.0f}°C) bereikt"
                 else:
@@ -1750,15 +2058,64 @@ class BoilerController:
                         b._leg_last_done = now_t
                         b._leg_ticks = 0
                         _LOGGER.info("BoilerController [%s]: legionella-cyclus voltooid", b.label)
+                        # v4.6.438: sla datum op in history
+                        from datetime import date as _date_leg
+                        _leg_hist = self._g().setdefault("legionella_history", {})
+                        _leg_hist.setdefault(b.entity_id, [])
+                        _today_str = str(_date_leg.today())
+                        if not _leg_hist[b.entity_id] or _leg_hist[b.entity_id][-1] != _today_str:
+                            _leg_hist[b.entity_id].append(_today_str)
+                            _leg_hist[b.entity_id] = _leg_hist[b.entity_id][-365:]  # max 1 jaar
                 else:
                     if days_since >= LEGIONELLA_INTERVAL_DAYS and not want_on:
-                        # Boiler nodig voor legionella — override want_on
-                        want_on = True
-                        if days_since >= LEGIONELLA_DEADLINE_DAYS:
-                            reason = f"Legionella DEADLINE: {days_since:.0f} dagen geleden (force)"
+                        # v4.6.437: Kies het goedkoopste uur voor legionella via price-aware planning
+                        _is_deadline = days_since >= LEGIONELLA_DEADLINE_DAYS
+                        _days_left   = max(0, int(LEGIONELLA_DEADLINE_DAYS - days_since))
+                        _hourly      = price_info.get("hourly_prices", [])
+                        _tomorrow    = price_info.get("hourly_prices_tomorrow")
+                        _cur_hour    = datetime.now().hour
+
+                        if _hourly and not _is_deadline:
+                            # Bepaal het gepland uur — leg_learner houdt dit per dag bij
+                            _leg_learner = next(
+                                (g.learner for g in self._groups
+                                 if g.learner and any(gb.entity_id == b.entity_id for gb in g.boilers)),
+                                next((g.learner for g in self._groups if g.learner), None),
+                            )
+                            if _leg_learner and hasattr(_leg_learner, "legionella_planned_hour"):
+                                _planned_h = _leg_learner.legionella_planned_hour(
+                                    b.entity_id,
+                                    _hourly,
+                                    _tomorrow,
+                                    days_until_needed=_days_left,
+                                )
+                            else:
+                                # Fallback: goedkoopste nachtuur
+                                _ranked = sorted(range(len(_hourly)), key=lambda i: _hourly[i])
+                                _night  = [h for h in _ranked[:6] if 0 <= h <= 6]
+                                _planned_h = _night[0] if _night else _ranked[0]
+
+                            if _cur_hour == _planned_h:
+                                want_on = True
+                                reason  = (f"Legionella preventie: {days_since:.0f} dagen geleden "
+                                           f"— gepland uur {_planned_h:02d}:00 "
+                                           f"({_hourly[_planned_h]*100:.1f}ct/kWh)")
+                                _LOGGER.info("BoilerController [%s]: %s", b.label, reason)
+                            else:
+                                _LOGGER.debug(
+                                    "BoilerController [%s]: legionella uitgesteld naar %02d:00 "
+                                    "(nu %02d:00, prijs %.4f €/kWh)",
+                                    b.label, _planned_h, _cur_hour,
+                                    _hourly[_cur_hour] if _cur_hour < len(_hourly) else 0,
+                                )
                         else:
-                            reason = f"Legionella preventie: {days_since:.0f} dagen geleden"
-                        _LOGGER.info("BoilerController [%s]: %s", b.label, reason)
+                            # Geen prijsdata of deadline: gewoon aan
+                            want_on = True
+                            if _is_deadline:
+                                reason = f"Legionella DEADLINE: {days_since:.0f} dagen geleden (force)"
+                            else:
+                                reason = f"Legionella preventie: {days_since:.0f} dagen geleden"
+                            _LOGGER.info("BoilerController [%s]: %s", b.label, reason)
                     elif days_since >= LEGIONELLA_DEADLINE_DAYS:
                         want_on = True
                         reason = f"Legionella DEADLINE overschreden: {days_since:.0f} dagen"
@@ -1989,6 +2346,7 @@ class BoilerController:
                 await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
             decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, 100.0))
         await self._async_save_power()
+        await self._async_save_ramp()
         return decisions
 
     def _group_standby(self, group: CascadeGroup) -> list[BoilerDecision]:
@@ -2195,6 +2553,43 @@ class BoilerController:
                             pass
 
                 if not _auto_power_read:
+                    # NILM fallback: zoek boiler in sensor.cloudems_nilm_devices
+                    # op basis van label-match of entity_id. NILM detecteert vermogen
+                    # passief via de P1-meter — ook zonder energiesensor op de boiler zelf.
+                    try:
+                        _nilm_st = self._hass.states.get("sensor.cloudems_nilm_devices")
+                        if _nilm_st:
+                            _nilm_devs = (_nilm_st.attributes.get("devices")
+                                          or _nilm_st.attributes.get("device_list") or [])
+                            _b_label_low = (b.label or "").lower()
+                            _b_eid_low   = b.entity_id.lower()
+                            for _nd in _nilm_devs:
+                                _nd_name = (_nd.get("name") or _nd.get("user_name") or "").lower()
+                                _nd_type = (_nd.get("device_type") or "").lower()
+                                # Match op label of 'boiler'/'water_heater' type
+                                _match = (
+                                    (_b_label_low and _nd_name and _b_label_low in _nd_name)
+                                    or (_nd_type in ("boiler", "water_heater", "electric_water_heater"))
+                                )
+                                if _match and _nd.get("is_on"):
+                                    _nilm_w = float(_nd.get("power_w") or 0.0)
+                                    if _nilm_w > 50:
+                                        b.current_power_w = _nilm_w
+                                        # Leer via EMA — NILM is minder nauwkeurig dan directe sensor
+                                        b.power_w = round(b.power_w * 0.95 + _nilm_w * 0.05, 0)
+                                        # Accumuleer kWh via NILM vermogen (10s interval)
+                                        b.cycle_kwh += (_nilm_w / 1000.0) * (10.0 / 3600.0)
+                                        _auto_power_read = True
+                                        _LOGGER.debug(
+                                            "BoilerController [%s]: NILM vermogen %.0fW "
+                                            "(device: %s)",
+                                            b.label, _nilm_w, _nd.get("name", "?"),
+                                        )
+                                        break
+                    except Exception as _nilm_err:
+                        _LOGGER.debug("BoilerController NILM-fallback fout: %s", _nilm_err)
+
+                if not _auto_power_read:
                     # Laatste fallback: schakelaarstatus als schatting
                     is_currently_on = self._is_on(b.entity_id, b)
                     b.current_power_w = b.power_w if is_currently_on else 0.0
@@ -2211,6 +2606,25 @@ class BoilerController:
                                     g.learner.record_demand(datetime.now().hour)
                     except (ValueError, TypeError):
                         pass
+            else:
+                # FIX 1: temperatuurdip als verbruikssignaal (geen flow sensor nodig).
+                # Als boiler UIT is en temp daalt > 3°C t.o.v. vorige meting → warm water getapt.
+                # Sla vorige temp op in _prev_temp_for_dip en detecteer de dip.
+                if b.current_temp_c is not None:
+                    _prev_dip = getattr(b, "_prev_temp_for_dip", None)
+                    if _prev_dip is not None and not self._is_on(b.entity_id, b):
+                        _dip = _prev_dip - b.current_temp_c
+                        if _dip >= 3.0:
+                            b.last_demand_ts = now
+                            for g in self._groups:
+                                if b in g.boilers and g.learner:
+                                    g.learner.record_demand(datetime.now().hour)
+                                    _LOGGER.debug(
+                                        "BoilerController [%s]: temp-dip %.1f°C → warm water "
+                                        "verbruik geregistreerd (%02d:00)",
+                                        b.label, _dip, datetime.now().hour,
+                                    )
+                    b._prev_temp_for_dip = b.current_temp_c
 
             # ── Thermisch model: heat_rate leren + legionella tick ────────────
             # Alleen als de boiler bij een groep met learner hoort
@@ -2218,6 +2632,90 @@ class BoilerController:
                 if b not in _grp.boilers or not _grp.learner:
                     continue
                 _is_on_now = self._is_on(b.entity_id, b)
+
+                # FIX 1+3: Tankvolume leren + ramp AAN-tijd bijhouden
+                # Generaliseerd voor alle boilertypen waarbij vermogen bekend is.
+                # COP-correctie: voor WP/hybrid is verbruik elektrisch → thermisch = elec × COP.
+                _has_power_data = (b.cycle_kwh > 0.0 or b.current_power_w is not None)
+                if _has_power_data and b.current_temp_c is not None:
+                    if _is_on_now:
+                        # Start nieuwe verwarmingscyclus
+                        if b._cycle_start_temp_c is None:
+                            b._cycle_start_temp_c = b.current_temp_c
+                            b._cycle_start_kwh    = b.cycle_kwh
+                        # FIX 1: accumuleer AAN-minuten voor ramp-stap (hybrid)
+                        if b.boiler_type == BOILER_TYPE_HYBRID:
+                            if not hasattr(b, "_ramp_on_min_acc"):
+                                b._ramp_on_min_acc = 0.0
+                            b._ramp_on_min_acc += (10.0 / 60.0)  # 10s cyclus → minuten
+                    else:
+                        # Boiler net UIT — probeer tankvolume te leren
+                        if (b._cycle_start_temp_c is not None
+                                and b.current_temp_c is not None
+                                and b.current_temp_c > b._cycle_start_temp_c + 2.0):
+                            _delta_t   = b.current_temp_c - b._cycle_start_temp_c
+                            _delta_kwh_elec = b.cycle_kwh - b._cycle_start_kwh
+                            # COP-correctie: WP/hybrid verbruiken elektrisch, leveren thermisch.
+                            # Resistief: COP=1 (elektr. = thermisch).
+                            # Gebruik buiten-COP als beschikbaar, anders type-gebaseerde schatting.
+                            if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+                                _cop_learn = _cop_from_temp(
+                                    b.outside_temp_c, b.cop_curve_override
+                                ) * COP_DHW_FACTOR
+                            else:
+                                _cop_learn = 1.0  # resistief of variabel
+                            _delta_kwh_therm = _delta_kwh_elec * _cop_learn
+                            # Alternatief als cycle_kwh nul is maar power_w bekend:
+                            # schat op basis van AAN-tijd × vermogen
+                            if _delta_kwh_therm < 0.02 and b.current_power_w and b.current_power_w > 50:
+                                _elapsed_h = (now - b.last_on_ts) / 3600.0 if b.last_on_ts > 0 else 0
+                                _delta_kwh_therm = (b.current_power_w / 1000.0) * _elapsed_h * _cop_learn
+                            # Q = m × c × ΔT  →  m [liter] = Q_therm / (0.001163 × ΔT)
+                            if _delta_t > 2.0 and _delta_kwh_therm > 0.02:
+                                _meas_l = _delta_kwh_therm / (0.001163 * _delta_t)
+                                _meas_l = max(20.0, min(500.0, _meas_l))
+                                # EMA α=0.15 — traag leren, filtert meetpieken
+                                if b._learned_tank_l < 1.0:
+                                    b._learned_tank_l = _meas_l
+                                else:
+                                    b._learned_tank_l = round(
+                                        b._learned_tank_l * 0.85 + _meas_l * 0.15, 1
+                                    )
+                                _LOGGER.info(
+                                    "BoilerController [%s]: geleerd tankvolume %.0fL "
+                                    "(meting: %.0fL, ΔT=%.1f°C, ΔkWh_therm=%.3f, COP=%.2f)",
+                                    b.label, b._learned_tank_l, _meas_l,
+                                    _delta_t, _delta_kwh_therm, _cop_learn,
+                                )
+                        b._cycle_start_temp_c = None
+                        b._cycle_start_kwh    = 0.0
+
+                # FIX 2: Demand-boost feedback — was de boost nuttig?
+                # Controleer 1.5-3u na demand-boost of er een temp-dip was (warm water verbruikt).
+                # Zo ja → demand_correct teller omhoog (drempel verlagen).
+                # Zo nee → demand_incorrect teller omhoog (drempel verhogen).
+                if (b.boiler_type == BOILER_TYPE_HYBRID
+                        and b._demand_boost_ts > 0
+                        and b._temp_before_demand is not None
+                        and b.current_temp_c is not None):
+                    _since_boost = (now - b._demand_boost_ts) / 3600.0  # uren
+                    if 1.5 <= _since_boost <= 3.0:
+                        _temp_dip = b._temp_before_demand - b.current_temp_c
+                        if _temp_dip > 3.0:
+                            # Warm water verbruikt → boost was nuttig
+                            _grp.learner._g().setdefault("demand_boost_stats", {})
+                            _grp.learner._g()["demand_boost_stats"]["correct"] =                                 _grp.learner._g()["demand_boost_stats"].get("correct", 0) + 1
+                            _LOGGER.info("BoilerController [%s]: demand-boost correct (dip %.1f°C)", b.label, _temp_dip)
+                        elif _since_boost >= 2.5:
+                            # Geen dip na 2.5u → boost was niet nodig
+                            _grp.learner._g().setdefault("demand_boost_stats", {})
+                            _grp.learner._g()["demand_boost_stats"]["incorrect"] =                                 _grp.learner._g()["demand_boost_stats"].get("incorrect", 0) + 1
+                            _LOGGER.info("BoilerController [%s]: demand-boost overbodig (geen dip)", b.label)
+                            b._demand_boost_ts    = 0.0  # reset
+                            b._temp_before_demand = None
+                        if _temp_dip > 3.0 or _since_boost >= 3.0:
+                            b._demand_boost_ts    = 0.0
+                            b._temp_before_demand = None
 
                 # Heat_rate learning: alleen als boiler aan is en temp stijgt
                 if _is_on_now and b.current_temp_c is not None:
@@ -2234,6 +2732,16 @@ class BoilerController:
                         )
 
                 # Legionella-tick: registreer seconden op ≥65°C
+                # FIX 3: BOOST boven legionella-temp telt ook als afgedekte cyclus
+                if (b.current_temp_c is not None
+                        and b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID)
+                        and not b.force_green
+                        and b.current_temp_c >= LEGIONELLA_TEMP_C
+                        and b.last_on_ts > 0):
+                    _boost_duration_s = now - b.last_on_ts
+                    _grp.learner.legionella_register_boost_high(
+                        b.entity_id, b.current_temp_c, _boost_duration_s
+                    )
                 if b.current_temp_c is not None:
                     _completed = _grp.learner.legionella_tick(b.entity_id, b.current_temp_c)
                     if _completed:
@@ -3125,6 +3633,12 @@ class BoilerController:
              "water_hardness_dh": b.water_hardness_dh,
              "legionella_days": getattr(b, "_leg_last_done", 0) and
                                 round((time.time() - b._leg_last_done) / 86400, 1) if getattr(b, "_leg_last_done", 0) > 0 else None,
+             # FIX 4: geleerd tankvolume en ramp-setpoint zichtbaar in sensor
+             "tank_liters_config":  b.tank_liters if b.tank_liters > 0 else None,
+             "tank_liters_learned": round(b._learned_tank_l, 0) if b._learned_tank_l > 1.0 else None,
+             "tank_liters_active":  round(b._effective_tank_liters, 0),
+             "ramp_setpoint_c":     round(b._cheap_ramp_setpoint_c, 1) if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0 else None,
+             "ramp_max_c":          b.cheap_ramp_max_c if b.boiler_type == BOILER_TYPE_HYBRID else None,
              }
             for b in all_boilers
         ]
@@ -3169,6 +3683,13 @@ class BoilerController:
                   "legionella": g.learner.get_legionella_status(b.entity_id) if g.learner else None,
                   "cop_at_current_temp": _cop_from_temp(b.outside_temp_c, b.cop_curve_override)
                                          if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID) else None,
+                  # FIX 4: geleerde tankvolume + ramp
+                  "tank_liters_config":  b.tank_liters if b.tank_liters > 0 else None,
+                  "tank_liters_learned": round(b._learned_tank_l, 0) if b._learned_tank_l > 1.0 else None,
+                  "tank_liters_active":  round(b._effective_tank_liters, 0),
+                  "ramp_setpoint_c":     round(b._cheap_ramp_setpoint_c, 1) if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0 else None,
+                  # FIX 2: demand boost statistieken
+                  "demand_boost_stats":  g.learner.get_demand_boost_stats() if g.learner else None,
                   }
                  for b in g.boilers
              ]}

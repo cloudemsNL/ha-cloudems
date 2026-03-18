@@ -85,6 +85,9 @@ class BatteryEfficiencyTracker:
         self._charged_today_kwh    = 0.0
         self._discharged_today_kwh = 0.0
         self._loaded = False
+        # Datum-guard: detecteer dagwissel zonder afhankelijkheid van periodieke code
+        from datetime import date as _d
+        self._last_date: str = str(_d.today())
 
     async def async_load(self) -> None:
         try:
@@ -111,7 +114,25 @@ class BatteryEfficiencyTracker:
         """
         Aanroepen elke update-cyclus.
         battery_power_w > 0 = laden, < 0 = ontladen.
+
+        Detecteert ook een dagwissel zonder afhankelijkheid van de periodieke
+        dagelijkse code — zodat charged_today / discharged_today altijd correct
+        worden gereset, ook als de coordinator op middernacht gefreezesd was.
         """
+        from datetime import date as _d
+        today_str = str(_d.today())
+        if today_str != self._last_date:
+            # Dag is gewisseld maar close_day() is nog niet aangeroepen.
+            # Reset accumulatoren zodat vandaag schoon begint.
+            _LOGGER.info(
+                "BatteryEfficiencyTracker: dagwissel gedetecteerd in observe() "
+                "(%s → %s), accumulatoren gereset.",
+                self._last_date, today_str,
+            )
+            self._charged_today_kwh    = 0.0
+            self._discharged_today_kwh = 0.0
+            self._last_date = today_str
+
         kwh = abs(battery_power_w) * dt_s / 3600.0 / 1000.0
         if battery_power_w > 10:
             self._charged_today_kwh    += kwh

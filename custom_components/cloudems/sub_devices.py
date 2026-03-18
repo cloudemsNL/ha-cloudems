@@ -46,6 +46,12 @@ SUB_PRICE       = "price"             # Energieprijzen: huidig, goedkoop, EPEX, 
 SUB_LAMP        = "lamp"              # Lampcirculatie sturing + module-schakelaar
 SUB_BATTERY     = "battery"           # Batterijopslag status & sturing
 SUB_GRID        = "grid"              # Net & fase-monitoring
+SUB_EV          = "ev_mobility"       # EV & mobiliteit: laadvermogen, sessie, ERE, micro-mobiliteit
+SUB_POOL        = "pool"              # Zwembad: status, watertemperatuur, filter, verwarming
+SUB_GAS         = "gas_heat"          # Gas & warmte: gasstand, analyse, warmtepomp COP
+SUB_GENERATOR   = "generator"         # Generator & noodstroom: status, kosten, ATS
+SUB_HOUSE       = "house"             # Huis & aanwezigheid: absence, slaap, dag-type, kamers
+SUB_SYSTEM      = "system_diag"       # Systeem & diagnose: watchdog, sanity, performance
 
 # ── Sub-device metadata ──────────────────────────────────────────────────────
 
@@ -59,9 +65,14 @@ _SUB_DEVICE_META: dict[str, tuple[str, str]] = {
     SUB_BOILER:        ("CloudEMS Warm Water",         "mdi:water-boiler"),
     SUB_PRICE:         ("CloudEMS Energieprijzen",     "mdi:currency-eur"),
     SUB_LAMP:          ("CloudEMS Lampcirculatie",     "mdi:lightbulb-group"),
-    SUB_BATTERY:       ("CloudEMS Batterij",              "mdi:battery-charging"),
-    SUB_GRID:          ("CloudEMS Net & Fasen",           "mdi:transmission-tower"),
-
+    SUB_BATTERY:       ("CloudEMS Batterij",           "mdi:battery-charging"),
+    SUB_GRID:          ("CloudEMS Net & Fasen",        "mdi:transmission-tower"),
+    SUB_EV:            ("CloudEMS EV & Mobiliteit",   "mdi:ev-station"),
+    SUB_POOL:          ("CloudEMS Zwembad",            "mdi:pool"),
+    SUB_GAS:           ("CloudEMS Gas & Warmte",       "mdi:fire"),
+    SUB_GENERATOR:     ("CloudEMS Generator",          "mdi:generator-stationary"),
+    SUB_HOUSE:         ("CloudEMS Huis & Aanwezigheid","mdi:home-heart"),
+    SUB_SYSTEM:        ("CloudEMS Systeem & Diagnose", "mdi:cog-outline"),
 }
 
 

@@ -46,8 +46,8 @@ SAVE_INTERVAL_S = 600
 
 # Default budgetten (NL gemiddeld huishouden)
 DEFAULT_ELEC_EUR_MONTH = 120.0    # €/maand elektriciteit
-DEFAULT_ELEC_KWH_MONTH = 300.0    # kWh/maand
-DEFAULT_GAS_M3_MONTH   = 150.0    # m³/maand (stookseizoen)
+DEFAULT_ELEC_KWH_MONTH = 500.0    # kWh/maand
+DEFAULT_GAS_M3_MONTH   = 250.0    # m³/maand (stookseizoen)
 
 
 @dataclass
@@ -239,12 +239,17 @@ class EnergyBudgetTracker:
         ) if self._budget_gas > 0 else None
 
         # Overall: meest kritieke status
-        statuses = [elec_eur.status, elec_kwh.status]
+        # v4.6.429: euro-budget is leidend voor de kritieke melding —
+        # kWh/gas alleen als attentie meerekenen zodat een hoog kWh-verbruik
+        # bij lage prijzen (veel teruglevering) niet onterecht een
+        # "dreigt overschreden" melding geeft.
+        statuses_critical = [elec_eur.status]           # euro is leidend
+        statuses_all      = [elec_eur.status, elec_kwh.status]
         if gas:
-            statuses.append(gas.status)
-        if "overschrijding" in statuses:
+            statuses_all.append(gas.status)
+        if "overschrijding" in statuses_critical:
             overall = "overschrijding"
-        elif "attentie" in statuses:
+        elif "overschrijding" in statuses_all or "attentie" in statuses_all:
             overall = "attentie"
         else:
             overall = "op_schema"

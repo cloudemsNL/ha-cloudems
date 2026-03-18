@@ -6,7 +6,21 @@
         "description": "**CloudEMS** optimises your energy usage fully locally — no cloud, no subscription.\n\n**What CloudEMS does for you:**\n- ⚡ Charge your EV and boiler at the cheapest time of day\n- ☀️ Maximise self-consumption of solar power\n- 📊 Monitor your quarter-hour peak for capacity tariffs\n- 🔌 Automatically detect appliances via NILM\n- 🚨 Warn about grid congestion in your area\n\nThis wizard takes about 5 minutes. You can rerun it via Settings → Integrations → CloudEMS → Reconfigure.\n\n![]({diagram_url})\n\n📖 [Documentation]({support_url}) · ☕ [Support CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
         "data": {
           "energy_prices_country": "Country (EPEX dynamic prices)",
-          "wizard_mode": "Setup mode"
+          "wizard_mode": "Setup mode",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "energy_prices_country": "Select your country to fetch the correct EPEX day-ahead electricity prices.",
@@ -38,7 +52,21 @@
         "title": "⚡ Grid connection",
         "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
         "data": {
-          "phase_preset": "Grid connection & fuse size"
+          "phase_preset": "Grid connection & fuse size",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "phase_preset": "E.g. 3×25A = 3-phase with 25 A per phase. Select 'Custom' to enter values manually."
@@ -57,7 +85,21 @@
           "phase_count": "Number of phases",
           "max_current_l1": "Max current L1 (A)",
           "max_current_l2": "Max current L2 (A)",
-          "max_current_l3": "Max current L3 (A)"
+          "max_current_l3": "Max current L3 (A)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "max_current_l1": "Maximum grid current on phase L1 — typically your fuse rating (e.g. 25 A).",
@@ -76,7 +118,21 @@
           "mains_voltage": "Fallback mains voltage (V)",
           "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
           "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "use_separate_import_export": "⚙️ Use separate sensors if your meter measures import and export separately (e.g. DSMR5)",
@@ -117,7 +173,21 @@
           "power_sensor_l3": "L3 power sensor (W)",
           "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
           "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5"
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "phase_sensors_L1": "─────────── Current sensors (A) ───────────",
@@ -153,7 +223,21 @@
           "ev_charger_entity": "EV charger setpoint entity (number)",
           "negative_price_threshold": "Negative price threshold (EUR/kWh)",
           "gas_sensor": "Gas meter sensor (optional)",
-          "gas_price_fixed": "Gas price per m³ (fallback)"
+          "gas_price_fixed": "Gas price per m³ (fallback)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "solar_sensor": "☀️ Total PV power sensor (use sum sensor if you have multiple inverters)",
@@ -168,7 +252,21 @@
         "title": "☀️ How many inverters?",
         "description": "Select the number of PV inverters in your installation. Select **0** to skip inverter management.\n\nCloudEMS will self-learn azimuth, tilt and peak power from your production history.\n\n📖 [Multi-inverter docs]({docs_url})",
         "data": {
-          "inverter_count": "Number of inverters (0–9)"
+          "inverter_count": "Number of inverters (0–9)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "docs_url": {
@@ -187,7 +285,21 @@
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave blank to self-learn",
           "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn",
-          "inv_rated_power": "Rated inverter power (W) — optional, for accurate clipping detection"
+          "inv_rated_power": "Rated inverter power (W) — optional, for accurate clipping detection",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "inv_sensor": "🔌 Connect the power sensor of this inverter (W or kW)",
@@ -231,7 +343,21 @@
           "congestion_enabled": "Enable grid congestion management",
           "battery_degradation_enabled": "Track battery degradation",
           "price_alert_high_eur_kwh": "Price alert high tariff (€/kWh)",
-          "nilm_min_confidence": "NILM minimum confidence (%)"
+          "nilm_min_confidence": "NILM minimum confidence (%)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "dynamic_loading": "Increase EV charging current during the cheapest EPEX hours and reduce it during expensive hours.",
@@ -249,7 +375,21 @@
         "description": "Configure the peak demand limit and which loads CloudEMS may switch off to stay under it.",
         "data": {
           "peak_shaving_limit_w": "Peak demand limit (W)",
-          "peak_shaving_assets": "Sheddable loads (entities to switch off during peak)"
+          "peak_shaving_assets": "Sheddable loads (entities to switch off during peak)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "peak_shaving_limit_w": "Maximum allowed grid import power in Watt. When exceeded, CloudEMS will switch off sheddable loads.",
@@ -262,7 +402,21 @@
         "data": {
           "ai_provider": "AI provider for NILM",
           "cloud_api_key": "API key (required for CloudEMS, OpenAI and Anthropic)",
-          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)"
+          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "ai_provider": "Select which AI backend CloudEMS uses to identify appliances. Ollama and built-in are local; cloud options require an API key.",
@@ -282,7 +436,21 @@
         "data": {
           "ollama_host": "Ollama host (e.g. localhost or 192.168.1.x)",
           "ollama_port": "Ollama port (default 11434)",
-          "ollama_model": "Ollama model (e.g. llama3, mistral, phi3)"
+          "ollama_model": "Ollama model (e.g. llama3, mistral, phi3)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "ollama_host": "Hostname or IP address of your Ollama instance.",
@@ -298,14 +466,42 @@
           "influxdb_token": "InfluxDB API Token",
           "influxdb_org": "InfluxDB Organisation",
           "influxdb_bucket": "InfluxDB Bucket (default: cloudems)",
-          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)"
+          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "p1_config": {
         "title": "📡 P1 smart meter",
         "description": "{description}\n\n![]({diagram_url})",
         "data": {
-          "p1_host": "P1 gateway IP address (optional)"
+          "p1_host": "P1 gateway IP address (optional)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "p1_host": "Enter the IP address of your P1 gateway (HomeWizard Energy, SLIMMELEZER+, P1ib, …). Leave empty if you already have a DSMR or HomeWizard integration — CloudEMS will pick up that data automatically."
@@ -315,7 +511,21 @@
         "title": "🔋 Batteries — Count",
         "description": "How many battery systems do you want to configure?\n\nEach battery is configured individually with a power sensor, SoC and capacity.",
         "data": {
-          "battery_count": "Number of batteries"
+          "battery_count": "Number of batteries",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "battery_detail": {
@@ -329,7 +539,21 @@
           "bat_max_discharge_w": "Max discharge power (W)",
           "bat_charge_entity": "Charge setpoint entity — optional",
           "bat_discharge_entity": "Discharge setpoint entity — optional",
-          "bat_label": "Name (e.g. Home Battery)"
+          "bat_label": "Name (e.g. Home Battery)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "battery_num": {
@@ -342,7 +566,21 @@
         "title": "🪟 Roller Shutters — Count",
         "description": "How many shutters do you want to connect?\n\n{overkiz_found}",
         "data": {
-          "shutter_count": "Number of shutters"
+          "shutter_count": "Number of shutters",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "shutter_detail": {
@@ -355,7 +593,21 @@
           "shutter_auto_thermal": "Automatically close when overheating",
           "shutter_auto_solar_gain": "Automatically open for solar heat gain",
           "shutter_auto_overheat": "Prevent overheating (priority)",
-          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)"
+          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "prices": {
@@ -366,7 +618,21 @@
           "price_include_btw": "Include VAT (21%)",
           "selected_supplier": "Supplier (for default markup)",
           "supplier_markup": "Manual markup (€/kWh)",
-          "energy_prices_country": "Country (for supplier options)"
+          "energy_prices_country": "Country (for supplier options)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "mail": {
@@ -383,14 +649,42 @@
           "mail_to": "Recipient(s) — comma-separated",
           "mail_monthly_report": "Send monthly PDF report",
           "mail_weekly_report": "Send weekly summary",
-          "mail_weekly_summary": "Wekelijkse samenvatting versturen"
+          "mail_weekly_summary": "Wekelijkse samenvatting versturen",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate": {
         "title": "🌡️ Klimaat & EPEX-sturing",
         "description": "{info}",
         "data": {
-          "climate_mode": "Klimaatmodus"
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_boiler": {
@@ -401,14 +695,42 @@
           "cv_min_zones": "Min. actieve zones voor CV aan",
           "cv_min_on_min": "Min. aan-tijd (min)",
           "cv_min_off_min": "Min. uit-tijd (min)",
-          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)"
+          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_zones": {
         "title": "🏠 Zone Control — Ruimtes",
         "description": "{discovery}",
         "data": {
-          "climate_zones_enabled": "Actieve ruimtes"
+          "climate_zones_enabled": "Actieve ruimtes",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_groups": {
@@ -421,7 +743,21 @@
           "boiler_group_count": "Aantal boilers in deze groep",
           "group_name": "Group name",
           "group_mode": "Operating mode",
-          "unit_count": "Number of boilers in group"
+          "unit_count": "Number of boilers in group",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_unit": {
@@ -466,7 +802,23 @@
           "power_w": "Power (W)",
           "priority": "Priority (1=high)",
           "min_on_minutes": "Min. on-time (min)",
-          "min_off_minutes": "Min. off-time (min)"
+          "min_off_minutes": "Min. off-time (min)",
+          "tank_liters": "Tank volume (L) — 0 = learn automatically",
+          "cheap_ramp_max_c": "Max. setpoint during cheap power / ramp (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "setpoint_c": "Normal setpoint. During PV surplus, the maximum setpoint is used automatically to store as much solar energy as possible.",
@@ -479,7 +831,21 @@
         "description": "Configure e-mail to automatically receive monthly or weekly energy reports as PDF.\n\nLeave empty to skip.",
         "data": {
           "github_log_token": "GitHub Personal Access Token (optional)",
-          "notification_service": "HA notify service name (e.g. mobile_app_name)"
+          "notification_service": "HA notify service name (e.g. mobile_app_name)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "github_log_token": "Token for automatic upload of anonymized diagnostic reports to GitHub. Create at github.com/settings/tokens with public_repo scope.",
@@ -494,7 +860,21 @@
           "import_power_sensor": "Import sensor (W consumption)",
           "export_power_sensor": "Export sensor (W production)",
           "solar_sensor": "PV power sensor (W)",
-          "battery_sensor": "Battery power sensor (W)"
+          "battery_sensor": "Battery power sensor (W)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "grid_sensor": "Single net power sensor: positive = import, negative = export.",
@@ -526,7 +906,21 @@
           "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
           "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
           "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)",
-          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group"
+          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
@@ -549,14 +943,42 @@
           "boiler_efficiency": "Boiler efficiency (0.5–1.0)",
           "heat_pump_cop": "Heat pump COP (manual, falls back to learned value)",
           "heat_pump_power_entity": "Heat pump electrical power sensor (W)",
-          "heat_pump_thermal_entity": "Heat pump thermal power sensor (W, optional)"
+          "heat_pump_thermal_entity": "Heat pump thermal power sensor (W, optional)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "dsmr_source": {
         "title": "📡 Meter Source",
         "description": "How should CloudEMS read the smart meter data?\n\n{detected}\n\n![]({diagram_url})",
         "data": {
-          "dsmr_source": "Meter source"
+          "dsmr_source": "Meter source",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "dsmr_source": "Choose how CloudEMS retrieves grid meter data. Use the DSMR/HomeWizard integration if you already have it set up in HA, otherwise select sensors manually or configure a direct connection."
@@ -566,7 +988,21 @@
         "title": "⚡ Price source — direct supplier connection",
         "description": "{info}",
         "data": {
-          "price_provider": "Price source"
+          "price_provider": "Price source",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "price_provider_credentials": {
@@ -576,7 +1012,21 @@
           "access_token": "API Token",
           "api_key": "API key",
           "username": "Email address",
-          "password": "Password"
+          "password": "Password",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_unit_edit": {
@@ -596,21 +1046,63 @@
           "bu_dimmer_off_pct": "Dimmer OFF (%)",
           "bu_boiler_type": "Boiler type",
           "bu_brand": "Brand / type",
-          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)"
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_brand": {
         "title": "🏷️ Brand / type boiler {idx} of {total}",
         "description": "Select the boiler brand. CloudEMS automatically fills in the correct control mode, setpoints and safety limits.",
         "data": {
-          "brand": "Brand / type"
+          "brand": "Brand / type",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_epex_count": {
         "title": "❄️ Airco / WP EPEX — Aantal apparaten",
         "description": "Huidige apparaten: {current}\n\nHoeveel airco's of warmtepompen wil je configureren?",
         "data": {
-          "ce_count": "Aantal apparaten"
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_epex_device": {
@@ -621,8 +1113,258 @@
           "ce_label": "Naam / label",
           "ce_type": "Type apparaat",
           "ce_power": "Vermogens­sensor (optioneel)",
-          "ce_offset": "Max. temperatuuroffset (°C)"
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
+      },
+      "generator": {
+        "title": "Generator & backup power",
+        "data": {
+          "generator_enabled": "Enable generator / backup power",
+          "generator_power_sensor": "Generator power sensor (optional)",
+          "generator_status_entity": "ATS/MTS status entity (optional)",
+          "generator_autostart_switch": "Auto-start switch (optional)",
+          "generator_max_power_w": "Max generator power (W)",
+          "generator_type": "Fuel type",
+          "generator_fuel_cost_eur_kwh": "Fuel cost (€/kWh)",
+          "ats_type": "Switch type (ATS/MTS)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "generator_opts": {
+        "title": "Generator & backup power",
+        "data": {
+          "generator_enabled": "Enable generator / backup power",
+          "generator_power_sensor": "Generator power sensor (optional)",
+          "generator_status_entity": "ATS/MTS status entity (optional)",
+          "generator_autostart_switch": "Auto-start switch (optional)",
+          "generator_max_power_w": "Max generator power (W)",
+          "generator_type": "Fuel type",
+          "generator_fuel_cost_eur_kwh": "Fuel cost (€/kWh)",
+          "ats_type": "Switch type (ATS/MTS)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "init": {
+        "title": "CloudEMS — Configure",
+        "data": {
+          "category": "Category",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_energie": {
+        "title": "⚡ Energy & Grid",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_opwekking": {
+        "title": "☀️ Generation & Storage",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_verbruik": {
+        "title": "🏠 Consumption & Comfort",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_automatisering": {
+        "title": "🤖 Automation & NILM",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_systeem": {
+        "title": "🔧 System & Communication",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_mobiliteit": {
+        "title": "Mobility & Charging"
+      },
+      "ebike_opts": {
+        "title": "E-bike & Micro-mobility",
+        "data": {
+          "ebike_entity_1": "Power sensor vehicle 1 (optional)",
+          "ebike_label_1": "Label vehicle 1 (e.g. 'E-bike Joan')",
+          "ebike_entity_2": "Power sensor vehicle 2 (optional)",
+          "ebike_label_2": "Label vehicle 2 (e.g. 'Scooter')"
+        }
+      },
+      "lamp_auto_opts": {
+        "title": "Smart Lamp Automation",
+        "data": {
+          "lamp_auto_enabled": "Enable smart lamp automation",
+          "lamp_auto_lamps_raw": "Lamp configuration (JSON)"
+        }
+      },
+      "lamp_automation_opts": {
+        "title": "🏠 Smart Lighting",
+        "data": {
+          "la_enabled": "Enable smart lighting",
+          "la_forgotten_minutes": "Forgotten lights: minutes before auto-off",
+          "back_to_menu": "← Back to menu",
+          "la_area_filter": "Filter by room"
+        }
+      },
+      "lamp_automation_detail_opts": {
+        "title": "💡 Configure lamps per room",
+        "data": {
+          "back_to_menu": "← Terug"
+        }
+      },
+      "ups_count_opts": {
+        "title": "🔋 UPS Systemen",
+        "data": {
+          "ups_count": "Number of UPS systems",
+          "ups_label": "Name / description",
+          "ups_brand": "Brand / protocol",
+          "ups_status_entity": "Status entity",
+          "ups_battery_entity": "Battery % sensor",
+          "ups_runtime_entity": "Remaining runtime sensor",
+          "ups_power_entity": "Power sensor (optional)"
+        }
+      },
+      "ups_detail_opts": {
+        "title": "🔋 UPS Configureren",
+        "data": {
+          "ups_count": "Number of UPS systems",
+          "ups_label": "Name / description",
+          "ups_brand": "Brand / protocol",
+          "ups_status_entity": "Status entity",
+          "ups_battery_entity": "Battery % sensor",
+          "ups_runtime_entity": "Remaining runtime sensor",
+          "ups_power_entity": "Power sensor (optional)"
+        }
+      },
+      "noodstroom": {
+        "title": "⚡ Noodstroom & Backup",
+        "data": {}
       }
     },
     "abort": {
@@ -638,10 +1380,23 @@
   "options": {
     "step": {
       "init": {
-        "title": "⚙️ CloudEMS — Configure",
-        "description": "Select the section you want to edit.",
+        "title": "CloudEMS — Configure",
         "data": {
-          "section": "Settings section"
+          "category": "Category",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "sensors": {
@@ -656,7 +1411,21 @@
           "phase_count": "Number of phases",
           "max_current_l1": "Max current L1 (A)",
           "max_current_l2": "Max current L2 (A)",
-          "max_current_l3": "Max current L3 (A)"
+          "max_current_l3": "Max current L3 (A)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "phase_sensors": {
@@ -674,7 +1443,21 @@
           "power_sensor_l3": "L3 power sensor",
           "power_sensor_l1_export": "DSMR5 export L1 (W) — optional",
           "power_sensor_l2_export": "DSMR5 export L2 (W) — optional",
-          "power_sensor_l3_export": "DSMR5 export L3 (W) — optional"
+          "power_sensor_l3_export": "DSMR5 export L3 (W) — optional",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "solar_ev_opts": {
@@ -689,7 +1472,21 @@
           "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
           "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
           "heat_pump_cop": "Heat pump COP (1.0–8.0)",
-          "enable_solar_dimmer": "Curtail solar at negative price"
+          "enable_solar_dimmer": "Curtail solar at negative price",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "description": "Solar panel sensor, EV charger and solar curtailment."
       },
@@ -707,7 +1504,21 @@
           "battery_scheduler_enabled": "Batterij scheduler (EPEX-gestuurd laden)",
           "congestion_enabled": "Netcongestie detectie",
           "battery_degradation_enabled": "Batterij degradatie tracking",
-          "battery_season_override": "Seizoen override (batterijstrategie)"
+          "battery_season_override": "Seizoen override (batterijstrategie)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "ai_opts": {
@@ -719,7 +1530,21 @@
           "ollama_host": "Ollama host",
           "ollama_port": "Ollama port",
           "ollama_model": "Ollama model",
-          "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)"
+          "nilm_min_confidence": "Minimum confidence threshold (0.30–0.99)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "nilm_min_confidence": "Detections below this confidence score are ignored. 0.65 is a good default."
@@ -742,7 +1567,21 @@
           "influxdb_token": "InfluxDB API Token",
           "influxdb_org": "InfluxDB Organisation",
           "influxdb_bucket": "InfluxDB Bucket (default: cloudems)",
-          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)"
+          "cloud_cover_sensor": "Cloud cover sensor (%, optional — improves PV forecast)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "congestion_threshold_w": "Import power above which congestion is flagged. Typically your capacity tariff limit.",
@@ -761,7 +1600,21 @@
           "inv_min_pct": "Minimum power during curtailment (%)",
           "inv_azimuth": "Azimuth (°) — optional, leave empty to self-learn",
           "inv_tilt": "Tilt angle (°) — optional, leave empty to self-learn",
-          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn"
+          "inv_rated_power": "Rated inverter power (Wp) — 0 = auto-learn",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "azimuth_tip": {
@@ -782,7 +1635,21 @@
         "title": "🔆 PV Inverters",
         "description": "How many inverters do you want to configure? Current: {inverter_names}",
         "data": {
-          "inverter_count": "Number of inverters (0–9)"
+          "inverter_count": "Number of inverters (0–9)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "inverter_names": {
@@ -795,7 +1662,21 @@
         "title": "🔋 Batteries",
         "description": "Current battery count: **{current_count}**. {battery_names}\n\nIn the next step, choose the type per battery: ⚡ **Zonneplan Nexus** (automatically managed) or 🔧 **Manual** (own SOC sensor + switch).",
         "data": {
-          "battery_count": "Number of batteries"
+          "battery_count": "Number of batteries",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "current_count": {
@@ -819,7 +1700,21 @@
           "bat_max_discharge_w": "Max discharge power (W) — 0 = self-learn",
           "bat_charge_entity": "Charge control entity (optional)",
           "bat_discharge_entity": "Discharge control entity (optional)",
-          "bat_label": "Name (e.g. 'Home Battery')"
+          "bat_label": "Name (e.g. 'Home Battery')",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "battery_num": {
@@ -832,7 +1727,21 @@
         "title": "🪟 Roller Shutters — Count",
         "description": "How many shutters do you want to connect?\n\n{overkiz_found}",
         "data": {
-          "shutter_count": "Number of shutters"
+          "shutter_count": "Number of shutters",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "shutter_detail_opts": {
@@ -849,7 +1758,21 @@
           "shutter_night_close": "Close shutter at (e.g. 23:00)",
           "shutter_morning_open": "Earliest opening time (e.g. 07:30)",
           "shutter_default_setpoint": "Default setpoint °C (no climate → 20)",
-          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)"
+          "shutter_schedule_learning": "Schedule learning (learn open/close times from usage)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "shutter_night_close": "Time at which the shutter closes automatically in the evening.",
@@ -868,7 +1791,21 @@
           "contract_type": "Contract type",
           "fixed_import_price": "Fixed import tariff (€/kWh)",
           "fixed_export_price": "Fixed feed-in tariff (€/kWh)",
-          "energy_prices_country": "Country"
+          "energy_prices_country": "Country",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "gas_opts": {
@@ -880,13 +1817,42 @@
           "boiler_efficiency": "Boiler efficiency",
           "heat_pump_cop": "Heat pump COP (manual)",
           "heat_pump_power_entity": "Heat pump power sensor (W)",
-          "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)"
+          "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "nilm_devices_opts": {
         "title": "🏷️ NILM Apparaten beheren",
         "description": "Hieronder staan alle gedetecteerde NILM-apparaten.\n\n**Huidig overzicht:**\n```\n{devices_overview}\n```\n\n**Hernoemen** — gebruik de service `{rename_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `name`: nieuwe weergavenaam (max. 60 tekens)\n- `device_type`: optioneel het type corrigeren\n\n**Verbergen/tonen** — gebruik de service `{hide_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `hidden`: `true` om te verbergen, `false` om te tonen\n\n👉 [Open Ontwikkeltools → Services]({devtools_url})",
-        "data": {},
+        "data": {
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        },
         "placeholders": {
           "devices_overview": {
             "description": "devices_overview",
@@ -915,7 +1881,21 @@
           "pool_temp_entity": "Water temperature sensor",
           "pool_uv_entity": "UV lamp switch",
           "pool_robot_entity": "Pool robot / cleaner",
-          "pool_heat_setpoint": "Target water temperature (°C)"
+          "pool_heat_setpoint": "Target water temperature (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "pool_filter_entity": "Switch entity controlling the filter pump.",
@@ -936,7 +1916,21 @@
           "lc_use_sun_entity": "Use sun entity for night detection (recommended)",
           "lc_min_confidence": "Minimum absence confidence (0.3–0.95)",
           "lc_night_start_h": "Night starts (hour, fallback)",
-          "lc_night_end_h": "Night ends (hour, fallback)"
+          "lc_night_end_h": "Night ends (hour, fallback)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "lc_light_entities": "Select all lights that may participate in circulation.",
@@ -968,14 +1962,42 @@
           "slot4_entity": "Slot 4 — switch",
           "slot4_earliest": "Slot 4 — earliest hour",
           "slot4_latest": "Slot 4 — latest hour",
-          "slot4_window": "Slot 4 — window size"
+          "slot4_window": "Slot 4 — window size",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "tab_visibility_opts": {
         "title": "👁️ Tab Visibility",
         "description": "Select which tabs you want to **hide** from the navigation bar. Hidden tabs are still accessible via direct URL but disappear from the tab row. CloudEMS applies this automatically in the Lovelace dashboard. The Overview tab is always visible.",
         "data": {
-          "hidden_tabs": "Hidden tabs"
+          "hidden_tabs": "Hidden tabs",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "mail_opts": {
@@ -992,7 +2014,21 @@
           "mail_to": "Recipient(s), comma-separated",
           "mail_monthly_report": "Send monthly PDF report",
           "mail_weekly_report": "Send weekly summary",
-          "mail_weekly_summary": "Wekelijkse samenvatting"
+          "mail_weekly_summary": "Wekelijkse samenvatting",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "info": {
@@ -1006,7 +2042,21 @@
         "description": "**Configured groups:**\n\n{groups_info}\n\n💡 {tip}",
         "data": {
           "bg_action": "Choose an action",
-          "boiler_groups_enabled": "Hot water cascade active"
+          "boiler_groups_enabled": "Hot water cascade active",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "placeholders": {
           "groups_info": {
@@ -1023,7 +2073,21 @@
         "data": {
           "bg_name": "Naam van de groep",
           "bg_mode": "Cascade modus",
-          "bg_unit_count": "Aantal boilers in deze groep"
+          "bg_unit_count": "Aantal boilers in deze groep",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_group_edit": {
@@ -1032,7 +2096,21 @@
         "data": {
           "bg_name": "Group name",
           "bg_mode": "Cascade mode",
-          "bge_action": "Action"
+          "bge_action": "Action",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_group_unit": {
@@ -1053,7 +2131,21 @@
           "bu_surplus_setpoint": "Max. setpoint at PV surplus / full battery (°C)",
           "bu_boiler_type": "Boiler type",
           "bu_brand": "Brand / model",
-          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)"
+          "bu_max_setpoint_boost": "Absolute upper limit setpoint (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "managed_battery_opts": {
@@ -1070,7 +2162,21 @@
           "zonneplan_house_sensor": "House consumption sensor (anti-roundtrip)",
           "zonneplan_min_house_load_w": "Min. house consumption for discharge (W)",
           "zonneplan_soc_reserve_high": "SoC reserve during multiple HIGH hours (%)",
-          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group"
+          "zonneplan_auto_forecast": "Auto-forecast: steer on tariff group",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",
@@ -1085,7 +2191,21 @@
         "title": "🔋 Battery {battery_num} of {total} — Which type?",
         "description": "Choose how CloudEMS controls this battery.\n\n⚡ **Managed provider** (Zonneplan, Tibber…) — CloudEMS communicates via the official integration. No separate sensors needed.\n\n🔧 **Manual** — You connect your own SOC sensor and charge/discharge switch.\n\n{detected_hint}",
         "data": {
-          "bat_type": "Battery type"
+          "bat_type": "Battery type",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "bat_type": "Detected providers: {detected_providers}"
@@ -1095,7 +2215,21 @@
         "title": "🌡️ Klimaat & EPEX-sturing",
         "description": "{info}",
         "data": {
-          "climate_mode": "Klimaatmodus"
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "cheap_switch_detail_opts": {
@@ -1112,7 +2246,21 @@
           "sd_power_threshold_w": "Start detection threshold (W)",
           "sd_price_threshold_eur": "Price threshold for delay (€/kWh)",
           "sd_grace_s": "Delay before turning off (s)",
-          "sd_notify": "Send notification when delayed"
+          "sd_notify": "Send notification when delayed",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "sd_enabled": "Enable if this device (e.g. dishwasher, washing machine) is started manually and you want CloudEMS to wait for cheap electricity.",
@@ -1124,7 +2272,21 @@
         "title": "⏳ Smart Delay Mode",
         "description": "![]({diagram_url})\n\n**Smart Delay Mode** is the intelligent sibling of the cheap-hours switch.\n\n**The difference:** with cheap-hours switches CloudEMS decides *when* the device starts. With smart delay mode *you start* the device yourself (e.g. press start on your washing machine), but if electricity is too expensive at that moment, CloudEMS automatically turns it **OFF** and restarts it as soon as the cheapest block begins.\n\n---\n\n**Typical devices:** 🧺 washing machine · 🍽️ dishwasher · 🌀 tumble dryer\n\n---\n\nYou currently have **{smart_delay_count}** smart delay switch(es) configured.\n\nChoose how many to set up *(0 = skip, only save cheap-hours switches)*.",
         "data": {
-          "smart_delay_count": "Number of smart delay devices"
+          "smart_delay_count": "Number of smart delay devices",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "smart_delay_detail_opts": {
@@ -1140,14 +2302,42 @@
           "earliest_hour": "Earliest hour (0–23)",
           "latest_hour": "Latest hour (0–23)",
           "grace_s": "Grace period (seconds)",
-          "notify": "Send notification on delay"
+          "notify": "Send notification on delay",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "prices_provider_opts": {
         "title": "⚡ Prices — Energy supplier",
         "description": "{info}",
         "data": {
-          "price_provider": "Price source"
+          "price_provider": "Price source",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "prices_epex_opts": {
@@ -1160,7 +2350,21 @@
           "price_include_tax": "Include energy tax",
           "price_include_btw": "Include VAT",
           "selected_supplier": "Energy supplier (for markup)",
-          "supplier_markup": "Custom markup (€/kWh)"
+          "supplier_markup": "Custom markup (€/kWh)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "price_provider_creds_opts": {
@@ -1170,14 +2374,42 @@
           "access_token": "API Token",
           "api_key": "API key",
           "username": "Email address",
-          "password": "Password"
+          "password": "Password",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_group_brand": {
         "title": "🏷️ Brand / type — Boiler {unit_num} of {total} ({group_name})",
         "description": "Select the boiler brand. CloudEMS automatically fills in the control mode, setpoints and limits.",
         "data": {
-          "brand": "Brand / type"
+          "brand": "Brand / type",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "boiler_unit_edit": {
@@ -1198,7 +2430,21 @@
           "bu_preset_on": "Preset name ON (e.g. BOOST)",
           "bu_preset_off": "Preset name OFF (e.g. GREEN)",
           "bu_dimmer_on_pct": "Dimmer on (%)",
-          "bu_dimmer_off_pct": "Dimmer off (%)"
+          "bu_dimmer_off_pct": "Dimmer off (%)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         },
         "data_description": {
           "bu_max_setpoint_entity": "Optional: number entity that sets the hardware maximum before each temperature change (required for Ariston Lydos Hybrid)."
@@ -1208,14 +2454,42 @@
         "title": "🏠 Zone Control — Ruimtes",
         "description": "{discovery}",
         "data": {
-          "climate_zones_enabled": "Actieve ruimtes"
+          "climate_zones_enabled": "Actieve ruimtes",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_epex_count_opts": {
         "title": "❄️ Airco / WP EPEX — Aantal apparaten",
         "description": "Huidige apparaten: {current}",
         "data": {
-          "ce_count": "Aantal apparaten"
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
       },
       "climate_epex_device_opts": {
@@ -1226,8 +2500,238 @@
           "ce_label": "Naam / label",
           "ce_type": "Type apparaat",
           "ce_power": "Vermogens­sensor (optioneel)",
-          "ce_offset": "Max. temperatuuroffset (°C)"
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
         }
+      },
+      "generator": {
+        "title": "Generator & backup power",
+        "data": {
+          "generator_enabled": "Enable generator / backup power",
+          "generator_power_sensor": "Generator power sensor (optional)",
+          "generator_status_entity": "ATS/MTS status entity (optional)",
+          "generator_autostart_switch": "Auto-start switch (optional)",
+          "generator_max_power_w": "Max generator power (W)",
+          "generator_type": "Fuel type",
+          "generator_fuel_cost_eur_kwh": "Fuel cost (€/kWh)",
+          "ats_type": "Switch type (ATS/MTS)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "generator_opts": {
+        "title": "Generator & backup power",
+        "data": {
+          "generator_enabled": "Enable generator / backup power",
+          "generator_power_sensor": "Generator power sensor (optional)",
+          "generator_status_entity": "ATS/MTS status entity (optional)",
+          "generator_autostart_switch": "Auto-start switch (optional)",
+          "generator_max_power_w": "Max generator power (W)",
+          "generator_type": "Fuel type",
+          "generator_fuel_cost_eur_kwh": "Fuel cost (€/kWh)",
+          "ats_type": "Switch type (ATS/MTS)",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_energie": {
+        "title": "⚡ Energy & Grid",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_opwekking": {
+        "title": "☀️ Generation & Storage",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_verbruik": {
+        "title": "🏠 Consumption & Comfort",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_automatisering": {
+        "title": "🤖 Automation & NILM",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_systeem": {
+        "title": "🔧 System & Communication",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Back to menu",
+          "budget_elec_eur_month": "Monthly electricity budget (€)",
+          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
+          "budget_enabled": "Enable energy budget",
+          "budget_gas_m3_month": "Monthly gas budget (m³)",
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Exclude devices",
+          "nilm_shift_include": "Include devices",
+          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
+          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
+          "pool_filter_power_entity": "Filter pump power sensor",
+          "pool_heat_power_entity": "Heat pump power sensor",
+          "shutter_smoke_sensor": "Smoke detector (optional)"
+        }
+      },
+      "menu_mobiliteit": {
+        "title": "Mobility & Charging"
+      },
+      "ebike_opts": {
+        "title": "E-bike & Micro-mobility",
+        "data": {
+          "ebike_entity_1": "Power sensor vehicle 1 (optional)",
+          "ebike_label_1": "Label vehicle 1 (e.g. 'E-bike Joan')",
+          "ebike_entity_2": "Power sensor vehicle 2 (optional)",
+          "ebike_label_2": "Label vehicle 2 (e.g. 'Scooter')"
+        }
+      },
+      "lamp_auto_opts": {
+        "title": "Smart Lamp Automation",
+        "data": {
+          "lamp_auto_enabled": "Enable smart lamp automation",
+          "lamp_auto_lamps_raw": "Lamp configuration (JSON)"
+        }
+      },
+      "lamp_automation_opts": {
+        "title": "🏠 Smart Lighting",
+        "data": {
+          "la_enabled": "Enable smart lighting",
+          "la_forgotten_minutes": "Forgotten lights: minutes before auto-off",
+          "back_to_menu": "← Back to menu",
+          "la_area_filter": "Filter by room"
+        }
+      },
+      "lamp_automation_detail_opts": {
+        "title": "💡 Configure lamps per room",
+        "data": {
+          "back_to_menu": "← Terug"
+        }
+      },
+      "ups_count_opts": {
+        "title": "🔋 UPS Systemen",
+        "data": {
+          "ups_count": "Number of UPS systems",
+          "ups_label": "Name / description",
+          "ups_brand": "Brand / protocol",
+          "ups_status_entity": "Status entity",
+          "ups_battery_entity": "Battery % sensor",
+          "ups_runtime_entity": "Remaining runtime sensor",
+          "ups_power_entity": "Power sensor (optional)"
+        }
+      },
+      "ups_detail_opts": {
+        "title": "🔋 UPS Configureren",
+        "data": {
+          "ups_count": "Number of UPS systems",
+          "ups_label": "Name / description",
+          "ups_brand": "Brand / protocol",
+          "ups_status_entity": "Status entity",
+          "ups_battery_entity": "Battery % sensor",
+          "ups_runtime_entity": "Remaining runtime sensor",
+          "ups_power_entity": "Power sensor (optional)"
+        }
+      },
+      "noodstroom": {
+        "title": "⚡ Noodstroom & Backup",
+        "data": {}
       }
     },
     "abort": {

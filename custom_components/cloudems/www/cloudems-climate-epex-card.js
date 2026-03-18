@@ -15,7 +15,7 @@
  *   price_sensor: "sensor.cloudems_price_current_hour"  (default)
  */
 
-const CE_CARD_VERSION = "1.0.0";
+const CE_CARD_VERSION = "1.1.0";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -121,6 +121,15 @@ const S = `
   .footer { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.06);
             display: flex; justify-content: space-between; align-items: center; }
   .footer-label { font-size: .68rem; color: #374151; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Uitleg sectie ── */
+  .explain-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.06); }
+  .explain-title { font-size: .75rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+  .explain-table { width: 100%; border-collapse: collapse; font-size: .75rem; margin-bottom: 10px; }
+  .explain-table th { color: #4b5563; font-weight: 600; padding: 4px 8px; text-align: left; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .explain-table td { color: #9ca3af; padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,.04); }
+  .explain-table tr:last-child td { border-bottom: none; }
+  .explain-note { font-size: .72rem; color: #4b5563; line-height: 1.5; font-style: italic; }
 `;
 
 // ── Mode → badge info ─────────────────────────────────────────────────────
@@ -274,6 +283,17 @@ class CloudEMSClimateEpexCard extends HTMLElement {
           <div class="footer">
             <span class="footer-label">sensor.cloudems_climate_epex_status</span>
             <span class="footer-label">${devices.length} apparaat${devices.length !== 1 ? "en" : ""}</span>
+          </div>
+
+          <div class="explain-section">
+            <div class="explain-title">📊 Hoe werkt EPEX-sturing?</div>
+            <table class="explain-table">
+              <tr><th>Situatie</th><th>Warmtepomp</th><th>Airco</th></tr>
+              <tr><td>🟢 Goedkoop (&lt;85% gem.)</td><td>+offset (voorverwarmen)</td><td>−offset (voorkoelen)</td></tr>
+              <tr><td>⚪ Neutraal</td><td>geen offset</td><td>geen offset</td></tr>
+              <tr><td>🔴 Duur (&gt;120% gem.)</td><td>−offset (zuiniger)</td><td>+offset (minder koelen)</td></tr>
+            </table>
+            <p class="explain-note">De module leert wanneer jij verwarmt/koelt en past offsets alleen toe als het apparaat actief is. Basissetpoints worden per apparaat en per uur bijgehouden via EMA-leren.</p>
           </div>
         </div>
       </div>

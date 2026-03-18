@@ -64,9 +64,23 @@ class DeviceSchedule:
             return 0.0
         return self.slot_counts[weekday][hour] / max(1, self.total_obs // (7 * 24))
 
+    def overall_on_ratio(self) -> float:
+        """Gemiddelde fractie dat het apparaat aan is over alle slots."""
+        if self.total_obs == 0:
+            return 0.0
+        total_on = sum(self.slot_counts[wd][h] for wd in range(7) for h in range(24))
+        return total_on / max(1, self.total_obs)
+
+    def is_always_on(self) -> bool:
+        """True als apparaat >80% van de tijd aan is — nooit ongebruikelijk."""
+        return self.overall_on_ratio() >= 0.80
+
     def is_unusual(self, weekday: int, hour: int) -> bool:
         """True if device running in this slot is historically rare."""
         if self.total_obs < MIN_OBSERVATIONS * 7 * 24:
+            return False
+        # Altijd-aan apparaten (router, standby, hub) nooit als ongebruikelijk markeren
+        if self.is_always_on():
             return False
         return self.fraction(weekday, hour) < UNUSUAL_THRESHOLD
 
@@ -166,13 +180,27 @@ class NILMScheduleLearner:
             peak_wd, peak_h = sched.peak_slot()
             unusual = sched.is_unusual(wd, h) and is_on
 
+            # v4.6.433: exporteer het volledige 7×24 profiel zodat de dashboard-kaart
+            # een weekoverzicht kan tonen. Normaliseer per weekdag (max=1.0).
+            weekly_profile = []
+            for _wd in range(7):
+                day_counts = sched.slot_counts[_wd]
+                day_max = max(day_counts) if day_counts else 0
+                weekly_profile.append([
+                    round(c / day_max, 2) if day_max > 0 else 0.0
+                    for c in day_counts
+                ])
+
             enriched.append({
                 **dev,
-                "schedule_unusual": unusual,
+                "schedule_unusual":      unusual,
                 "schedule_peak_weekday": DAYS[peak_wd] if peak_wd is not None else None,
                 "schedule_peak_hour":    peak_h,
                 "schedule_observations": sched.total_obs,
                 "schedule_ready":        sched.total_obs >= MIN_OBSERVATIONS * 7 * 24,
+                "schedule_weekly_profile": weekly_profile,  # 7×24 genormaliseerd
+                "schedule_always_on":    sched.is_always_on(),
+                "schedule_on_ratio":     round(sched.overall_on_ratio(), 3),
             })
 
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:

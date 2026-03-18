@@ -16,12 +16,31 @@ _LOGGER = logging.getLogger(__name__)
 
 # Max entries in memory (24u bij 1 beslissing per minuut per categorie = 24*60*5 ≈ 7200)
 # We bewaren max 1000 entries — bij 5 categorieën elke 10s = ~2880/uur → we samplen
-MAX_ENTRIES        = 1000
-MAX_SENSOR_ENTRIES = 60    # Max entries in sensor attribuut (HA size limit)
+MAX_ENTRIES        = 2000
+MAX_SENSOR_ENTRIES = 200   # v4.6.409: meer entries → langere zichtbare history in kaart
 HISTORY_FILENAME   = "cloudems_decisions_history.json"
-# Dedupliceer: sla beslissing alleen op als actie/reden gewijzigd is (per categorie)
-DEDUPE_WINDOW_S    = 30    # Minimaal interval per categorie voor identieke beslissingen
-DEDUPE_WINDOW_PER_CAT: dict[str, float] = {}  # Override per categorie (leeg = allen 30s)
+# v4.6.409: grotere deduplicatievensters — ongewijzigde beslissingen (hold_off, idle)
+# worden minder frequent opgeslagen zodat de history niet volpropt raakt.
+# Actie-WIJZIGINGEN (turn_on → turn_off) worden altijd gelogd want action verschilt.
+DEDUPE_WINDOW_S    = 300   # 5 minuten standaard (was 30s)
+DEDUPE_WINDOW_PER_CAT: dict[str, float] = {
+    "boiler":           300,   # 5 min — hold_off/hold_on is snel stabiel
+    "battery":          300,
+    "batterij":         300,
+    "shutter":          600,   # 10 min — rolluiken veranderen weinig 's nachts
+    "rolluiken":        600,
+    "lamp_circulation": 300,
+    "ev":               120,   # 2 min — EV laadsessie wil vaker gelogd
+    "zonneplan":        300,
+    # PV beslissingen — clipping en dimmen zijn nu ook zichtbaar
+    "clipping":         300,   # 5 min — clipping-detectie is stabiel overdag
+    "solar_dim":         60,   # 1 min — dimmer-beslissingen vaker loggen
+    "solar_dimmer":      60,
+    "cheap_switch":     600,   # 10 min — schakelstatus verandert weinig
+    "cheap_switch_status": 600,
+    "peak_shaving":     120,   # 2 min — piekschaving is actief
+    "congestion":       300,
+}
 
 
 class DecisionsHistory:

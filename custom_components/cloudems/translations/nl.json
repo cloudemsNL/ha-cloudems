@@ -6,7 +6,21 @@
         "description": "**CloudEMS** optimaliseert je energieverbruik volledig lokaal — geen cloud, geen abonnement.\n\n**Wat CloudEMS voor je doet:**\n- ⚡ Laad je EV en boiler op het goedkoopste moment van de dag\n- ☀️ Benut zoveel mogelijk eigen zonnestroom (cruciaal na afbouw saldering 2027)\n- 📊 Bewaakt je kwartier-piek voor het capaciteitstarief\n- 🔌 Detecteert automatisch apparaten via NILM\n- 🚨 Waarschuwt bij netcongestie in jouw wijk\n\nDeze wizard duurt ongeveer 5 minuten. Je kunt hem later opnieuw doorlopen via Instellingen → Integraties → CloudEMS → Opnieuw instellen.\n\n![]({diagram_url})\n\n📖 [Documentatie]({support_url}) · ☕ [Steun CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
         "data": {
           "energy_prices_country": "Land (EPEX dynamische prijzen)",
-          "wizard_mode": "Installatiemodus"
+          "wizard_mode": "Installatiemodus",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "energy_prices_country": "Kies je land voor de juiste EPEX day-ahead stroomprijzen.",
@@ -38,7 +52,21 @@
         "title": "⚡ Netaansluiting",
         "description": "Kies het type aansluiting dat bij jouw situatie past.\n\n**1-fase (meeste woningen):** Standaard huisaansluiting. Maximale stroomsterkte is 1×16A (= ~3,7 kW) of 1×25A (= ~5,75 kW).\n\n**3-fase:** Zwaardere aansluiting, vaak bij woningen met een warmtepomp, grote laadpaal of zonnepanelen >10 kWp. Maximaal 3×16A (= ~11 kW) of hoger.\n\n💡 **Weet je het niet zeker?** Kijk op je meterkast — het aantal groepen en de hoofdzekering vertellen je het type aansluiting. Staat er één schakelaar voor het hele huis? Dan is het 1-fase.",
         "data": {
-          "phase_preset": "Aansluiting & zekeringswaarde"
+          "phase_preset": "Aansluiting & zekeringswaarde",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "phase_preset": "Bijv. 3×25A = 3-fase met 25 A per fase. Kies 'Aangepast' voor handmatige invoer."
@@ -57,7 +85,21 @@
           "phase_count": "Aantal fasen",
           "max_current_l1": "Max. stroom L1 (A)",
           "max_current_l2": "Max. stroom L2 (A)",
-          "max_current_l3": "Max. stroom L3 (A)"
+          "max_current_l3": "Max. stroom L3 (A)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "max_current_l1": "Maximale netbelasting op fase L1 — typisch je zekeringswaarde (bijv. 25 A).",
@@ -76,7 +118,21 @@
           "mains_voltage": "Fallback-netspanning (V)",
           "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
           "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5"
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "use_separate_import_export": "⚙️ Gebruik aparte sensoren als je meter import en export afzonderlijk meet (bijv. DSMR5)",
@@ -117,7 +173,21 @@
           "power_sensor_l3": "L3 vermogenssensor (W)",
           "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
           "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5"
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "phase_sensors_L1": "─────────── Stroomsensoren (A) ───────────",
@@ -153,7 +223,21 @@
           "ev_charger_entity": "EV Laadpaal setpoint (number entiteit)",
           "negative_price_threshold": "Prijsdrempel voor afschaling (EUR/kWh)",
           "gas_sensor": "Gasverbruikmeter sensor (optioneel)",
-          "gas_price_fixed": "Gasprijs per m³ (fallback)"
+          "gas_price_fixed": "Gasprijs per m³ (fallback)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "solar_sensor": "☀️ Totaal PV-vermogen sensor (bij meerdere omvormers de som-sensor)",
@@ -168,7 +252,21 @@
         "title": "☀️ Hoeveel omvormers?",
         "description": "Kies het aantal PV-omvormers in jouw installatie. Kies **0** om omvormerbeheer over te slaan.\n\nCloudEMS leert azimut, hellingshoek en piekvermogen automatisch.\n\n📖 [Multi-omvormer docs]({docs_url})",
         "data": {
-          "inverter_count": "Aantal omvormers (0–9)"
+          "inverter_count": "Aantal omvormers (0–9)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "docs_url": {
@@ -187,7 +285,21 @@
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
           "inv_azimuth": "Azimut (°) — leeg laten voor automatisch leren",
           "inv_tilt": "Hellingshoek (°) — leeg laten voor automatisch leren",
-          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren"
+          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "inv_sensor": "🔌 Koppel de vermogenssensor van deze omvormer (W of kW)",
@@ -231,7 +343,21 @@
           "congestion_enabled": "Netcongestiebeheer inschakelen",
           "battery_degradation_enabled": "Batterijdegradatie bijhouden",
           "price_alert_high_eur_kwh": "Prijsalert hoog tarief (€/kWh)",
-          "nilm_min_confidence": "NILM minimale betrouwbaarheid (%)"
+          "nilm_min_confidence": "NILM minimale betrouwbaarheid (%)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "price_alert_high_eur_kwh": "Stuur een melding als de EPEX-prijs hoger is dan deze waarde. Standaard 0,30 €/kWh.",
@@ -248,7 +374,21 @@
         "title": "📊 Piekafschaving instellen",
         "data": {
           "peak_shaving_limit_w": "Piekvermogensgrens (W)",
-          "peak_shaving_assets": "Afschakelbare verbruikers"
+          "peak_shaving_assets": "Afschakelbare verbruikers",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "description": "Configureer de piekbelastinglimiet en welke verbruikers CloudEMS mag uitschakelen om eronder te blijven.",
         "data_description": {
@@ -262,7 +402,21 @@
         "data": {
           "ai_provider": "AI-provider voor NILM",
           "cloud_api_key": "API-sleutel (vereist voor CloudEMS, OpenAI en Anthropic)",
-          "nilm_min_confidence": "Minimale betrouwbaarheid voor apparaatdetectie (0,30–0,99)"
+          "nilm_min_confidence": "Minimale betrouwbaarheid voor apparaatdetectie (0,30–0,99)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "premium_url": {
@@ -281,7 +435,21 @@
         "data": {
           "ollama_host": "Ollama host (bijv. localhost of 192.168.1.x)",
           "ollama_port": "Ollama poort (standaard 11434)",
-          "ollama_model": "Ollama model (bijv. llama3, mistral, phi3)"
+          "ollama_model": "Ollama model (bijv. llama3, mistral, phi3)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "description": "Configureer de Ollama-server die CloudEMS gebruikt voor lokale AI-inferentie.",
         "data_description": {
@@ -298,14 +466,42 @@
           "influxdb_token": "InfluxDB API Token",
           "influxdb_org": "InfluxDB Organisatie",
           "influxdb_bucket": "InfluxDB Bucket (standaard: cloudems)",
-          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)"
+          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "p1_config": {
         "title": "📡 P1 slimme meter",
         "description": "{description}\n\n![]({diagram_url})",
         "data": {
-          "p1_host": "IP-adres P1-gateway (optioneel)"
+          "p1_host": "IP-adres P1-gateway (optioneel)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "p1_host": "Vul het IP-adres in van je P1-gateway (HomeWizard Energy, SLIMMELEZER+, P1ib, …). Laat leeg als je al een DSMR- of HomeWizard-integratie gebruikt — CloudEMS pikt die data automatisch op."
@@ -315,7 +511,21 @@
         "title": "🔋 Batterijen — Aantal",
         "description": "Hoeveel batterijsystemen wil je koppelen?\n\nElke batterij wordt apart geconfigureerd met vermogenssensor, SoC en capaciteit.",
         "data": {
-          "battery_count": "Aantal batterijen"
+          "battery_count": "Aantal batterijen",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "battery_detail": {
@@ -329,7 +539,21 @@
           "bat_max_discharge_w": "Max. ontlaadvermogen (W) — 0 = zelf leren",
           "bat_charge_entity": "Laadbesturing entiteit (optioneel)",
           "bat_discharge_entity": "Ontlaadbesturing entiteit (optioneel)",
-          "bat_label": "Naam (bijv. 'Thuisbatterij')"
+          "bat_label": "Naam (bijv. 'Thuisbatterij')",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "battery_num": {
@@ -342,7 +566,21 @@
         "title": "🪟 Rolluiken — Aantal",
         "description": "Hoeveel rolluiken wil je koppelen?\n\n{overkiz_found}",
         "data": {
-          "shutter_count": "Aantal rolluiken"
+          "shutter_count": "Aantal rolluiken",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "shutter_detail": {
@@ -355,7 +593,21 @@
           "shutter_auto_thermal": "Automatisch sluiten bij oververhitting",
           "shutter_auto_solar_gain": "Automatisch openen voor zonnewarmte",
           "shutter_auto_overheat": "Oververhitting voorkomen (prioriteit)",
-          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)"
+          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "prices": {
@@ -366,7 +618,21 @@
           "price_include_tax": "Energiebelasting meenemen",
           "price_include_btw": "BTW meenemen (21%)",
           "selected_supplier": "Leverancier (voor standaard marge)",
-          "supplier_markup": "Handmatige marge (€/kWh)"
+          "supplier_markup": "Handmatige marge (€/kWh)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "gas_opts": {
@@ -379,7 +645,21 @@
           "boiler_efficiency": "Ketelrendement (0.5–1.0)",
           "heat_pump_cop": "Warmtepomp COP (handmatig, valt terug op geleerde waarde)",
           "heat_pump_power_entity": "Warmtepomp elektrisch vermogen sensor (W)",
-          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor (W, optioneel)"
+          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor (W, optioneel)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "mail": {
@@ -396,14 +676,42 @@
           "mail_to": "Ontvanger(s) — komma-gescheiden",
           "mail_monthly_report": "Maandelijks PDF-rapport versturen",
           "mail_weekly_report": "Wekelijkse samenvatting versturen",
-          "mail_weekly_summary": "Wekelijkse samenvatting versturen"
+          "mail_weekly_summary": "Wekelijkse samenvatting versturen",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate": {
         "title": "🌡️ Klimaat & EPEX-sturing",
         "description": "{info}",
         "data": {
-          "climate_mode": "Klimaatmodus"
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_boiler": {
@@ -414,14 +722,42 @@
           "cv_min_zones": "Min. actieve zones voor CV aan",
           "cv_min_on_min": "Min. aan-tijd (min)",
           "cv_min_off_min": "Min. uit-tijd (min)",
-          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)"
+          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_zones": {
         "title": "🏠 Zone Control — Ruimtes",
         "description": "{discovery}",
         "data": {
-          "climate_zones_enabled": "Actieve ruimtes"
+          "climate_zones_enabled": "Actieve ruimtes",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_groups": {
@@ -434,7 +770,21 @@
           "boiler_group_count": "Aantal boilers in deze groep",
           "group_name": "Groepsnaam",
           "group_mode": "Bedrijfsmodus",
-          "unit_count": "Aantal boilers in groep"
+          "unit_count": "Aantal boilers in groep",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_unit": {
@@ -479,7 +829,23 @@
           "power_w": "Vermogen (W)",
           "priority": "Prioriteit (1=hoog)",
           "min_on_minutes": "Min. aan-tijd (min)",
-          "min_off_minutes": "Min. uit-tijd (min)"
+          "min_off_minutes": "Min. uit-tijd (min)",
+          "tank_liters": "Tankinhoud (L) — 0 = automatisch leren",
+          "cheap_ramp_max_c": "Max. setpoint bij goedkope stroom / ramp (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "setpoint_c": "Normaal setpoint. Bij PV-surplus wordt automatisch het maximale setpoint gebruikt om zoveel mogelijk zonne-energie op te slaan.",
@@ -492,7 +858,21 @@
         "description": "Stel e-mail in om automatisch maandelijkse of wekelijkse energierapporten als PDF te ontvangen.\n\nLaat leeg om over te slaan.",
         "data": {
           "github_log_token": "GitHub Personal Access Token (optioneel)",
-          "notification_service": "HA notify service naam (bijv. mobile_app_naam)"
+          "notification_service": "HA notify service naam (bijv. mobile_app_naam)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "github_log_token": "Token voor automatisch uploaden van geanonimiseerde diagnoserapporten naar GitHub. Maak aan op github.com/settings/tokens met public_repo scope.",
@@ -507,7 +887,21 @@
           "import_power_sensor": "Import-sensor (W afname)",
           "export_power_sensor": "Export-sensor (W teruglevering)",
           "solar_sensor": "PV-vermogen sensor (W)",
-          "battery_sensor": "Batterij-vermogen sensor (W)"
+          "battery_sensor": "Batterij-vermogen sensor (W)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "grid_sensor": "Eén sensor met nettovermogen: positief = afname, negatief = teruglevering.",
@@ -539,7 +933,21 @@
           "zonneplan_house_sensor": "Huisverbruik sensor (anti-rondpomp)",
           "zonneplan_min_house_load_w": "Min. huisverbruik voor ontladen (W)",
           "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)",
-          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep"
+          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
@@ -556,7 +964,21 @@
         "title": "📡 Meterbron",
         "description": "Hoe leest CloudEMS de slimme-meterdata?\n\n{detected}\n\n![]({diagram_url})",
         "data": {
-          "dsmr_source": "Meterbron"
+          "dsmr_source": "Meterbron",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "dsmr_source": "Kies hoe CloudEMS de netmeterdata ophaalt. Gebruik de DSMR/HomeWizard-integratie als je die al hebt ingesteld in HA, anders selecteer je handmatig sensoren of stel je een directe verbinding in."
@@ -566,7 +988,21 @@
         "title": "⚡ Prijsbron — directe leverancier koppeling",
         "description": "{info}",
         "data": {
-          "price_provider": "Prijsbron"
+          "price_provider": "Prijsbron",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "price_provider_credentials": {
@@ -576,7 +1012,21 @@
           "access_token": "API Token",
           "api_key": "API-sleutel",
           "username": "E-mailadres",
-          "password": "Wachtwoord"
+          "password": "Wachtwoord",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_unit_edit": {
@@ -596,21 +1046,63 @@
           "bu_dimmer_off_pct": "Dimmer UIT (%)",
           "bu_boiler_type": "Type boiler",
           "bu_brand": "Merk / type",
-          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)"
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_brand": {
         "title": "🏷️ Merk / type boiler {idx} van {total}",
         "description": "Selecteer het merk van de boiler. CloudEMS vult automatisch de juiste sturingmodus, setpoints en veiligheidslimieten in.",
         "data": {
-          "brand": "Merk / type"
+          "brand": "Merk / type",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_epex_count": {
         "title": "❄️ Airco / WP EPEX — Aantal apparaten",
         "description": "Huidige apparaten: {current}\n\nHoeveel airco's of warmtepompen wil je configureren?",
         "data": {
-          "ce_count": "Aantal apparaten"
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_epex_device": {
@@ -621,8 +1113,258 @@
           "ce_label": "Naam / label",
           "ce_type": "Type apparaat",
           "ce_power": "Vermogens­sensor (optioneel)",
-          "ce_offset": "Max. temperatuuroffset (°C)"
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
+      },
+      "generator": {
+        "title": "Generator & noodstroom",
+        "data": {
+          "generator_enabled": "Generator / noodstroom inschakelen",
+          "generator_power_sensor": "Vermogenssensor generator (optioneel)",
+          "generator_status_entity": "ATS/MTS status entiteit (optioneel)",
+          "generator_autostart_switch": "Auto-start schakelaar (optioneel)",
+          "generator_max_power_w": "Max. generatorvermogen (W)",
+          "generator_type": "Brandstoftype",
+          "generator_fuel_cost_eur_kwh": "Brandstofkosten (€/kWh)",
+          "ats_type": "Type schakelaar (ATS/MTS)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "generator_opts": {
+        "title": "Generator & noodstroom",
+        "data": {
+          "generator_enabled": "Generator / noodstroom inschakelen",
+          "generator_power_sensor": "Vermogenssensor generator (optioneel)",
+          "generator_status_entity": "ATS/MTS status entiteit (optioneel)",
+          "generator_autostart_switch": "Auto-start schakelaar (optioneel)",
+          "generator_max_power_w": "Max. generatorvermogen (W)",
+          "generator_type": "Brandstoftype",
+          "generator_fuel_cost_eur_kwh": "Brandstofkosten (€/kWh)",
+          "ats_type": "Type schakelaar (ATS/MTS)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "init": {
+        "title": "CloudEMS — Configureren",
+        "data": {
+          "category": "Categorie",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_energie": {
+        "title": "⚡ Energie & Grid",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_opwekking": {
+        "title": "☀️ Opwekking & Opslag",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_verbruik": {
+        "title": "🏠 Verbruik & Comfort",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_automatisering": {
+        "title": "🤖 Automatisering & NILM",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_systeem": {
+        "title": "🔧 Systeem & Communicatie",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_mobiliteit": {
+        "title": "Mobiliteit & Laden"
+      },
+      "ebike_opts": {
+        "title": "E-bike & Micro-mobiliteit",
+        "data": {
+          "ebike_entity_1": "Vermogenssensor voertuig 1 (optioneel)",
+          "ebike_label_1": "Label voertuig 1 (bijv. 'E-bike Joan')",
+          "ebike_entity_2": "Vermogenssensor voertuig 2 (optioneel)",
+          "ebike_label_2": "Label voertuig 2 (bijv. 'Scooter')"
+        }
+      },
+      "lamp_auto_opts": {
+        "title": "Slimme Lamp Automatisering",
+        "data": {
+          "lamp_auto_enabled": "Slimme lamp automatisering inschakelen",
+          "lamp_auto_lamps_raw": "Lamp configuratie (JSON)"
+        }
+      },
+      "lamp_automation_opts": {
+        "title": "🏠 Slimme Verlichting",
+        "data": {
+          "la_enabled": "Slimme verlichting inschakelen",
+          "la_forgotten_minutes": "Vergeten lichten: minuten voor auto-uit",
+          "back_to_menu": "← Terug naar menu",
+          "la_area_filter": "Filter op ruimte"
+        }
+      },
+      "lamp_automation_detail_opts": {
+        "title": "💡 Lampen per ruimte instellen",
+        "data": {
+          "back_to_menu": "← Terug"
+        }
+      },
+      "ups_count_opts": {
+        "title": "🔋 UPS Systemen",
+        "data": {
+          "ups_count": "Aantal UPS systemen",
+          "ups_label": "Naam / omschrijving",
+          "ups_brand": "Merk / protocol",
+          "ups_status_entity": "Status entiteit",
+          "ups_battery_entity": "Batterij % sensor",
+          "ups_runtime_entity": "Resterende runtime sensor",
+          "ups_power_entity": "Vermogen sensor (optioneel)"
+        }
+      },
+      "ups_detail_opts": {
+        "title": "🔋 UPS Configureren",
+        "data": {
+          "ups_count": "Aantal UPS systemen",
+          "ups_label": "Naam / omschrijving",
+          "ups_brand": "Merk / protocol",
+          "ups_status_entity": "Status entiteit",
+          "ups_battery_entity": "Batterij % sensor",
+          "ups_runtime_entity": "Resterende runtime sensor",
+          "ups_power_entity": "Vermogen sensor (optioneel)"
+        }
+      },
+      "noodstroom": {
+        "title": "⚡ Noodstroom & Backup",
+        "data": {}
       }
     },
     "abort": {
@@ -638,10 +1380,23 @@
   "options": {
     "step": {
       "init": {
-        "title": "⚙️ CloudEMS — Configureren",
-        "description": "Kies de sectie die je wilt aanpassen.",
+        "title": "CloudEMS — Configureren",
         "data": {
-          "section": "Instellingssectie"
+          "category": "Categorie",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "sensors": {
@@ -655,7 +1410,21 @@
           "phase_count": "Aantal fasen",
           "max_current_l1": "Max. stroom L1 (A)",
           "max_current_l2": "Max. stroom L2 (A)",
-          "max_current_l3": "Max. stroom L3 (A)"
+          "max_current_l3": "Max. stroom L3 (A)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "description": "Netaansluiting, netspanning en faseinstellingen."
       },
@@ -674,7 +1443,21 @@
           "power_sensor_l3": "L3 vermogenssensor",
           "power_sensor_l1_export": "DSMR5 teruglevering L1 (W) — optioneel",
           "power_sensor_l2_export": "DSMR5 teruglevering L2 (W) — optioneel",
-          "power_sensor_l3_export": "DSMR5 teruglevering L3 (W) — optioneel"
+          "power_sensor_l3_export": "DSMR5 teruglevering L3 (W) — optioneel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "solar_ev_opts": {
@@ -689,7 +1472,21 @@
           "gas_price_fixed": "Fixed gas price (€/m³) — used when no sensor",
           "boiler_efficiency": "Electric boiler efficiency (0.5–1.0)",
           "heat_pump_cop": "Heat pump COP (1.0–8.0)",
-          "enable_solar_dimmer": "Zonnestroom curtailment bij negatieve prijs"
+          "enable_solar_dimmer": "Zonnestroom curtailment bij negatieve prijs",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "description": "Zonnepaneel sensor, EV laadpaal en zonnebegrenzing."
       },
@@ -707,7 +1504,21 @@
           "battery_scheduler_enabled": "Batterijplanning op basis van prijzen",
           "congestion_enabled": "Netcongestiebeheer",
           "battery_degradation_enabled": "Batterijdegradatie bijhouden",
-          "battery_season_override": "Seizoen override (batterijstrategie)"
+          "battery_season_override": "Seizoen override (batterijstrategie)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "ai_opts": {
@@ -719,7 +1530,21 @@
           "ollama_host": "Ollama host",
           "ollama_port": "Ollama poort",
           "ollama_model": "Ollama model",
-          "nilm_min_confidence": "Minimale betrouwbaarheidsdrempel (0,30–0,99)"
+          "nilm_min_confidence": "Minimale betrouwbaarheidsdrempel (0,30–0,99)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "nilm_min_confidence": "Detecties onder deze betrouwbaarheidsdrempel worden genegeerd. 0.65 is een goede standaardwaarde."
@@ -742,7 +1567,21 @@
           "influxdb_token": "InfluxDB API Token",
           "influxdb_org": "InfluxDB Organisatie",
           "influxdb_bucket": "InfluxDB Bucket (standaard: cloudems)",
-          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)"
+          "cloud_cover_sensor": "Bewolkingssensor (%, optioneel — verbetert PV forecast)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "congestion_threshold_w": "Importvermogen waarboven congestie wordt gemeld. Typisch gelijk aan het capaciteitstarief limiet.",
@@ -761,7 +1600,21 @@
           "inv_min_pct": "Minimaal vermogen bij afschaling (%)",
           "inv_azimuth": "Azimut (°) — leeg laten voor automatisch leren",
           "inv_tilt": "Hellingshoek (°) — leeg laten voor automatisch leren",
-          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren"
+          "inv_rated_power": "Nominaal piekvermogen (Wp) — 0 = zelf leren",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "azimuth_tip": {
@@ -782,7 +1635,21 @@
         "title": "🔆 PV Omvormers",
         "description": "Hoeveel omvormers wil je configureren? Bestaande omvormers: {inverter_names}",
         "data": {
-          "inverter_count": "Aantal omvormers (0–9)"
+          "inverter_count": "Aantal omvormers (0–9)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "inverter_names": {
@@ -795,7 +1662,21 @@
         "title": "🔋 Stap 1: Hoeveel batterijen?",
         "description": "Huidig aantal batterijen: **{current_count}**. {battery_names}\n\nKies in de volgende stap per batterij het type: ⚡ **Zonneplan Nexus** (automatisch beheerd) of 🔧 **Handmatig** (eigen SOC-sensor + schakelaar).",
         "data": {
-          "battery_count": "Aantal batterijen"
+          "battery_count": "Aantal batterijen",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "current_count": {
@@ -819,7 +1700,21 @@
           "bat_max_discharge_w": "Max. ontlaadvermogen (W) — 0 = zelf leren",
           "bat_charge_entity": "Laadbesturing entiteit (optioneel)",
           "bat_discharge_entity": "Ontlaadbesturing entiteit (optioneel)",
-          "bat_label": "Naam (bijv. 'Thuisbatterij')"
+          "bat_label": "Naam (bijv. 'Thuisbatterij')",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "battery_num": {
@@ -832,14 +1727,42 @@
         "title": "🌡️ Klimaat & EPEX-sturing",
         "description": "{info}",
         "data": {
-          "climate_mode": "Klimaatmodus"
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "shutter_count_opts": {
         "title": "🪟 Rolluiken — Aantal",
         "description": "Hoeveel rolluiken wil je koppelen?\n\n{overkiz_found}",
         "data": {
-          "shutter_count": "Aantal rolluiken"
+          "shutter_count": "Aantal rolluiken",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "shutter_detail_opts": {
@@ -856,7 +1779,21 @@
           "shutter_night_close": "Rolluik sluiten om (bijv. 23:00)",
           "shutter_morning_open": "Vroegste openingstijd (bijv. 07:30)",
           "shutter_default_setpoint": "Standaard setpoint °C (geen klimaat → 20)",
-          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)"
+          "shutter_schedule_learning": "Tijdschema leren (open/sluit tijden leren van gebruik)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "shutter_night_close": "Tijdstip waarop het rolluik 's avonds sluit.",
@@ -868,7 +1805,21 @@
         "title": "💶 Prijzen — Land",
         "description": "Kies je land. De beschikbare leveranciers worden hierop aangepast.",
         "data": {
-          "energy_prices_country": "Land"
+          "energy_prices_country": "Land",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "gas_opts": {
@@ -880,13 +1831,42 @@
           "boiler_efficiency": "Ketelrendement",
           "heat_pump_cop": "Warmtepomp COP (handmatig)",
           "heat_pump_power_entity": "Warmtepomp vermogen sensor",
-          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor"
+          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "nilm_devices_opts": {
         "title": "🏷️ NILM Apparaten beheren",
         "description": "Hieronder staan alle gedetecteerde NILM-apparaten.\n\n**Huidig overzicht:**\n```\n{devices_overview}\n```\n\n**Hernoemen** — gebruik de service `{rename_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `name`: nieuwe weergavenaam (max. 60 tekens)\n- `device_type`: optioneel het type corrigeren\n\n**Verbergen/tonen** — gebruik de service `{hide_service}`:\n- `device_id`: het ID tussen de haakjes hierboven\n- `hidden`: `true` om te verbergen, `false` om te tonen\n\n👉 [Open Ontwikkeltools → Services]({devtools_url})",
-        "data": {},
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        },
         "placeholders": {
           "devices_overview": {
             "description": "devices_overview",
@@ -915,7 +1895,21 @@
           "pool_temp_entity": "Watertemperatuursensor",
           "pool_uv_entity": "UV-lamp schakelaar",
           "pool_robot_entity": "Bodemreiniger (robot/stofzuiger)",
-          "pool_heat_setpoint": "Gewenste watertemperatuur (°C)"
+          "pool_heat_setpoint": "Gewenste watertemperatuur (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "pool_filter_entity": "De schakelaar die de filtreerpomp aanstuurt.",
@@ -936,7 +1930,21 @@
           "lc_use_sun_entity": "Nacht bepalen via zon (aanbevolen)",
           "lc_min_confidence": "Minimale zekerheid afwezigheid",
           "lc_night_start_h": "Nacht begint (uur, fallback)",
-          "lc_night_end_h": "Nacht eindigt (uur, fallback)"
+          "lc_night_end_h": "Nacht eindigt (uur, fallback)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "lc_light_entities": "Selecteer alle lampen die mogen deelnemen aan de circulatie.",
@@ -968,14 +1976,42 @@
           "slot4_entity": "Slot 4 — schakelaar",
           "slot4_earliest": "Slot 4 — vroegste uur",
           "slot4_latest": "Slot 4 — laatste uur",
-          "slot4_window": "Slot 4 — venstergrootte"
+          "slot4_window": "Slot 4 — venstergrootte",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "tab_visibility_opts": {
         "title": "👁️ Tabbladen Zichtbaarheid",
         "description": "Selecteer welke tabbladen je wil **verbergen** uit de navigatiebalk. Verborgen tabbladen zijn nog steeds bereikbaar via directe URL maar verdwijnen uit de tabbladenrij. CloudEMS past dit automatisch toe in het Lovelace dashboard. Het tabblad Overzicht is altijd zichtbaar.",
         "data": {
-          "hidden_tabs": "Verborgen tabbladen"
+          "hidden_tabs": "Verborgen tabbladen",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "mail_opts": {
@@ -992,7 +2028,21 @@
           "mail_to": "Ontvanger(s), komma-gescheiden",
           "mail_monthly_report": "Maandelijks PDF-rapport versturen",
           "mail_weekly_report": "Wekelijkse samenvatting versturen",
-          "mail_weekly_summary": "Wekelijkse samenvatting"
+          "mail_weekly_summary": "Wekelijkse samenvatting",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "info": {
@@ -1006,7 +2056,21 @@
         "description": "**Geconfigureerde groepen:**\n\n{groups_info}\n\n💡 {tip}",
         "data": {
           "bg_action": "Kies een actie",
-          "boiler_groups_enabled": "Warm water cascade actief"
+          "boiler_groups_enabled": "Warm water cascade actief",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "placeholders": {
           "groups_info": {
@@ -1023,7 +2087,21 @@
         "data": {
           "bg_name": "Naam van de groep",
           "bg_mode": "Cascade modus",
-          "bg_unit_count": "Aantal boilers in deze groep"
+          "bg_unit_count": "Aantal boilers in deze groep",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_group_edit": {
@@ -1032,7 +2110,21 @@
         "data": {
           "bg_name": "Naam van de groep",
           "bg_mode": "Cascade modus",
-          "bge_action": "Actie"
+          "bge_action": "Actie",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_group_unit": {
@@ -1053,7 +2145,21 @@
           "bu_surplus_setpoint": "Max. setpoint bij PV-surplus / accu vol (°C)",
           "bu_boiler_type": "Type boiler",
           "bu_brand": "Merk / model",
-          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)"
+          "bu_max_setpoint_boost": "Absolute bovengrens setpoint (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "managed_battery_opts": {
@@ -1070,7 +2176,21 @@
           "zonneplan_house_sensor": "Huisverbruik sensor (anti-rondpomp)",
           "zonneplan_min_house_load_w": "Min. huisverbruik voor ontladen (W)",
           "zonneplan_soc_reserve_high": "SoC-reserve bij meerdere HIGH-uren (%)",
-          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep"
+          "zonneplan_auto_forecast": "Automatisch sturen op tariefgroep",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "zonneplan_enabled": "{zonneplan_description}",
@@ -1085,7 +2205,21 @@
         "title": "🔋 Batterij {battery_num} van {total} — Welk type?",
         "description": "Kies hoe CloudEMS deze batterij aanstuurt.\n\n⚡ **Beheerde provider** (Zonneplan, Tibber…) — CloudEMS communiceert via de officiële integratie. Geen losse sensoren nodig.\n\n🔧 **Handmatig** — Je koppelt zelf een SOC-sensor en laad/ontlaad-schakelaar.\n\n{detected_hint}",
         "data": {
-          "bat_type": "Type batterij"
+          "bat_type": "Type batterij",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "bat_type": "Gevonden providers: {detected_providers}"
@@ -1107,7 +2241,21 @@
           "sd_grace_s": "Wachttijd voor uitschakelen (s)",
           "sd_notify": "Melding sturen bij uitgesteld starten",
           "sd_wait_mode": "Wachtmodus",
-          "sd_max_wait_h": "Maximale wachttijd (0 = onbeperkt)"
+          "sd_max_wait_h": "Maximale wachttijd (0 = onbeperkt)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "sd_enabled": "Zet aan als dit apparaat (bijv. vaatwasser, wasmachine) handmatig wordt gestart en je wilt dat CloudEMS wacht op goedkope stroom.",
@@ -1121,7 +2269,21 @@
         "title": "⏳ Slimme Uitstelmodus",
         "description": "![]({diagram_url})\n\nDe **Slimme Uitstelmodus** is de slimme broer van de goedkope-uren schakelaar.\n\n**Verschil:** bij de goedkope-uren schakelaar bepaalt CloudEMS *wanneer* het apparaat start. Bij de slimme uitstelmodus *start jij zelf* het apparaat (bijv. je drukt op de wasmachine), maar als de stroom op dat moment te duur is, schakelt CloudEMS het apparaat automatisch **UIT** en start het opnieuw zodra het goedkoopste blok aanbreekt.\n\n---\n\n**Typische apparaten:** 🧺 wasmachine · 🍽️ vaatwasser · 🌀 wasdroger\n\n---\n\nJe hebt momenteel **{smart_delay_count}** slimme uitstelmodus-schakelaar(s) ingesteld.\n\nKies hoeveel je wilt instellen *(0 = overslaan, alleen goedkope-uren schakelaars opslaan)*.",
         "data": {
-          "smart_delay_count": "Aantal apparaten voor slimme uitstel"
+          "smart_delay_count": "Aantal apparaten voor slimme uitstel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "smart_delay_detail_opts": {
@@ -1137,14 +2299,42 @@
           "earliest_hour": "Vroegste uur (0–23)",
           "latest_hour": "Laatste uur (0–23)",
           "grace_s": "Genade-periode (seconden)",
-          "notify": "Stuur melding bij uitstel"
+          "notify": "Stuur melding bij uitstel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "prices_provider_opts": {
         "title": "💶 Prijzen — Leverancier",
         "description": "{info}",
         "data": {
-          "price_provider": "Prijsbron / Leverancier"
+          "price_provider": "Prijsbron / Leverancier",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "prices_epex_opts": {
@@ -1157,7 +2347,21 @@
           "price_include_tax": "Inclusief energiebelasting (EB)",
           "price_include_btw": "Inclusief BTW",
           "selected_supplier": "Energieleverancier (voor opslag)",
-          "supplier_markup": "Eigen opslag (€/kWh) — als Aangepaste markup is geselecteerd"
+          "supplier_markup": "Eigen opslag (€/kWh) — als Aangepaste markup is geselecteerd",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "price_provider_creds_opts": {
@@ -1167,14 +2371,42 @@
           "access_token": "API Token",
           "api_key": "API-sleutel",
           "username": "E-mailadres",
-          "password": "Wachtwoord"
+          "password": "Wachtwoord",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_group_brand": {
         "title": "🏷️ Merk / type — Boiler {unit_num} van {total} ({group_name})",
         "description": "Selecteer het merk van de boiler. CloudEMS vult sturingmodus, setpoints en limieten automatisch in.",
         "data": {
-          "brand": "Merk / type"
+          "brand": "Merk / type",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "boiler_unit_edit": {
@@ -1195,7 +2427,21 @@
           "bu_preset_on": "Preset naam AAN (bijv. BOOST)",
           "bu_preset_off": "Preset naam UIT (bijv. GREEN)",
           "bu_dimmer_on_pct": "Dimmer aan (%)",
-          "bu_dimmer_off_pct": "Dimmer uit (%)"
+          "bu_dimmer_off_pct": "Dimmer uit (%)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
           "bu_max_setpoint_entity": "Optioneel: number-entity die het hardware-maximum instelt vóór elke temperatuurwijziging (vereist voor Ariston Lydos Hybrid)."
@@ -1205,14 +2451,42 @@
         "title": "🏠 Zone Control — Ruimtes",
         "description": "{discovery}",
         "data": {
-          "climate_zones_enabled": "Actieve ruimtes"
+          "climate_zones_enabled": "Actieve ruimtes",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_epex_count_opts": {
         "title": "❄️ Airco / WP EPEX — Aantal apparaten",
         "description": "Huidige apparaten: {current}",
         "data": {
-          "ce_count": "Aantal apparaten"
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
       },
       "climate_epex_device_opts": {
@@ -1223,8 +2497,238 @@
           "ce_label": "Naam / label",
           "ce_type": "Type apparaat",
           "ce_power": "Vermogens­sensor (optioneel)",
-          "ce_offset": "Max. temperatuuroffset (°C)"
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
         }
+      },
+      "generator": {
+        "title": "Generator & noodstroom",
+        "data": {
+          "generator_enabled": "Generator / noodstroom inschakelen",
+          "generator_power_sensor": "Vermogenssensor generator (optioneel)",
+          "generator_status_entity": "ATS/MTS status entiteit (optioneel)",
+          "generator_autostart_switch": "Auto-start schakelaar (optioneel)",
+          "generator_max_power_w": "Max. generatorvermogen (W)",
+          "generator_type": "Brandstoftype",
+          "generator_fuel_cost_eur_kwh": "Brandstofkosten (€/kWh)",
+          "ats_type": "Type schakelaar (ATS/MTS)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "generator_opts": {
+        "title": "Generator & noodstroom",
+        "data": {
+          "generator_enabled": "Generator / noodstroom inschakelen",
+          "generator_power_sensor": "Vermogenssensor generator (optioneel)",
+          "generator_status_entity": "ATS/MTS status entiteit (optioneel)",
+          "generator_autostart_switch": "Auto-start schakelaar (optioneel)",
+          "generator_max_power_w": "Max. generatorvermogen (W)",
+          "generator_type": "Brandstoftype",
+          "generator_fuel_cost_eur_kwh": "Brandstofkosten (€/kWh)",
+          "ats_type": "Type schakelaar (ATS/MTS)",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_energie": {
+        "title": "⚡ Energie & Grid",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_opwekking": {
+        "title": "☀️ Opwekking & Opslag",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_verbruik": {
+        "title": "🏠 Verbruik & Comfort",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_automatisering": {
+        "title": "🤖 Automatisering & NILM",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_systeem": {
+        "title": "🔧 Systeem & Communicatie",
+        "data": {
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu",
+          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
+          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
+          "budget_enabled": "Energiebudget inschakelen",
+          "budget_gas_m3_month": "Maandbudget gas (m³)",
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_include": "Apparaten opnemen",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
+          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
+          "pool_filter_power_entity": "Vermogenssensor filterpomp",
+          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+        }
+      },
+      "menu_mobiliteit": {
+        "title": "Mobiliteit & Laden"
+      },
+      "ebike_opts": {
+        "title": "E-bike & Micro-mobiliteit",
+        "data": {
+          "ebike_entity_1": "Vermogenssensor voertuig 1 (optioneel)",
+          "ebike_label_1": "Label voertuig 1 (bijv. 'E-bike Joan')",
+          "ebike_entity_2": "Vermogenssensor voertuig 2 (optioneel)",
+          "ebike_label_2": "Label voertuig 2 (bijv. 'Scooter')"
+        }
+      },
+      "lamp_auto_opts": {
+        "title": "Slimme Lamp Automatisering",
+        "data": {
+          "lamp_auto_enabled": "Slimme lamp automatisering inschakelen",
+          "lamp_auto_lamps_raw": "Lamp configuratie (JSON)"
+        }
+      },
+      "lamp_automation_opts": {
+        "title": "🏠 Slimme Verlichting",
+        "data": {
+          "la_enabled": "Slimme verlichting inschakelen",
+          "la_forgotten_minutes": "Vergeten lichten: minuten voor auto-uit",
+          "back_to_menu": "← Terug naar menu",
+          "la_area_filter": "Filter op ruimte"
+        }
+      },
+      "lamp_automation_detail_opts": {
+        "title": "💡 Lampen per ruimte instellen",
+        "data": {
+          "back_to_menu": "← Terug"
+        }
+      },
+      "ups_count_opts": {
+        "title": "🔋 UPS Systemen",
+        "data": {
+          "ups_count": "Aantal UPS systemen",
+          "ups_label": "Naam / omschrijving",
+          "ups_brand": "Merk / protocol",
+          "ups_status_entity": "Status entiteit",
+          "ups_battery_entity": "Batterij % sensor",
+          "ups_runtime_entity": "Resterende runtime sensor",
+          "ups_power_entity": "Vermogen sensor (optioneel)"
+        }
+      },
+      "ups_detail_opts": {
+        "title": "🔋 UPS Configureren",
+        "data": {
+          "ups_count": "Aantal UPS systemen",
+          "ups_label": "Naam / omschrijving",
+          "ups_brand": "Merk / protocol",
+          "ups_status_entity": "Status entiteit",
+          "ups_battery_entity": "Batterij % sensor",
+          "ups_runtime_entity": "Resterende runtime sensor",
+          "ups_power_entity": "Vermogen sensor (optioneel)"
+        }
+      },
+      "noodstroom": {
+        "title": "⚡ Noodstroom & Backup",
+        "data": {}
       }
     },
     "abort": {

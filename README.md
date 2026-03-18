@@ -16,10 +16,10 @@
 
 ---
 
-> [!WARNING]
-> **🧪 Beta versie** — CloudEMS is actief in ontwikkeling. De kernfunctionaliteit (NILM, prijsoptimalisatie, batterij- en boilersturing) is stabiel en in dagelijks gebruik. Nieuwe functies zoals de interactieve JS-kaarten zijn in beta.
+> [!NOTE]
+> **v4.6.440 — Release Candidate** — CloudEMS has reached RC quality. Core functionality (NILM, price optimisation, battery, boiler, EV, shutters) is stable and in daily use. The generator/ATS module is new and in active testing.
 >
-> **Dashboard na installatie:** Het CloudEMS dashboard wordt automatisch aangemaakt. Bij sommige installaties (met name na een dashboard-verwijdering of HACS-update) is **twee keer herstarten** van Home Assistant nodig voordat het dashboard zichtbaar is in de sidebar. Dit is een bekende beperking van de HA Lovelace API en wordt onderzocht.
+> **Dashboard:** The CloudEMS dashboard is created automatically on first install. On some setups a **double restart** of Home Assistant is required before the dashboard appears in the sidebar. This is a known Lovelace API limitation.
 
 CloudEMS transforms your smart meter into an intelligent energy brain. It observes, learns, predicts and acts — automatically aligning every flexible load in your home to the cheapest electricity, maximising solar self-consumption, protecting circuits from overload, and keeping your home safe while you're away.
 
@@ -33,8 +33,8 @@ Everything runs **100% locally** on your Home Assistant instance. No cloud. No s
 - [Requirements](#requirements)
 - [How it works](#how-it-works)
 - [Features](#features)
-- [Sensors & entities](#sensors--entities)
 - [Dashboard](#dashboard)
+- [Configuration wizard](#configuration-wizard)
 - [Support CloudEMS](#support-cloudems)
 
 ---
@@ -89,47 +89,49 @@ Every module is **self-learning** and **zero-config**. CloudEMS calibrates itsel
 
 Non-Intrusive Load Monitoring identifies individual appliances from the aggregate grid power signal alone. No extra hardware or smart plugs required.
 
-Each power event is matched against an internal signature database, a local scikit-learn model trained on your confirmed events, and optionally a local Ollama LLM for edge cases.
+Each power event is matched against an internal signature database, a local classifier trained on your confirmed events, and optionally a local Ollama LLM for edge cases.
 
-**Adaptive thresholds** — detection sensitivity auto-calibrates to your installation's noise floor using a rolling 80th-percentile estimator. Quiet P1 meters reach ~10 W sensitivity; noisy clamp meters stay higher to avoid false triggers.
+**Adaptive thresholds** — detection sensitivity auto-calibrates to your installation's noise floor using a rolling 80th-percentile estimator. Quiet P1 meters reach ~10 W sensitivity.
 
-**False positive removal** — new detections are validated 20 seconds after the trigger. If the grid baseline hasn't moved as expected, unconfirmed events are discarded automatically. User-confirmed devices are never auto-removed.
+**False positive removal** — new detections are validated 20 seconds after the trigger and discarded if the grid baseline hasn't moved as expected.
 
 **Smart Plug Anchoring** — Shelly, Tasmota or ESPHome plugs are automatically used as anchors, lifting detection accuracy from ~65% to ~85%+.
 
-**Bayesian classification** — detection scores adjust in real-time based on outdoor temperature, time of day, season, and wind direction. The Bayesian layer can only improve confidence, never lower it.
+**Bayesian classification** — detection scores adjust in real-time based on outdoor temperature, time of day, season, and wind direction.
 
-**HMM session tracking** — a Hidden Markov Model tracks multi-state appliances (e.g. washing machines with multiple power levels) to sharpen on/off boundary detection.
+**7×24 weekly time profile** — each device builds a full 7-day × 24-hour usage matrix. CloudEMS detects when a device runs at an unusual time (e.g. dishwasher at 03:00) and sends an alert. Always-on devices (router, standby, hub) are automatically excluded based on their measured on-ratio — no manual configuration needed.
 
-Detected device categories include washing machines, dryers, dishwashers, ovens, heat pumps, boilers, EV chargers, refrigerators, TVs, computers and more — with daily kWh breakdowns per category.
+**HMM session tracking** — a Hidden Markov Model tracks multi-state appliances to sharpen on/off boundary detection.
 
 ---
 
 ### 💰 Dynamic EPEX prices & cost optimisation
 
-CloudEMS fetches day-ahead electricity prices (EPEX Spot) for NL, DE, AT (no API key) and all ENTSO-E areas (free key). It identifies the cheapest consecutive-hour windows and exposes them as sensors you can attach to any switch or automation.
+CloudEMS fetches day-ahead electricity prices (EPEX Spot) for NL, DE, AT (no API key) and all ENTSO-E areas (free key).
 
-**Cheapest 4-hour block** — always shows the optimal charging/heating window for today, with per-hour breakdown, start/end times and a live countdown.
+**Smart negative price alerts** — alerts only fire when the **all-in price including energy tax and VAT** is negative, not just the raw EPEX base. This prevents false alerts when EPEX dips just below zero but the effective consumer price is still positive.
 
-**Cheap-hours switch scheduler** — link any switch or script to automatically activate during the cheapest N hours of the day.
+**Cheapest N-hour block** — always shows the optimal charging/heating window for today with countdown.
 
-**Bill simulator** — records your hourly consumption and EPEX price continuously, then calculates what you would have paid on a fixed tariff, a day/night tariff, or your actual dynamic contract. After 2+ months it tells you exactly how much you're saving.
+**Cheap-hours switch scheduler** — link any switch or script to automatically activate during the cheapest N hours.
 
-**Cost forecaster** — predicts today's and tomorrow's total cost based on learned consumption patterns and upcoming EPEX prices, with monthly budget tracking.
+**Bill simulator** — records hourly consumption and EPEX price, calculates what you would have paid on a fixed, day/night or dynamic tariff.
 
-**Saldering simulator** — models the phased abolition of Dutch net metering (saldering), showing the financial impact year by year for your specific solar and consumption profile.
+**Cost forecaster** — predicts today's and tomorrow's total cost based on learned consumption patterns and upcoming EPEX prices.
+
+**Energy budget** — configurable monthly budget in €, kWh and m³ gas. Critical alerts fire only when the **euro budget** is at risk, not just kWh, to prevent false alarms when high solar export offsets consumption.
+
+**Saldering simulator** — models the phased abolition of Dutch net metering (saldering), showing the financial impact year by year for your specific profile.
 
 ---
 
 ### ⚡ Grid congestion & capacity tariff management
 
-Designed for the Dutch grid congestion reality of 2025–2026, with relevance for Belgium's already-active capacity tariff regime.
+**Grid congestion detector** — monitors import power against a configurable threshold with automatic priority-based load shedding (EV first, then boiler, then export reduction).
 
-**Grid congestion detector** — monitors your import power against a configurable threshold. When import is high *and* the EPEX price is elevated, a congestion event is declared and CloudEMS automatically sheds flexible loads in priority order: EV charging is throttled to minimum, boiler loads are deferred, and solar export is reduced if the battery can absorb it. Events are counted per day and per month with peak import logging.
+**Capacity tariff peak monitor** — tracks 15-minute average power demand vs monthly peak with end-of-quarter projection and ranked shedding actions. Relevant for Belgium's capaciteitstarief and Dutch DSO tariff reforms (Liander / Enexis 2025+).
 
-**Capacity tariff peak monitor** — tracks your 15-minute average power demand and compares it against the highest quarterly-peak recorded this month. When you are close to setting a new monthly peak, an alert fires with the minutes remaining in the current quarter-hour window — giving you time to shed loads before it counts. Relevant for Belgium's capaciteitstarief and anticipated Dutch DSO tariff reforms (Liander / Enexis 2025–2026).
-
-**Flex score** — a real-time 0–100 flexibility score that combines grid price, solar surplus, battery state, phase load and congestion status into a single signal used to coordinate all load-shifting modules without conflict.
+**Flex score** — a real-time 0–100 flexibility score combining grid price, solar surplus, battery state, phase load and congestion status.
 
 ---
 
@@ -137,274 +139,193 @@ Designed for the Dutch grid congestion reality of 2025–2026, with relevance fo
 
 **Self-learning PV forecast** — builds a statistical model of your solar production by observing actual inverter output over weeks, blended with Open-Meteo irradiance data. No panel specifications required.
 
-**Forecast accuracy tracking** — continuously measures MAPE over 14-day and 30-day windows. A bias factor detects systematic over- or under-estimation and corrects the model over time.
+**Forecast accuracy tracking** — continuously measures MAPE over 14-day and 30-day windows with automatic bias correction.
 
-**Solar ROI calculator** — estimates annual yield (kWh), financial value, and payback period based on your detected system size and current energy prices.
+**Solar ROI calculator** — estimates annual yield (kWh), financial value and payback period based on detected system size and current energy prices.
 
-**Automatic orientation detection** — derives your panel azimuth and tilt from the shape of your daily yield curves after ~30 clear days.
+**Automatic orientation detection** — derives panel azimuth and tilt from the shape of daily yield curves after ~30 clear days.
 
-**Multi-inverter support** — up to 9 inverters tracked independently. CloudEMS learns which grid phase each inverter feeds and dims only overloaded phases during congestion events.
+**Multi-inverter support** — up to 9 inverters tracked independently with per-phase assignment.
 
-**Clipping loss analysis** — detects when your inverter hits its rated power limit and quantifies the kWh lost per day, including an estimated payback period for upgrading to a larger inverter.
+**Clipping loss analysis & forecast** — detects when your inverter hits its power limit, quantifies the lost kWh per day, and predicts tomorrow's losses.
 
-**Clipping forecast** — predicts tomorrow's expected clipping losses based on the weather forecast and learned inverter behaviour, so you can pre-emptively adjust loads or battery scheduling.
+**PV health monitoring** — detects soiling, degradation and structural shading by comparing recent peak production against an irradiance-adjusted all-time baseline.
 
-**PV health monitoring** — detects soiling, degradation, and structural shading by comparing recent peak production against an irradiance-adjusted all-time baseline.
+**P1 offline detection** — when the P1/DSMR smart meter goes offline, the energy flow card shows a clear red warning banner instead of silently displaying 0W everywhere. All modules remain paused until data resumes.
 
 ---
 
 ### 🔋 Battery management
 
-CloudEMS builds an optimal daily charge/discharge schedule based on EPEX prices, current SoC, and battery capacity. In summer it detects when solar will fully charge the battery and skips unnecessary overnight charging.
+Optimal daily charge/discharge schedule based on EPEX prices, current SoC and battery capacity. In summer it detects when solar will fully charge the battery and skips unnecessary overnight charging.
 
-**Degradation tracking** — counts full and partial charge cycles, detects deep-discharge and high-SoC stress, and tracks State of Health (SoH) over time with alerts at 90% and 80% SoH thresholds.
+**Degradation tracking** — cycle counting, SoH tracking, deep-discharge and high-SoC stress alerts at 90% and 80% SoH thresholds.
+
+**Daily reset persistence** — battery charged/discharged today counters survive HA restarts and P1 outages. A self-healing date guard in both `BatteryEfficiencyTracker` and `BatterySavingsTracker` resets counters at midnight regardless of whether the coordinator was active at that moment.
 
 ---
 
 ### 🚗 EV charging
 
-**Dynamic current control** — adjusts your EV charger in real-time using a self-tuning PID controller across three modes: solar surplus, cheap-hours, and phase protection.
+**Dynamic current control** — self-tuning PID controller across solar surplus, cheap-hours, and phase protection modes.
 
-**Session learner** — after ~10 sessions CloudEMS learns your typical plug-in time, expected kWh per session, and weekday patterns to pre-reserve the optimal cheap windows for the next charge.
+**Session learner** — learns plug-in time, expected kWh and weekday patterns to pre-reserve optimal cheap windows for the next charge.
 
-**ERE certificate tracking** — tracks charged kWh against the Dutch RED3 / NEa Emissiereductie-eenheden (ERE) scheme. Calculates the renewable energy fraction based on whether charging occurred on solar surplus, green-rate hours, or grid average. Generates quarterly reports suitable for submission to an inboekdienstverlener (Laadloon, FincoEnergies, Voltico, etc.), with monthly breakdowns and JSON/CSV export. Estimated yield: €0.03–€0.10 per kWh charged, ~€120–€400/year for a typical home charger.
+**ERE certificate tracking** — tracks charged kWh against the Dutch RED3/NEa Emissiereductie-eenheden scheme with quarterly reports suitable for submission to an inboekdienstverlener. Estimated yield: €0.03–€0.10 per kWh charged.
 
-> ERE tracking requires a MID-certified charge point (Zaptec, Alfen, OCPP, Smappee, Ohme) and registration with an inboekdienstverlener before May 2026.
+---
+
+### ⚡ Generator & ATS/MTS backup power
+
+Full generator and transfer switch integration — works with both automatic ATS and manual MTS setups. Configured entirely through the wizard; no YAML required.
+
+**Automatic ATS** — CloudEMS reads a binary_sensor or sensor entity and reacts automatically when the generator takes over. The NET node in the energy flow card is dimmed and replaced by the generator node.
+
+**Manual MTS** — CloudEMS confirms grid loss after 15 seconds and sends both a persistent HA notification and a TTS voice alert: *"Zet de MTS schakelaar om en start de generator."* A 5-minute cooldown prevents repeated alerts.
+
+**Auto-start** — optionally links a switch, button or script to automatically start the generator. Verifies it actually started within 30 seconds and sends an escalation alert if it didn't.
+
+**Load limiting** — when running on generator, CloudEMS automatically:
+- Pauses EV charging when generator headroom drops below 1 kW
+- Reduces boiler setpoint to legionella-safe minimum (45°C) when headroom drops below 2 kW
+- Blocks all solar export (no grid feed-in when disconnected from the grid)
+
+**Generator node in energy flow** — dedicated orange node showing live power, capacity utilisation percentage and fuel type. Fully interactive: click the node for a popup with all generator details.
+
+**Generator fuel cost sensor** — tracks estimated fuel cost (€) based on measured power consumption and configured cost per kWh.
+
+**Configuration:** power sensor, ATS/MTS status entity, auto-start switch, max power (W), fuel type, cost per kWh, TTS entity.
 
 ---
 
 ### 🌡️ Climate & heat pump intelligence
 
-**COP learning** — tracks your heat pump's Coefficient of Performance grouped by outdoor temperature bucket, with defrost cycle exclusion for accurate baselines.
+**COP learning** — tracks heat pump efficiency grouped by outdoor temperature with defrost cycle exclusion.
 
-**Degradation detection** — short-term (3–4 week) and year-on-year COP comparison. A sustained drop of 8%+ triggers a maintenance advisory.
+**Degradation detection** — short-term (3–4 week) and year-on-year COP comparison with maintenance advisories.
 
-**Climate pre-heat scheduling** — calculates the optimal pre-heat moment based on the thermal house model, current EPEX price ratio, and a configurable setpoint offset.
+**Climate pre-heat scheduling** — calculates optimal pre-heat moment based on the thermal house model, current EPEX price ratio and configurable setpoint offset.
 
-**Zone climate cost tracking** — monitors per-zone heating costs today and over time, including wood stove efficiency advice where applicable.
+**Climate EPEX compensation** — pre-heats or pre-cools based on upcoming EPEX prices using EMA-learned setpoint patterns per hour of the day.
 
-**Smart climate manager** — coordinates zone setpoints, boiler demand signals and heat pump scheduling into a unified climate strategy, overrideable per zone from the dashboard.
+**Zone climate cost tracking** — monitors per-zone heating costs today and over time.
 
 ---
 
 ### ♨️ Boiler & hot water
 
-**Boiler cascade control (v3.1)** — manages one or more electric boiler groups (resistive or heat-pump-assisted) with configurable setpoints, comfort thresholds, minimum on/off times, and per-unit priorities. Groups are managed through the wizard — no YAML required.
+**Boiler cascade control** — manages one or more electric boiler groups (resistive, heat pump, or hybrid) with configurable setpoints, comfort thresholds, minimum on/off times and per-unit priorities. Fully wizard-driven.
 
-**Self-learning delivery boiler detection** — the cascade automatically learns which boiler is used first for hot water demand (the "delivery" boiler) by tracking temperature deficits and energy consumption per cycle. The delivery boiler is always heated first to ensure hot water is available. Minimum 5 learning cycles needed; confidence reported on the dashboard.
+**Safe ramp-up after restart** — the hybrid/heat pump boiler setpoint ramps up gradually from the green base temperature in configurable steps (e.g. 53°C → 58°C → 63°C). After a restart, if the water temperature is far below the saved ramp setpoint, the ramp resets to green base — preventing uncontrolled heating when connection is lost.
 
-**Hourly and day-of-week usage patterns** — a 7×24 matrix of hot water usage is built from flow sensor readings. The system uses this to pre-heat the delivery boiler before expected demand peaks — not just when cheap hours begin. Saturday morning patterns are treated differently from Monday morning.
+**Price-aware legionella scheduling** — instead of running legionella prevention at a fixed time, CloudEMS selects the cheapest available hour (preferably night) based on EPEX prices. If tomorrow has significantly cheaper prices and there's still time, it defers to tomorrow. The safety deadline is always respected.
 
-**Optimal start timing** — instead of starting the boiler as soon as cheap electricity begins (which may be hours early), CloudEMS calculates the exact start time needed so the boiler reaches setpoint just before the predicted demand peak.
+**Demand-boost threshold** — configurable via slider in the boiler card Leren tab (30–180 min). Shows learned threshold and accuracy statistics (correct/incorrect boost decisions).
 
-**Thermal loss compensation** — the system learns each boiler's cooling rate (°C/hour). This is used to predict when a boiler will fall below the comfort floor, enabling just-in-time re-heating. Dashboard shows "time until cold" per boiler.
+**Tank volume configuration** — configurable in the wizard (0 = learn automatically from heating cycles). Also configurable: ramp maximum temperature.
 
-**Flow-sensor demand response** — connecting a flow sensor (binary or volume) to each boiler group gives CloudEMS real-time hot water demand signals. When a tap opens, the delivery boiler gets immediate priority regardless of the current cascade schedule.
-
-**Seasonal setpoints** — automatic summer/winter mode based on outdoor temperature trend (3-day hysteresis). Configurable per-season setpoints, or automatic ±5°C adjustment.
-
-**Grid congestion integration** — during grid congestion, buffer boilers are paused while the delivery boiler remains on. This cuts peak load while maintaining hot water availability.
-
-**Proportional dimmer control** — for boilers connected via a dimmer module (RBDimmer, DimmerLink, `number.*`, `light.*`), the power output follows PV surplus proportionally in 5% steps (30-second update rate). Full AAN/UIT control also supported.
-
-**Post-saldering mode** — with Dutch net metering phasing out in 2027, this mode lowers the PV surplus trigger threshold to 40%, aggressively consuming every available solar watt instead of exporting it.
-
-**Anomaly detection** — if daily hot water demand exceeds 2.5× the learned baseline, a persistent HA notification is created. Useful for detecting leaks or unusual household situations.
-
-**P1 direct response** — when a P1 smart meter reader is configured, grid export data is pushed to the boiler controller on every telegram (~1 second). This means the boiler reacts to live grid conditions rather than waiting for the coordinator cycle (30 seconds).
-
-**Week energy budget** — tracks kWh consumption per boiler per ISO week, visible on the dashboard.
-
-**Delta-T setpoint optimisation** — when a boiler is well above its comfort floor, the setpoint is reduced proportionally (max −8°C) to avoid overheating and reduce thermal losses.
-
-**Wash cycle detector** — when a washing machine or dishwasher is connected (via smart plug or NILM), CloudEMS detects the active wash phase (pre-wash, heating, wash, rinse, spin) from the power profile and estimates remaining programme time.
+**Self-learning delivery boiler detection**, hourly usage patterns, thermal loss compensation, flow-sensor demand response, proportional dimmer control, anomaly detection and wash cycle detector all remain fully functional.
 
 ---
 
-### ⚡ Phase management & capacity tariff
+### 🪟 Roller shutters
 
-Monitors import and export current per phase (L1/L2/L3) every 10 seconds with automatic load shedding in priority order when limits are approached.
+**New shutter card v3.0** — completely redesigned:
 
-**Phase balancing** — detects structural phase imbalance and provides concrete re-wiring advice.
+- **Compact overview** — all shutters in one list with position bar, ▲ ▼ per-shutter buttons and ☀ sun indicator
+- **"All up / All down"** — single action for all shutters simultaneously
+- **Detail dropdown** — select any shutter to see position slider, automation toggle, open/close times, setpoint, sun status and active override timer (shown only when override is active)
+- **Collapsible learning section** — click to reveal progress bars and detected orientation per shutter
+- **Direct HA service calls** — all buttons call real HA cover services
 
-**Peak shaving** — configurable import limit with priority-based shedding.
+---
 
-**Congestion shedding** — automatic load reduction during high-price congestion events. Four warning levels: advisory (80%), soon (90%), warning (95%), critical (100%+). Actions are ranked by comfort impact.
+### 💡 Energy demand & savings advice
 
-**Capacity tariff peak monitor (v3.0)** — tracks the 15-minute average power demand and compares it against the monthly peak. Features:
-- Automatic monthly reset (no manual intervention needed)
-- End-of-quarter projection based on current power trajectory
-- Ranked load-shedding actions with urgency levels (advisory / soon / now)
-- 12-month peak history with indicative cost per month
-- Headroom indicator: W available before setting a new monthly peak
-- Relevant for Belgium (active), Netherlands (Liander/Enexis 2025+)
+**Energy demand module** — calculates current energy needs per subsystem (boiler, battery, EV, climate, pool, gas) with device-level forecasts from NILM history.
+
+**Savings advice engine** — generates up to 6 concrete tips with estimated € amounts based on current prices, surplus and learned patterns.
+
+**Demand card** — tabbed card with system needs, device forecasts and advice. Available in the **💡 Advies** dashboard tab.
 
 ---
 
 ### 🏠 Presence & home intelligence
 
-**Absence detection** — determines occupancy purely from energy consumption patterns. No GPS, no login events. States: home, away, sleeping, vacation — with confidence percentage and standby power level.
+**Absence detection** — determines occupancy purely from energy consumption. States: home, away, sleeping, vacation.
 
-**Sleep detector** — detects when everyone is asleep based on motion sensor inactivity and lights-off signals. Switches off configurable standby loads automatically.
-
-**Day classifier** — classifies each day as workday, weekend, holiday, vacation, or anomalous based on consumption patterns, used by scheduling modules across the entire system.
-
-**Thermal house model** — learns your home's thermal loss coefficient (W/°C) from heating power and outdoor temperature. Powers pre-heat scheduling and winter heating cost forecasts.
-
-**Consumption anomaly detection** — 168 weekly time slots tracked with adaptive thresholds. Standby hunters flag always-on devices as potential energy wasters.
-
-**Virtual room meters** — clusters devices and smart plugs by HA Area, exposing real-time per-room consumption without extra hardware.
-
-**Gas analysis** — correlates gas consumption with Heating Degree Days to benchmark boiler efficiency and forecast winter gas costs.
-
-**Weekly energy insights** — an automatically generated weekly summary of consumption trends, savings, solar yield, peak costs and module recommendations, delivered as a HA notification and visible on the dashboard.
-
----
-
-### 💡 Lamp circulation & burglary deterrence
-
-When CloudEMS detects an empty home, it activates a lamp circulation system that makes the house appear occupied:
-
-- **Random intervals** — Gaussian-distributed timing (2–8 min), no two evenings identical
-- **Behaviour mimicry** — learns which lamps you personally use at which hour of the day
-- **Seasonal intelligence** — starts and stops based on actual sunset via `sun.sun`
-- **PIR bypass** — lamps paired with motion sensors are excluded while real motion is detected
-- **Passive phase detection** — every switch event passively identifies which grid phase that lamp is on
-- **Negative price bonus** — extends intervals when EPEX prices go negative
-
----
-
-### 🏊 Pool controller
-
-Manages filtration and heating intelligently: PV surplus mode, cheapest EPEX hours fallback, temperature-adjusted daily minimum runtime, and COP-optimised heat pump scheduling.
-
----
-
-### 🚲 Micro-mobility tracker
-
-Detects and tracks e-bike and scooter charging sessions (40–700 W) using non-overlapping power classification ranges. Builds a learning profile per vehicle with session history, average kWh, peak charge hour, and optimal charging time recommendations.
-
-Supported integrations: Bosch eBike via [hass-bosch-ebike](https://github.com/...) (HACS), Specialized Turbo via Bluetooth (HACS), and any brand via losse sensors configured in CloudEMS options.
+**Sleep detector**, **day classifier**, **thermal house model**, **consumption anomaly detection**, **virtual room meters**, **gas analysis** and **weekly energy insights** — all stable and unchanged.
 
 ---
 
 ### 🛡️ Data quality & reliability
 
-**Sensor sanity guard** — validates all sensor values before any calculation. Filters impossible readings, kW/W unit confusion, historical spikes, and sign errors.
+**Sensor sanity guard** — validates all values before calculations. Filters impossible readings, kW/W unit confusion, historical spikes and sign errors.
 
-**EMA diagnostics** — tracks all sensors through an Exponential Moving Average filter. Detects frozen sensors, slow-responding sensors, and blocked spikes before they corrupt calculations.
+**EMA diagnostics** — detects frozen sensors, slow-responding sensors and blocked spikes.
 
-**Watchdog** — monitors the coordinator for repeated update failures. After 3 consecutive errors it reloads the integration with exponential backoff (30 s → 60 s → max 1 hour). Full crash history is persisted across HA restarts and visible on the Diagnose tab with error messages, timestamps, and restart counter.
-
----
-
-## Sensors & entities
-
-### Design principle — always own your data
-
-CloudEMS follows a strict rule: **every physical value that CloudEMS uses internally must also exist as its own `sensor.cloudems_*` entity**, recorded by Home Assistant's built-in recorder.
-
-This means:
-
-- If a cloud integration (Ariston, Growatt, Zonneplan) is temporarily offline, CloudEMS still has the last known value in its own sensor history.
-- Automations and dashboards built on `sensor.cloudems_*` entities never break when the source device changes or is replaced.
-- History graphs in the UI always work — they read from CloudEMS sensors, not from third-party entities that may return `unavailable` or non-numeric states.
-- Long-term statistics are under CloudEMS control: no data gaps caused by upstream integration issues.
-
-**Rule for contributors:** if you add a new data source that CloudEMS reads every cycle, add a corresponding `sensor.cloudems_*` entity. Never build a history graph or automation targeting an external entity directly.
-
-### Sensor overview
-
-CloudEMS exposes 100+ sensors. Key examples:
-
-| Domain | Sensor | Description |
-|---|---|---|
-| Grid | `grid_net_power` | Live net import/export (W) |
-| Grid | `phase_l1_current` | Per-phase current (A) |
-| Grid | `kwartier_piek` | 15-min average demand vs. monthly peak (W) |
-| Grid | `grid_congestion` | Congestion active, utilisation %, event count |
-| Price | `energy_price_current_hour` | Current EPEX price (€/kWh) |
-| Price | `cheapest_4h_block` | Cheapest 4-hour window + countdown |
-| Price | `energy_cost_today` | Actual cost so far today (€) |
-| Price | `energy_cost_forecast_today` | Predicted total cost today (€) |
-| Bill | `bill_simulator_saving_vs_fixed` | € saved vs fixed tariff this year |
-| NILM | `nilm_running_devices` | Count of detected active appliances |
-| Solar | `solar_<label>` | Per-inverter actual PV power (W) — own sensor per omvormer |
-| Solar | `solar_pv_forecast_today` | Predicted PV yield today (kWh) |
-| Solar | `pv_forecast_accuracy` | MAPE 14d/30d + bias factor |
-| Solar | `clipping_loss_today` | Lost kWh to inverter clipping |
-| Solar | `clipping_forecast_tomorrow` | Expected clipping losses tomorrow |
-| Solar | `pv_health` | Panel health status |
-| Solar | `pv_opbrengst_terugverdientijd` | Annual yield estimate + payback period |
-| Battery | `battery_soc` | Battery state of charge (%) — own sensor |
-| Battery | `battery_power` | Total battery charge/discharge power (W) — own sensor |
-| Battery | `battery_epex_schedule` | Current charge/discharge action |
-| Battery | `battery_soh` | State of Health (%) |
-| Boiler | `boiler_<slug>_temp` | Per-boiler water temperature (°C) — own recorder sensor |
-| Boiler | `boiler_<slug>_power` | Per-boiler heating power (W) — own recorder sensor |
-| EV | `ev_laad_power` | Actual EV charge power (W) — own recorder sensor |
-| EV | `ev_session_kwh` | Energy delivered in current session |
-| EV | `ere_certificaten` | ERE certificates earned + quarterly report |
-| Heat pump | `heat_pump_cop_current` | Current measured COP |
-| Heat pump | `heat_pump_cop_degradation` | Year-on-year COP health |
-| Climate | `climate_preheat` | Pre-heat mode, setpoint offset, price ratio |
-| Climate | `zone_klimaat_kosten_vandaag` | Per-zone heating costs today |
-| Presence | `absence_detector` | home / away / sleeping / vacation + confidence |
-| Lamps | `lamp_circulation_status` | Circulation mode + active lamps |
-| Pool | `pool_status` | Filter + heater state + water temp |
-| Pool | `pool_water_temp` | Pool water temperature (°C) — own recorder sensor |
-| Weather | `buiten_temp` | Outside temperature (°C) — own recorder sensor, persists when weather integration is unavailable |
-| House | `thermal_w_per_k` | Thermal loss coefficient (W/°C) |
-| House | `anomaly_detected` | Unusual consumption (adaptive threshold) |
-| House | `energy_insights` | Weekly summary: savings, trends, recommendations |
-| Micro | `micro_mobiliteit` | E-bike/scooter session tracking + vehicle profiles |
-| Gas | `gasstand` | Gas meter reading (m³) — own recorder sensor |
-| Gas | `gasanalyse` | Gas efficiency vs HDD benchmark + winter forecast |
-| Costs | `energy_budget_status` | Budget tracking (on track / overspend) |
-| Diag | `sensor_sanity` | Sensor health: critical/warning flags |
-| Diag | `ema_diagnostics` | Frozen/slow sensors, blocked spikes |
-| Diag | `watchdog` | Crash counter, restart history, last error, version |
+**Watchdog** — monitors the coordinator for repeated update failures. After 3 consecutive errors it reloads the integration with exponential backoff (30 s → 60 s → max 1 hour). Full crash history visible on the Diagnose tab.
 
 ---
 
 ## Dashboard
 
-The included `cloudems-dashboard.yaml` provides **19 fully-styled tabs**. Import it via the HA Lovelace dashboard editor (Raw configuration editor → paste).
+The included dashboard provides **22 fully-styled tabs** built entirely from custom JavaScript cards — no external frontend dependencies required beyond Home Assistant itself.
 
-**Required frontend cards** (all free, installable via HACS):
-- [mushroom-cards](https://github.com/piitaya/lovelace-mushroom)
-- [apexcharts-card](https://github.com/RomRider/apexcharts-card)
-- [card-mod](https://github.com/thomasloven/lovelace-card-mod)
+**Energy flow card highlights:**
+- Animated power flow with proportional line widths and moving dots
+- Interactive node popups with metrics and sparklines
+- **Hover to enlarge** — nodes scale 1.08× on mouseover with full-name tooltip
+- Generator node with capacity bar (when configured)
+- P1 offline warning banner
+- Sun/moon node with live cloud cover shading
 
-| # | Tab | Content |
-|---|---|---|
-| 1 | 🏠 Overzicht | Live grid, solar, battery, current cost, notifications |
-| 2 | 💶 Prijzen & Kosten | EPEX chart, cheap-hours, bill simulator, saldering, forecasts |
-| 3 | 🏡 Huis Intelligentie | Presence, day type, consumption categories, room meters, pre-heat |
-| 4 | ⚡ Fasen | Per-phase current gauges, phase balance, peak shaving, congestion |
-| 5 | ☀️ Solar & PV | Inverter status, clipping, clipping forecast, shadow detection, ROI |
-| 6 | 🔋 Batterij | EPEX schedule, SoC graph, State of Health, degradation |
-| 7 | 🧠 NILM Apparaten | Detected devices, top consumers, AI confidence |
-| 8 | ⚙️ NILM Beheer | Live activity monitor, device list, models, cleanup |
-| 9 | 🌡️ Warm Water | Boiler groups, cascade control, wash cycle status |
-| 10 | 🌡️ Klimaat | Zone overview, pre-heat schedule, zone cost tracking |
-| 11 | 🚗 EV & Mobiliteit | Dynamic charging, session learner, ERE certificates, flex score |
-| 12 | 🚲 E-bike & Scooter | Micro-mobility sessions, vehicle profiles, usage graph |
-| 13 | 🏊 Zwembad | Pool filtration + heating smart control |
-| 14 | 💡 Lampen | Circulation control, phase detection, behaviour pattern |
-| 15 | 🏆 ERE Certificaten | ERE earnings, quarterly report, MID meter status |
-| 16 | 🧬 Zelflerend | Weekly insights, learning progress, anomaly detail, standby hunters |
-| 17 | 🔔 Meldingen | All active alerts, per-system alert status |
-| 18 | 🔬 Diagnose | Watchdog crash monitor, sensor sanity, EMA diagnostics, system info |
-| 19 | ⚙️ Configuratie | Module toggles, boiler groups editor, NILM settings |
+| Tab | Content |
+|---|---|
+| 🏠 Overzicht | Live energy flow, status, notifications |
+| 💡 Advies | Energy demand per subsystem, savings tips |
+| 💶 Prijzen & Kosten | EPEX chart, cheap-hours, bill simulator, forecasts |
+| 🏡 Huis | Presence, day type, consumption categories, room meters |
+| ⚡ Fasen | Per-phase currents, phase balance, peak shaving |
+| ☀️ Solar & PV | Inverter status, clipping, forecast, ROI |
+| 🔋 Batterij | EPEX schedule, SoC, State of Health |
+| 🧠 NILM Apparaten | Detected devices, schedule profiles, time heatmap |
+| ⚙️ NILM Beheer | Live activity, device list, models, cleanup |
+| 🌡️ Warm Water | Boiler groups, ramp status, demand-boost config |
+| ❄️ Klimaat | Zone overview, pre-heat, zone cost tracking |
+| ❄️ Klimaat EPEX | Price-based pre-heat/cool scheduling |
+| 🚗 EV & Mobiliteit | Dynamic charging, session learner, ERE certificates |
+| 🚲 E-bike & Scooter | Micro-mobility sessions, vehicle profiles |
+| 🏊 Zwembad | Pool filtration + heating smart control |
+| 💡 Lampen | Circulation control, behaviour pattern |
+| 🏆 ERE Certificaten | ERE earnings, quarterly report |
+| 🪟 Rolluiken | Shutter card v3.0 with dropdown detail |
+| 🧬 Zelflerend | Weekly insights, learning progress, anomaly detail |
+| 🔔 Meldingen | All active alerts |
+| 🔬 Diagnose | Watchdog, sensor sanity, EMA diagnostics |
+| ⚙️ Configuratie | Module toggles, boiler groups, NILM settings |
 
-The dashboard reads the CloudEMS version dynamically from HA — updating the integration automatically updates the version shown in all tab titles.
+---
+
+## Configuration wizard
+
+The setup wizard guides you through all modules in grouped categories. Every step has a **← Back** button to return to the main menu without losing progress.
+
+Available in 🇳🇱 Dutch · 🇬🇧 English · 🇩🇪 German · 🇫🇷 French.
+
+| Category | Included sections |
+|---|---|
+| ⚡ Energie & Grid | Grid sensors, phase sensors, prices, budget, P1 advanced, **generator/ATS** |
+| ☀️ Opwekking | PV inverters, clipping, EV, batteries |
+| 🏠 Verbruik | Boiler controller, climate, shutters, pool, lamps |
+| 🤖 Automatisering | NILM, AI, load shifting, cheap-hours switches |
+| 🔧 Systeem | Mail reports |
 
 ---
 
 ## Support CloudEMS
 
-CloudEMS is **completely free and open source**. If it saves you money on your energy bill — please consider a small contribution.
+CloudEMS is **completely free**. If it saves you money on your energy bill — please consider a small contribution.
 
 <div align="center">
 
@@ -423,5 +344,5 @@ You can also support by starring this repository, [reporting bugs](https://githu
 ---
 
 <div align="center">
-<sub>Keywords: Home Assistant energy management · NILM · EPEX spot prices · dynamic EV charging · peak shaving · phase balancing · grid congestion · netcongestie · capaciteitstarief · ERE certificaten · saldering simulator · solar curtailment · Ollama AI · lamp circulation · burglary deterrence · smart meter · P1 · DSMR · bill simulator · heat pump COP · wash cycle detector · sleep detector · e-bike charging · watchdog · presence detection · PV forecast accuracy · clipping loss · false positive removal · flex score · boiler cascade</sub>
+<sub>Keywords: Home Assistant energy management · NILM · EPEX spot prices · dynamic EV charging · peak shaving · phase balancing · grid congestion · netcongestie · capaciteitstarief · ERE certificaten · saldering simulator · solar curtailment · Ollama AI · lamp circulation · burglary deterrence · smart meter · P1 · DSMR · bill simulator · heat pump COP · wash cycle detector · sleep detector · e-bike charging · watchdog · presence detection · PV forecast accuracy · clipping loss · flex score · boiler cascade · generator ATS MTS backup power · rolluiken automatisering · legionella planning · demand boost · shutter card · energy budget</sub>
 </div>

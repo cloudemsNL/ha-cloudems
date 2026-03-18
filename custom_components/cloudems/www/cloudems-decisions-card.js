@@ -7,30 +7,56 @@
 const CARD_VERSION = "4.6.171";
 
 const CAT_CONFIG = {
-  battery:           { icon: "🔋", label: "Batterij",     color: "#4caf50" },
-  battery_bde:       { icon: "🔋", label: "Batterij BDE",  color: "#4caf50" },
-  zonneplan_auto:    { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
-  zonneplan:         { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
-  boiler:            { icon: "🚿", label: "Boiler",        color: "#ff8040" },
-  decision_boiler:   { icon: "🚿", label: "Boiler",        color: "#ff8040" },
-  ev:                { icon: "🚗", label: "EV",            color: "#2196f3" },
-  ev_solar_plan:     { icon: "🚗", label: "EV planning",   color: "#2196f3" },
-  decision_ev_solar_plan: { icon: "🚗", label: "EV planning", color: "#2196f3" },
-  shutter:           { icon: "🪟", label: "Rolluiken",     color: "#9c27b0" },
-  decision_shutter:  { icon: "🪟", label: "Rolluiken",     color: "#9c27b0" },
-  battery_slider:    { icon: "🎚️", label: "Sliders",      color: "#ffd600" },
-  price_hour:        { icon: "€",  label: "Prijs",         color: "#00bcd4" },
+  // ── Batterij ──────────────────────────────────────────────────────────────
+  battery:              { icon: "🔋", label: "Batterij",        color: "#4caf50" },
+  battery_bde:          { icon: "🔋", label: "Batterij BDE",    color: "#4caf50" },
+  battery_scheduler:    { icon: "🔋", label: "Batterij plan",   color: "#4caf50" },
+  battery_health:       { icon: "🔋", label: "Batterij gezond", color: "#4caf50" },
+  zonneplan_auto:       { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
+  zonneplan:            { icon: "⚡", label: "Zonneplan",       color: "#60a5fa" },
+  // ── Zonnepanelen ──────────────────────────────────────────────────────────
+  clipping:             { icon: "☀️", label: "Clipping",        color: "#ffd600" },
+  solar_dim:            { icon: "☀️", label: "Omvormer dimmen", color: "#ffd600" },
+  solar_dimmer:         { icon: "☀️", label: "Solar dimmer",    color: "#ffd600" },
+  // ── Boiler ────────────────────────────────────────────────────────────────
+  boiler:               { icon: "🚿", label: "Boiler",          color: "#ff8040" },
+  decision_boiler:      { icon: "🚿", label: "Boiler",          color: "#ff8040" },
+  // ── EV ────────────────────────────────────────────────────────────────────
+  ev:                   { icon: "🚗", label: "EV",              color: "#2196f3" },
+  ev_charger:           { icon: "🚗", label: "EV lader",        color: "#2196f3" },
+  ev_solar_plan:        { icon: "🚗", label: "EV planning",     color: "#2196f3" },
+  decision_ev_solar_plan: { icon: "🚗", label: "EV planning",   color: "#2196f3" },
+  // ── Rolluiken ─────────────────────────────────────────────────────────────
+  shutter:              { icon: "🪟", label: "Rolluiken",       color: "#9c27b0" },
+  decision_shutter:     { icon: "🪟", label: "Rolluiken",       color: "#9c27b0" },
+  // ── Overig ────────────────────────────────────────────────────────────────
+  lamp_circulation:     { icon: "💡", label: "Lampen",          color: "#fde047" },
+  cheap_switch:         { icon: "💶", label: "Goedkoop schak.",  color: "#00bcd4" },
+  cheap_switch_status:  { icon: "💶", label: "Goedkoop status", color: "#00bcd4" },
+  tariff_change:        { icon: "€",  label: "Tarief",          color: "#00bcd4" },
+  peak_shaving:         { icon: "📉", label: "Piekschaving",    color: "#f87171" },
+  congestion:           { icon: "⚠️", label: "Congestie",       color: "#f87171" },
+  nilm_load_shift:      { icon: "🔌", label: "NILM verschuiv.", color: "#a78bfa" },
+  smart_delay:          { icon: "⏳", label: "Slim uitstel",    color: "#a78bfa" },
+  smart_delay_intercept:{ icon: "⏳", label: "Uitstel stop",    color: "#a78bfa" },
+  pool_filter:          { icon: "🏊", label: "Zwembad filter",  color: "#38bdf8" },
+  pool_heat:            { icon: "🏊", label: "Zwembad verw.",   color: "#38bdf8" },
+  sensor_hint:          { icon: "💡", label: "Sensor hint",     color: "#6b7280" },
+  battery_slider:       { icon: "🎚️", label: "Sliders",        color: "#ffd600" },
+  price_hour:           { icon: "€",  label: "Prijs",           color: "#00bcd4" },
 };
 
 const ALL_CATS = Object.keys(CAT_CONFIG);
 
 // Categorie-groepen voor filter knoppen
 const FILTER_GROUPS = [
-  { id: "all",     label: "Alles",     cats: ALL_CATS },
-  { id: "battery", label: "🔋 Batterij", cats: ["battery", "battery_bde", "zonneplan_auto", "zonneplan"] },
-  { id: "boiler",  label: "🚿 Boiler",  cats: ["boiler", "decision_boiler"] },
-  { id: "ev",      label: "🚗 EV",      cats: ["ev", "ev_solar_plan", "decision_ev_solar_plan"] },
+  { id: "all",     label: "Alles",        cats: ALL_CATS },
+  { id: "solar",   label: "☀️ Zonnepanelen", cats: ["clipping", "solar_dim", "solar_dimmer"] },
+  { id: "battery", label: "🔋 Batterij",  cats: ["battery", "battery_bde", "battery_scheduler", "battery_health", "zonneplan_auto", "zonneplan"] },
+  { id: "boiler",  label: "🚿 Boiler",    cats: ["boiler", "decision_boiler"] },
+  { id: "ev",      label: "🚗 EV",        cats: ["ev", "ev_charger", "ev_solar_plan", "decision_ev_solar_plan"] },
   { id: "shutter", label: "🪟 Rolluiken", cats: ["shutter", "decision_shutter"] },
+  { id: "overig",  label: "⚙️ Overig",   cats: ["lamp_circulation","cheap_switch","cheap_switch_status","tariff_change","peak_shaving","congestion","nilm_load_shift","smart_delay","smart_delay_intercept","pool_filter","pool_heat","sensor_hint"] },
 ];
 
 const S = `
@@ -185,10 +211,20 @@ class CloudEMSDecisionsCard extends HTMLElement {
 
   _formatCtx(e) {
     const parts = [];
-    if (e.solar_w != null)  parts.push(`☀️ ${e.solar_w}W`);
-    if (e.grid_w  != null)  parts.push(`⚡ ${e.grid_w > 0 ? "+":""}${e.grid_w}W`);
-    if (e.soc_pct != null)  parts.push(`🔋 ${e.soc_pct}%`);
+    // Energie-context (altijd aanwezig)
+    if (e.solar_w  != null && e.solar_w > 0) parts.push(`☀️ ${e.solar_w}W`);
+    if (e.grid_w   != null) parts.push(`⚡ ${e.grid_w > 0 ? "+":""}${e.grid_w}W`);
+    if (e.soc_pct  != null) parts.push(`🔋 ${e.soc_pct}%`);
     if (e.price_eur != null) parts.push(`€ ${(e.price_eur * 100).toFixed(1)}ct`);
+    // FIX 1: PV-specifieke payload — clipping & dimmer details
+    if (e.curtailment_pct != null) parts.push(`📉 ${e.curtailment_pct.toFixed(0)}% gecurtailed`);
+    if (e.target_w != null && e.cat === 'solar_dimmer') parts.push(`→ ${e.target_w}W doel`);
+    // EV context
+    if (e.session_kwh != null) parts.push(`🔌 ${e.session_kwh.toFixed(1)} kWh`);
+    if (e.charge_pct  != null) parts.push(`${e.charge_pct.toFixed(0)}%`);
+    // Boiler context
+    if (e.temp_c != null && (e.cat === 'boiler' || e.cat === 'decision_boiler')) parts.push(`🌡️ ${e.temp_c.toFixed(0)}°C`);
+    if (e.setpoint_c != null && (e.cat === 'boiler' || e.cat === 'decision_boiler')) parts.push(`→ ${e.setpoint_c.toFixed(0)}°`);
     return parts.join(" · ");
   }
 

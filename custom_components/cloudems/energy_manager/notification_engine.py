@@ -545,15 +545,16 @@ class NotificationEngine:
 
         # Hoge energieprijs (per uur alert)
         price_info = data.get("energy_price", {})
-        current_price = price_info.get("current")
+        current_price = price_info.get("current_display") or price_info.get("current")
+        price_lbl     = price_info.get("price_label", "€/kWh")
         price_alert_thr = data.get("config_price_alert_high", 0.30)
         if current_price and current_price > price_alert_thr:
             alerts["price_alert_high"] = {
                 "priority": "warning",
                 "category": "price",
-                "title":    f"Hoge energieprijs: {current_price:.4f} €/kWh",
+                "title":    f"Hoge energieprijs: {current_price:.4f} €/kWh ({price_lbl})",
                 "message":  (
-                    f"Huidige prijs {current_price:.4f} €/kWh overschrijdt de ingestelde drempel "
+                    f"Huidige prijs {current_price:.4f} €/kWh ({price_lbl}) overschrijdt de ingestelde drempel "
                     f"van {price_alert_thr:.2f} €/kWh. Overweeg zware lasten uit te schakelen."
                 ),
                 "active":   True,
@@ -632,6 +633,32 @@ class NotificationEngine:
                 continue
             if not dev.get("schedule_ready"):
                 continue  # niet genoeg observaties — nog geen betrouwbaar patroon
+            # v4.6.453: altijd-aan apparaten nooit melden (hub, router, standby)
+            if dev.get("schedule_always_on"):
+                continue
+            # Apparaattypen die per definitie altijd aan zijn → nooit melden
+            _always_on_types = {"entertainment", "router", "network", "hub", "standby",
+                                 "security", "unknown"}
+            _dtype = (dev.get("device_type") or dev.get("type") or "").lower()
+            _dname = (dev.get("user_name") or dev.get("name") or "").lower()
+            if _dtype in _always_on_types and any(
+                kw in _dname for kw in ("hub", "router", "switch", "gateway", "bridge",
+                                        "nest", "google", "alexa", "echo", "homey",
+                                        "pi", "proxmox", "server", "netwerk")
+            ):
+                continue
+            # v4.6.453: apparaten die zelden aan zijn (oven, vaatwasser) — alleen
+            # melden als er genoeg observaties zijn EN het echt afwijkt van het patroon.
+            # Een oven die 1x per week aan is heeft on_ratio ~0.006 — dat is normaal,
+            # niet "vergeten". Drempel: min 5 keer aan geweest (on_events).
+            _on_events = dev.get("on_events") or dev.get("session_count") or 0
+            if _on_events < 5:
+                continue
+            # Als het apparaat zelden aan is (on_ratio < 2%) is "ongebruikelijk tijdstip"
+            # per definitie zinloos — elk moment is ongebruikelijk.
+            _on_ratio = dev.get("schedule_on_ratio", 0.0)
+            if _on_ratio < 0.02:  # minder dan 2% van de tijd aan
+                continue
             dev_name = dev.get("user_name") or dev.get("name", "Onbekend apparaat")
             peak_wd  = dev.get("schedule_peak_weekday", "")
             peak_h   = dev.get("schedule_peak_hour")
@@ -842,6 +869,63 @@ class NotificationEngine:
                 }
             else:
                 alerts["inverter_dimmer_disabled"] = {"active": False, "priority": "info", "category": "pv", "title": "", "message": ""}
+
+        # v4.6.447: UPS-fase melding
+        gen_data = data.get("generator", {})
+        if gen_data.get("ups_active"):
+            alerts["ups_active"] = {
+                "priority": "warning",
+                "category": "grid",
+                "title":    "🔦 UPS actief — netuitval gedetecteerd",
+                "message":  ("CloudEMS detecteert netuitval. "
+                             "Veiligheidsverlichting (hal/gang/trap) is ingeschakeld. "
+                             "Start de generator of schakel de MTS om."),
+                "active":   True,
+            }
+        elif "ups_active" in alerts:
+            alerts["ups_active"]["active"] = False
+
+        # v4.6.447: Uitgevallen groep detectie
+        circuit = data.get("circuit_monitor", {})
+        for phase, alert_data in (circuit.get("alerts") or {}).items():
+            key = f"circuit_outage_{phase}"
+            if alert_data.get("confirmed"):
+                devices_str = (", ".join(alert_data.get("devices", [])[:3])
+                               if alert_data.get("devices") else "onbekend")
+                alerts[key] = {
+                    "priority": "warning",
+                    "category": "grid",
+                    "title":    f"⚡ Groep uitgevallen — fase {phase}",
+                    "message":  (f"Fase {phase} heeft onverwacht lage stroom "
+                                 f"({alert_data.get('current_a', 0):.1f}A). "
+                                 f"Mogelijk getroffen: {devices_str}. "
+                                 f"Controleer de groepenkast."),
+                    "active":   True,
+                }
+            elif key in alerts:
+                alerts[key]["active"] = False
+
+        # v4.6.450: UPS alerts
+        ups_data = data.get("ups", {})
+        for unit in (ups_data.get("ups_units") or []):
+            key = f"ups_{unit.get('ups_id','ups')}"
+            if unit.get("on_battery"):
+                bat  = unit.get("battery_pct", 100)
+                run  = unit.get("runtime_min", 0)
+                shed = unit.get("devices_shed", 0)
+                alerts[key] = {
+                    "priority": "critical" if unit.get("low_battery") else "warning",
+                    "category": "grid",
+                    "title":    f"🔋 {unit.get('label','UPS')} op batterij",
+                    "message":  (
+                        f"{unit.get('label','UPS')} draait op batterij. "
+                        f"Batterij: {bat:.0f}% · Runtime: {run:.0f} min. "
+                        + (f"{shed} apparaten afgeschakeld." if shed else "")
+                    ),
+                    "active": True,
+                }
+            elif key in alerts:
+                alerts[key]["active"] = False
 
         return alerts
 
