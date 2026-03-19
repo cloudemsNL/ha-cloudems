@@ -22,6 +22,8 @@ resources:
   type: module
 - url: /local/cloudems/cloudems-decisions-card.js?v=4.6.297
   type: module
+- url: /local/cloudems/cloudems-decisions-learner-card.js?v=4.6.499
+  type: module
 - url: /local/cloudems/cloudems-prijsverloop-card.js?v=4.6.297
   type: module
 - url: /local/cloudems/cloudems-price-card.js?v=4.6.297
@@ -135,7 +137,7 @@ views:
       state: 'off'
     card:
       type: markdown
-      content: "⚠️ **\U0001F50B Batterij module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
+      content: "⚠️ **☀️ Solar learner staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om zonnepanelen te monitoren.\n"
       card_mod:
         style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
   - type: "custom:cloudems-solar-card"
@@ -151,16 +153,6 @@ views:
       content: "{% set forecasts = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'forecasts') or [] %}\n{% set total = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'total_clipped_kwh')\
         \ or 0 %}\n**Totaal verwacht geclipte energie morgen: {{ total }} kWh**\n\n{% for f in forecasts if f.predicted_clip_kwh > 0.05 %}\n\U0001F536 **{{ f.advice }}**\n{% endfor %}\n\n\U0001F4A1 *Tip:\
         \ laad de batterij vóór de clippinguren volledig op om geclipte energie optimaal te benutten.*\n"
-  - type: conditional
-    conditions:
-    - condition: state
-      entity: switch.cloudems_module_batterij
-      state: 'off'
-    card:
-      type: markdown
-      content: "⚠️ **\U0001F50B Batterij module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-      card_mod:
-        style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
 - path: cloudems-batterij
   title: 🔋
   cards:
@@ -1557,6 +1549,7 @@ views:
     style: "hui-view { padding: 12px 12px 24px !important; }\n"
   cards:
   - *id001
+  - type: custom:cloudems-decisions-learner-card
   - type: entities
     title: 🧠 Leervoortgang overzicht
     entities:

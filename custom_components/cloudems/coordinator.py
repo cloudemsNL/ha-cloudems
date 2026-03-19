@@ -413,6 +413,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._store_time_patterns = Store(hass, 1, _SKEY_TP)
         # v4.5: co-occurrence store
         self._store_co_occurrence = Store(hass, 1, "cloudems_nilm_co_occurrence_v1")
+        # v4.6.484: realtime kWh tellers voor altijd-aan apparaten (smart_plug/anchor)
+        self._store_anchor_kwh   = Store(hass, 1, "cloudems_anchor_kwh_v1")
+        self._store_pv_hourly    = Store(hass, 1, "cloudems_pv_hourly_v1")  # v4.6.493
+        self._anchor_kwh_today:     dict[str, float] = {}   # device_id → kWh vandaag
+        self._anchor_kwh_yesterday: dict[str, float] = {}   # device_id → kWh gisteren
+        self._anchor_kwh_day:       str = ""                # YYYY-MM-DD van huidige dag
+        self._anchor_kwh_last_save: float = 0.0
+        # v4.6.492: per-uur solar kWh accumulatie (persistent over page-reload)
+        self._pv_today_hourly_kwh:  list = [0.0] * 24  # index = uur (0-23)
+        self._pv_hourly_day:        str = ""            # YYYY-MM-DD voor dag-reset
+        self._pv_hourly_last_hour:  int = -1            # vorig uur voor afsluiting
         # v4.0.1: ExportDailyTracker — persistente dagelijkse export-kWh history
         from .energy_manager.export_limit_monitor import (
             ExportDailyTracker, ExportLimitMonitor,
@@ -453,6 +464,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # v4.0.2: BatteryDecisionEngine — één instantie
         from .energy_manager.battery_decision_engine import BatteryDecisionEngine as _BDE
         self._battery_decision_engine = _BDE()
+        # v4.6.498: Decision Outcome Learner — na BDE aanmaken zodat set_learner() werkt
+        from .energy_manager.decision_outcome_learner import DecisionOutcomeLearner as _DOL
+        self._decision_learner = _DOL(self.hass)
+        self._battery_decision_engine.set_learner(self._decision_learner)
         # adaptive thresholds per device_type: {type: {min_events, confidence, fp_count, tp_count}}
         self._adaptive_thresholds: dict = {}
         self._nilm_active:        bool = DEFAULT_NILM_ACTIVE
@@ -1996,6 +2011,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             )
         # v4.0.4: BDE Feedback laden
         await self._bde_feedback.async_load()
+        # v4.6.498: laad decision outcome learner
+        try:
+            await self._decision_learner.async_load()
+        except Exception as _dol_err:
+            _LOGGER.warning("CloudEMS: Decision Learner laden mislukt: %s", _dol_err)
         # v4.5.66: BatterySocLearner laden
         await self._battery_soc_learner.async_load()
 
@@ -2451,6 +2471,29 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v1.22: laad persistente NILM toggle-staat vóór HybridNILM setup
         await self._load_nilm_toggles()
+        # v4.6.484: laad anchor kWh tellers
+        try:
+            import datetime as _dt_akwh
+            _akwh_data = await self._store_anchor_kwh.async_load() or {}
+            _today_key = _dt_akwh.date.today().isoformat()
+            if _akwh_data.get("day") == _today_key:
+                self._anchor_kwh_today     = _akwh_data.get("today", {})
+                self._anchor_kwh_yesterday = _akwh_data.get("yesterday", {})
+                self._anchor_kwh_day       = _today_key
+        except Exception as _akwh_err:
+            _LOGGER.debug("CloudEMS: anchor kWh laden mislukt: %s", _akwh_err)
+        # v4.6.493: laad per-uur solar kWh (persistent over herstart)
+        try:
+            import datetime as _dt_pvh_load
+            _pvh_data = await self._store_pv_hourly.async_load() or {}
+            _pvh_today_key = _dt_pvh_load.date.today().isoformat()
+            if _pvh_data.get("day") == _pvh_today_key:
+                self._pv_today_hourly_kwh     = _pvh_data.get("today", [0.0] * 24)
+                self._pv_yesterday_hourly_kwh = _pvh_data.get("yesterday", [0.0] * 24)
+                self._pv_hourly_day           = _pvh_today_key
+                _LOGGER.info("CloudEMS: per-uur solar kWh hersteld voor %s", _pvh_today_key)
+        except Exception as _pvh_load_err:
+            _LOGGER.debug("CloudEMS: pv_hourly laden mislukt: %s", _pvh_load_err)
         _LOGGER.info("CloudEMS: BatteryEPEXScheduler actief")
 
         # v1.10.2: Sensor hint engine (passive pattern observer)
@@ -2594,6 +2637,32 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Externe bediening detectie opstarten
             await self._shutter_ctrl.async_setup()
             await self._shutter_ctrl.async_load_timers()
+            # v4.6.502: koppel DOL aan shutter controller voor bias-toepassing
+            if getattr(self, "_decision_learner", None):
+                self._shutter_ctrl._decision_learner = self._decision_learner
+
+            # v4.6.465: Thermal gain learner — leert pid_kp per rolluik
+            try:
+                from .energy_manager.shutter_thermal_learner import ShutterThermalLearner as _ThermalLearner
+                self._shutter_thermal_learner = _ThermalLearner(self.hass)
+                await self._shutter_thermal_learner.async_setup()
+                self._shutter_ctrl._thermal_learner = self._shutter_thermal_learner
+                _LOGGER.info("CloudEMS: ShutterThermalLearner actief")
+            except Exception as _tl_err:
+                _LOGGER.warning("CloudEMS: ShutterThermalLearner kon niet starten: %s", _tl_err)
+                self._shutter_thermal_learner = None
+
+            # v4.6.464: ShutterPIDLearner — gain learning per rolluik per uur + seizoen
+            try:
+                from .energy_manager.shutter_pid_learner import ShutterPIDLearner as _PIDLearner
+                self._shutter_pid_learner = _PIDLearner(self.hass)
+                await self._shutter_pid_learner.async_setup()
+                self._shutter_ctrl.set_pid_learner(self._shutter_pid_learner)
+                _LOGGER.info("CloudEMS: ShutterPIDLearner actief")
+            except Exception as _pl_err:
+                _LOGGER.warning("CloudEMS: ShutterPIDLearner kon niet starten: %s", _pl_err)
+                self._shutter_pid_learner = None
+
             # v4.3.7: weather entity + presence entities koppelen
             _weather_eid = cfg.get("shutter_weather_entity") or ""
             if _weather_eid:
@@ -2868,11 +2937,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "temp_sensor": _bu.temp_sensor or "(leeg)",
                         "control_mode": _bu.control_mode,
                     })
+            # v4.6.471: log shutter_config incl. temp_sensor voor debugging
+            _shutter_config_log = [
+                {
+                    "entity_id":   sc.get("entity_id", ""),
+                    "label":       sc.get("label", ""),
+                    "temp_sensor": sc.get("temp_sensor") or "(leeg)",
+                    "area_id":     sc.get("area_id") or "(leeg)",
+                }
+                for sc in (self._config.get("shutter_configs") or [])
+            ]
             _aio_su.ensure_future(self._learning_backup.async_log_high("coordinator_startup", {
                 "version":         _mf_version,
                 "active_modules":  _active_modules,
                 "ha_version":      str(getattr(getattr(self.hass, "data", {}), "get", lambda k, d="": d)("homeassistant", "")),
                 "boiler_config":   _boiler_config_log,
+                "shutter_config":  _shutter_config_log,
             }))
 
     # ── Update loop ───────────────────────────────────────────────────────────
@@ -3373,6 +3453,32 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "target_soc_pct":    ev_decision.get("target_soc_pct"),
                         }
                     )
+                    # v4.6.498: Fase 2 — registreer EV-beslissing in DOL
+                    try:
+                        if ev_decision.get("active"):
+                            from .energy_manager.decision_outcome_learner import build_context_bucket
+                            import datetime as _dt_ev
+                            _ev_bucket = build_context_bucket(
+                                "ev", None, current_price or 0.0,
+                                float((price_info or {}).get("avg_today") or 0),
+                                _ev_surplus,
+                                month=_dt_ev.datetime.now().month,
+                                hour=_dt_ev.datetime.now().hour,
+                            )
+                            _ev_mode = ev_decision.get("mode", "solar")
+                            _ev_kwh  = float(ev_decision.get("current_a", 6)) * 230 / 1000  # ~Wh per cyclus
+                            _ev_alt  = "wait" if _ev_mode in ("solar", "cheap") else "charge_now"
+                            self._decision_learner.record_decision(
+                                component      = "ev",
+                                action         = _ev_mode,
+                                alternative    = _ev_alt,
+                                context_bucket = _ev_bucket,
+                                price_eur_kwh  = current_price or 0.0,
+                                energy_kwh     = _ev_kwh,
+                                eval_after_s   = 3600,
+                            )
+                    except Exception as _dol_ev_err:
+                        _LOGGER.debug("DOL EV record fout: %s", _dol_ev_err)
 
             # v4.0.6: EV gecombineerde EPEX+PV laadplanning (vervangt v1.18.1 PV-only)
             ev_solar_plan: dict = {}
@@ -3615,6 +3721,48 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._last_solar_w   = round(float(data.get("solar_power", 0) or 0), 1)
             self._last_grid_w    = round(float(data.get("grid_power",  0) or 0), 1)
             self._last_house_w   = round(float(data.get("house_power", 0) or 0), 1)
+
+            # v4.6.492: per-uur solar kWh accumulatie
+            try:
+                import datetime as _dt_pvh
+                _pvh_today = _dt_pvh.date.today().isoformat()
+                _pvh_hour  = _dt_pvh.datetime.now().hour
+                if self._pv_hourly_day != _pvh_today:
+                    # Nieuwe dag: sla vandaag op als gisteren, reset vandaag
+                    self._pv_yesterday_hourly_kwh = list(self._pv_today_hourly_kwh)  # v4.6.493
+                    self._pv_today_hourly_kwh = [0.0] * 24
+                    self._pv_hourly_day       = _pvh_today
+                    self._pv_hourly_last_hour = _pvh_hour
+                # v4.6.506: bij uurwisseling — finalize vorig uur naar pv_forecast
+                if (self._pv_hourly_last_hour >= 0
+                        and _pvh_hour != self._pv_hourly_last_hour
+                        and self._pv_forecast):
+                    _prev_h   = self._pv_hourly_last_hour
+                    _prev_kwh = self._pv_today_hourly_kwh[_prev_h]
+                    if _prev_kwh > 0:
+                        for _inv in self._config.get(CONF_INVERTER_CONFIGS, []):
+                            _inv_eid = _inv.get("entity_id", "")
+                            if _inv_eid:
+                                try:
+                                    self._pv_forecast.finalize_hour(
+                                        _inv_eid, _prev_h, _prev_kwh
+                                    )
+                                except Exception as _fh_err:
+                                    _LOGGER.debug("finalize_hour fout: %s", _fh_err)
+                        _LOGGER.info(
+                            "PVForecast: uur %d afgesloten — %.3f kWh werkelijk → fractie bijgesteld",
+                            _prev_h, _prev_kwh,
+                        )
+                # Accumuleer huidig uur: W * interval_s / 3600 / 1000 = kWh
+                _pvh_interval = UPDATE_INTERVAL_FAST  # v4.6.493: was getattr met nonexistent attr
+                _pvh_inc = self._last_solar_w * _pvh_interval / 3_600_000.0
+                if _pvh_inc > 0:
+                    self._pv_today_hourly_kwh[_pvh_hour] = round(
+                        self._pv_today_hourly_kwh[_pvh_hour] + _pvh_inc, 4
+                    )
+                self._pv_hourly_last_hour = _pvh_hour
+            except Exception as _pvh_err:
+                _LOGGER.debug("CloudEMS: pv hourly accumulatie fout: %s", _pvh_err)
             # InfluxDB realtime
             if self._influxdb and self._influxdb.enabled:
                 self._influxdb.write_realtime(data)
@@ -3884,7 +4032,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     })
             if self._pv_forecast:
                 await self._pv_forecast.async_refresh_weather()
-                pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh()
+                pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh(
+                    produced_kwh=round(sum(self._pv_today_hourly_kwh), 2)
+                )  # v4.6.492: dagtotaal = reeds geproduceerd + resterende forecast
+                # v4.6.462: Forecast.Solar layer 3 status
+                _fcsolar_status = {}
+                if hasattr(self._pv_forecast, "get_forecast_solar_status"):
+                    _fcsolar_status = self._pv_forecast.get_forecast_solar_status()
                 pv_forecast_tomorrow_kwh = self._pv_forecast.get_total_forecast_tomorrow_kwh()
                 # Cloud cover correctie: lees van weather entity of aparte sensor
                 _cloud_eid = self._config.get("cloud_cover_sensor", "")
@@ -4083,6 +4237,32 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "price_eur_kwh":   round(current_price or 0, 5),
                         }
                     )
+                    # v4.6.498: Fase 2 — registreer boilerbeslissing in DOL
+                    try:
+                        if bd.action in ("hold_on", "turn_on", "boost") and bd.current_state:
+                            from .energy_manager.decision_outcome_learner import build_context_bucket
+                            import datetime as _dt_b
+                            _b_bucket = build_context_bucket(
+                                "boiler", None, current_price or 0.0,
+                                float((price_info or {}).get("avg_today") or 0),
+                                solar_surplus,
+                                month=_dt_b.datetime.now().month,
+                                hour=_dt_b.datetime.now().hour,
+                            )
+                            # Schat energie: 2kWh per boost-beslissing (conservatief)
+                            _b_kwh = 2.0
+                            _b_alt = "hold_off" if bd.action in ("hold_on","turn_on","boost") else "boost"
+                            self._decision_learner.record_decision(
+                                component      = "boiler",
+                                action         = bd.action,
+                                alternative    = _b_alt,
+                                context_bucket = _b_bucket,
+                                price_eur_kwh  = current_price or 0.0,
+                                energy_kwh     = _b_kwh,
+                                eval_after_s   = 7200,  # evalueer na 2 uur
+                            )
+                    except Exception as _dol_b_err:
+                        _LOGGER.debug("DOL boiler record fout: %s", _dol_b_err)
                 # NILM-gebaseerd vermogen leren (als geen energiesensor geconfigureerd)
                 try:
                     _nilm_devs = self._nilm.get_devices_for_ha() if self._nilm else []
@@ -4221,7 +4401,20 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # ── Rolluiken evaluatie ───────────────────────────────────────────
             if self._shutter_ctrl is not None and getattr(self, "_shutter_enabled", False):
                 try:
-                    _sol = data.get("solar", {})
+                    # v4.6.464: lees sun.sun automatisch — geen gebruikersconfiguratie nodig
+                    _sun_state = self.hass.states.get("sun.sun")
+                    _sol: dict = {}
+                    if _sun_state and _sun_state.state not in ("unavailable", "unknown"):
+                        _sun_az  = _sun_state.attributes.get("azimuth")
+                        _sun_elv = _sun_state.attributes.get("elevation")
+                        if _sun_az is not None and _sun_elv is not None:
+                            _sol = {
+                                "azimuth":   float(_sun_az),
+                                "elevation": float(_sun_elv),
+                            }
+                    # Fallback: gebruik bestaande data["solar"] als sun.sun niet beschikbaar is
+                    if not _sol:
+                        _sol = data.get("solar", {})
                     _room_temps: dict = {}
                     _room_setpoints: dict = {}
                     # Haal kamertemperaturen op via zone_climate_manager indien beschikbaar
@@ -4232,40 +4425,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                     _room_temps[zone.area_id] = zone.current_temp
                                 if zone.setpoint is not None:
                                     _room_setpoints[zone.area_id] = zone.setpoint
-                                # Update learner
-                                if self._shutter_learner and zone.current_temp is not None:
-                                    _az  = _sol.get("azimuth")
-                                    _elv = _sol.get("elevation")
-                                    if _az is not None and _elv is not None:
-                                        learned = self._shutter_learner.update(
-                                            area_id=zone.area_id,
-                                            area_name=getattr(zone, "area_name", zone.area_id),
-                                            room_temp_c=zone.current_temp,
-                                            solar_azimuth=float(_az),
-                                            solar_elevation=float(_elv),
-                                        )
-                                        if learned:
-                                            self._shutter_ctrl._states  # trigger refresh
+                                pass  # oriëntatie-learning verwijderd (ShutterThermalLearner heeft geen update())
                     # Voeg temperaturen toe van rolluiken met een losse sensor maar zonder zone climate
                     _az  = _sol.get("azimuth")
                     _elv = _sol.get("elevation")
                     for _scfg in getattr(self._shutter_ctrl, "_configs", []):
-                        if _scfg.area_id and _scfg.area_id not in _room_temps and _scfg.temp_sensor:
+                        # v4.6.464: gebruik entity_id als fallback key als area_id leeg is
+                        # zodat temp_sensor altijd gelezen wordt ongeacht HA-kamer koppeling
+                        _rkey = _scfg.area_id or _scfg.entity_id
+                        if _rkey and _rkey not in _room_temps and _scfg.temp_sensor:
                             _t = self._shutter_ctrl._read_temp_sensor(_scfg.temp_sensor)
                             if _t is not None:
-                                _room_temps[_scfg.area_id] = _t
-                                # Leer ook oriëntatie via deze sensor
-                                if self._shutter_learner and _az is not None and _elv is not None:
-                                    self._shutter_learner.update(
-                                        area_id=_scfg.area_id,
-                                        area_name=_scfg.area_name or _scfg.area_id,
-                                        room_temp_c=_t,
-                                        solar_azimuth=float(_az),
-                                        solar_elevation=float(_elv),
-                                    )
+                                _room_temps[_rkey] = _t
+                                pass  # oriëntatie-learning verwijderd
                     # v4.3.7: poll weer en aanwezigheid elke cyclus
                     self._shutter_ctrl.poll_weather()
                     self._shutter_ctrl.poll_presence()
+                    # v4.6.465: flush thermal learner
+                    if getattr(self, "_shutter_thermal_learner", None):
+                        await self._shutter_thermal_learner.async_flush_if_dirty()
+
                     shutter_decisions = await self._shutter_ctrl.async_evaluate(
                         outdoor_temp_c     = data.get("outdoor_temp_c"),
                         solar_elevation_deg= _sol.get("elevation"),
@@ -4276,6 +4455,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     )
                     # v4.5.61: log de uitkomst per rolluik — gebruik de verse decision
                     # (niet last_action/last_reason want die worden niet bij idle bijgewerkt)
+                    # v4.6.465: flush thermal learner
+                    if getattr(self, "_shutter_thermal_learner", None):
+                        await self._shutter_thermal_learner.async_flush_if_dirty()
+
                     try:
                         _sh_decisions_map = {d.entity_id: d for d in shutter_decisions}
                         for _sh_cfg in getattr(self._shutter_ctrl, "_configs", []):
@@ -4306,6 +4489,35 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             )
                     except Exception as _sh_log_err:
                         _LOGGER.debug("Rolluik-log mislukt: %s", _sh_log_err)
+
+                    # v4.6.502: Fase 3 — registreer actieve rolluikbeslissingen in DOL
+                    try:
+                        from .energy_manager.decision_outcome_learner import build_context_bucket
+                        import datetime as _dt_sh
+                        _sh_hour = _dt_sh.datetime.now().hour
+                        _sh_month = _dt_sh.datetime.now().month
+                        for _sh_dec in shutter_decisions:
+                            if _sh_dec.action in ("position", "close", "open"):
+                                _sh_bucket = build_context_bucket(
+                                    "shutter", None, current_price or 0.0,
+                                    float((price_info or {}).get("avg_today") or 0),
+                                    solar_surplus if 'solar_surplus' in dir() else 0.0,
+                                    month=_sh_month, hour=_sh_hour,
+                                )
+                                # Schatting: 0.1 kWh thermisch voordeel per positie-stap
+                                _sh_kwh  = 0.1
+                                _sh_alt  = "idle"
+                                self._decision_learner.record_decision(
+                                    component      = "shutter",
+                                    action         = _sh_dec.action,
+                                    alternative    = _sh_alt,
+                                    context_bucket = _sh_bucket,
+                                    price_eur_kwh  = current_price or 0.0,
+                                    energy_kwh     = _sh_kwh,
+                                    eval_after_s   = 7200,  # evalueer na 2 uur
+                                )
+                    except Exception as _dol_sh_err:
+                        _LOGGER.debug("DOL shutter record fout: %s", _dol_sh_err)
                 except Exception as _sh_exc:
                     _LOGGER.exception("CloudEMS ShutterController fout: %s", _sh_exc)
             energy_tax   = float(self._config.get(CONF_ENERGY_TAX, 0.0))
@@ -4554,6 +4766,47 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 nilm_devices_enriched = enrich_devices_with_wear(nilm_devices_enriched)
             except Exception as _lf_err:
                 _LOGGER.debug("Levensduur verrijking fout: %s", _lf_err)
+
+            # v4.6.484: realtime kWh accumulatie voor altijd-aan apparaten (smart_plug)
+            # Gewone NILM apparaten ticken via detector.tick_energy() (alleen als is_on=True).
+            # Smart_plug/anchor apparaten draaien altijd maar zitten niet in self._devices
+            # van de detector → tick_energy wordt nooit aangeroepen → teller blijft 0.
+            # Fix: accumuleer hier per cyclus op basis van huidig vermogen.
+            try:
+                import datetime as _dt_akwh
+                _today_k = _dt_akwh.date.today().isoformat()
+                if self._anchor_kwh_day != _today_k:
+                    # Nieuwe dag — zet yesterday = today en reset today
+                    self._anchor_kwh_yesterday = dict(self._anchor_kwh_today)
+                    self._anchor_kwh_today     = {}
+                    self._anchor_kwh_day       = _today_k
+                # Accumuleer per cyclus: W × interval_s / 3600000 = kWh
+                for _d in nilm_devices_enriched:
+                    if _d.get("source") != "smart_plug":
+                        continue
+                    _did   = _d.get("device_id") or _d.get("entity_id", "")
+                    _pw    = float(_d.get("current_power") or 0.0)
+                    if _did and _pw > 0:
+                        _kwh_inc = _pw * UPDATE_INTERVAL_FAST / 3_600_000.0
+                        self._anchor_kwh_today[_did] = round(
+                            self._anchor_kwh_today.get(_did, 0.0) + _kwh_inc, 4
+                        )
+                # Opslaan elke 60s
+                if time.time() - self._anchor_kwh_last_save > 60:
+                    self.hass.async_create_task(self._store_anchor_kwh.async_save({
+                        "day":       _today_k,
+                        "today":     self._anchor_kwh_today,
+                        "yesterday": self._anchor_kwh_yesterday,
+                    }))
+                    # v4.6.493: sla ook per-uur solar kWh op
+                    self.hass.async_create_task(self._store_pv_hourly.async_save({
+                        "day":       _today_k,
+                        "today":     list(self._pv_today_hourly_kwh),
+                        "yesterday": list(getattr(self, "_pv_yesterday_hourly_kwh", [0.0] * 24)),
+                    }))
+                    self._anchor_kwh_last_save = time.time()
+            except Exception as _akwh_err:
+                _LOGGER.debug("CloudEMS: anchor kWh accumulatie fout: %s", _akwh_err)
 
             # v4.4.1: Trusted device lijst — één geïntegreerd vertrouwensmodel.
             #
@@ -4814,6 +5067,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 outside_temp_c_val = await self._thermal_model.async_fetch_outdoor_temp(
                     session=self._session
                 )
+            # v4.6.477: automatische fallback via weather entiteit als nog geen buitentemp
+            if outside_temp_c_val is None:
+                for _w_eid in ["weather.forecast_thuis", "weather.forecast_home", "weather.home"]:
+                    _w_st = self.hass.states.get(_w_eid)
+                    if _w_st and _w_st.state not in ("unavailable", "unknown"):
+                        _t = _w_st.attributes.get("temperature")
+                        if _t is not None:
+                            try:
+                                outside_temp_c_val = float(_t)
+                                break
+                            except (ValueError, TypeError):
+                                pass
 
             # v1.15.0: Heat pump COP update
             hp_cop_data: dict = {}
@@ -5405,7 +5670,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             try:
                 if hasattr(self, "_smart_delay_scheduler") and self._smart_delay_scheduler:
                     _sd_price   = self._enrich_price_info(price_info) if price_info else {}
-                    _sd_actions = await self._smart_delay_scheduler.async_evaluate(_sd_price)
+                    _sd_actions = await self._smart_delay_scheduler.async_evaluate(_sd_price, solar_surplus_w=solar_surplus if 'solar_surplus' in dir() else 0.0)
                     _sd_status  = self._smart_delay_scheduler.get_status(_sd_price)
                     smart_delay_data = {
                         "switches":      _sd_status,
@@ -5688,6 +5953,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         )
                     except Exception as _fb_err:
                         _LOGGER.debug("BDE feedback record fout: %s", _fb_err)
+
+                # v4.6.498: Decision Outcome Learner — registreer batterijbeslissing
+                if _bde_result and _bde_result.should_execute:
+                    try:
+                        from .energy_manager.decision_outcome_learner import build_context_bucket
+                        _dol_kwh   = (_bde_ctx.battery_capacity_kwh * 0.5) if _bde_ctx else 5.0
+                        _dol_soc   = _bde_ctx.soc_pct if _bde_ctx else None
+                        _dol_price = _bde_ctx.epex_eur_now if _bde_ctx else 0.0
+                        _dol_avg   = float((self.data or {}).get("avg_price_today", 0) or 0)
+                        _dol_surp  = solar_surplus if 'solar_surplus' in dir() else 0.0
+                        _dol_bucket = build_context_bucket(
+                            "battery", _dol_soc, _dol_price or 0.0, _dol_avg, _dol_surp
+                        )
+                        _dol_alt = "hold"
+                        if _bde_result.action == "charge":
+                            _dol_alt = "hold"
+                        elif _bde_result.action == "discharge":
+                            _dol_alt = "hold"
+                        elif _bde_result.action == "hold":
+                            _dol_alt = "charge" if _dol_price < _dol_avg else "discharge"
+                        self._decision_learner.record_decision(
+                            component      = "battery",
+                            action         = _bde_result.action,
+                            alternative    = _dol_alt,
+                            context_bucket = _dol_bucket,
+                            price_eur_kwh  = _dol_price or 0.0,
+                            energy_kwh     = _dol_kwh,
+                        )
+                    except Exception as _dol_rec_err:
+                        _LOGGER.debug("DOL record fout: %s", _dol_rec_err)
 
                 # Uitvoering: stuur commando naar Zonneplan als confidence >= 0.75
                 if _bde_result and _bde_result.should_execute and _zp_br:
@@ -6834,6 +7129,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _fb_eval_err:
                     _LOGGER.debug("BDE feedback eval fout: %s", _fb_eval_err)
 
+                # v4.6.498: Decision Outcome Learner — evalueer rijpe records elke cyclus
+                try:
+                    _dol_evaluated = self._decision_learner.evaluate_outcomes(
+                        current_price  = float(price_info.get("current") or 0),
+                        price_history  = self._price_hour_history,
+                    )
+                    if _dol_evaluated > 0 or self._decision_learner._dirty:
+                        await self._decision_learner.async_save()
+                except Exception as _dol_eval_err:
+                    _LOGGER.debug("DOL evaluate fout: %s", _dol_eval_err)
+
             if price_info and _cur_hour_ts != self._price_history_last_hour:
                 _cur_price = price_info.get("current")
                 if _cur_price is not None:
@@ -6971,6 +7277,34 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._climate_epex:
                 try:
                     self._climate_epex.tick(price_info or {})
+                    # v4.6.502: Fase 3 — registreer warmtepomp-beslissingen in DOL
+                    try:
+                        _ce_status = self._climate_epex.get_status()
+                        for _ce_dev in _ce_status:
+                            _ce_offset = float(_ce_dev.get("active_offset_c", 0))
+                            if abs(_ce_offset) > 0.05:
+                                from .energy_manager.decision_outcome_learner import build_context_bucket
+                                import datetime as _dt_hp
+                                _hp_action  = "preheat" if _ce_offset > 0 else "reduce"
+                                _hp_kwh     = abs(_ce_offset) * 0.3  # schatting: 0.3 kWh per graad
+                                _hp_bucket  = build_context_bucket(
+                                    "heatpump", None, current_price or 0.0,
+                                    float((price_info or {}).get("avg_today") or 0),
+                                    solar_surplus if 'solar_surplus' in dir() else 0.0,
+                                    month=_dt_hp.datetime.now().month,
+                                    hour=_dt_hp.datetime.now().hour,
+                                )
+                                self._decision_learner.record_decision(
+                                    component      = "heatpump",
+                                    action         = _hp_action,
+                                    alternative    = "hold",
+                                    context_bucket = _hp_bucket,
+                                    price_eur_kwh  = current_price or 0.0,
+                                    energy_kwh     = _hp_kwh,
+                                    eval_after_s   = 10800,  # evalueer na 3 uur
+                                )
+                    except Exception as _dol_hp_err:
+                        _LOGGER.debug("DOL heatpump record fout: %s", _dol_hp_err)
                 except Exception as _ce_err:
                     _LOGGER.debug("ClimateEpex tick fout: %s", _ce_err)
 
@@ -7275,6 +7609,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     for i, c in enumerate(self._config.get("inverter_configs", []))
                 ],          # ← peak + clipping
                 "pv_forecast_today_kwh":     pv_forecast_kwh,
+                "forecast_solar_status":     _fcsolar_status if '_fcsolar_status' in dir() else {},
                 "pv_payback":           self._calc_pv_payback(
                     pv_forecast_kwh,
                     price_info,
@@ -7283,6 +7618,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "pv_forecast_tomorrow_kwh":  pv_forecast_tomorrow_kwh,
                 "pv_forecast_hourly":        pv_forecast_hourly,
                 "pv_forecast_hourly_tomorrow": pv_forecast_hourly_tomorrow,
+                "pv_today_hourly_kwh":       list(self._pv_today_hourly_kwh),  # v4.6.492
                 "inverter_profiles":    inverter_profiles,
                 "peak_shaving":         peak_data,
                 "boiler_status":        self._boiler_ctrl.get_status() if self._boiler_ctrl else [],
@@ -7290,6 +7626,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "pool":                 pool_data,          # ← v1.25.8 zwembad controller
                 "lamp_circulation":     lamp_circ_data,     # ← v1.25.9 intelligente lampenbeveiliging
                 "shutters":             self._shutter_ctrl.get_status() if self._shutter_ctrl else {},  # ← v3.9.0 rolluiken
+                "shutter_thermal_gains": getattr(self, "_shutter_thermal_learner", None).get_status() if getattr(self, "_shutter_thermal_learner", None) else [],
                 "decision_log":         list(self._decision_log),
                 "insights":             self._insights,
                 "nilm_diagnostics":     self._nilm.get_diagnostics(),  # ← v1.7
@@ -8920,6 +9257,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         break
             if _boiler_active and _boiler_tip:
                 tips.append(_boiler_tip)
+            elif getattr(self, "_boiler_ctrl", None):
+                # Boiler is geconfigureerd — CloudEMS beheert hem, geen handmatige tip tonen
+                tips.append(f"☀️ PV-surplus {solar_surplus:.0f}W: CloudEMS stuurt je boiler automatisch aan.")
             else:
                 tips.append(f"☀️ PV-surplus {solar_surplus:.0f}W: zet boiler/EV aan om exportverlies te minimaliseren.")
 

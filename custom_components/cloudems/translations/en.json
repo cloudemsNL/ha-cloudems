@@ -1809,29 +1809,10 @@
         }
       },
       "gas_opts": {
-        "title": "Gas & Heating Settings",
+        "title": "Gas & Heat",
         "data": {
-          "gas_sensor": "Gas meter sensor",
-          "gas_price_sensor": "Gas price sensor",
-          "gas_price_fixed": "Fixed gas price (€/m³)",
-          "boiler_efficiency": "Boiler efficiency",
-          "heat_pump_cop": "Heat pump COP (manual)",
-          "heat_pump_power_entity": "Heat pump power sensor (W)",
-          "heat_pump_thermal_entity": "Heat pump thermal sensor (W, optional)",
-          "back_to_menu": "← Back to menu",
-          "budget_elec_eur_month": "Monthly electricity budget (€)",
-          "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
-          "budget_enabled": "Enable energy budget",
-          "budget_gas_m3_month": "Monthly gas budget (m³)",
-          "nilm_load_shifting_enabled": "Enable load shifting",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Exclude devices",
-          "nilm_shift_include": "Include devices",
-          "nilm_shift_max_defer_hours": "Max. deferral (hours)",
-          "nilm_shift_price_threshold": "Price threshold for shifting (€/kWh)",
-          "pool_filter_power_entity": "Filter pump power sensor",
-          "pool_heat_power_entity": "Heat pump power sensor",
-          "shutter_smoke_sensor": "Smoke detector (optional)"
+          "section": "Section",
+          "back_to_menu": "← Back to menu"
         }
       },
       "nilm_devices_opts": {
@@ -2684,25 +2665,27 @@
         }
       },
       "lamp_auto_opts": {
-        "title": "Smart Lamp Automation",
+        "title": "Lamp Automation — Step 1",
         "data": {
-          "lamp_auto_enabled": "Enable smart lamp automation",
-          "lamp_auto_lamps_raw": "Lamp configuration (JSON)"
+          "la_enabled": "Enable lamp automation",
+          "la_forgotten_minutes": "Forgotten timer (minutes)",
+          "back_to_menu": "← Back to menu"
         }
       },
       "lamp_automation_opts": {
-        "title": "🏠 Smart Lighting",
+        "title": "Lamp Automation — Step 1",
         "data": {
-          "la_enabled": "Enable smart lighting",
-          "la_forgotten_minutes": "Forgotten lights: minutes before auto-off",
-          "back_to_menu": "← Back to menu",
-          "la_area_filter": "Filter by room"
+          "la_enabled": "Enable lamp automation",
+          "la_forgotten_minutes": "Forgotten timer (minutes)",
+          "back_to_menu": "← Back to menu"
         }
       },
       "lamp_automation_detail_opts": {
-        "title": "💡 Configure lamps per room",
+        "title": "Lamp Automation — Step 2: Mode per lamp",
+        "description": "{uitleg}",
         "data": {
-          "back_to_menu": "← Terug"
+          "terug_naar_stap1": "↩ Back to step 1",
+          "back_to_menu": "← Back to menu"
         }
       },
       "ups_count_opts": {
@@ -2732,6 +2715,48 @@
       "noodstroom": {
         "title": "⚡ Noodstroom & Backup",
         "data": {}
+      },
+      "nilm_shift_opts": {
+        "title": "NILM Load Shifting",
+        "description": "Automatically shift appliances to cheaper hours based on NILM detection.",
+        "data": {
+          "nilm_load_shifting_enabled": "Enable load shifting",
+          "nilm_shift_price_threshold": "Price threshold — only shift above this rate",
+          "nilm_shift_max_defer_hours": "Maximum defer time",
+          "nilm_shift_include": "Only shift these devices (comma-separated, empty = all)",
+          "nilm_shift_exclude": "Never shift these devices (comma-separated)",
+          "nilm_shift_deadlines_raw": "Deadlines per device (JSON, optional)",
+          "back_to_menu": "← Back to menu"
+        }
+      },
+      "budget_opts": {
+        "title": "Budget & Usage Limits",
+        "data": {
+          "budget_enabled": "Enable budget monitoring",
+          "budget_elec_eur_month": "Electricity budget",
+          "budget_elec_kwh_month": "Electricity usage limit",
+          "budget_gas_m3_month": "Gas usage limit",
+          "back_to_menu": "← Back to menu"
+        }
+      },
+      "gas_meter_opts": {
+        "title": "Gas Meter & Price",
+        "data": {
+          "gas_sensor": "Gas usage sensor",
+          "gas_price_sensor": "Gas price sensor (dynamic)",
+          "gas_price_fixed": "Fixed gas price (€/m³)",
+          "boiler_efficiency": "Boiler efficiency (0.5–1.0)",
+          "back_to_menu": "← Back to menu"
+        }
+      },
+      "warmtepomp_opts": {
+        "title": "Heat Pump Settings",
+        "data": {
+          "heat_pump_cop": "COP (manual)",
+          "heat_pump_power_entity": "Heat pump power sensor",
+          "heat_pump_thermal_entity": "Heat pump thermal power sensor",
+          "back_to_menu": "← Back to menu"
+        }
       }
     },
     "abort": {

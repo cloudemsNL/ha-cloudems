@@ -68,7 +68,6 @@ class ShutterConfig:
     morning_open_time: str = "08:00"        # start default, learned schedule takes over
     schedule_learning: bool = True          # v4.6.153: learn open/close times from observations
     default_setpoint: float = 20.0          # fallback setpoint als geen klimaat beschikbaar
-    smoke_sensor: str = ""                  # optioneel: binary_sensor per rolluik/ruimte
 
     # PID instellingen (positie-sturing)
     pid_kp: float = 15.0                    # proportionele versterking
@@ -169,7 +168,11 @@ class ShutterController:
 
         # v4.6.153: Schedule learner
         from .shutter_learner import ShutterScheduleLearner
+        from .shutter_pid_learner import ShutterPIDLearner as _PIDLearner  # noqa
         self._schedule_learner = ShutterScheduleLearner()
+
+        # v4.6.465: Thermal gain learner
+        self._thermal_learner: Any = None   # ShutterThermalLearner — gekoppeld via async_setup
 
     # ── Setup ────────────────────────────────────────────────────────────────
 
@@ -321,6 +324,12 @@ class ShutterController:
     def set_learner(self, learner: Any) -> None:
         """Koppel de ShutterThermalLearner."""
         self._learner = learner
+        if not hasattr(self, "_pid_learner"):
+            self._pid_learner = None
+
+    def set_pid_learner(self, learner: Any) -> None:
+        """Koppel de ShutterPIDLearner (v4.6.464)."""
+        self._pid_learner = learner
 
     def set_wind_speed(self, wind_ms: float | None, threshold_ms: float = 12.0) -> None:
         """Update actuele windsnelheid (m/s) en drempel. Wordt door coordinator aangeroepen."""
@@ -464,10 +473,21 @@ class ShutterController:
         for cfg in self._configs:
             if not cfg.entity_id:
                 continue
-            # Kamertemperatuur: eerst via zone climate manager, dan via geconfigureerde sensor
-            room_temp = room_temps.get(cfg.area_id)
-            if room_temp is None and cfg.temp_sensor:
-                room_temp = self._read_temp_sensor(cfg.temp_sensor)
+            # v4.6.477: direct van sensor lezen (meest betrouwbaar), room_temps als fallback
+            _rt_key = cfg.area_id or cfg.entity_id
+            room_temp = self._read_temp_sensor(cfg.temp_sensor) if cfg.temp_sensor else None
+            if room_temp is None:
+                room_temp = room_temps.get(_rt_key) if _rt_key else None
+
+            # v4.6.470: debug log zodat room_temp zichtbaar is in cloudems_high.log
+            _LOGGER.info(
+                "CloudEMS ShutterEval [%s]: room_temp=%s sensor=%s area_id=%s entity_id=%s",
+                cfg.label or cfg.entity_id,
+                f"{room_temp:.1f}°C" if room_temp is not None else "None",
+                cfg.temp_sensor or "niet gekoppeld",
+                cfg.area_id or "—",
+                cfg.entity_id,
+            )
 
             decision = self._evaluate_one(
                 cfg,
@@ -548,6 +568,13 @@ class ShutterController:
                         state.auto_disabled_until = until
                         state.auto_enabled = False
                         _LOGGER.info("CloudEMS Shutters: pauze hersteld voor %s tot %s", eid, until)
+            # v4.6.491: herstel permanent uitgeschakelde automaten
+            for eid in data.get("auto_disabled_permanent", []):
+                state = self._states.get(eid)
+                if state:
+                    state.auto_enabled = False
+                    state.auto_disabled_until = None
+                    _LOGGER.info("CloudEMS Shutters: automaat permanent UIT hersteld voor %s", eid)
             for eid, t in data.get("override_until", {}).items():
                 state = self._states.get(eid)
                 if state and t:
@@ -577,8 +604,14 @@ class ShutterController:
                 auto_disabled[eid] = state.auto_disabled_until.isoformat()
             if state.override_until:
                 overrides[eid] = state.override_until.isoformat()
+        # v4.6.491: sla ook permanent uitgeschakelde automaten op (hours=0 → auto_disabled_until=None)
+        auto_disabled_permanent = [
+            eid for eid, state in self._states.items()
+            if not state.auto_enabled and state.auto_disabled_until is None
+        ]
         payload: dict = {
             "auto_disabled_until": auto_disabled,
+            "auto_disabled_permanent": auto_disabled_permanent,
             "override_until": overrides,
         }
         # v4.6.153: save learned schedules if dirty
@@ -596,6 +629,11 @@ class ShutterController:
         else:
             state.auto_disabled_until = None
         self._schedule_save_timers()
+        # Direct evalueren als automaat weer aan gaat
+        if enabled and self._coordinator is not None:
+            self.hass.async_create_task(
+                self._coordinator.async_request_refresh()
+            )
 
     def get_auto_enabled(self, entity_id: str) -> bool:
         """Geef terug of automaat aan is. Hervatten als timer verlopen is."""
@@ -627,7 +665,7 @@ class ShutterController:
                 return
 
     def get_schedule_learning(self, entity_id: str) -> bool:
-        """v4.6.157: Geef terug of tijdschema-leren aan is voor een rolluik."""""
+        """v4.6.157: Geef terug of tijdschema-leren aan is voor een rolluik."""
         for cfg in self._configs:
             if cfg.entity_id == entity_id:
                 return cfg.schedule_learning
@@ -646,6 +684,11 @@ class ShutterController:
             state.override_action = SHUTTER_ACTION_IDLE
             _LOGGER.debug("CloudEMS Shutters: override geannuleerd voor %s", entity_id)
             self._schedule_save_timers()
+        # Direct evalueren
+        if self._coordinator is not None:
+            self.hass.async_create_task(
+                self._coordinator.async_request_refresh()
+            )
 
     # ── Evaluatie logica ─────────────────────────────────────────────────────
 
@@ -857,6 +900,25 @@ class ShutterController:
         """
         import time as _time
 
+        # v4.6.465: gebruik geleerde kp als thermal learner beschikbaar
+        import datetime as _dt
+        _now = _dt.datetime.now()
+        _hour = _now.hour
+        _is_summer = 4 <= _now.month <= 9
+        _effective_kp = cfg.pid_kp
+        if getattr(self, "_thermal_learner", None):
+            _effective_kp = self._thermal_learner.get_effective_kp(
+                cfg.entity_id, _hour, _is_summer, cfg.pid_kp
+            )
+        # v4.6.464: ShutterPIDLearner overschrijft indien voldoende samples
+        if getattr(self, "_pid_learner", None) is not None:
+            from .shutter_pid_learner import SEASONS as _SEAS
+            _szn = _SEAS.get(_now.month, "spring")
+            _kp_learned = self._pid_learner.get_calibrated_kp(
+                cfg.entity_id, _hour, _szn, default_kp=_effective_kp
+            )
+            _effective_kp = _kp_learned
+
         # PV-surplus: verhoog effectief setpoint zodat gratis warmte benut wordt
         bonus = 0.0
         if pv_surplus_w > 500 and solar_on_window:
@@ -866,8 +928,25 @@ class ShutterController:
 
         error = room_temp - effective_sp
 
+        # v4.6.502: pas geleerde bias toe op deadband — voorzichtiger of agressiever reageren
+        _effective_deadband = self._TEMP_DEADBAND
+        if getattr(self, "_decision_learner", None):
+            try:
+                import datetime as _dt_sh_bias
+                from .decision_outcome_learner import build_context_bucket
+                _sh_bucket = build_context_bucket(
+                    "shutter", None, 0.0, 0.0, pv_surplus_w,
+                    month=_dt_sh_bias.datetime.now().month,
+                    hour=_dt_sh_bias.datetime.now().hour,
+                )
+                _sh_bias = self._decision_learner.get_bias("shutter", _sh_bucket, "position")
+                # bias > 0 → eerder ingrijpen (kleiner deadband), bias < 0 → later ingrijpen
+                _effective_deadband = max(0.1, self._TEMP_DEADBAND * (1.0 - _sh_bias * 0.3))
+            except Exception:
+                pass
+
         # Deadband — bij kleine afwijking niets doen
-        if abs(error) < self._TEMP_DEADBAND:
+        if abs(error) < _effective_deadband:
             state.pid_integral = 0.0      # reset integral in deadband
             return None
 
@@ -880,7 +959,7 @@ class ShutterController:
         # PID berekening
         dt = max(elapsed, 60.0) if state.pid_last_time > 0 else 300.0
 
-        p_term = cfg.pid_kp * error
+        p_term = _effective_kp * error
         state.pid_integral += error * dt
         state.pid_integral  = max(-300.0, min(300.0, state.pid_integral))  # anti-windup
         i_term = cfg.pid_ki * state.pid_integral
@@ -902,11 +981,32 @@ class ShutterController:
         state.pid_last_time   = now_ts
         state.pid_last_output = target_pos
 
+        # v4.6.465: registreer beweging voor thermal gain learning
+        if getattr(self, "_thermal_learner", None) and room_temp is not None:
+            self._thermal_learner.record_move(
+                entity_id   = cfg.entity_id,
+                label       = cfg.label,
+                pos_before  = float(current_pos),
+                pos_after   = float(target_pos),
+                temp_before = room_temp,
+                hour        = _hour,
+                is_summer   = _is_summer,
+            )
+        # v4.6.464: ShutterPIDLearner — registreer beweging voor gain-leren
+        if getattr(self, "_pid_learner", None) is not None and room_temp is not None:
+            self._pid_learner.record_movement(
+                entity_id  = cfg.entity_id,
+                pos_before = current_pos,
+                pos_after  = target_pos,
+                temp_before= room_temp,
+            )
+
         _LOGGER.debug(
             "PID[%s] temp=%.1f sp=%.1f(+%.1f) err=%.2f "
-            "p=%.1f i=%.1f d=%.1f → pos=%d (was %d)",
+            "p=%.1f i=%.1f d=%.1f → pos=%d (was %d) kp=%.1f%s",
             cfg.label, room_temp, setpoint, bonus, error,
-            p_term, i_term, d_term, target_pos, current_pos,
+            p_term, i_term, d_term, target_pos, current_pos, _effective_kp,
+            " (geleerd)" if _effective_kp != cfg.pid_kp else "",
         )
         return target_pos
 
@@ -1106,6 +1206,10 @@ class ShutterController:
                     priority=60,
                 )
 
+        # v4.6.465: tick thermal learner met huidige temperatuur (meting na 15 min)
+        if getattr(self, "_thermal_learner", None) and room_temp is not None:
+            self._thermal_learner.tick(cfg.entity_id, room_temp)
+
         # ── Niets te doen ─────────────────────────────────────────────────────
         return ShutterDecision(
             entity_id=cfg.entity_id,
@@ -1157,7 +1261,11 @@ class ShutterController:
                 reason=f"oververhitting ({room_temp:.1f}°C > {setpoint+3:.1f}°C)", priority=100,
             )
         if room_temp is not None and state is not None:
-            pid_pos = self._pid_position(cfg, state, room_temp, setpoint, pv_surplus_w, sun_on_window)
+            # v4.6.493: gebruik een kopie van state zodat _pid_position de echte PID-integraal
+            # niet muteert wanneer shadow wordt berekend tijdens override/automaat-uit.
+            import copy as _copy
+            shadow_state = _copy.copy(state)
+            pid_pos = self._pid_position(cfg, shadow_state, room_temp, setpoint, pv_surplus_w, sun_on_window)
             if pid_pos is not None:
                 return ShutterDecision(
                     entity_id=cfg.entity_id, action=SHUTTER_ACTION_POSITION,

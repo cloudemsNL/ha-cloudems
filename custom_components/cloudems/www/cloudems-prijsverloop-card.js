@@ -1,4 +1,4 @@
-/** @version 4.6.300
+/** @version 4.6.486
  * CloudEMS Prijsverloop Card — cloudems-prijsverloop-card
  *
  * Nieuw in 4.6.300:
@@ -544,7 +544,9 @@ class CloudemsPrijsverloopCard extends HTMLElement {
         // Zonder negatieven: schaal op maxPrice (duurste = 100%) anders over de rand
         barWidth  = Math.min(100, hasNeg ? (price / totalRange * 100) : (price / maxPrice * 100));
         barLeft   = zeroPct;
-        const norm = (price - Math.max(0, minPrice)) / (maxPrice - Math.max(0, minPrice) || 0.001);
+        // Kleur op basis van verhouding t.o.v. daggemiddelde — stabiel bij all-in/EPEX wisseling
+        // norm=0 = 30% onder gem, norm=0.5 = op gem, norm=1 = 30% boven gem
+        const norm = Math.max(0, Math.min(1, (price - avgPrice * 0.7) / (avgPrice * 0.6 || 0.001)));
         barBg = isExp ? 'rgb(220,80,50)' : isCurrent ? '#00d14e' : this._barColor(norm);
         barRadius = hasNeg ? '0 3px 3px 0' : '3px';
       }

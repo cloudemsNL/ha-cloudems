@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Solar Card  v2.1.0
+// CloudEMS Solar Card  v2.1.1
 
 const SOL_VERSION = "2.1.0";
 const SOL_STYLES = `
@@ -198,15 +198,23 @@ class CloudemsSolarCard extends HTMLElement {
                      || this._staleWarning('sensor.cloudems_solar_system', 5);
     const fcTomKwh=parseFloat(fcTS?.state||0)||0;
     const fcHourly=fcA.hourly||[];
-    const fcTomHourly=(fcTS?.attributes?.hourly)||[];
-    // Werkelijke productie per uur vandaag — uit solar_learner history (hourly_peak_w als proxy)
-    // Echte per-uur actual: gebruik _histPv die we bijhouden in de kaart
+    const fcTomHourly=(fcTS?.attributes?.hourly_tomorrow)||[];
+    // v4.6.492: werkelijke productie per uur vandaag — uit backend (persistent over reload)
     const nowH=new Date().getHours();
-    if(!this._pvHist) this._pvHist = new Array(24).fill(0);
-    if(!this._pvHistDay) this._pvHistDay = new Date().getDate();
-    if(new Date().getDate() !== this._pvHistDay){ this._pvHist = new Array(24).fill(0); this._pvHistDay = new Date().getDate(); }
-    // Update huidig uur met live waarde (kWh = W / 360 per 10s sample)
-    this._pvHist[nowH] = Math.max(this._pvHist[nowH], totalW / 1000 * (10/3600));
+    const _backendHourly = fcA.actual_hourly_kwh || null;
+    if(_backendHourly && _backendHourly.length === 24){
+      // Backend data beschikbaar — gebruik die (persistent, herstart-bestendig)
+      // Houd in-memory fallback in sync zodat bij korte onderbreking data behouden blijft
+      this._pvHist = _backendHourly.slice();
+      this._pvHistDay = new Date().getDate();
+    } else {
+      // Fallback: in-memory accumulatie (werkt alleen zolang pagina open is)
+      if(!this._pvHist) this._pvHist = new Array(24).fill(0);
+      if(!this._pvHistDay) this._pvHistDay = new Date().getDate();
+      if(new Date().getDate() !== this._pvHistDay){ this._pvHist = new Array(24).fill(0); this._pvHistDay = new Date().getDate(); }
+      const _kwh_inc = totalW / 1000 * (10/3600);
+      if(_kwh_inc > 0) this._pvHist[nowH] = (this._pvHist[nowH] || 0) + _kwh_inc;
+    }
     const actualHourly = this._pvHist;
     // Gisteren: gebruik pv_forecast_accuracy hourly_actual_kwh als die beschikbaar is,
     // anders solar_learner actual_kwh_per_hour. hourly_peak_w is GEEN gisteren-data.
@@ -283,18 +291,26 @@ class CloudemsSolarCard extends HTMLElement {
     const _BH = 60;
     const _nKwh = _cd.isToday?(_acA[nowH]||0):0;
     const _fKwh = _cd.isToday?(_fcA[nowH]||0):0;
-    const _dif = _fKwh>0?Math.round((_nKwh-_fKwh)/_fKwh*100):0;
     const _totF=_fcA.reduce((a,b)=>a+b,0), _totA=_acA.reduce((a,b)=>a+b,0);
+    // v4.6.492: afwijking proportioneel op verstreken minuten van het uur
+    // v4.6.506: gebruik sensor attribute minutes_into_hour voor proportionele verwachting
+    const _nowMin = parseInt(fcA.minutes_into_hour ?? new Date().getMinutes());
+    const _hourFrac = Math.max(_nowMin/60, 0.01);
+    // "Verwacht tot nu" = fractie van het uurforecast op basis van verstreken minuten
+    const _fKwhSoFar = _fKwh * _hourFrac;
+    const _difNow = _fKwhSoFar>0.001?Math.round((_nKwh-_fKwhSoFar)/_fKwhSoFar*100):0;
+    const _fmtKwh = v => v>=0.1?v.toFixed(2)+' kWh':(v*1000).toFixed(0)+' Wh';
     const _stHtml = _cd.isToday
-      ? `<div class="fc-stat"><div class="fc-stat-l">Uur ${nowH} nu</div><div class="fc-stat-v" style="color:#f0c040">${(_nKwh*1000).toFixed(0)} W</div></div>
-         <div class="fc-stat"><div class="fc-stat-l">Verwacht</div><div class="fc-stat-v" style="color:#86efac">${(_fKwh*1000).toFixed(0)} W</div></div>
-         <div class="fc-stat"><div class="fc-stat-l">Afwijking</div><div class="fc-stat-v" style="color:${_dif>=0?'#34d399':'#f87171'}">${_dif>=0?'+':''}${_dif}%</div></div>`
+      ? `<div class="fc-stat"><div class="fc-stat-l">Uur ${nowH} (${_nowMin}min)</div><div class="fc-stat-v" style="color:#f0c040">${_fmtKwh(_nKwh)}</div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Verwacht tot nu</div><div class="fc-stat-v" style="color:#86efac">${_fmtKwh(_fKwhSoFar)}<span style="font-size:8px;color:rgba(255,255,255,.3)"> (vol: ${_fmtKwh(_fKwh)})</span></div></div>
+         <div class="fc-stat"><div class="fc-stat-l">Afwijking</div><div class="fc-stat-v" style="color:${_difNow>=0?'#34d399':'#f87171'}">${_nowMin<5?'—':(_difNow>=0?'+':'')+_difNow+'%'}</div></div>`
       : _cd.isTomorrow
       ? `<div class="fc-stat" style="grid-column:1/-1"><div class="fc-stat-l">Verwacht totaal morgen</div><div class="fc-stat-v" style="color:#86efac">${_totF.toFixed(1)} kWh</div></div>`
       : `<div class="fc-stat"><div class="fc-stat-l">Werkelijk</div><div class="fc-stat-v" style="color:#f0c040">${_totA.toFixed(1)} kWh</div></div>
          <div class="fc-stat"><div class="fc-stat-l">Verwacht was</div><div class="fc-stat-v" style="color:rgba(255,255,255,.5)">${_totF.toFixed(1)} kWh</div></div>
          <div class="fc-stat"><div class="fc-stat-l">Afwijking</div><div class="fc-stat-v" style="color:${_totF>0&&(_totA-_totF)/_totF>=0?'#34d399':'#f87171'}">${_totF>0?((_totA-_totF)/_totF>=0?'+':'')+Math.round((_totA-_totF)/_totF*100)+'%':'—'}</div></div>`;
-    const _bH = Array.from({length:24},(_,i)=>{
+
+        const _bH = Array.from({length:24},(_,i)=>{
       const isNow=_cd.isToday&&i===nowH, isPast=_cd.isToday&&i<nowH;
       const fh=Math.max((_fcA[i]||0)/_mxV*_BH,(_fcA[i]||0)>0?1:0);
       const ah=Math.max((_acA[i]||0)/_mxV*_BH,(_acA[i]||0)>0?1:0);
@@ -455,7 +471,7 @@ class CloudemsSolarCard extends HTMLElement {
       })()}
       <div class="top-strip">
         <div class="top-box"><span class="top-label">Nu</span><span class="top-val" style="color:var(--sl-gold)">${Math.round(totalW)} W</span>${peakW?`<span class="top-sub">piek ${Math.round(peakW)} W</span>`:""}</div>
-        <div class="top-box"><span class="top-label">Vandaag</span><span class="top-val" style="color:${scA.pv_today_kwh > 0.05 ? 'var(--sl-green)' : 'var(--sl-amber)'}">${scA.pv_today_kwh > 0.05 ? scA.pv_today_kwh.toFixed(1) : fcKwh.toFixed(1)} kWh</span><span class="top-sub">${scA.pv_today_kwh > 0.05 ? 'gemeten' : 'verwacht'}</span></div>
+        <div class="top-box"><span class="top-label">Vandaag</span><span class="top-val" style="color:${scA.pv_today_kwh > 0.05 ? 'var(--sl-green)' : 'var(--sl-amber)'}">${scA.pv_today_kwh > 0.05 ? scA.pv_today_kwh.toFixed(1) : fcKwh.toFixed(1)} kWh</span><span class="top-sub">${scA.pv_today_kwh > 0.05 ? 'gemeten' : 'dagschatting'}</span></div>
         <div class="top-box"><span class="top-label">Morgen</span><span class="top-val">${fcTomKwh.toFixed(1)} kWh</span><span class="top-sub">verwacht</span></div>
       </div>
 

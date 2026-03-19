@@ -48,12 +48,18 @@ class CloudemsMiniPriceCard extends HTMLElement {
       ? (a.today_prices_incl_tax || a.today_prices || [])
       : (a.today_prices_excl_tax || a.today_prices_base || a.today_prices || []);
 
-    // Dagstatistieken altijd berekend uit de getoonde prijzenreeks
-    // Zo zijn de balkkleurdrempels altijd relatief aan de zichtbare prijzen
+    // v4.6.495: drempels ALTIJD op basis van all-in reeks — zo veranderen balkkleur niet bij toggle.
+    // Eerder werden drempels berekend uit de getoonde reeks, waardoor bij EPEX alle drempels
+    // verschoven en balkkleur compleet anders werden.
+    const _pricesAllIn = a.today_prices_incl_tax || a.today_prices || [];
+    const _pValsRef = _pricesAllIn.map(p => parseFloat(p.price || 0) * 100).filter(v => !isNaN(v));
+    const avgCt = _pValsRef.length ? _pValsRef.reduce((a,b) => a+b, 0) / _pValsRef.length : 0;
+    const minCt = _pValsRef.length ? Math.min(..._pValsRef) : 0;
+    const maxCt = _pValsRef.length ? Math.max(..._pValsRef) : 0;
+    // Dagstatistieken voor weergave: uit de getoonde reeks
     const _pVals = prices.map(p => parseFloat(p.price || 0) * 100).filter(v => !isNaN(v));
-    const avgCt = _pVals.length ? _pVals.reduce((a,b) => a+b, 0) / _pVals.length : 0;
-    const minCt = _pVals.length ? Math.min(..._pVals) : 0;
-    const maxCt = _pVals.length ? Math.max(..._pVals) : 0;
+    const minCtDisp = _pVals.length ? Math.min(..._pVals) : 0;
+    const maxCtDisp = _pVals.length ? Math.max(..._pVals) : 0;
 
     const taxPer = (parseFloat(a.tax_per_kwh || 0)) * 100;
     const nowH   = new Date().getHours();
@@ -72,6 +78,9 @@ class CloudemsMiniPriceCard extends HTMLElement {
       : tariff ? tariff.charAt(0).toUpperCase() + tariff.slice(1) : 'Normaal';
 
     // Mini barchart
+    // v4.6.504: balkkleur altijd op basis van all-in waarde (ongeacht toggle)
+    // zodat kleuren identiek zijn in beide modi
+    const valsAllIn = _pricesAllIn.map(p => parseFloat(p.price || 0) * 100).filter(v => !isNaN(v));
     let chartSvg = '';
     const vals = prices.map(p => parseFloat(p.price || 0) * 100).filter(v => !isNaN(v));
     if (vals.length > 0) {
@@ -81,7 +90,9 @@ class CloudemsMiniPriceCard extends HTMLElement {
         const isNow = i === nowH;
         const h2    = Math.max(2, Math.abs(v) / maxV * (v >= 0 ? base : H - base));
         const y     = v >= 0 ? base - h2 : base;
-        const bc    = isNow ? '#f0c040' : v < 0 ? '#34d399' : v < avgCt ? '#86efac' : v > maxCt * 0.8 ? '#ef4444' : '#60a5fa';
+        // Kleur op basis van all-in waarde — zelfde drempels in beide modi
+        const vRef  = valsAllIn[i] !== undefined ? valsAllIn[i] : v;
+        const bc    = isNow ? '#f0c040' : vRef < 0 ? '#34d399' : vRef < avgCt ? '#86efac' : vRef > maxCt * 0.8 ? '#ef4444' : '#60a5fa';
         return `<rect x="${i*(bw+gap)}" y="${y.toFixed(1)}" width="${bw}" height="${h2.toFixed(1)}" rx="1.5" fill="${bc}" opacity="${isNow?1:.65}"/>`;
       }).join('');
       chartSvg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:36px;display:block">
@@ -114,9 +125,9 @@ class CloudemsMiniPriceCard extends HTMLElement {
         <button class="toggle" id="tax-toggle">${si ? '✓ all-in' : '○ kale EPEX'}</button>
       </div>
       <div class="stats">
-        <span class="stat">Min: <strong>${minCt.toFixed(1)} ct</strong></span>
-        <span class="stat">Gem: <strong>${avgCt.toFixed(1)} ct</strong></span>
-        <span class="stat">Max: <strong>${maxCt.toFixed(1)} ct</strong></span>
+        <span class="stat">Min: <strong>${minCtDisp.toFixed(1)} ct</strong></span>
+        <span class="stat">Gem: <strong>${(_pVals.length?_pVals.reduce((a,b)=>a+b,0)/_pVals.length:0).toFixed(1)} ct</strong></span>
+        <span class="stat">Max: <strong>${maxCtDisp.toFixed(1)} ct</strong></span>
         ${taxPer > 0 ? `<span class="stat">EB+BTW: <strong>${taxPer.toFixed(1)} ct</strong></span>` : ''}
       </div>
       ${chartSvg}

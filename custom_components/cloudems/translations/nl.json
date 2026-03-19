@@ -1823,29 +1823,11 @@
         }
       },
       "gas_opts": {
-        "title": "Gas & Warmte Instellingen",
+        "title": "Gas & Warmte",
+        "description": "Kies wat je wilt instellen.",
         "data": {
-          "gas_sensor": "Gasverbruik sensor",
-          "gas_price_sensor": "Gasprijs sensor",
-          "gas_price_fixed": "Vaste gasprijs (€/m³)",
-          "boiler_efficiency": "Ketelrendement",
-          "heat_pump_cop": "Warmtepomp COP (handmatig)",
-          "heat_pump_power_entity": "Warmtepomp vermogen sensor",
-          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor",
-          "back_to_menu": "← Terug naar menu",
-          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
-          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
-          "budget_enabled": "Energiebudget inschakelen",
-          "budget_gas_m3_month": "Maandbudget gas (m³)",
-          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Apparaten uitsluiten",
-          "nilm_shift_include": "Apparaten opnemen",
-          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
-          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
-          "pool_filter_power_entity": "Vermogenssensor filterpomp",
-          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "section": "Onderdeel",
+          "back_to_menu": "← Terug naar menu"
         }
       },
       "nilm_devices_opts": {
@@ -2255,7 +2237,8 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "sd_surplus_threshold_w": "PV-surplus drempel (W)"
         },
         "data_description": {
           "sd_enabled": "Zet aan als dit apparaat (bijv. vaatwasser, wasmachine) handmatig wordt gestart en je wilt dat CloudEMS wacht op goedkope stroom.",
@@ -2681,25 +2664,29 @@
         }
       },
       "lamp_auto_opts": {
-        "title": "Slimme Lamp Automatisering",
+        "title": "Lamp Automatisering — Stap 1",
+        "description": "Schakel de lamp-automatisering in en stel de vergeten-timer in.\n\nModi per lamp (in stap 2):\n👤 Handmatig — CloudEMS leert alleen, doet niets automatisch\n🔔 Semi-auto — CloudEMS stuurt een notificatie, jij bevestigt\n🤖 Automatisch — CloudEMS schakelt direct op basis van aanwezigheid",
         "data": {
-          "lamp_auto_enabled": "Slimme lamp automatisering inschakelen",
-          "lamp_auto_lamps_raw": "Lamp configuratie (JSON)"
+          "la_enabled": "Lamp automatisering inschakelen",
+          "la_forgotten_minutes": "Vergeten-timer — lamp uit na X minuten afwezigheid",
+          "back_to_menu": "← Terug naar menu"
         }
       },
       "lamp_automation_opts": {
-        "title": "🏠 Slimme Verlichting",
+        "title": "Lamp Automatisering — Stap 1",
+        "description": "Schakel de lamp-automatisering in en stel de vergeten-timer in.\n\nModi per lamp (in stap 2):\n👤 Handmatig — CloudEMS leert alleen, doet niets automatisch\n🔔 Semi-auto — CloudEMS stuurt een notificatie, jij bevestigt\n🤖 Automatisch — CloudEMS schakelt direct op basis van aanwezigheid",
         "data": {
-          "la_enabled": "Slimme verlichting inschakelen",
-          "la_forgotten_minutes": "Vergeten lichten: minuten voor auto-uit",
-          "back_to_menu": "← Terug naar menu",
-          "la_area_filter": "Filter op ruimte"
+          "la_enabled": "Lamp automatisering inschakelen",
+          "la_forgotten_minutes": "Vergeten-timer — lamp uit na X minuten afwezigheid",
+          "back_to_menu": "← Terug naar menu"
         }
       },
       "lamp_automation_detail_opts": {
-        "title": "💡 Lampen per ruimte instellen",
+        "title": "Lamp Automatisering — Stap 2: Modus per lamp",
+        "description": "{uitleg}",
         "data": {
-          "back_to_menu": "← Terug"
+          "terug_naar_stap1": "↩ Terug naar stap 1 (globale instellingen)",
+          "back_to_menu": "← Terug naar menu"
         }
       },
       "ups_count_opts": {
@@ -2729,6 +2716,51 @@
       "noodstroom": {
         "title": "⚡ Noodstroom & Backup",
         "data": {}
+      },
+      "nilm_shift_opts": {
+        "title": "NILM Lastverschuiving",
+        "description": "Verschuif apparaten automatisch naar goedkopere uren op basis van NILM-detectie.",
+        "data": {
+          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
+          "nilm_shift_price_threshold": "Prijsdrempel — alleen verschuiven boven dit tarief",
+          "nilm_shift_max_defer_hours": "Maximale uitsteltijd",
+          "nilm_shift_include": "Alleen deze apparaten verschuiven (kommagescheiden, leeg = alles)",
+          "nilm_shift_exclude": "Deze apparaten nooit verschuiven (kommagescheiden)",
+          "nilm_shift_deadlines_raw": "Deadlines per apparaat (JSON, optioneel)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "budget_opts": {
+        "title": "Budget & Verbruikslimieten",
+        "description": "Stel maandelijkse limieten in voor stroom en gas. CloudEMS waarschuwt als je op koers ligt om het budget te overschrijden.",
+        "data": {
+          "budget_enabled": "Budget bewaking inschakelen",
+          "budget_elec_eur_month": "Elektriciteitsbudget",
+          "budget_elec_kwh_month": "Elektriciteitsverbruik limiet",
+          "budget_gas_m3_month": "Gasverbruik limiet",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "gas_meter_opts": {
+        "title": "Gasverbruik & Gasprijs",
+        "description": "Koppel je gasmeter en stel de gasprijs in voor kostenberekeningen.",
+        "data": {
+          "gas_sensor": "Gasverbruik sensor",
+          "gas_price_sensor": "Gasprijs sensor (dynamisch)",
+          "gas_price_fixed": "Vaste gasprijs (€/m³) — wordt gebruikt als geen prijssensor gekoppeld is",
+          "boiler_efficiency": "Ketelrendement (0.5–1.0)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "warmtepomp_opts": {
+        "title": "Warmtepomp Instellingen",
+        "description": "Koppel je warmtepomp voor COP-bewaking en energieberekeningen.",
+        "data": {
+          "heat_pump_cop": "COP (handmatig) — seizoensgemiddelde rendement",
+          "heat_pump_power_entity": "Warmtepomp vermogen sensor",
+          "heat_pump_thermal_entity": "Warmtepomp thermisch vermogen sensor",
+          "back_to_menu": "← Terug naar menu"
+        }
       }
     },
     "abort": {

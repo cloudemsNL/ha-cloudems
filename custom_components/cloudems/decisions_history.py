@@ -158,7 +158,7 @@ class DecisionsHistory:
 
 
 def _iso(ts: float) -> str:
+    """Geeft lokale tijd als ISO-string — zodat e.iso[11:16] direct leesbaar is in dashboard."""
     import datetime
-    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
+    # v4.6.493: gebruik lokale tijd (was UTC) zodat tijdstempels kloppen bij zomertijd
+    return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")

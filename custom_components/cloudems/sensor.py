@@ -170,6 +170,7 @@ async def async_setup_entry(
         CloudEMSPoolWaterTempSensor(coordinator, entry),
         CloudEMSEVPowerSensor(coordinator, entry),
         CloudEMSDecisionsHistorySensor(coordinator, entry),  # v4.6.104: beslissingsgeschiedenis
+        CloudEMSDecisionLearnerSensor(coordinator, entry),    # v4.6.498: decision outcome learner
         # v4.6.104: energie & batterij recorder-sensoren
         CloudEMSBatterijSOCSensor(coordinator, entry),
         CloudEMSNetVermogenSensor(coordinator, entry),
@@ -595,6 +596,9 @@ async def async_setup_entry(
         ]
         if shutter_learn_entities:
             async_add_entities(shutter_learn_entities, update_before_add=False)
+
+        # v4.6.456: windsnelheid sensor (leest van ShutterController)
+        async_add_entities([CloudEMSWindsnelheidSensor(coordinator, entry)], update_before_add=False)
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:
@@ -1653,6 +1657,8 @@ class CloudEMSForecastSensor(CoordinatorEntity, SensorEntity):
         d = self.coordinator.data or {}
         return _trim_attrs({
             "hourly":   d.get("pv_forecast_hourly", []),
+            "actual_hourly_kwh": d.get("pv_today_hourly_kwh", [0.0] * 24),  # v4.6.492
+            "minutes_into_hour": __import__("datetime").datetime.now().minute,  # v4.6.506
             "profiles": [
                 {k: v for k, v in p.items() if k in {"entity_id", "label", "peak_w", "today_kwh"}}
                 for p in d.get("inverter_profiles", [])
@@ -2211,9 +2217,22 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
                 # v4.5.51: kamer uit room_meter engine
                 "room":          _room_map.get(dv.get("device_id", dv.get("id", "")), ""),
                 # v4.6.314: energie + runtime voor detail panel
-                "today_kwh":        round((dv.get("energy") or {}).get("today_kwh", 0.0), 3),
-                "energy_kwh_today": round((dv.get("energy") or {}).get("today_kwh", 0.0), 3),  # alias voor JS card
-                "yesterday_kwh":    round((dv.get("energy") or {}).get("yesterday_kwh", 0.0), 3),
+                # v4.6.484: smart_plug apparaten gebruiken realtime kWh teller uit coordinator
+                "today_kwh":        round(
+                    (self.coordinator._anchor_kwh_today.get(dv.get("device_id") or dv.get("entity_id", ""), None)
+                     if dv.get("source") == "smart_plug"
+                     else None)
+                    or (dv.get("energy") or {}).get("today_kwh", 0.0), 3),
+                "energy_kwh_today": round(
+                    (self.coordinator._anchor_kwh_today.get(dv.get("device_id") or dv.get("entity_id", ""), None)
+                     if dv.get("source") == "smart_plug"
+                     else None)
+                    or (dv.get("energy") or {}).get("today_kwh", 0.0), 3),
+                "yesterday_kwh":    round(
+                    (self.coordinator._anchor_kwh_yesterday.get(dv.get("device_id") or dv.get("entity_id", ""), None)
+                     if dv.get("source") == "smart_plug"
+                     else None)
+                    or (dv.get("energy") or {}).get("yesterday_kwh", 0.0), 3),
                 "total_on_seconds": round((dv.get("energy") or {}).get("total_on_seconds", 0.0), 0),
                 "session_count": dv.get("session_count", 0),
                 "avg_duration_min": round(dv.get("avg_duration_min", 0.0), 1),
@@ -6253,11 +6272,13 @@ class CloudEMSCheapSwitchesSensor(CoordinatorEntity, SensorEntity):
         cs = data.get("cheap_switches", {})
         # v4.5 fix: voeg smart_delay toe zodat dashboard YAML
         # state_attr(..., 'smart_delay') correct leest
+        # v4.6.479: kaart verwacht array, niet dict
         sd = data.get("smart_delay", {})
+        sd_list = sd.get("switches", []) if isinstance(sd, dict) else (sd if isinstance(sd, list) else [])
         return {
             "switches":     cs.get("switches", []),
             "last_actions": cs.get("actions", []),
-            "smart_delay":  sd,
+            "smart_delay":  sd_list,
         }
 
 
@@ -8509,3 +8530,88 @@ class CloudEMSShutterLearnProgressSensor(CoordinatorEntity, SensorEntity):
             "open_today":       s.get("schedule_open_today"),
             "close_today":      s.get("schedule_close_today"),
         }
+
+
+# ── v4.6.456: CloudEMS Windsnelheid Sensor ───────────────────────────────────
+class CloudEMSWindsnelheidSensor(CoordinatorEntity, SensorEntity):
+    """Exposeert de windsnelheid die ShutterController intern gebruikt (km/h)."""
+
+    _attr_has_entity_name   = False
+    _attr_name              = "CloudEMS Windsnelheid"
+    _attr_icon              = "mdi:weather-windy"
+    _attr_device_class      = SensorDeviceClass.WIND_SPEED
+    _attr_state_class       = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "km/h"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_windsnelheid"
+        self.entity_id       = "sensor.cloudems_windsnelheid"
+
+    @property
+    def device_info(self):
+        return sub_device_info(self._entry, SUB_SHUTTER)
+
+    @property
+    def native_value(self):
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc is None:
+            return None
+        wind_ms = getattr(sc, "_current_wind_speed", None)
+        if wind_ms is None:
+            return None
+        return round(float(wind_ms) * 3.6, 1)  # m/s → km/h
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        sc = getattr(self.coordinator, "_shutter_ctrl", None)
+        if sc is None:
+            return {}
+        wind_ms  = getattr(sc, "_current_wind_speed", None)
+        thr_ms   = getattr(sc, "_wind_threshold_ms", 12.0)
+        storm    = getattr(sc, "_is_storm", False)
+        thr_kmh  = round(float(thr_ms) * 3.6, 1)
+        return {
+            "wind_ms":          wind_ms,
+            "drempel_kmh":      thr_kmh,
+            "storm_actief":     storm,
+            "windbeveiliging":  (wind_ms is not None and wind_ms >= thr_ms) or storm,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v4.6.498 — Decision Outcome Learner Sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSDecisionLearnerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor die de status van de Decision Outcome Learner exposeert."""
+
+    _attr_icon       = "mdi:brain"
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry          = entry
+        self._attr_name      = "CloudEMS Decision Outcome Learner"
+        self._attr_unique_id = f"{entry.entry_id}_decision_learner"
+        self.entity_id       = "sensor.cloudems_decision_learner"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        learner = getattr(self.coordinator, "_decision_learner", None)
+        if learner is None:
+            return "0"
+        status = learner.get_status()
+        return str(status.get("total_evaluated", 0))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        learner = getattr(self.coordinator, "_decision_learner", None)
+        if learner is None:
+            return {"status": "niet geladen"}
+        return _trim_attrs(learner.get_status())

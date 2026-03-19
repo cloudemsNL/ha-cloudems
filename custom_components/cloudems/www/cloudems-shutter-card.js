@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v3.0.0
 
-const SHUTTER_VERSION = "3.1.0";
+const SHUTTER_VERSION = "3.3.0";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const CSS = `
@@ -73,6 +73,7 @@ class CloudemsShutterCard extends HTMLElement {
   }
 
   setConfig(c){ this._cfg = {title:"Rolluiken",...c}; this._render(); }
+  // filter_entity: toon alleen dit rolluik (optioneel)
 
   set hass(h){
     this._hass = h;
@@ -100,7 +101,10 @@ class CloudemsShutterCard extends HTMLElement {
     const sw = h.states["switch.cloudems_module_rolluiken"];
     const moduleOff = sw?.state === "off";
     const shutterData = stS?.attributes?.shutters ?? {};
-    const shutters = shutterData.shutters ?? [];
+    let shutters = shutterData.shutters ?? [];
+
+    // filter_entity: toon alleen het opgegeven rolluik
+    if(c.filter_entity) shutters = shutters.filter(s => s.entity_id === c.filter_entity);
 
     if(!stS || stS.state === "unavailable"){
       sh.innerHTML=`<style>${CSS}</style><div class="card"><div class="empty">sensor.cloudems_status niet beschikbaar</div></div>`;
@@ -116,8 +120,10 @@ class CloudemsShutterCard extends HTMLElement {
 
     if(this._selIdx >= shutters.length) this._selIdx = 0;
 
-    // Overzicht
-    const ovRows = shutters.map((s,i) => {
+    const singleMode = !!c.filter_entity; // single-shutter modus: geen overzicht, geen dropdown
+
+    // Overzicht (alleen in multi-modus)
+    const ovRows = singleMode ? "" : shutters.map((s,i) => {
       const pos = Math.round(parseFloat(s.position ?? s.current_position ?? 0));
       const auto = s.auto_enabled !== false;
       const over = s.override_active || false;
@@ -170,23 +176,25 @@ class CloudemsShutterCard extends HTMLElement {
       </div>`;
     }).join("");
 
+    const hdrLabel = singleMode
+      ? (s.label || s.entity_id || c.title || "Rolluik")
+      : (c.title ?? "Rolluiken");
+
     sh.innerHTML = `<style>${CSS}</style>
     <div class="card">
       ${moduleOff?`<div class="module-warn">⚠️ Rolluiken module staat uit — schakel in via Configuratie.</div>`:""}
       <div class="hdr">
-        <span class="hdr-title">${esc(c.title??"Rolluiken")}</span>
-        <div class="hdr-btns">
+        <span class="hdr-title">${esc(hdrLabel)}</span>
+        ${singleMode ? `<div class="hdr-btns">
+          <button class="bs" data-action="up" data-idx="0" style="width:32px;height:32px;font-size:14px;">&#9650;</button>
+          <button class="bs" data-action="dn" data-idx="0" style="width:32px;height:32px;font-size:14px;">&#9660;</button>
+        </div>` : `<div class="hdr-btns">
           <button class="btn-all" data-action="all-up">&#9650; Alles</button>
           <button class="btn-all" data-action="all-dn">&#9660; Alles</button>
-        </div>
+        </div>`}
       </div>
       <div class="body">
-        ${ovRows}
-        <hr class="divider">
-        <div class="detail-hdr">
-          <label>Detail</label>
-          <select id="shutter-picker">${selectOpts}</select>
-        </div>
+        ${singleMode ? "" : ovRows + `<hr class="divider"><div class="detail-hdr"><label>Detail</label><select id="shutter-picker">${selectOpts}</select></div>`}
         <div class="dr">
           <span class="dl">Positie</span>
           <div class="pos-wrap">
@@ -242,18 +250,42 @@ class CloudemsShutterCard extends HTMLElement {
       }
       if(action === "toggle-learn-switch"){
         const sw = btn.dataset.switch;
-        const newState = btn.dataset.state === "on" ? "off" : "on";
+        const learnWasOn = btn.dataset.state === "on";
         if(sw && this._hass){
-          this._hass.callService("switch", newState==="on"?"turn_on":"turn_off", {entity_id: sw})
-            .catch(err=>console.warn("CloudEMS toggle learn:",err));
+          // v4.6.493: optimistische UI-update
+          btn.dataset.state = learnWasOn ? "off" : "on";
+          btn.classList.toggle("on", !learnWasOn);
+          btn.classList.toggle("off", learnWasOn);
+          btn.style.pointerEvents = "none";
+          this._hass.callService("switch", learnWasOn?"turn_off":"turn_on", {entity_id: sw})
+            .catch(err => {
+              console.warn("CloudEMS toggle learn:", err);
+              btn.dataset.state = learnWasOn ? "on" : "off";
+              btn.classList.toggle("on", learnWasOn);
+              btn.classList.toggle("off", !learnWasOn);
+            })
+            .finally(() => { btn.style.pointerEvents = ""; });
         }
         return;
       }
       if(action === "toggle-auto"){
         if(!this._hass) return;
-        const svc = btn.dataset.state === "on" ? "turn_off" : "turn_on";
+        const wasOn = btn.dataset.state === "on";
+        const svc = wasOn ? "turn_off" : "turn_on";
+        // v4.6.493: optimistische UI-update — flip direct zodat gebruiker niet dubbel klikt
+        btn.dataset.state = wasOn ? "off" : "on";
+        btn.classList.toggle("on", !wasOn);
+        btn.classList.toggle("off", wasOn);
+        btn.style.pointerEvents = "none";  // blokkeer dubbelklik tijdens service-call
         this._hass.callService("switch", svc, {entity_id: btn.dataset.switch})
-          .catch(err=>console.warn("CloudEMS toggle auto:",err));
+          .catch(err => {
+            console.warn("CloudEMS toggle auto:", err);
+            // Herstel bij fout
+            btn.dataset.state = wasOn ? "on" : "off";
+            btn.classList.toggle("on", wasOn);
+            btn.classList.toggle("off", !wasOn);
+          })
+          .finally(() => { btn.style.pointerEvents = ""; });
         return;
       }
       if(action === "up" || action === "dn"){
@@ -299,9 +331,16 @@ input[type=text]{background:var(--card-background-color,#1c1c1c);border:1px soli
 </style>
 <div class="wrap">
   <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${esc(cfg.title??"Rolluiken")}"></div>
+  <div class="row"><label class="lbl">Filter op rolluik (entity_id, optioneel)</label><input type="text" name="filter_entity" value="${esc(cfg.filter_entity??"")}"></div>
 </div>`;
     this.shadowRoot.querySelector("input[name=title]")?.addEventListener("change",e=>{
       this._cfg={...this._cfg,title:e.target.value}; this._fire();
+    });
+    this.shadowRoot.querySelector("input[name=filter_entity]")?.addEventListener("change",e=>{
+      const v = e.target.value.trim();
+      if(v) this._cfg={...this._cfg,filter_entity:v};
+      else { const c={...this._cfg}; delete c.filter_entity; this._cfg=c; }
+      this._fire();
     });
   }
 }

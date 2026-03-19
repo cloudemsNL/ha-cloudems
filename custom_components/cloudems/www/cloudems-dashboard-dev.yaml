@@ -1,38 +1,451 @@
-views:
-- title: 🧪 JS Cards Dev
-  path: dev-js-cards
-  type: masonry
-  max_columns: 3
-  icon: mdi:flask
-  cards:
-  - type: markdown
-    content: '## 🧪 CloudEMS JS Cards — Development
+title: Rolluiken
+path: test2
+icon: mdi:window-shutter-cog
+type: sections
+max_columns: 3
+theme: waves
+background:
+  opacity: 33
+  alignment: center
+  size: cover
+  repeat: repeat
+  attachment: fixed
+  image: /api/image/serve/333f837bb72fb920ec1ba145713922bb/original
+visible:
+  - user: d1a543d6493147f1a866c28cb857b41d
+  - user: 53e8eefa9f9b419e84b80090a68c2974
+  - user: b2b43e2e5ec24c24816f29d2d268e1cf
+  - user: cce385c9c49849a2ac756c3b1caea7aa
+  - user: 4392905d12b9442b81a8b5dd7e348e5c
+cards: []
+badges: []
 
-      Nieuwe interactieve kaarten in test. Nog niet stabiel genoeg voor prod.
+sections:
 
-      **Versie:** {{state_attr(''sensor.cloudems_watchdog'',''cloudems_version'')}}
+  # ── Kolom 1 — Slaapkamer Britt ───────────────────────────────────────────────
+  - type: grid
+    column_span: 1
+    cards:
+      - type: vertical-stack
+        cards:
 
-      '
-  - type: custom:cloudems-solar-card
-    title: ☀️ Zonnepanelen (JS)
-  - type: custom:cloudems-battery-card
-    title: 🔋 Batterij (JS)
-  - type: custom:cloudems-boiler-card
-    tank_liters: 80
-    cold_water_temp: 10
-    shower_temp: 38
-    shower_liters_per_min: 8
-    shower_duration_min: 8
-    title: 🚿 Warm Water (JS)
-  - type: custom:cloudems-shutter-card
-    title: 🪟 Rolluiken (JS)
-  - type: custom:cloudems-nilm-card
-  - type: custom:cloudems-pv-forecast-card
-- title: ⚡ Alles (JS)
-  path: dev-beheer
-  type: masonry
-  max_columns: 1
-  icon: mdi:view-dashboard-variant
-  cards:
-  - type: custom:cloudems-beheer-card
-    title: ⚡ CloudEMS
+          - type: horizontal-stack
+            cards:
+              - type: custom:bubble-card
+                card_type: button
+                entity: switch.cloudems_shutter_rolluik_slaapkamer_britt_auto
+                button_type: switch
+                show_state: true
+                show_name: true
+                scrolling_effect: false
+                tap_action:
+                  action: toggle
+                sub_button:
+                  - name: "50"
+                    show_icon: true
+                    show_name: true
+                    show_state: false
+                    show_background: true
+                    state_background: false
+                    tap_action:
+                      action: perform-action
+                      perform_action: cover.set_cover_position
+                      target:
+                        entity_id: cover.rolluik_slaapkamer_britt
+                      data:
+                        position: 50
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:shutter-card
+                entities:
+                  - entity: cover.rolluik_slaapkamer_britt
+                    name: Rolluik Slaapkamer Britt
+                    buttons_position: left
+                    title_position: bottom
+            grid_options:
+              columns: full
+              rows: auto
+
+          - type: markdown
+            content: >
+              {% set shutters = state_attr('sensor.cloudems_status', 'shutters') %}
+              {% set s = (shutters.shutters | selectattr('entity_id', 'eq', 'cover.rolluik_slaapkamer_britt') | list | first) if shutters and shutters.shutters else none %}
+              {% if s %}
+              {% if s.shadow_action == 'close' %}🌞 **Zon schijnt** — sluiten{% elif s.shadow_action == 'open' %}💨 **Geen zon** — openen{% else %}⬜ **Zonschaduw:** idle{% endif %}{% if s.shadow_reason %} _({{ s.shadow_reason }})_{% endif %}
+
+              **Laatste beslissing:** {{ s.last_action | default('—') }}
+
+              {% if s.override_active %}⏱ **Override actief**{% if s.override_until %} tot {{ as_timestamp(s.override_until) | timestamp_custom('%H:%M') }}{% endif %}
+              {% else %}✅ Geen override{% endif %}
+              {% else %}_Geen data_{% endif %}
+
+          - type: markdown
+            title: Beslissingslog Britt
+            content: >
+              {% set all = state_attr('sensor.cloudems_decisions_history', 'decisions') %}
+              {% set entries = (all | selectattr('cat', 'eq', 'shutter') | selectattr('label', 'eq', 'cover.rolluik_slaapkamer_britt') | list)[:8] if all else [] %}
+              {% if entries %}
+              {% for e in entries %}
+              `{{ e.iso[11:16] }}` **{{ e.action }}** — {{ e.reason }}
+              {% endfor %}
+              {% else %}
+              _Nog geen beslissingen gelogd_
+              {% endif %}
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:scheduler-card
+                include:
+                  - switch.cloudems_shutter_rolluik_slaapkamer_britt_auto
+                exclude: []
+                discover_existing: false
+                title: false
+                show_header_toggle: false
+                time_step: 15
+                default_editor: scheme
+                display_options:
+                  primary_info: default
+                  secondary_info:
+                    - relative-time
+                  icon: action
+                sort_by:
+                  - state
+                  - relative-time
+                customize: {}
+                tags: []
+                exclude_tags: []
+
+          - type: horizontal-stack
+            cards:
+              - type: sensor
+                graph: line
+                entity: sensor.thermometer_slaapkamer_britt_temperatuur
+                detail: 1
+                name: Temperatuur Slaapkamer Britt
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:mini-graph-card
+                hours_to_show: 24
+                points_per_hour: 2
+                show:
+                  graph: bar
+                entities:
+                  - entity: cover.rolluik_slaapkamer_britt
+                    attribute: current_position
+                    name: Rolluik Slaapkamer Britt
+            grid_options:
+              columns: 24
+              rows: auto
+
+        grid_options:
+          columns: 24
+          rows: auto
+
+  # ── Kolom 2 — Overloop ───────────────────────────────────────────────────────
+  - type: grid
+    column_span: 1
+    cards:
+      - type: vertical-stack
+        cards:
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:bubble-card
+                card_type: button
+                entity: switch.cloudems_shutter_rolluik_overloop_mama_auto
+                button_type: switch
+                show_state: true
+                show_name: true
+                scrolling_effect: false
+                tap_action:
+                  action: toggle
+                sub_button:
+                  - name: "50"
+                    show_icon: true
+                    show_name: true
+                    show_state: false
+                    show_background: true
+                    state_background: false
+                    tap_action:
+                      action: perform-action
+                      perform_action: cover.set_cover_position
+                      target:
+                        entity_id: cover.rolluik_overloop_mama
+                      data:
+                        position: 50
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:shutter-card
+                entities:
+                  - entity: cover.rolluik_overloop_mama
+                    name: Rolluik Overloop
+                    buttons_position: left
+                    title_position: bottom
+            grid_options:
+              columns: full
+              rows: auto
+
+          - type: markdown
+            content: >
+              {% set shutters = state_attr('sensor.cloudems_status', 'shutters') %}
+              {% set s = (shutters.shutters | selectattr('entity_id', 'eq', 'cover.rolluik_overloop_mama') | list | first) if shutters and shutters.shutters else none %}
+              {% if s %}
+              {% if s.shadow_action == 'close' %}🌞 **Zon schijnt** — sluiten{% elif s.shadow_action == 'open' %}💨 **Geen zon** — openen{% else %}⬜ **Zonschaduw:** idle{% endif %}{% if s.shadow_reason %} _({{ s.shadow_reason }})_{% endif %}
+
+              **Laatste beslissing:** {{ s.last_action | default('—') }}
+
+              {% if s.override_active %}⏱ **Override actief**{% if s.override_until %} tot {{ as_timestamp(s.override_until) | timestamp_custom('%H:%M') }}{% endif %}
+              {% else %}✅ Geen override{% endif %}
+              {% else %}_Geen data_{% endif %}
+
+          - type: markdown
+            title: Beslissingslog Overloop
+            content: >
+              {% set all = state_attr('sensor.cloudems_decisions_history', 'decisions') %}
+              {% set entries = (all | selectattr('cat', 'eq', 'shutter') | selectattr('label', 'eq', 'cover.rolluik_overloop_mama') | list)[:8] if all else [] %}
+              {% if entries %}
+              {% for e in entries %}
+              `{{ e.iso[11:16] }}` **{{ e.action }}** — {{ e.reason }}
+              {% endfor %}
+              {% else %}
+              _Nog geen beslissingen gelogd_
+              {% endif %}
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:scheduler-card
+                include:
+                  - switch.cloudems_shutter_rolluik_overloop_mama_auto
+                exclude: []
+                discover_existing: false
+                title: false
+                show_header_toggle: false
+                time_step: 15
+                default_editor: scheme
+                display_options:
+                  primary_info: default
+                  secondary_info:
+                    - relative-time
+                  icon: action
+                sort_by:
+                  - relative-time
+                  - state
+                customize: {}
+                tags: []
+                exclude_tags: []
+
+          - type: horizontal-stack
+            cards:
+              - type: sensor
+                graph: line
+                entity: sensor.thermometer_overloop_temperatuur
+                detail: 1
+                name: Temperatuur Overloop
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:mini-graph-card
+                hours_to_show: 24
+                points_per_hour: 2
+                show:
+                  graph: bar
+                entities:
+                  - entity: cover.rolluik_overloop_mama
+                    attribute: current_position
+                    name: Rolluik Overloop
+            grid_options:
+              columns: 24
+              rows: auto
+
+        grid_options:
+          columns: 24
+          rows: auto
+
+  # ── Kolom 3 — Slaapkamer Lynn ────────────────────────────────────────────────
+  - type: grid
+    column_span: 1
+    cards:
+      - type: vertical-stack
+        cards:
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:bubble-card
+                card_type: button
+                entity: switch.cloudems_shutter_rolluik_slaapkamer_lynn_auto
+                button_type: switch
+                show_state: true
+                show_name: true
+                scrolling_effect: false
+                tap_action:
+                  action: toggle
+                sub_button:
+                  - name: "50"
+                    show_icon: true
+                    show_name: true
+                    show_state: false
+                    show_background: true
+                    state_background: false
+                    tap_action:
+                      action: perform-action
+                      perform_action: cover.set_cover_position
+                      target:
+                        entity_id: cover.rolluik_slaapkamer_lynn
+                      data:
+                        position: 50
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:shutter-card
+                entities:
+                  - entity: cover.rolluik_slaapkamer_lynn
+                    name: Rolluik Slaapkamer Lynn
+                    buttons_position: left
+                    title_position: bottom
+            grid_options:
+              columns: full
+              rows: auto
+
+          - type: markdown
+            content: >
+              {% set shutters = state_attr('sensor.cloudems_status', 'shutters') %}
+              {% set s = (shutters.shutters | selectattr('entity_id', 'eq', 'cover.rolluik_slaapkamer_lynn') | list | first) if shutters and shutters.shutters else none %}
+              {% if s %}
+              {% if s.shadow_action == 'close' %}🌞 **Zon schijnt** — sluiten{% elif s.shadow_action == 'open' %}💨 **Geen zon** — openen{% else %}⬜ **Zonschaduw:** idle{% endif %}{% if s.shadow_reason %} _({{ s.shadow_reason }})_{% endif %}
+
+              **Laatste beslissing:** {{ s.last_action | default('—') }}
+
+              {% if s.override_active %}⏱ **Override actief**{% if s.override_until %} tot {{ as_timestamp(s.override_until) | timestamp_custom('%H:%M') }}{% endif %}
+              {% else %}✅ Geen override{% endif %}
+              {% else %}_Geen data_{% endif %}
+
+          - type: markdown
+            title: Beslissingslog Lynn
+            content: >
+              {% set all = state_attr('sensor.cloudems_decisions_history', 'decisions') %}
+              {% set entries = (all | selectattr('cat', 'eq', 'shutter') | selectattr('label', 'eq', 'cover.rolluik_slaapkamer_lynn') | list)[:8] if all else [] %}
+              {% if entries %}
+              {% for e in entries %}
+              `{{ e.iso[11:16] }}` **{{ e.action }}** — {{ e.reason }}
+              {% endfor %}
+              {% else %}
+              _Nog geen beslissingen gelogd_
+              {% endif %}
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:scheduler-card
+                include:
+                  - switch.cloudems_shutter_rolluik_slaapkamer_lynn_auto
+                exclude: []
+                discover_existing: false
+                title: false
+                show_header_toggle: false
+                time_step: 15
+                default_editor: scheme
+                display_options:
+                  primary_info: default
+                  secondary_info:
+                    - relative-time
+                  icon: action
+                sort_by:
+                  - relative-time
+                  - state
+                customize: {}
+                tags: []
+                exclude_tags: []
+
+          - type: horizontal-stack
+            cards:
+              - type: sensor
+                graph: line
+                entity: sensor.thermometer_slaapkamer_lynn_temperatuur
+                detail: 1
+                name: Temperatuur Slaapkamer Lynn
+            grid_options:
+              columns: 24
+              rows: auto
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:mini-graph-card
+                hours_to_show: 24
+                points_per_hour: 2
+                show:
+                  graph: bar
+                entities:
+                  - entity: cover.rolluik_slaapkamer_lynn
+                    attribute: current_position
+                    name: Rolluik Slaapkamer Lynn
+            grid_options:
+              columns: 24
+              rows: auto
+
+        grid_options:
+          columns: 24
+          rows: auto
+
+  # ── Rij 2, kolom 1–2 — CloudEMS overzicht + windwaarschuwing ─────────────────
+  - type: grid
+    column_span: 2
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.weather_station_windsnelheid
+                above: 45
+            card:
+              type: markdown
+              content: >
+                ## ⚠️ Hoge wind — rolluiken omhoog!
+                Windsnelheid: **{{ states('sensor.weather_station_windsnelheid') }} km/h**
+                CloudEMS trekt de rolluiken automatisch omhoog boven de drempel.
+          - type: horizontal-stack
+            cards:
+              - type: custom:cloudems-shutter-card
+                title: Britt
+                filter_entity: cover.rolluik_slaapkamer_britt
+              - type: custom:cloudems-shutter-card
+                title: Overloop
+                filter_entity: cover.rolluik_overloop_mama
+              - type: custom:cloudems-shutter-card
+                title: Lynn
+                filter_entity: cover.rolluik_slaapkamer_lynn
+
+  # ── Rij 2, kolom 3 — Module + wind ───────────────────────────────────────────
+  - type: grid
+    column_span: 1
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: CloudEMS Rolluiken Module
+            entities:
+              - entity: switch.cloudems_module_rolluiken
+                name: Module aan/uit
+                icon: mdi:robot
+          - type: entities
+            title: Wind
+            entities:
+              - entity: sensor.weather_station_windsnelheid
+                name: Windsnelheid

@@ -2976,18 +2976,25 @@ class BoilerController:
             if boiler:
                 is_boost = (preset == boiler.preset_on)
                 if is_boost and boiler.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-                    # v4.6.24: BOOST stuurt altijd max_setpoint_boost_c als temperature.
-                    # Ariston Lydos respecteert set_temperature ook in BOOST-modus —
-                    # zonder dit getal stuurt CloudEMS het normale setpoint (bijv. 58°C)
-                    # en haalt de boiler nooit 75°C, ook al staat BOOST aan.
-                    # v4.6.57: uitzondering bij handmatige override — als active_setpoint_c
-                    # bewust lager is ingesteld (bijv. 71°C < 75°C), respecteer dat setpoint.
-                    # Zo kan de gebruiker via de virtuele thermostaat een tussenwaarde kiezen.
+                    # v4.6.495: respecteer de graduele ramp (active_setpoint_c) ook in BOOST.
+                    # Eerder stuurde BOOST altijd max_setpoint_boost_c (75°C) als temperature,
+                    # waardoor de ramp-bescherming tegen doorverwarmen bij communicatiestoring
+                    # volledig werd genegeerd.
+                    # Nu: gebruik active_setpoint_c als die via de ramp is gezet (hybrid),
+                    # anders val terug op max_setpoint_boost_c (niet-ramp boilers).
                     _auto_boost_sp = boiler.max_setpoint_boost_c if boiler.max_setpoint_boost_c > 0 else boiler.surplus_setpoint_c
                     _active_sp = boiler.active_setpoint_c or boiler.setpoint_c
                     _is_manual = boiler._manual_override_until > time.time()
+                    _ramp_active = (
+                        boiler.boiler_type == BOILER_TYPE_HYBRID
+                        and boiler._cheap_ramp_setpoint_c > 0
+                        and not _is_manual
+                    )
                     if _is_manual and _active_sp > 0 and _active_sp < _auto_boost_sp:
                         target_sp = _active_sp
+                    elif _ramp_active:
+                        # Ramp actief: stuur de graduele ramp-waarde, nooit direct de max
+                        target_sp = round(min(boiler._cheap_ramp_setpoint_c, _auto_boost_sp), 1)
                     else:
                         target_sp = _auto_boost_sp
                 elif not on:
@@ -3097,7 +3104,20 @@ class BoilerController:
                     _max_ent_state2 = self._hass.states.get(_resolved_max_entity)
                     if _max_ent_state2 is not None:
                         _is_boost_preset2 = (preset == boiler.preset_on)
-                        _desired_max2 = boiler.max_setpoint_boost_c if _is_boost_preset2 else boiler.max_setpoint_green_c
+                        if _is_boost_preset2:
+                            # v4.6.495: max_setpoint volgt de ramp, niet altijd 75°C
+                            _ramp_active2 = (
+                                boiler.boiler_type == BOILER_TYPE_HYBRID
+                                and boiler._cheap_ramp_setpoint_c > 0
+                                and boiler._manual_override_until <= time.time()
+                            )
+                            if _ramp_active2:
+                                # Zet hardware-cap op ramp + kleine marge zodat setpoint bereikbaar is
+                                _desired_max2 = min(boiler._cheap_ramp_setpoint_c + 2.0, boiler.max_setpoint_boost_c)
+                            else:
+                                _desired_max2 = boiler.max_setpoint_boost_c
+                        else:
+                            _desired_max2 = boiler.max_setpoint_green_c
                         _hw_max2 = _max_ent_state2.attributes.get("max")
                         if _hw_max2 is not None:
                             try:

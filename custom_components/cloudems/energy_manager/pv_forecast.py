@@ -4,13 +4,17 @@
 # use of this file is strictly prohibited. See LICENSE for full terms.
 
 """
-CloudEMS PV Forecasting — v1.4.2
+CloudEMS PV Forecasting — v1.5.0
 
-Two-layer forecast engine:
+Three-layer forecast engine:
   Layer 1: Statistical model using historically learned hourly yield curves
            per inverter. No internet required.
   Layer 2: Open-Meteo weather API (free, no key) for irradiance forecast.
            Used when available to weight the statistical model.
+  Layer 3: Forecast.Solar API (free, no key, rate-limited to 12 req/hour).
+           Direct watt-per-hour forecast based on exact panel config.
+           When available, overrides layers 1+2 with high confidence.
+           Cache: 2 hours. Falls back to layers 1+2 on error or rate limit.
 
 Self-learning orientation / azimuth / tilt:
   - CloudEMS measures actual peak irradiance times throughout the day.
@@ -67,6 +71,12 @@ OPEN_METEO_URL_BASE = (
     "?forecast_days=2&timezone=auto"
 )
 OPEN_METEO_URL = OPEN_METEO_URL_BASE  # legacy, unused — URL built dynamically now
+
+# v1.5.0: Forecast.Solar API — gratis, geen API key, rate limit ~12 req/uur
+# URL: /estimate/:lat/:lon/:dec/:az/:kwp
+# dec = tilt (0-90), az = azimuth Forecast.Solar conventie (-180…+180, 0=S)
+FORECAST_SOLAR_URL = "https://api.forecast.solar/estimate/{lat}/{lon}/{dec}/{az}/{kwp}"
+FORECAST_SOLAR_CACHE_S = 7200  # 2 uur cache (rate limit: ~12 req/uur)
 
 # Minimum samples before orientation is "confident".
 # Each sample = one clear-sky *minute* (sampled once per minute).
@@ -197,6 +207,9 @@ class PVForecast:
         # Cloud cover correctie (Ecowitt / weather entity)
         self._live_cloud_cover_pct:  float | None = None
         self._live_cloud_cover_hour: int | None   = None
+        # v1.5.0: Forecast.Solar cache — dict[hour_key] = watts
+        self._fcsolar_cache:    dict = {}   # "YYYY-MM-DDTHH:00" → W
+        self._fcsolar_ts:       float = 0.0  # timestamp laatste fetch
 
     # Save interval: write to HA Store at most every 2 minutes when data changed.
     _SAVE_INTERVAL_S: int = 30   # v2.6: verlaagd van 120s — minder kans op verlies bij harde restart
@@ -564,6 +577,80 @@ class PVForecast:
 
     # ── Forecast ──────────────────────────────────────────────────────────────
 
+    async def async_refresh_forecast_solar(self) -> None:
+        """Fetch Forecast.Solar watt-per-hour forecast for all inverters combined.
+
+        Gratis API, geen key vereist. Rate limit: ~12 req/uur (1 req per 12 min).
+        Cache: FORECAST_SOLAR_CACHE_S (2u). Valt stil bij fouten — layers 1+2 nemen over.
+
+        Forecast.Solar azimuth-conventie: 0=S, -90=O (East), +90=W.
+        HA-conventie: 0=N, 90=O, 180=Z, 270=W.
+        Conversie: fs_az = ha_az - 180 (dan clampen naar -180…+180).
+        """
+        if not self._session:
+            return
+        if time.time() - self._fcsolar_ts < FORECAST_SOLAR_CACHE_S:
+            return  # Cache nog geldig
+
+        profiles_with_data = [
+            p for p in self._profiles.values()
+            if p.effective_tilt is not None and p.effective_azimuth is not None
+            and p._peak_wp and p._peak_wp > 10
+        ]
+        if not profiles_with_data:
+            return
+
+        # Combineer alle omvormers: gewogen gemiddeld tilt/azimuth, totaal kWp
+        total_kwp = sum(p._peak_wp for p in profiles_with_data) / 1000.0
+        if total_kwp < 0.1:
+            return
+
+        tilts = [p.effective_tilt or 35.0 for p in profiles_with_data]
+        azims = [p.effective_azimuth or 180.0 for p in profiles_with_data]
+        avg_tilt = round(sum(tilts) / len(tilts), 0)
+        avg_az_ha = sum(azims) / len(azims)
+        # HA (0=N,90=E,180=S,270=W) → Forecast.Solar (0=S,-90=E,+90=W)
+        fs_az = avg_az_ha - 180.0
+        fs_az = max(-180.0, min(180.0, fs_az))
+
+        url = FORECAST_SOLAR_URL.format(
+            lat=round(self._lat, 4),
+            lon=round(self._lon, 4),
+            dec=int(avg_tilt),
+            az=int(fs_az),
+            kwp=round(total_kwp, 2),
+        )
+
+        try:
+            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status == 200:
+                    data   = await r.json()
+                    watts  = data.get("result", {}).get("watts", {})
+                    # watts dict: {"2025-03-18 08:00:00": 123, ...}
+                    # Normaliseer keys naar ISO format "YYYY-MM-DDTHH:00"
+                    cache = {}
+                    for ts_str, w in watts.items():
+                        try:
+                            # Forecast.Solar levert "YYYY-MM-DD HH:MM:SS"
+                            dt_obj = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                            key = dt_obj.strftime("%Y-%m-%dT%H:00")
+                            cache[key] = float(w)
+                        except Exception:
+                            pass
+                    self._fcsolar_cache = cache
+                    self._fcsolar_ts    = time.time()
+                    _LOGGER.info(
+                        "CloudEMS PVForecast: Forecast.Solar bijgewerkt — %d uur, %.1f kWp, "
+                        "tilt=%.0f° az=%.0f° (HA-conventie)",
+                        len(cache), total_kwp, avg_tilt, avg_az_ha,
+                    )
+                elif r.status == 429:
+                    _LOGGER.debug("CloudEMS PVForecast: Forecast.Solar rate limit (429) — gebruik cache")
+                else:
+                    _LOGGER.debug("CloudEMS PVForecast: Forecast.Solar HTTP %d", r.status)
+        except Exception as exc:
+            _LOGGER.debug("CloudEMS PVForecast: Forecast.Solar fetch mislukt: %s", exc)
+
     async def async_refresh_weather(self) -> None:
         """Fetch Open-Meteo irradiance forecast (hourly, 2 days). No API key needed."""
         if not self._session:
@@ -631,6 +718,9 @@ class PVForecast:
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("CloudEMS PVForecast: weather fetch failed: %s", exc)
 
+        # v1.5.0: Layer 3 — Forecast.Solar (na Open-Meteo, zelfde aanroep-cadans)
+        await self.async_refresh_forecast_solar()
+
     # ── Internal forecast helper ───────────────────────────────────────────────
 
     @staticmethod
@@ -682,6 +772,20 @@ class PVForecast:
             _calib = p._calib_factor if (p._calib_factor and 0.2 <= p._calib_factor <= 1.5) else 1.0
             forecast_w = round(max(0.0, p._peak_wp * blended * _calib), 1)
 
+            # v1.5.0: Layer 3 — Forecast.Solar overschrijft layers 1+2 als beschikbaar
+            # Forecast.Solar geeft totaal voor alle omvormers; verdeel proportioneel over
+            # omvormers op basis van hun peak_wp aandeel.
+            weather_key_fs = target.strftime("%Y-%m-%dT%H:00")
+            fs_total_w = self._fcsolar_cache.get(weather_key_fs)
+            if fs_total_w is not None and fs_total_w >= 0:
+                # Bereken aandeel van deze omvormer in totaal kWp
+                total_peak_wp = sum(
+                    pp._peak_wp for pp in self._profiles.values() if pp._peak_wp and pp._peak_wp > 10
+                )
+                share = (p._peak_wp / total_peak_wp) if total_peak_wp > 10 else 1.0
+                forecast_w = round(max(0.0, fs_total_w * share), 1)
+                conf = 0.93  # Forecast.Solar: hoge betrouwbaarheid
+
             # Cloud cover correctie voor het huidige uur (live data van weather sensor/Ecowitt)
             # Alleen toepassen als de cloud cover data vers is (huidig uur)
             _cc = self._live_cloud_cover_pct
@@ -713,6 +817,70 @@ class PVForecast:
         now = dt_util.now().replace(minute=0, second=0, microsecond=0)
         return self._build_forecast(inverter_id, now, confidence_no_weather=0.7)
 
+    def finalize_hour(
+        self,
+        inverter_id: str,
+        hour: int,
+        actual_kwh: float,
+    ) -> None:
+        """v4.6.506: Sterke per-uur correctie bij uurwisseling.
+
+        Vergelijkt de werkelijke kWh van het afgesloten uur met de forecast-kWh
+        voor dat uur, en past hourly_yield_fraction aan via een sterkere alpha
+        dan de 10-seconden EMA (0.08-0.15).
+
+        Dit zorgt dat een uur dat structureel te hoog/laag is (bijv. door schaduw
+        of oriëntatie-afwijking) binnen enkele dagen gecorrigeerd wordt.
+
+        Logica:
+          actual_kwh → actual_frac = actual_kwh / peak_wp
+          forecast_frac → huidig opgeslagen profiel
+          verschil → pas hourly_yield_fraction aan met alpha=0.25 (sterk)
+
+        Veiligheidslimieten:
+          - Alleen als actual_kwh >= 0 en uur een zonne-uur is (6-21)
+          - Correctie max factor 2.0x of 0.1x (voorkomt wilde uitschieters)
+          - Alleen als peak_wp bekend is
+        """
+        if hour < 6 or hour > 21:
+            return  # nacht — geen correctie
+        p = self._profiles.get(inverter_id)
+        if p is None or p._peak_wp < 10:
+            return
+        if actual_kwh < 0:
+            return
+
+        hour_key = str(hour)
+        # Werkelijke fractie: kWh → W gemiddeld over het uur
+        actual_w    = actual_kwh * 1000.0  # kWh → Wh → gem. W (1 uur)
+        actual_frac = actual_w / p._peak_wp
+
+        # Begrens op plausibele waarden
+        actual_frac = max(0.0, min(1.0, actual_frac))
+
+        prev_frac = float(p.hourly_yield_fraction.get(hour_key, actual_frac))
+
+        # Gebruik sterkere alpha dan de 10s-EMA zodat uurwisseling meer gewicht heeft
+        alpha = 0.25
+
+        new_frac = round(prev_frac * (1.0 - alpha) + actual_frac * alpha, 4)
+
+        # Veiligheidscheck: max 2x of min 0.1x van vorige waarde
+        if prev_frac > 0.01:
+            new_frac = min(new_frac, prev_frac * 2.0)
+            new_frac = max(new_frac, prev_frac * 0.1)
+
+        old_frac = p.hourly_yield_fraction.get(hour_key, 0.0)
+        p.hourly_yield_fraction[hour_key] = round(new_frac, 4)
+        self._dirty = True
+
+        _LOGGER.info(
+            "PVForecast finalize_hour [%s] uur=%d: werkelijk=%.3f kWh "
+            "frac %.4f → %.4f (Δ%+.4f, alpha=%.2f)",
+            inverter_id, hour, actual_kwh,
+            old_frac, new_frac, new_frac - old_frac, alpha,
+        )
+
     def get_forecast_tomorrow(self, inverter_id: str) -> list[HourForecast]:
         """Return 24-hour forecast for tomorrow for one inverter."""
         tomorrow = (
@@ -722,13 +890,39 @@ class PVForecast:
         )
         return self._build_forecast(inverter_id, tomorrow, confidence_no_weather=0.6)
 
-    def get_total_forecast_today_kwh(self) -> float:
-        """Sum forecast for all inverters for today in kWh."""
-        total = 0.0
+    def get_total_forecast_today_kwh(self, produced_kwh: float = 0.0) -> float:
+        """Sum forecast for all inverters for today in kWh.
+
+        v4.6.493: dagtotaal = geproduceerde uren (0 t/m nowH-1) + forecast resterende uren
+        (nowH t/m 23). get_forecast() start al bij het huidige uur, dus produced_kwh mag
+        alleen de volledig afgesloten uren bevatten om double-counting te voorkomen.
+        """
+        remaining = 0.0
         for eid in self._profiles:
             for hf in self.get_forecast(eid):
-                total += hf.forecast_w / 1000.0
-        return round(total, 2)
+                remaining += hf.forecast_w / 1000.0
+        # produced_kwh bevat het huidige uur deels — trek de lopende uurforecast eraf
+        # zodat het huidige uur precies één keer meetelt (via forecast).
+        # Resultaat: dagtotaal = afgeronde uren werkelijk + prognose huidig+rest.
+        from homeassistant.util import dt as _dt_util
+        _now_min = _dt_util.now().minute
+        _hour_frac_done = _now_min / 60.0
+        # Huidig uur al deels geproduceerd — dat zit in produced_kwh maar ook in remaining
+        # We willen: produced_kwh (exclusief lopend uur) + remaining (inclusief lopend uur)
+        # Schatting geproduceerd in lopend uur = produced_kwh * hour_frac_done / 1.0
+        # Maar we weten niet welk deel van produced_kwh van het lopende uur is.
+        # Eenvoudigste correcte fix: current hour forecast aftrekken van produced_kwh
+        # zodat we niet dubbel tellen. We nemen het minimum om negatief te voorkomen.
+        current_hour_forecast = 0.0
+        for eid in self._profiles:
+            fc_list = self.get_forecast(eid)
+            if fc_list:
+                current_hour_forecast += fc_list[0].forecast_w / 1000.0
+        # Deel van het lopend uur al verstreken = _hour_frac_done
+        # produced_kwh bevat ~_hour_frac_done * current_hour_forecast van het lopende uur
+        # Trek dat af om dubbeltelling te voorkomen
+        overlap = min(produced_kwh, current_hour_forecast * _hour_frac_done)
+        return round(max(0.0, produced_kwh - overlap) + remaining, 2)
 
     def get_total_forecast_tomorrow_kwh(self) -> float:
         """Sum forecast for all inverters for tomorrow in kWh."""
@@ -737,6 +931,17 @@ class PVForecast:
             for hf in self.get_forecast_tomorrow(eid):
                 total += hf.forecast_w / 1000.0
         return round(total, 2)
+
+    def get_forecast_solar_status(self) -> dict:
+        """Return Forecast.Solar layer 3 status voor dashboard."""
+        return {
+            "active":       bool(self._fcsolar_cache),
+            "cached_hours": len(self._fcsolar_cache),
+            "last_update":  datetime.fromtimestamp(self._fcsolar_ts, tz=timezone.utc).isoformat()
+                            if self._fcsolar_ts > 0 else None,
+            "cache_age_min": round((time.time() - self._fcsolar_ts) / 60, 0)
+                            if self._fcsolar_ts > 0 else None,
+        }
 
     def get_profile_summary(self, inverter_id: str) -> dict:
         p = self._profiles.get(inverter_id)

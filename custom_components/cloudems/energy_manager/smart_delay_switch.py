@@ -4,7 +4,7 @@
 # use of this file is strictly prohibited. See LICENSE for full terms.
 
 """
-CloudEMS Slimme Uitstelmodus — v1.0.0
+CloudEMS Slimme Uitstelmodus — v1.1.0
 
 Detecteert wanneer een schakelaar AAN gaat tijdens dure stroom en schakelt hem
 automatisch UIT. Zodra het geconfigureerde goedkope prijsblok aanbreekt wordt
@@ -34,6 +34,10 @@ Configuratie per schakelaar:
   grace_s             int   — seconden na detectie wachten voor uitschakelen (default: 30)
   notify              bool  — stuur HA persistent_notification (default: True)
   active              bool  — in-/uitschakelen zonder verwijderen
+  surplus_threshold_w float — PV-surplus (W) waarboven ook inschakelen (0 = uitgeschakeld)
+                              Werkt parallel aan prijs/blok: zodra surplus >= drempel
+                              wordt het apparaat ingeschakeld ongeacht de prijs.
+                              Ideaal voor: vaatwasser bij 500W+ surplus ook starten.
 
 Copyright © 2025 CloudEMS — https://cloudems.eu
 """
@@ -104,6 +108,10 @@ class SmartDelayConfig:
     # Beschermt tegen oneindig wachten bij ontbrekende EPEX-data of geen goedkoop blok
     # Typisch: vaatwasser=12h (klaar voor ochtend), wasmachine=8h, EV=0 (onbeperkt)
     max_wait_h:         int   = 0
+    # v1.1.0: PV-surplus drempel — inschakelen bij voldoende zonne-energie
+    # 0 = uitgeschakeld (surplus-trigger niet actief)
+    # >0 = schakel in als solar_surplus_w >= surplus_threshold_w
+    surplus_threshold_w: float = 0.0
 
     @classmethod
     def from_dict(cls, d: dict) -> "SmartDelayConfig":
@@ -121,6 +129,7 @@ class SmartDelayConfig:
             active             = bool(d.get("active", True)),
             wait_mode          = str(d.get("wait_mode", "price")),
             max_wait_h         = int(d.get("max_wait_h", 0)),
+            surplus_threshold_w= float(d.get("surplus_threshold_w", 0.0)),
         )
 
     def to_dict(self) -> dict:
@@ -138,6 +147,7 @@ class SmartDelayConfig:
             "active":             self.active,
             "wait_mode":          self.wait_mode,
             "max_wait_h":         self.max_wait_h,
+            "surplus_threshold_w": self.surplus_threshold_w,
         }
 
 
@@ -312,7 +322,7 @@ class SmartDelayScheduler:
 
     # ── Hoofd-evaluatieloop ────────────────────────────────────────────────────
 
-    async def async_evaluate(self, price_info: dict) -> list[dict]:
+    async def async_evaluate(self, price_info: dict, solar_surplus_w: float = 0.0) -> list[dict]:
         """
         Evalueer alle slimme uitstelmodus-schakelaars.
         Aanroepen elke coordinator-tick (10s).
@@ -509,7 +519,44 @@ class SmartDelayScheduler:
                     if price > cfg.price_threshold_eur:
                         continue
 
-                # Inschakelen
+                # v1.1.0: Surplus-trigger — inschakelen bij voldoende PV-surplus
+                # Werkt parallel aan prijs/blok: als surplus >= drempel, direct inschakelen
+                # ongeacht de absolute prijs of het goedkoopste blok.
+                if cfg.surplus_threshold_w > 0 and solar_surplus_w >= cfg.surplus_threshold_w:
+                    _LOGGER.info(
+                        "SmartDelay: %s AAN door surplus %.0fW >= drempel %.0fW",
+                        cfg.label or cfg.entity_id, solar_surplus_w, cfg.surplus_threshold_w,
+                    )
+                    st.state       = DelayState.ACTIVATING
+                    st.target_hour = now_h
+                    ok = await self._turn_on(cfg)
+                    if ok:
+                        st.state        = DelayState.IDLE
+                        st.activated_at = now_ts
+                        await self._notify(
+                            cfg,
+                            title=f"☀️ {cfg.label or cfg.entity_id} gestart op surplus",
+                            message=(
+                                f"CloudEMS heeft **{cfg.label or cfg.entity_id}** ingeschakeld "
+                                f"omdat er voldoende PV-surplus is: {solar_surplus_w:.0f}W "
+                                f"(drempel: {cfg.surplus_threshold_w:.0f}W).\n\n"
+                                f"Stroomprijs is nu €{price:.4f}/kWh."
+                            ),
+                        )
+                        actions.append({
+                            "entity_id": cfg.entity_id,
+                            "label":     cfg.label,
+                            "action":    "surplus_activated",
+                            "surplus_w": round(solar_surplus_w, 0),
+                            "price":     price,
+                            "hour":      now_h,
+                            "reason":    f"Surplus {solar_surplus_w:.0f}W >= drempel {cfg.surplus_threshold_w:.0f}W",
+                        })
+                    else:
+                        st.state = DelayState.INTERCEPTED
+                    continue
+
+                # Inschakelen (prijs/blok trigger)
                 st.state       = DelayState.ACTIVATING
                 st.target_hour = now_h
                 ok = await self._turn_on(cfg)
@@ -586,6 +633,7 @@ class SmartDelayScheduler:
                 "power_threshold_w":  cfg.power_threshold_w,
                 "wait_mode":          cfg.wait_mode,
                 "max_wait_h":         cfg.max_wait_h,
+                "surplus_threshold_w": cfg.surplus_threshold_w,
                 "deadline_ts":        (st.intercepted_at + cfg.max_wait_h * 3600)
                                       if (cfg.max_wait_h > 0 and st.intercepted_at > 0)
                                       else None,

@@ -144,7 +144,7 @@ class CloudEMSHomeCard extends HTMLElement {
 .rexp{font-size:9px;color:rgba(255,255,255,0.2);text-align:center}
 .sep{height:1px;background:rgba(255,255,255,0.06);margin:2px 13px}
 .dvblock{background:rgba(255,255,255,0.02);padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
-.dvrow{display:grid;grid-template-columns:10px 1fr 46px 28px 64px;align-items:center;gap:0 5px;padding:3px 13px 3px 25px;font-size:11px}
+.dvrow{display:grid;grid-template-columns:10px 1fr 46px 28px 52px 54px;align-items:center;gap:0 5px;padding:3px 13px 3px 25px;font-size:11px}
 .dot{width:6px;height:6px;border-radius:50%}
 .ph-bar{display:flex;gap:10px;padding:7px 13px;border-bottom:1px solid rgba(255,255,255,0.06);font-size:11px;flex-wrap:wrap}
 .ph-chip{display:flex;align-items:center;gap:4px}
@@ -579,13 +579,18 @@ ${ins?`<div class="ins">${ins}</div>`:''}`;
       const inactive_room=r.power_w<=0;
       let devRows='';
       if(isExp&&devs.length>0){
-        devRows=devs.map(d=>`<div class="dvrow">
+        devRows=devs.map(d=>{
+          // v4.6.496: toon kWh per apparaat naast W
+          const _dKwh = parseFloat(d.today_kwh||d.energy_kwh_today||0);
+          const _kwhTxt = _dKwh>=0.01 ? _dKwh.toFixed(2)+' kWh' : '';
+          return `<div class="dvrow">
           <div class="dot" style="background:${d.is_on?'#22c55e':'rgba(255,255,255,0.15)'}"></div>
           <div style="font-size:11px;color:rgba(255,255,255,0.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.name||d.device_type||'?'}</div>
           <div style="font-size:11px;text-align:right;color:rgba(255,255,255,0.5)">${d.is_on?Math.round(d.power_w||0)+' W':'—'}</div>
           <div style="font-size:10px;text-align:center;font-weight:700;color:${phC(d.phase||'?')}">${d.phase||'?'}</div>
+          <div style="font-size:10px;text-align:right;color:rgba(255,255,255,0.3)">${_kwhTxt}</div>
           <div style="font-size:10px;text-align:right;color:${stC(d)}">${stL(d)}</div>
-        </div>`).join('');
+        </div>`;}).join('');
       }else if(isExp){devRows=`<div style="padding:5px 25px;font-size:11px;color:rgba(255,255,255,0.25)">Geen apparaten bekend</div>`;}
       return`<div class="row${isTop?' top':''}${inactive_room?' off':''}" data-room="${r.room}" style="cursor:${hasDevs?'pointer':'default'}">
         <div class="rname">${name}</div>

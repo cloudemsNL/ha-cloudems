@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Version Card  v1.0.0
+// CloudEMS Version Card  v1.0.1
 
 class CloudEMSVersionCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }
@@ -8,11 +8,11 @@ class CloudEMSVersionCard extends HTMLElement {
   set hass(h){
     this._hass = h;
     const wd  = h?.states['sensor.cloudems_watchdog']?.attributes || {};
-    const sig = [wd.version, wd.uptime_s, wd.update_cycles, wd.errors_total].join('|');
+    const sig = [wd.cloudems_version, wd.version, wd.uptime_s, wd.update_cycles, wd.errors_total].join('|');
     if(sig === this._prev) return;
     this._prev = sig;
 
-    const ver     = wd.version || h?.states['sensor.cloudems_watchdog']?.state || '?';
+    const ver     = wd.cloudems_version || wd.version || h?.states['sensor.cloudems_watchdog']?.attributes?.cloudems_version || '?';
     const uptime  = wd.uptime_s  ? _fmtUp(wd.uptime_s)  : '—';
     const cycles  = wd.update_cycles != null ? wd.update_cycles.toLocaleString('nl') : '—';
     const errors  = wd.errors_total  != null ? wd.errors_total  : '—';
@@ -63,4 +63,4 @@ customElements.define('cloudems-version-card', CloudEMSVersionCard);
 customElements.define('cloudems-version-card-editor', CloudEMSVersionCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({type:'cloudems-version-card', name:'CloudEMS Versie Card', description:'CloudEMS versie, uptime en systeem statistieken', preview:true});
-console.info('%c CLOUDEMS-VERSION-CARD %c v1.0.0 ','background:#4ade80;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#4ade80;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');
+console.info('%c CLOUDEMS-VERSION-CARD %c v1.0.1 ','background:#4ade80;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#4ade80;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

@@ -58,6 +58,8 @@ LOVELACE_DEMAND_URL         = f"/local/cloudems/cloudems-demand-card.js?v={VERSI
 LOVELACE_DIAGNOSE_URL        = f"/local/cloudems/cloudems-diagnose-card.js?v={VERSION}"
 LOVELACE_VERSION_URL         = f"/local/cloudems/cloudems-version-card.js?v={VERSION}"
 LOVELACE_KLIMAAT_URL        = f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}"
+LOVELACE_APPLIANCE_URL      = f"/local/cloudems/cloudems-appliance-card.js?v={VERSION}"
+LOVELACE_P1_URL             = f"/local/cloudems/cloudems-p1-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -104,6 +106,8 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_BOILER_URL,       "cloudems-boiler-card.js"),
     (LOVELACE_BATTERY_URL,      "cloudems-battery-card.js"),
     (LOVELACE_SHUTTER_URL,      "cloudems-shutter-card.js"),
+    (LOVELACE_APPLIANCE_URL,    "cloudems-appliance-card.js"),
+    (LOVELACE_P1_URL,           "cloudems-p1-card.js"),
     (LOVELACE_SOLAR_URL,        "cloudems-solar-card.js"),
     (LOVELACE_PV_FORECAST_URL,  "cloudems-pv-forecast-card.js"),
     (LOVELACE_OVERVIEW_URL,     "cloudems-overview-card.js"),
@@ -125,6 +129,7 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
     (LOVELACE_MINI_PRICE_URL,   "cloudems-mini-price-card.js"),
     (f"/local/cloudems/cloudems-lamp-auto-card.js?v={VERSION}", "cloudems-lamp-auto-card.js"),
+    (f"/local/cloudems/cloudems-decisions-learner-card.js?v={VERSION}", "cloudems-decisions-learner-card.js"),  # v4.6.500
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.

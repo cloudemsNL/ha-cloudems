@@ -2428,99 +2428,103 @@ class CloudEMSOptionsFlow(_OptionsBase):
         return dict(entry.options)
 
     async def async_step_lamp_auto_opts(self, user_input=None):
-        """Slimme lamp automatisering — los van lampcirculatie."""
-        data = self._data()
-        if user_input is not None:
-            _back = await self._maybe_back(user_input)
-            if _back is not None: return _back
-            lamps_raw = user_input.get("lamp_auto_lamps_raw", "")
-            # Sla ruwe JSON op — de engine parseert dit
-            import json as _json
-            try:
-                lamps_parsed = _json.loads(lamps_raw) if lamps_raw.strip() else []
-            except Exception:
-                lamps_parsed = data.get("lamp_auto_lamps", [])
-            return self._save({
-                "lamp_auto_enabled":  user_input.get("lamp_auto_enabled", False),
-                "lamp_auto_lamps":    lamps_parsed,
-            })
-
-        enabled = data.get("lamp_auto_enabled", False)
-
-        # Bouw suggestieslijst vanuit HA — toon als info in description
-        suggestion_info = "Lampen worden automatisch gevonden via HA-ruimtes. Stel per lamp de modus in via de CloudEMS lamp-automatisering kaart op het dashboard."
-
-        return self.async_show_form(
-            step_id="lamp_auto_opts",
-            data_schema=vol.Schema({
-                vol.Optional("lamp_auto_enabled", default=enabled): selector.BooleanSelector(),
-            }),
-            description_placeholders={"info": suggestion_info},
-        )
+        """Backwards compat — verwijst door naar lamp_automation_opts."""
+        return await self.async_step_lamp_automation_opts(user_input)
 
     async def async_step_lamp_automation_opts(self, user_input=None):
-        """Slimme verlichting — globale instellingen + ruimte-filter."""
+        """Lamp Automatisering — stap 1: aan/uit + vergeten-timer.
+
+        De engine kent 3 modi per lamp:
+          👤 Handmatig  — CloudEMS leert alleen, doet niets automatisch
+          🔔 Semi-auto  — CloudEMS stuurt een notificatie, jij bevestigt
+          🤖 Automatisch — CloudEMS schakelt direct op basis van aanwezigheid
+
+        Standaarden op basis van ruimtenaam:
+          slaapkamer / badkamer → Handmatig
+          woonkamer / keuken   → Semi-auto
+          hal / gang / buiten  → Automatisch
+        """
         data = self._data()
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
-            # Kies ruimte-filter → ga naar detail stap
-            area_filter = user_input.get("la_area_filter", "")
-            if area_filter and area_filter != "__alle__":
-                self._la_area_filter = area_filter
-                return await self.async_step_lamp_automation_detail_opts()
-            # Globale instellingen opslaan
             la_cfg = data.get("lamp_automation", {}) or {}
             new_la = {
                 **la_cfg,
                 "enabled":           user_input.get("la_enabled", False),
                 "forgotten_minutes": int(user_input.get("la_forgotten_minutes", 30)),
             }
-            return self._save({"lamp_automation": new_la})
+            # Sla op en ga door naar per-lamp stap
+            # We updaten intern zodat detail-stap de nieuwe waarden ziet
+            if hasattr(self, "_options"):
+                self._options = {**self._options, "lamp_automation": new_la}
+            self._la_area_filter = ""
+            return await self.async_step_lamp_automation_detail_opts()
 
-        la_cfg    = data.get("lamp_automation", {}) or {}
-        lamp_list = la_cfg.get("lamps", [])
-
-        # Bouw lijst van unieke ruimtes voor filter
-        areas = sorted(set(
-            l.get("area_name", "") for l in lamp_list if l.get("area_name")
-        ))
-        area_options = [{"value": "__alle__", "label": "— Alle lampen —"}]
-        area_options += [{"value": a, "label": f"📍 {a}"} for a in areas]
-
-        schema_dict = {
-            vol.Optional("back_to_menu",        default=False): selector.BooleanSelector(),
-            vol.Optional("la_enabled",          default=la_cfg.get("enabled", False)): selector.BooleanSelector(),
-            vol.Optional("la_forgotten_minutes",default=int(la_cfg.get("forgotten_minutes", 30))): selector.NumberSelector(
-                selector.NumberSelectorConfig(min=10, max=120, step=5, mode="slider",
-                                              unit_of_measurement="min")
-            ),
-        }
-        if area_options:
-            schema_dict[vol.Optional("la_area_filter", default="__alle__")] = selector.SelectSelector(
-                selector.SelectSelectorConfig(options=area_options, mode="list")
-            )
-
+        la_cfg = data.get("lamp_automation", {}) or {}
         return self.async_show_form(
             step_id="lamp_automation_opts",
-            data_schema=vol.Schema(schema_dict),
+            description_placeholders={
+                "uitleg": (
+                    "Modi:\n"
+                    "👤 Handmatig — alleen leren, nooit schakelen\n"
+                    "🔔 Semi-auto — notificatie sturen, jij bevestigt\n"
+                    "🤖 Automatisch — direct schakelen op basis van aanwezigheid\n\n"
+                    "Standaard per ruimte: slaapkamer→Handmatig, woonkamer→Semi, hal→Automatisch"
+                )
+            },
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu",         default=False): selector.BooleanSelector(),
+                vol.Optional("la_enabled",           default=la_cfg.get("enabled", False)): selector.BooleanSelector(),
+                vol.Optional("la_forgotten_minutes", default=int(la_cfg.get("forgotten_minutes", 30))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=120, step=5, mode="slider",
+                                                  unit_of_measurement="min")
+                ),
+            }),
         )
 
     async def async_step_lamp_automation_detail_opts(self, user_input=None):
-        """Slimme verlichting — per-lamp modus voor gefilterde ruimte."""
+        """Lamp Automatisering — stap 2: stel per lamp de modus in."""
         data      = self._data()
         la_cfg    = data.get("lamp_automation", {}) or {}
-        lamp_list = la_cfg.get("lamps", [])
+        lamp_list = list(la_cfg.get("lamps", []))
         area      = getattr(self, "_la_area_filter", "")
 
-        # Filter op ruimte of toon alle lampen
-        filtered = [l for l in lamp_list
-                    if not area or l.get("area_name", "") == area]
+        # Auto-discover lampen via HA als lijst leeg is
+        if not lamp_list:
+            try:
+                from .energy_manager.lamp_automation import ROOM_DEFAULT_MODE
+                from homeassistant.helpers import area_registry as ar, entity_registry as er
+                area_reg = ar.async_get(self.hass)
+                ent_reg  = er.async_get(self.hass)
+                for entry in ent_reg.entities.values():
+                    if entry.domain != "light" or entry.disabled:
+                        continue
+                    a = area_reg.async_get_area(entry.area_id) if entry.area_id else None
+                    area_name = a.name if a else ""
+                    mode = "manual"
+                    for kw, (m, _) in ROOM_DEFAULT_MODE.items():
+                        if kw in area_name.lower():
+                            mode = m
+                            break
+                    lamp_list.append({
+                        "entity_id": entry.entity_id,
+                        "label":     entry.name or entry.original_name or entry.entity_id,
+                        "area_name": area_name,
+                        "mode":      mode,
+                        "excluded":  False,
+                    })
+                la_cfg = {**la_cfg, "lamps": lamp_list}
+            except Exception:
+                pass
+
+        filtered = [l for l in lamp_list if not area or l.get("area_name", "") == area]
 
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
-            # Update lamp configs
+            if user_input.get("terug_naar_stap1"):
+                return await self.async_step_lamp_automation_opts()
             for lamp in lamp_list:
                 slug = lamp["entity_id"].replace(".", "_").replace("-", "_")
                 if f"mode_{slug}" in user_input:
@@ -2531,22 +2535,34 @@ class CloudEMSOptionsFlow(_OptionsBase):
             return self._save({"lamp_automation": new_la})
 
         schema_dict = {
-            vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            vol.Optional("back_to_menu",     default=False): selector.BooleanSelector(),
+            vol.Optional("terug_naar_stap1", default=False): selector.BooleanSelector(),
         }
-        for lamp in filtered[:15]:   # max 15 per pagina
+        for lamp in filtered[:15]:
             slug = lamp["entity_id"].replace(".", "_").replace("-", "_")
-            lbl  = lamp.get("label", lamp["entity_id"])
+            lbl      = lamp.get("label", lamp["entity_id"])
+            area_lbl = f" [{lamp.get('area_name','')}]" if lamp.get("area_name") else ""
             schema_dict[vol.Optional(f"mode_{slug}", default=lamp.get("mode", "manual"))] = selector.SelectSelector(
                 selector.SelectSelectorConfig(options=[
-                    {"value": "manual", "label": f"{lbl} — 👤 Handmatig (alleen leren)"},
-                    {"value": "semi",   "label": f"{lbl} — 🔔 Semi-auto (vraag bevestiging)"},
-                    {"value": "auto",   "label": f"{lbl} — 🤖 Automatisch (direct)"},
+                    {"value": "manual", "label": f"{lbl}{area_lbl} — 👤 Handmatig (alleen leren, nooit schakelen)"},
+                    {"value": "semi",   "label": f"{lbl}{area_lbl} — 🔔 Semi-auto (notificatie, jij bevestigt)"},
+                    {"value": "auto",   "label": f"{lbl}{area_lbl} — 🤖 Automatisch (direct schakelen)"},
                 ], mode="list")
             )
             schema_dict[vol.Optional(f"excl_{slug}", default=lamp.get("excluded", False))] = selector.BooleanSelector()
 
         return self.async_show_form(
             step_id="lamp_automation_detail_opts",
+            description_placeholders={
+                "uitleg": (
+                    f"Gevonden: {len(filtered)} lamp(en).\n"
+                    "👤 Handmatig = CloudEMS leert alleen, doet nooit iets automatisch.\n"
+                    "🔔 Semi-auto = CloudEMS stuurt een notificatie, jij bevestigt.\n"
+                    "🤖 Automatisch = CloudEMS schakelt direct op basis van aanwezigheid.\n"
+                    "Zet 'Uitsluiten' aan om een lamp volledig te negeren.\n"
+                    "Zet 'Terug naar stap 1' aan om de globale instellingen te wijzigen."
+                )
+            },
             data_schema=vol.Schema(schema_dict),
         )
 
@@ -2853,9 +2869,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="climate_opts",       label="🌡️ Klimaatbeheer"),
                         selector.SelectOptionDict(value="shutter_count_opts", label="🪟 Rolluiken"),
                         selector.SelectOptionDict(value="pool_opts",          label="🏊 Zwembad Controller"),
-                        selector.SelectOptionDict(value="lamp_circ_opts",     label="💡 Lampcirculatie & Beveiliging"),
-                        selector.SelectOptionDict(value="lamp_automation_opts", label="🏠 Slimme Verlichting (auto)"),
-                        selector.SelectOptionDict(value="lamp_auto_opts",     label="🏠 Slimme Lamp Automatisering"),
+                        selector.SelectOptionDict(value="lamp_circ_opts",      label="💡 Lampcirculatie & Beveiliging"),
+                        selector.SelectOptionDict(value="lamp_automation_opts", label="🏠 Lamp Automatisering (aan/uit per ruimte)"),
                         selector.SelectOptionDict(value="gas_opts",           label="🔥 Gas & Warmte"),
                         selector.SelectOptionDict(value="__terug__",          label="← Terug"),
                     ], mode="list"))
@@ -3037,34 +3052,78 @@ class CloudEMSOptionsFlow(_OptionsBase):
         )
 
     async def async_step_gas_opts(self, user_input=None):
-        """🔥 Gas & Warmte — aparte sectie voor gas/boiler/warmtepomp."""
+        """🔥 Gas & Warmte — submenu om te kiezen."""
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            section = user_input.get("section", "")
+            if section == "gas_meter_opts":
+                return await self.async_step_gas_meter_opts()
+            if section == "warmtepomp_opts":
+                return await self.async_step_warmtepomp_opts()
+            return await self.async_step_menu_verbruik()
+        return self.async_show_form(
+            step_id="gas_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("section", default="gas_meter_opts"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="gas_meter_opts",   label="🔥 Gasverbruik & Gasprijs"),
+                        selector.SelectOptionDict(value="warmtepomp_opts",  label="♨️ Warmtepomp"),
+                    ], mode="list")
+                ),
+            }),
+        )
+
+    async def async_step_gas_meter_opts(self, user_input=None):
+        """🔥 Gasverbruik & Gasprijs."""
         data = self._data()
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
             return self._save(user_input)
-        # Import needed constants with safe fallback
         try:
             from .const import CONF_GAS_SENSOR, CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED
-            from .const import CONF_BOILER_EFFICIENCY, CONF_HEAT_PUMP_COP
-            from .const import DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY, DEFAULT_HEAT_PUMP_COP
-            from .const import CONF_HEAT_PUMP_ENTITY, CONF_HEAT_PUMP_THERMAL_ENTITY
+            from .const import CONF_BOILER_EFFICIENCY
+            from .const import DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY
         except ImportError:
             CONF_GAS_SENSOR = "gas_sensor"; CONF_GAS_PRICE_SENSOR = "gas_price_sensor"
             CONF_GAS_PRICE_FIXED = "gas_price_fixed"; CONF_BOILER_EFFICIENCY = "boiler_efficiency"
-            CONF_HEAT_PUMP_COP = "heat_pump_cop"; DEFAULT_GAS_PRICE_EUR_M3 = 1.05
-            DEFAULT_BOILER_EFFICIENCY = 0.90; DEFAULT_HEAT_PUMP_COP = 3.5
+            DEFAULT_GAS_PRICE_EUR_M3 = 1.05; DEFAULT_BOILER_EFFICIENCY = 0.90
+        return self.async_show_form(
+            step_id="gas_meter_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Optional(CONF_GAS_SENSOR,       default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_SENSOR, default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_FIXED,  default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+                vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
+            }),
+        )
+
+    async def async_step_warmtepomp_opts(self, user_input=None):
+        """♨️ Warmtepomp instellingen."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        try:
+            from .const import CONF_HEAT_PUMP_COP, CONF_HEAT_PUMP_ENTITY, CONF_HEAT_PUMP_THERMAL_ENTITY
+            from .const import DEFAULT_HEAT_PUMP_COP
+        except ImportError:
+            CONF_HEAT_PUMP_COP = "heat_pump_cop"; DEFAULT_HEAT_PUMP_COP = 3.5
             CONF_HEAT_PUMP_ENTITY = "heat_pump_power_entity"
             CONF_HEAT_PUMP_THERMAL_ENTITY = "heat_pump_thermal_entity"
         return self.async_show_form(
-            step_id="gas_opts",
+            step_id="warmtepomp_opts",
             data_schema=vol.Schema({
-                vol.Optional(CONF_GAS_SENSOR, default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
-                vol.Optional(CONF_GAS_PRICE_SENSOR, default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
-                vol.Optional(CONF_GAS_PRICE_FIXED, default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
-                vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
-                vol.Optional(CONF_HEAT_PUMP_COP, default=float(data.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))): vol.All(vol.Coerce(float), vol.Range(min=1.0, max=8.0)),
-                vol.Optional(CONF_HEAT_PUMP_ENTITY, default=data.get(CONF_HEAT_PUMP_ENTITY) or vol.UNDEFINED): _ent(),
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Optional(CONF_HEAT_PUMP_COP,            default=float(data.get(CONF_HEAT_PUMP_COP, DEFAULT_HEAT_PUMP_COP))):
+                    vol.All(vol.Coerce(float), vol.Range(min=1.0, max=8.0)),
+                vol.Optional(CONF_HEAT_PUMP_ENTITY,         default=data.get(CONF_HEAT_PUMP_ENTITY) or vol.UNDEFINED): _ent(),
                 vol.Optional(CONF_HEAT_PUMP_THERMAL_ENTITY, default=data.get(CONF_HEAT_PUMP_THERMAL_ENTITY) or vol.UNDEFINED): _ent(),
             }),
         )
@@ -3192,6 +3251,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     "notify":              bool(user_input.get("sd_notify", True)),
                     "wait_mode":           user_input.get("sd_wait_mode", "price"),
                     "max_wait_h":          int(user_input.get("sd_max_wait_h", 0)),
+                    "surplus_threshold_w": float(user_input.get("sd_surplus_threshold_w", 0.0)),
                     "active":              True,
                 }
             self._opts.setdefault("cheap_switches", []).append(switch_cfg)
@@ -3294,6 +3354,14 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.NumberSelectorConfig(
                             min=0, max=24, step=1,
                             unit_of_measurement="uur", mode="slider"
+                        )
+                    ),
+                vol.Optional("sd_surplus_threshold_w",
+                             default=float(ex_sd.get("surplus_threshold_w", 0.0))):
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0, max=5000, step=50,
+                            unit_of_measurement="W", mode="slider"
                         )
                     ),
             }),

@@ -114,9 +114,26 @@ class BatteryDecisionEngine:
 
     Gebruik:
         engine = BatteryDecisionEngine()
+        engine.set_learner(decision_outcome_learner)   # optioneel
         decision = engine.evaluate(ctx)
         lines    = engine.explain(ctx)
     """
+
+    def __init__(self) -> None:
+        self._learner = None   # v4.6.498: DecisionOutcomeLearner — optioneel koppelen
+
+    def set_learner(self, learner) -> None:
+        """Koppel de DecisionOutcomeLearner voor bias-toepassing op drempels."""
+        self._learner = learner
+
+    def _biased_threshold(self, base: float, component: str, bucket: str, action: str) -> float:
+        """Pas de geleerde bias toe op een drempelwaarde. Veilig: max ±30%, min 5 samples."""
+        if self._learner is None:
+            return base
+        try:
+            return self._learner.apply_bias_to_threshold(base, component, bucket, action)
+        except Exception:
+            return base
 
     def evaluate(self, ctx: DecisionContext) -> BatteryDecision:
         soc = ctx.soc_pct
@@ -306,7 +323,23 @@ class BatteryDecisionEngine:
         if price is None:
             return None
 
-        if price <= PRICE_CHEAP_EUR and headroom_kwh >= MIN_USEFUL_CAPACITY_KWH:
+        # v4.6.498: pas geleerde bias toe op drempels
+        _bucket = ""
+        try:
+            from .decision_outcome_learner import build_context_bucket
+            import datetime as _dt
+            _avg = ctx.epex_forecast[0].get("price", PRICE_CHEAP_EUR) if ctx.epex_forecast else PRICE_CHEAP_EUR
+            _bucket = build_context_bucket(
+                "battery", ctx.soc_pct, price or 0.0,
+                float(_avg), ctx.pv_surplus_w,
+                month=_dt.datetime.now().month, hour=_dt.datetime.now().hour,
+            )
+        except Exception:
+            pass
+        _cheap_thresh     = self._biased_threshold(PRICE_CHEAP_EUR,     "battery", _bucket, "charge")
+        _expensive_thresh = self._biased_threshold(PRICE_EXPENSIVE_EUR, "battery", _bucket, "discharge")
+
+        if price <= _cheap_thresh and headroom_kwh >= MIN_USEFUL_CAPACITY_KWH:
             if ctx.pv_forecast_tomorrow_kwh > ctx.battery_capacity_kwh * 0.7:
                 if soc is not None and soc > 50:
                     return BatteryDecision(
@@ -319,16 +352,16 @@ class BatteryDecisionEngine:
             ceil = self._charge_ceiling(ctx.soh_pct)
             return BatteryDecision(
                 action="charge",
-                reason=f"EPEX goedkoop €{price:.3f}/kWh ≤ {PRICE_CHEAP_EUR:.2f} — laden",
+                reason=f"EPEX goedkoop €{price:.3f}/kWh ≤ {_cheap_thresh:.2f} (geleerd) — laden",
                 priority=3, confidence=0.75, source="epex_cheap",
                 soc_pct=soc, target_soc_pct=ceil,
                 tariff_group=tg, epex_eur=price,
             )
 
-        if price >= PRICE_EXPENSIVE_EUR and available_kwh >= MIN_USEFUL_CAPACITY_KWH:
+        if price >= _expensive_thresh and available_kwh >= MIN_USEFUL_CAPACITY_KWH:
             return BatteryDecision(
                 action="discharge",
-                reason=f"EPEX duur €{price:.3f}/kWh ≥ {PRICE_EXPENSIVE_EUR:.2f} — ontladen",
+                reason=f"EPEX duur €{{price:.3f}}/kWh ≥ {{_expensive_thresh:.2f}} (geleerd) — ontladen",
                 priority=3, confidence=0.70, source="epex_expensive",
                 soc_pct=soc, target_soc_pct=MIN_SOC_DISCHARGE + 5,
                 tariff_group=tg, epex_eur=price,
