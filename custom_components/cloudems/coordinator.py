@@ -1852,6 +1852,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if getattr(self, "_shutter_ctrl", None):
             await self._shutter_ctrl.async_shutdown()
 
+        # v4.6.514: opruimen realtime solar/batterij listeners
+        if getattr(self, "_rt_unsub_solar", None):
+            self._rt_unsub_solar()
+            self._rt_unsub_solar = None
+        if getattr(self, "_rt_unsub_battery", None):
+            self._rt_unsub_battery()
+            self._rt_unsub_battery = None
+
         # v4.6.276: AdaptiveHome bridge opruimen
         if getattr(self, "_ah_bridge", None):
             await self._ah_bridge.async_shutdown()
@@ -2524,6 +2532,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             from .energy_manager.p1_reader import P1Reader
             self._p1_reader = P1Reader(cfg)
             await self._p1_reader.async_start()
+            # v4.6.512: realtime fase-stroom updates via P1 callback
+            def _on_p1_telegram(t) -> None:
+                try:
+                    import asyncio as _aio
+                    _aio.ensure_future(self._process_p1_realtime(t))
+                except Exception:
+                    pass
+            self._p1_reader.set_telegram_callback(_on_p1_telegram)
 
         if cfg.get(CONF_PEAK_SHAVING_ENABLED, False):
             from .energy_manager.peak_shaving import PeakShaving
@@ -2893,6 +2909,70 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._bayes = BayesianNILMClassifier()
             self._nilm._bayes_callback = self._bayes
             _LOGGER.info("CloudEMS NILM Bayesian classifier actief")
+
+        # v4.6.514: Realtime solar + batterij via state-change listeners.
+        # P1/grid heeft al een callback (1s). Solar en batterij worden normaal elke
+        # 10s gepolled — dat is te traag voor NILM huis-verbruik berekening.
+        # State-change listeners geven updates zodra de omvormer/batterij-sensor wijzigt.
+        self._rt_unsub_solar   = None
+        self._rt_unsub_battery = None
+        try:
+            from homeassistant.helpers.event import async_track_state_change_event
+            from homeassistant.core import callback as _ha_callback
+
+            _solar_eid   = cfg.get(CONF_SOLAR_SENSOR, "")
+            _battery_eid = cfg.get(CONF_BATTERY_SENSOR, "")
+            _use_sep     = cfg.get(CONF_USE_SEPARATE_IE, False)
+            _import_eid  = cfg.get(CONF_IMPORT_SENSOR, "") if _use_sep else ""
+            _export_eid  = cfg.get(CONF_EXPORT_SENSOR, "") if _use_sep else ""
+
+            @_ha_callback
+            def _on_solar_state_change(event) -> None:
+                """Ontvang solar-vermogen update direct bij state-change."""
+                new_state = event.data.get("new_state")
+                if new_state is None or new_state.state in ("unavailable", "unknown", ""):
+                    return
+                try:
+                    _w = self._calc.to_watts(_solar_eid, float(new_state.state))
+                    if _w is not None:
+                        self._last_solar_w = round(float(_w), 1)
+                        # NILM direct voeden met nieuw huis-vermogen
+                        if self._nilm and not self.learning_frozen:
+                            _grid_w = getattr(self, "_last_p1_realtime_grid_w", 0.0) or 0.0
+                            _house  = max(0.0, _grid_w + self._last_solar_w)
+                            self._nilm.update_power("L1", _house, source="solar_realtime")
+                except Exception:
+                    pass
+
+            @_ha_callback
+            def _on_battery_state_change(event) -> None:
+                """Ontvang batterij-vermogen update direct bij state-change."""
+                new_state = event.data.get("new_state")
+                if new_state is None or new_state.state in ("unavailable", "unknown", ""):
+                    return
+                try:
+                    _w = self._calc.to_watts(_battery_eid, float(new_state.state))
+                    if _w is not None:
+                        self._last_battery_w = round(float(_w), 1)
+                except Exception:
+                    pass
+
+            _solar_listen_ids = [e for e in [_solar_eid] if e]
+            _batt_listen_ids  = [e for e in [_battery_eid] if e]
+
+            if _solar_listen_ids:
+                self._rt_unsub_solar = async_track_state_change_event(
+                    self.hass, _solar_listen_ids, _on_solar_state_change
+                )
+                _LOGGER.debug("CloudEMS: realtime solar state-listener actief voor %s", _solar_eid)
+
+            if _batt_listen_ids:
+                self._rt_unsub_battery = async_track_state_change_event(
+                    self.hass, _batt_listen_ids, _on_battery_state_change
+                )
+                _LOGGER.debug("CloudEMS: realtime batterij state-listener actief voor %s", _battery_eid)
+        except Exception as _rt_listen_err:
+            _LOGGER.warning("CloudEMS: realtime solar/batterij listeners niet beschikbaar: %s", _rt_listen_err)
 
         # v4.6.170: gebruik VERSION uit const.py — voorkomt blocking I/O in event loop
         from .const import VERSION as _mf_version
@@ -3627,7 +3707,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # v1.9: P1 per-phase power → NILM (highest quality input)
                 # DSMR5 telegrams include per-phase import power in kW
                 # P1Telegram fields: power_l1_import_w, power_l2_import_w, power_l3_import_w
-                for ph, attr in (("L1","power_l1_import_w"),("L2","power_l2_import_w"),("L3","power_l3_import_w")):
+                # v4.6.516: P1Telegram heeft power_l1_w (niet power_l1_import_w)
+                for ph, attr in (("L1","power_l1_w"),("L2","power_l2_w"),("L3","power_l3_w")):
                     pw = getattr(t, attr, None)
                     if pw is not None and pw >= 0 and not self.learning_frozen:
                         self._nilm.update_power(ph, pw, source="p1_direct")
@@ -5892,6 +5973,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     # v4.6.416: energy demand — verwacht verbruik rest van de dag
                     expected_remaining_kwh   = float((self.data or {}).get("energy_demand", {}).get("device_total_kwh", 0.0)),
                     system_demand_kwh        = float((self.data or {}).get("energy_demand", {}).get("system_total_kwh", 0.0)),
+                    # v4.6.507: saldering — beïnvloedt laad/ontlaad drempels
+                    net_metering_pct         = get_net_metering_pct(self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")),
                 )
                 _bde_result  = self._battery_decision_engine.evaluate(_bde_ctx)
                 _bde_explain = self._battery_decision_engine.explain(_bde_ctx)
@@ -8934,6 +9017,102 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return None
         return round(sum(readings) / len(readings), 1)
 
+    async def _process_p1_realtime(self, t) -> None:
+        """v4.6.512: Realtime verwerking van een nieuw P1 telegram.
+
+        Aangeroepen direct vanuit de P1Reader callback — buiten de 10s coordinator-cyclus.
+        Verwerkt alleen de tijdkritische data:
+          - Fase-stromen en -vermogens → limiter (piekschaving, fase-balans, dimmer)
+          - Netto grid-vermogen → NILM (apparaatdetectie werkt beter bij hogere frequentie)
+          - Grid/PV/batterij opgeslagen voor volgende coordinator-cyclus
+
+        Geen zware berekeningen: geen prijzen, geen BDE, geen boiler, geen besluiten.
+        """
+        if t is None:
+            return
+        try:
+            now = time.time()
+            mains_v     = float(self._config.get(CONF_MAINS_VOLTAGE, DEFAULT_MAINS_VOLTAGE_V))
+            phase_count = int(self._config.get(CONF_PHASE_COUNT, 1))
+            phases      = ["L1", "L2", "L3"] if phase_count == 3 else ["L1"]
+
+            # -- Fase-stromen en -vermogens direct naar limiter --
+            phase_map = {
+                "L1": (getattr(t, "power_l1_w", 0.0),      getattr(t, "power_l1_export_w", 0.0), getattr(t, "current_l1", None), getattr(t, "voltage_l1", None)),
+                "L2": (getattr(t, "power_l2_w", 0.0),      getattr(t, "power_l2_export_w", 0.0), getattr(t, "current_l2", None), getattr(t, "voltage_l2", None)),
+                "L3": (getattr(t, "power_l3_w", 0.0),      getattr(t, "power_l3_export_w", 0.0), getattr(t, "current_l3", None), getattr(t, "voltage_l3", None)),
+            }
+            for ph in phases:
+                p_imp, p_exp, cur_a, volt_v = phase_map[ph]
+                if not p_imp and not p_exp and cur_a is None:
+                    continue
+                net_p = float(p_imp or 0.0) - float(p_exp or 0.0)  # import - export = netto
+                v     = float(volt_v) if (volt_v and volt_v > 50) else mains_v
+                # Richting bepalen via nettovermogen (positief=import, negatief=export)
+                if cur_a is not None and abs(net_p) > 5:
+                    signed_a = abs(float(cur_a)) * (1.0 if net_p >= 0 else -1.0)
+                elif cur_a is not None:
+                    signed_a = float(cur_a)
+                elif abs(net_p) > 5 and v > 0:
+                    signed_a = net_p / v
+                else:
+                    continue  # geen bruikbare data voor deze fase
+                self._limiter.update_phase(
+                    phase       = ph,
+                    current_a   = round(signed_a, 3),
+                    power_w     = round(net_p, 1),
+                    voltage_v   = round(v, 1),
+                    derived_from= "p1_realtime",
+                )
+
+            # -- Sla actueel grid-vermogen op voor volgende cyclus --
+            net_grid_w = (t.power_import_w or 0.0) - (t.power_export_w or 0.0)
+            self._last_p1_realtime_grid_w = net_grid_w
+            self._last_p1_realtime_ts     = now
+
+            # v4.6.512: push realtime update naar HA zodat fase-sensoren direct updaten
+            # Gebruik async_set_extra_state_attributes via listeners ipv volledige refresh
+            for listener in list(self._listeners):
+                try:
+                    listener()
+                except Exception:
+                    pass
+
+            # -- NILM: stuur huis-verbruik door voor apparaatdetectie --
+            # v4.6.514: Bug-fix — NILM moet huis-verbruik ontvangen, niet netto grid.
+            # Bij zonne-overschot springt grid negatief, waardoor NILM onterecht
+            # apparaten "detecteert" of mist terwijl het PV-variatie is.
+            # Huis = grid_netto + solar. Solar is langzaam (10s polled), maar die
+            # fout is kleiner dan het weggooien van alle edge-informatie.
+            # "GRID" bestaat niet als sleutel in _power_buffers → stil genegeerd.
+            # Fix: gebruik L1 als enkelfase fallback, en huis-vermogen per fase.
+            if self._nilm and not self.learning_frozen:
+                try:
+                    _solar_now = getattr(self, "_last_solar_w", 0.0) or 0.0
+                    # Per-fase naar NILM als beschikbaar (3-fase installatie)
+                    _phases_sent = 0
+                    for ph in phases:
+                        p_imp, p_exp, _, _ = phase_map[ph]
+                        if p_imp is not None or p_exp is not None:
+                            ph_grid = (p_imp or 0.0) - (p_exp or 0.0)
+                            # Voeg evenredig solar toe (split over actieve fases)
+                            ph_solar = _solar_now / len(phases)
+                            ph_house = max(0.0, ph_grid + ph_solar)
+                            self._nilm.update_power(ph, ph_house, source="p1_realtime")
+                            _phases_sent += 1
+                    # Enkelfase fallback: gebruik totaal huis-vermogen op L1
+                    if _phases_sent == 0:
+                        house_w = max(0.0, net_grid_w + _solar_now)
+                        self._nilm.update_power("L1", house_w, source="p1_realtime_l1")
+                except Exception:
+                    pass
+
+            # -- Sla P1 data op zodat coordinator-cyclus hem kan gebruiken --
+            self._last_p1_update = now
+
+        except Exception as _rt_err:
+            _LOGGER.debug("P1 realtime verwerking fout: %s", _rt_err)
+
     async def _process_power_data(self, data: Dict) -> None:
         """Update per-phase readings; uses P=U*I fallback via PowerCalculator."""
         cfg      = self._config
@@ -8958,6 +9137,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         p1_data = getattr(self, "_last_p1_data", {}) if _p1_age < 90 else {}
         if _p1_age >= 90 and getattr(self, "_last_p1_data", {}):
             _LOGGER.debug("P1 data stale (%.0fs oud) — fase-fallback uitgeschakeld", _p1_age)
+        # v4.6.516: _last_p1_data slaat import op als "power_l1_import_w" (zie opbouw ~regel 3696)
+        # Dit is NIET hetzelfde als P1Telegram.as_dict() → de dict-keys zijn hier leidend.
         p1_phase_power  = {"L1": "power_l1_import_w", "L2": "power_l2_import_w", "L3": "power_l3_import_w"}
         p1_phase_export = {"L1": "power_l1_export_w",  "L2": "power_l2_export_w",  "L3": "power_l3_export_w"}
         p1_phase_current= {"L1": "current_l1",          "L2": "current_l2",          "L3": "current_l3"}
@@ -9030,16 +9211,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 ema_voltage =self._limiter.get_voltage_ema(ph),
             )
 
-            # FIX: pass current_a and voltage_v separately — don't let limiter recalculate
+            # Teken: current altijd positief uit sensor → teken = teken van power_w
             _resolved_a = resolved.get("current_a")
-            _LOGGER.debug(
-                "CloudEMS fase [%s]: resolved current_a=%s → update_phase met %.3fA",
-                ph, _resolved_a, _resolved_a or 0.0,
-            )
+            _resolved_p = resolved.get("power_w")
+            if _resolved_a is not None and _resolved_p is not None:
+                _resolved_a = abs(_resolved_a) * (1.0 if _resolved_p >= 0 else -1.0)
+                _resolved_a = round(_resolved_a, 3)
+
             self._limiter.update_phase(
                 phase       = ph,
-                current_a   = resolved.get("current_a") or 0.0,
-                power_w     = resolved.get("power_w")   or 0.0,
+                current_a   = _resolved_a or 0.0,
+                power_w     = _resolved_p  or 0.0,
                 voltage_v   = resolved.get("voltage_v") or mains_v,
                 derived_from= resolved.get("derived_from","direct"),
             )

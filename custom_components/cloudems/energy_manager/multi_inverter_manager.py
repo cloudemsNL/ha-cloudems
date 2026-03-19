@@ -59,7 +59,11 @@ PID_SAMPLE_TIME_S   = 8.0    # Elke 8 seconden nieuwe berekening
 
 # Herstel-hysteresis: omvormer wordt pas hersteld als stroom HYSTERESIS_A
 # onder het setpoint zit (voorkomt direct terug-oscilleren)
-RESTORE_HYSTERESIS_A = 2.0
+RESTORE_HYSTERESIS_A = 4.0   # v4.6.508: verhoogd van 2.0 → 4.0A (was te klein)
+
+# v4.6.508: minimum tijd (seconden) dat een omvormer gedimmed blijft voordat
+# herstel naar 100% mag plaatsvinden. Voorkomt PID-jacht / heen-en-weer oscilleren.
+MIN_DIM_DURATION_S = 60
 
 # Handmatige dim-override: na deze tijd hervat de automatische sturing
 # 30 minuten — genoeg om handmatig te testen, kort genoeg om nooit surplus te missen
@@ -151,6 +155,11 @@ class MultiInverterManager:
         # but can be toggled at runtime via the dashboard switch)
         self._dimmer_enabled: dict[str, bool] = {
             c.entity_id: getattr(c, "solar_dimmer", True) for c in inverter_controls
+        }
+        # v4.6.508: tijdstip van laatste dim-actie per omvormer —
+        # herstel naar 100% mag pas na MIN_DIM_DURATION_S
+        self._last_dim_ts: dict[str, float] = {
+            c.entity_id: 0.0 for c in inverter_controls
         }
         # Phase prober — aangemaakt in async_setup
         self._phase_prober: "PhaseProber | None" = None
@@ -278,9 +287,16 @@ class MultiInverterManager:
 
         # ── 3. Omvormers zonder fase-conflict → herstel naar 100% ─────────────
         controlled_ids = {d.inverter_id for d in decisions}
+        _now = __import__("time").time()
         for ctrl in self._controls:
             if ctrl.entity_id not in controlled_ids:
                 if self._current_pct[ctrl.entity_id] < 100.0:
+                    # v4.6.508: wacht minimaal MIN_DIM_DURATION_S na laatste dim
+                    # voordat we herstellen — voorkomt PID-jacht
+                    elapsed_since_dim = _now - self._last_dim_ts.get(ctrl.entity_id, 0.0)
+                    if elapsed_since_dim < MIN_DIM_DURATION_S:
+                        continue  # nog te vroeg — blijf gedimmed
+
                     # Controleer of de betrokken fase echt vrij is
                     profile = self._learner.get_profile(ctrl.entity_id)
                     phase = profile.detected_phase if (profile and profile.phase_certain) else None
@@ -369,6 +385,7 @@ class MultiInverterManager:
                 target = max(ctrl.min_power_pct, pid_output)
                 if abs(target - self._current_pct[ctrl.entity_id]) >= PID_DEADBAND_PCT:
                     await self._set_output(ctrl, target)
+                    self._last_dim_ts[ctrl.entity_id] = __import__("time").time()  # v4.6.508
                     decisions.append(DimDecision(
                         inverter_id=ctrl.entity_id,
                         label=ctrl.label or ctrl.entity_id,

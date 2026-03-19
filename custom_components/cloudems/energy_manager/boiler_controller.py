@@ -257,6 +257,9 @@ class BoilerState:
     stagger_ticks:       int   = 0
     control_mode:        str   = "switch"
     surplus_setpoint_c:  float = 75.0    # setpoint bij PV-surplus (setpoint_boost modus)
+    # v4.6.507: communicatiestoring detectie — telt opeenvolgende turn_on zonder respons
+    _no_response_count:  int   = 0       # hoe vaak turn_on gestuurd maar is_on bleef False
+    _no_response_backoff_until: float = 0.0  # wacht tot deze ts voor volgende poging
     # v4.6.13: hardware_max_c — absolute bovengrens voor alle setpoints die naar de
     # hardware gestuurd worden. Voorkomt dat CloudEMS bijv. 78°C stuurt terwijl de boiler
     # maar 60°C aankan. 0.0 = niet ingesteld (systeem gebruikt SAFETY_MAX_C - 2.0 = 78°C).
@@ -1370,6 +1373,16 @@ class BoilerController:
         # FIX 3: herstel geleerde tankvolumes na herstart
         _saved_ramp = await self._ramp_store.async_load() or {}
         for b in list(self._boilers) + [b for g in self._groups for b in g.boilers]:
+            # v4.6.507: altijd initialiseren voor hybrid — ook als er geen opgeslagen data is.
+            # Zonder dit blijft _cheap_ramp_setpoint_c=0 als PV-surplus de eerste trigger is,
+            # waardoor de ramp-check faalt en direct 75°C verstuurd wordt.
+            if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c <= 0:
+                _green_init = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                b._cheap_ramp_setpoint_c = _green_init
+                _LOGGER.info(
+                    "BoilerController [%s]: ramp geïnitialiseerd op %.0f°C (green_base)",
+                    b.label, _green_init,
+                )
             _ramp_data = _saved_ramp.get(b.entity_id, {})
             if _ramp_data:
                 _green_base = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
@@ -1488,7 +1501,28 @@ class BoilerController:
                 if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
                     _hw_max = b.hw_ceiling
                     _target = _hw_max if _max_charge else min(b.surplus_setpoint_c, _hw_max)
-                    b.active_setpoint_c = min(_target, b.hw_ceiling)
+                    if b.boiler_type == BOILER_TYPE_HYBRID:
+                        # v4.6.507: ook bij PV-surplus de ramp gebruiken voor hybrid.
+                        # Voorheen sprong active_setpoint_c direct naar surplus_setpoint_c (75°C).
+                        # Nu: gebruik _cheap_ramp_setpoint_c als tussenstap, zodat bij
+                        # communicatiestoring de boiler niet doorverwarmt naar 75°C.
+                        _green_base_s = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                        _rmax_s = min(b.cheap_ramp_max_c, b.surplus_setpoint_c, _hw_max)
+                        if b._cheap_ramp_setpoint_c < _green_base_s:
+                            b._cheap_ramp_setpoint_c = _green_base_s
+                        # Ramp omhoog bij voldoende AAN-tijd (surplus = snel rampen: 15 min)
+                        _ramp_on_s = getattr(b, "_ramp_on_min_acc", 0.0)
+                        _ramp_step_min = min(self._ramp_min_on_per_step, 15.0)  # surplus: sneller
+                        if _ramp_on_s >= _ramp_step_min:
+                            b._cheap_ramp_setpoint_c = min(b._cheap_ramp_setpoint_c + b.cheap_ramp_step_c, _rmax_s)
+                            b._ramp_on_min_acc = 0.0
+                            _LOGGER.debug(
+                                "BoilerController [%s]: surplus ramp stap → %.0f°C",
+                                b.label, b._cheap_ramp_setpoint_c,
+                            )
+                        b.active_setpoint_c = min(b._cheap_ramp_setpoint_c, _hw_max)
+                    else:
+                        b.active_setpoint_c = min(_target, _hw_max)
                 else:
                     _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
                     b.active_setpoint_c = min(_target, b.hw_ceiling)
@@ -1550,7 +1584,19 @@ class BoilerController:
                         if b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
                             _hw_max = b.hw_ceiling
                             _target = _hw_max if _max_charge else min(b.surplus_setpoint_c, _hw_max)
-                            b.active_setpoint_c = min(_target, b.hw_ceiling)
+                            if b.boiler_type == BOILER_TYPE_HYBRID:
+                                # v4.6.507: ramp ook voor groep-hybrid bij PV-surplus
+                                _green_base_sg = b.max_setpoint_green_c if b.max_setpoint_green_c > 0 else b.setpoint_c
+                                _rmax_sg = min(b.cheap_ramp_max_c, b.surplus_setpoint_c, _hw_max)
+                                if b._cheap_ramp_setpoint_c < _green_base_sg:
+                                    b._cheap_ramp_setpoint_c = _green_base_sg
+                                _ramp_on_sg = getattr(b, "_ramp_on_min_acc", 0.0)
+                                if _ramp_on_sg >= min(self._ramp_min_on_per_step, 15.0):
+                                    b._cheap_ramp_setpoint_c = min(b._cheap_ramp_setpoint_c + b.cheap_ramp_step_c, _rmax_sg)
+                                    b._ramp_on_min_acc = 0.0
+                                b.active_setpoint_c = min(b._cheap_ramp_setpoint_c, _hw_max)
+                            else:
+                                b.active_setpoint_c = min(_target, _hw_max)
                         else:
                             _target = b.surplus_setpoint_c if not _max_charge else b.hw_ceiling
                             b.active_setpoint_c = min(_target, b.hw_ceiling)
@@ -2166,7 +2212,12 @@ class BoilerController:
 
         action = self._apply_timers(b, want_on, is_on, now, reason)
         if action == "turn_on":
-            await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+            # v4.6.507: back-off bij herhaalde no-response
+            if self._check_turn_on_no_response(b, is_on):
+                await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+            else:
+                action = "hold_off"
+                reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
         if action == "turn_off":
             await self._switch_smart(b.entity_id, False, b, solar_surplus_w); b.last_off_ts = now
         return BoilerDecision(entity_id=b.entity_id, label=b.label,
@@ -2279,7 +2330,12 @@ class BoilerController:
                     reason = f"seq{suffix}: {b.temp_deficit_c:.1f}°C onder setpoint"
                 action = self._apply_timers(b, True, is_on, now, reason)
                 if action == "turn_on":
-                    await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                    # v4.6.507: back-off bij herhaalde no-response
+                    if self._check_turn_on_no_response(b, is_on):
+                        await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                    else:
+                        action = "hold_off"
+                        reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
                 decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, 100.0))
                 active = b
             else:
@@ -2319,7 +2375,12 @@ class BoilerController:
             reason = f"parallel: {pct:.0f}% (tekort {b.temp_deficit_c:.1f}°C)"
             action = self._apply_timers(b, True, is_on, now, reason)
             if action == "turn_on":
-                await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                # v4.6.507: back-off bij herhaalde no-response
+                if self._check_turn_on_no_response(b, is_on):
+                    await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                else:
+                    action = "hold_off"
+                    reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
             decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, pct))
         return decisions
 
@@ -2343,7 +2404,12 @@ class BoilerController:
             reason = f"prio={b.priority}, tekort {b.temp_deficit_c:.1f}°C"
             action = self._apply_timers(b, True, is_on, now, reason)
             if action == "turn_on":
-                await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                # v4.6.507: back-off bij herhaalde no-response
+                if self._check_turn_on_no_response(b, is_on):
+                    await self._switch_smart(b.entity_id, True, b, solar_surplus_w); b.last_on_ts = now
+                else:
+                    action = "hold_off"
+                    reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
             decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, 100.0))
         await self._async_save_power()
         await self._async_save_ramp()
@@ -2828,6 +2894,50 @@ class BoilerController:
         return s.state == "on"
 
     # ── Schakelaar / dimmer ───────────────────────────────────────────────────
+
+
+    def _check_turn_on_no_response(self, b: "BoilerState", is_on: bool) -> bool:
+        """v4.6.507: Detecteer communicatiestoring — back-off als turn_on herhaaldelijk
+        geen effect heeft (is_on blijft False terwijl we AAN proberen te zetten).
+
+        Returns True als we mogen proberen aan te zetten, False als we in back-off zitten.
+        Back-off schema: na 3 pogingen → 2 min wachten, na 6 → 5 min, na 10 → 15 min.
+        """
+        now = time.time()
+        if b._no_response_backoff_until > now:
+            return False  # nog in back-off
+        if is_on:
+            # Boiler is AAN → reset teller
+            b._no_response_count = 0
+            return True
+        # Boiler is UIT terwijl we al eerder turn_on stuurden
+        if b.last_on_ts > 0 and (now - b.last_on_ts) < 120:
+            # Binnen 2 minuten na turn_on: tel als geen respons
+            b._no_response_count += 1
+        else:
+            b._no_response_count = 0
+            return True
+        # Back-off drempels
+        if b._no_response_count >= 10:
+            b._no_response_backoff_until = now + 900  # 15 min
+            _LOGGER.warning(
+                "BoilerController [%s]: 10x turn_on zonder respons — 15 min pauze "
+                "(communicatiestoring?)", b.label,
+            )
+            return False
+        elif b._no_response_count >= 6:
+            b._no_response_backoff_until = now + 300  # 5 min
+            _LOGGER.warning(
+                "BoilerController [%s]: 6x turn_on zonder respons — 5 min pauze", b.label,
+            )
+            return False
+        elif b._no_response_count >= 3:
+            b._no_response_backoff_until = now + 120  # 2 min
+            _LOGGER.info(
+                "BoilerController [%s]: 3x turn_on zonder respons — 2 min pauze", b.label,
+            )
+            return False
+        return True
 
     async def _switch_smart(self, entity_id: str, on: bool,
                              boiler: Optional[BoilerState] = None,

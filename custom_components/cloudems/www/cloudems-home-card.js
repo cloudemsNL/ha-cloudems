@@ -331,11 +331,15 @@ ${t==='history'?this._tabHistory():''}
     const nextH=`${String((now.getHours()+1)%24).padStart(2,'0')}:00`;
     // Phases
     // v1.5.0: signed current (negatief = export) — valt terug op unsigned met sign van power
+    // phases komt uit sensor.cloudems_status.attributes.phases — direct uit de limiter.
+    // current_a is al gesigneerd: positief=import, negatief=export.
+    const _phases=this._a('sensor.cloudems_status','phases')||{};
     const _signedA=(ph)=>{
-      const signed=this._v(`sensor.cloudems_signed_current_${ph.toLowerCase()}`);
-      if(signed!==0||this._s(`sensor.cloudems_signed_current_${ph.toLowerCase()}`)?.state==='0')return signed;
-      const raw=this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_current`)||this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0;
-      const pw=this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)||this._v(`sensor.cloudems_power_${ph.toLowerCase()}`)||0;
+      const pd=_phases[ph];
+      if(pd&&pd.current_a!=null) return pd.current_a;
+      // Fallback: ruwe stroom * teken van vermogen
+      const raw=Math.abs(this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0);
+      const pw=pd?.power_w??this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)??0;
       return raw*(pw<0?-1:1);
     };
     // v1.8.1: sanity clamp — waarden >100A zijn opstartartefacten
@@ -348,7 +352,7 @@ ${t==='history'?this._tabHistory():''}
     const l2w=this._v('sensor.cloudems_import_power_l2')||this._v('sensor.cloudems_power_l2');
     const l3w=this._v('sensor.cloudems_import_power_l3')||this._v('sensor.cloudems_power_l3');
     const maxA=this._config.max_ampere||25;
-    const imbalance=Math.max(l1a,l2a,l3a)-Math.min(l1a,l2a,l3a);
+    const imbalance=Math.max(Math.abs(l1a),Math.abs(l2a),Math.abs(l3a))-Math.min(Math.abs(l1a),Math.abs(l2a),Math.abs(l3a)); // v4.6.511: abs
     const phColor=(a,w)=>a<0||w<0?'#34d399':Math.abs(a)>maxA?'#ef4444':'#f87171';
     const phDir=(w,a)=>a<0||w<0?'↑ export':w>10?'↓ import':'≈ balans';
     const phDirC=(w,a)=>a<0||w<0?'#34d399':w>10?'#f87171':'rgba(255,255,255,0.4)';
@@ -446,7 +450,8 @@ ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<
     </div>`;
   }).join('')}
   ${(()=>{
-    const vals=[l1a,l2a,l3a]; const mx=Math.max(...vals); const mn=Math.min(...vals); const diff=mx-mn;
+    // v4.6.511: onbalans op absolute waarden — richting (import/export) telt niet mee
+    const vals=[Math.abs(l1a),Math.abs(l2a),Math.abs(l3a)]; const mx=Math.max(...vals); const mn=Math.min(...vals); const diff=mx-mn;
     const bc=diff>5?'#ef4444':diff>3?'#f97316':'#34d399';
     const bpct=Math.min(100,Math.round(diff/maxA*100));
     return`<div class="pk-row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);padding-top:4px">

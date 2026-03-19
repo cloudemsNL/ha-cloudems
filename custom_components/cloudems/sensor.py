@@ -1464,29 +1464,31 @@ class CloudEMSPhaseSignedCurrentSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        pd = (self.coordinator.data or {}).get("phases", {}).get(self._phase, {})
-        power_w  = pd.get("power_w")
-        voltage_v = pd.get("voltage_v")
+        # v4.6.512: lees direct uit de limiter voor realtime waarden
+        # (coordinator.data["phases"] wordt maar elke 10s bijgewerkt)
+        limiter = getattr(self.coordinator, "_limiter", None)
+        if limiter:
+            pd = limiter.get_phase_summary().get(self._phase, {})
+        else:
+            pd = (self.coordinator.data or {}).get("phases", {}).get(self._phase, {})
+
         current_a = pd.get("current_a")
+        power_w   = pd.get("power_w")
 
-        if power_w is None:
+        if current_a is None:
             return None
 
-        # Sanity: vermogen >25kW per fase = opstartartefact
-        if abs(power_w) > 25000:
+        # Sanity: >100A is opstartartefact
+        if abs(current_a) > 100:
             return None
 
-        # Methode 1: P / V — alleen bij plausibele spanning (195–265V)
-        if voltage_v and 195 <= voltage_v <= 265:
-            result = round(power_w / voltage_v, 2)
-            return result if abs(result) <= 100 else None
-
-        # Methode 2: |I| * sign(P)
-        if current_a is not None and abs(current_a) <= 100:
+        # current_a is al gesigneerd door coordinator (import=+, export=-)
+        # Alleen als power_w beschikbaar is als extra richtingscheck
+        if power_w is not None and abs(power_w) > 5:
             sign = -1 if power_w < 0 else 1
-            return round(current_a * sign, 2)
+            return round(abs(current_a) * sign, 2)
 
-        return None
+        return round(current_a, 2)
 
     @property
     def extra_state_attributes(self):
@@ -7165,6 +7167,9 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
             "watchdog_failures":      wd.get("total_failures", 0),
         }
         shutters = (self.coordinator.data or {}).get("shutters", {})
+        # v4.6.520: fase-data uit de limiter exposeren zodat home-card piekschaving correct werkt
+        limiter = getattr(self.coordinator, "_limiter", None)
+        phases = limiter.get_phase_summary() if limiter else {}
         # v4.6.256: expose inverter_data zodat solar card fallback werkt bij opstarten
         inverter_data = (self.coordinator.data or {}).get("inverter_data", [])
         # v4.6.432: generator status meegeven aan flow card
@@ -7172,7 +7177,7 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         # v4.6.449: circuit monitor
         circuit_monitor = (self.coordinator.data or {}).get("circuit_monitor", {})
         ups = (self.coordinator.data or {}).get("ups", {})
-        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups}
+        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

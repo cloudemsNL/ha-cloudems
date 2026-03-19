@@ -120,16 +120,42 @@ class SolarDimmer:
         }
 
     async def async_evaluate(self, current_price: float | None) -> None:
-        """Evaluate current price and dim/restore accordingly."""
+        """Evaluate current price and dim/restore accordingly.
+
+        v4.6.507: de drempel wordt gecorrigeerd voor saldering.
+        Bij 36% saldering (NL 2026) is de werkelijke export-opbrengst:
+          effective_export = current_price × net_metering_pct
+        De dimmer activeert pas als effective_export <= threshold,
+        zodat hij niet te vroeg ingrijpt terwijl export nog waarde heeft.
+        Bij 0% saldering (2027+, DE, BE) is effective_export = current_price (geen correctie).
+        """
         if current_price is None:
             return
 
-        should_dim = current_price <= self._threshold
+        # Haal actueel salderingspercentage op via coordinator
+        _nm_pct = 0.0
+        try:
+            from ..const import get_net_metering_pct, CONF_ENERGY_PRICES_COUNTRY
+            _country = self.config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+            _nm_pct  = get_net_metering_pct(_country)
+        except Exception:
+            pass
+
+        # Effectieve export-waarde: bij saldering is een lage prijs minder erg
+        # want je ontvangt ook teruglevering-credit. Dus: pas drempel aan.
+        # Bij nm=0.36: prijs van -5ct voelt als -5 + 0.36×all_in_price ≈ effectief hoger
+        # Vereenvoudigd: drempel verschuift met -nm_pct × all_in_estimate
+        # Schatting all_in: current_price + 0.12 (energie belasting + BTW)
+        _tax_estimate = 0.12  # conservatieve schatting belasting + BTW (€/kWh)
+        _effective_price = current_price + _nm_pct * _tax_estimate
+
+        should_dim = _effective_price <= self._threshold
 
         if should_dim and not self.is_active:
             _LOGGER.info(
-                "⚡ Negative price detected (%.4f €/kWh ≤ %.4f) — dimming solar/EV",
-                current_price, self._threshold,
+                "⚡ Prijs te laag (%.4f€ effectief, %.4f€ nominaal, saldering %.0f%%) "
+                "≤ %.4f — dimmen",
+                _effective_price, current_price, _nm_pct * 100, self._threshold,
             )
             await self._dim()
             self.is_active = True
@@ -137,8 +163,8 @@ class SolarDimmer:
 
         elif not should_dim and self.is_active:
             _LOGGER.info(
-                "✅ Price normalised (%.4f €/kWh) — restoring solar/EV",
-                current_price,
+                "✅ Prijs genormaliseerd (%.4f€ effectief) — herstellen",
+                _effective_price,
             )
             await self._restore()
             self.is_active = False

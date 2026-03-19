@@ -104,6 +104,10 @@ class DecisionContext:
     # Gebruikt om te bepalen of accu genoeg heeft voor rest van de dag
     expected_remaining_kwh:   float           = 0.0   # device + systeem vraag rest dag
     system_demand_kwh:        float           = 0.0   # boiler + zones + EV (doel-gebaseerd)
+    # v4.6.507: salderingspercentage — bepaalt werkelijke waarde van export vs. self-consumption
+    # NL 2026: 0.36, NL 2027+: 0.00, DE/BE/FR: 0.00
+    # Beïnvloedt laad/ontlaad drempels: bij 0% saldering is zelf-consumptie veel waardevoller
+    net_metering_pct:         float           = 0.0   # 0.0–1.0
 
 
 # ── Engine ────────────────────────────────────────────────────────────────────
@@ -323,7 +327,7 @@ class BatteryDecisionEngine:
         if price is None:
             return None
 
-        # v4.6.498: pas geleerde bias toe op drempels
+        # v4.6.507: pas geleerde bias toe op drempels
         _bucket = ""
         try:
             from .decision_outcome_learner import build_context_bucket
@@ -339,7 +343,24 @@ class BatteryDecisionEngine:
         _cheap_thresh     = self._biased_threshold(PRICE_CHEAP_EUR,     "battery", _bucket, "charge")
         _expensive_thresh = self._biased_threshold(PRICE_EXPENSIVE_EUR, "battery", _bucket, "discharge")
 
-        if price <= _cheap_thresh and headroom_kwh >= MIN_USEFUL_CAPACITY_KWH:
+        # v4.6.507: saldering corrigeert de werkelijke waarde van export.
+        # Bij 36% saldering is export 36% van importprijs waard — ontladen is minder aantrekkelijk.
+        # Bij 0% saldering (2027 NL, en alle andere landen) is zelf-consumeren maximaal waardevol
+        # → ontlaaddrempel omlaag (eerder ontladen), laaddrempel iets omhoog.
+        #
+        # Effectieve exportwaarde:  price × net_metering_pct
+        # Waarde zelf-consumptie:   all_in_price (≈ price + tax + markup)
+        # Spread = zelf-consumptie minus export → groter bij lager saldering → eerder laden
+        _nm = max(0.0, min(1.0, ctx.net_metering_pct))
+        # Ontlaaddrempel: bij 100% saldering is export evenveel waard als import → minder
+        # nuttig om te ontladen. Bij 0% saldering: directe besparing = maximaal.
+        # Correctie: drempel × (1 - nm * 0.4) — max 40% lager bij volledige saldering
+        _discharge_thresh = _expensive_thresh * (1.0 - _nm * 0.4)
+        # Laaddrempel: bij 0% saldering wil je vroeger laden (geen export-fallback)
+        # Correctie: drempel iets hoger bij 0% saldering (agressiever laden)
+        _charge_thresh = _cheap_thresh * (1.0 + (1.0 - _nm) * 0.15)
+
+        if price <= _charge_thresh and headroom_kwh >= MIN_USEFUL_CAPACITY_KWH:
             if ctx.pv_forecast_tomorrow_kwh > ctx.battery_capacity_kwh * 0.7:
                 if soc is not None and soc > 50:
                     return BatteryDecision(
@@ -352,16 +373,16 @@ class BatteryDecisionEngine:
             ceil = self._charge_ceiling(ctx.soh_pct)
             return BatteryDecision(
                 action="charge",
-                reason=f"EPEX goedkoop €{price:.3f}/kWh ≤ {_cheap_thresh:.2f} (geleerd) — laden",
+                reason=f"EPEX goedkoop €{price:.3f}/kWh ≤ {_charge_thresh:.2f} (saldering {_nm:.0%}) — laden",
                 priority=3, confidence=0.75, source="epex_cheap",
                 soc_pct=soc, target_soc_pct=ceil,
                 tariff_group=tg, epex_eur=price,
             )
 
-        if price >= _expensive_thresh and available_kwh >= MIN_USEFUL_CAPACITY_KWH:
+        if price >= _discharge_thresh and available_kwh >= MIN_USEFUL_CAPACITY_KWH:
             return BatteryDecision(
                 action="discharge",
-                reason=f"EPEX duur €{{price:.3f}}/kWh ≥ {{_expensive_thresh:.2f}} (geleerd) — ontladen",
+                reason=f"EPEX duur €{price:.3f}/kWh ≥ {_discharge_thresh:.2f} (saldering {_nm:.0%}) — ontladen",
                 priority=3, confidence=0.70, source="epex_expensive",
                 soc_pct=soc, target_soc_pct=MIN_SOC_DISCHARGE + 5,
                 tariff_group=tg, epex_eur=price,
@@ -445,6 +466,7 @@ class BatteryDecisionEngine:
             *([ f"⚡ Verwacht verbruik: {_td:.1f} kWh (devices {ctx.expected_remaining_kwh:.1f} + systemen {ctx.system_demand_kwh:.1f}) — {'tekort {:.1f} kWh'.format(_gap) if _gap > 0.2 else 'voldoende ✅'}" ] if _td > 0.05 else []),
             f"Tariefgroep: {tg.upper()}",
             f"EPEX nu: €{price:.3f}/kWh {'🟢' if price is not None and price <= PRICE_CHEAP_EUR else ('🔴' if price is not None and price >= PRICE_EXPENSIVE_EUR else '🟡')}" if price is not None else "EPEX: onbekend",
+            f"Saldering: {ctx.net_metering_pct:.0%} → laadrempel €{(PRICE_CHEAP_EUR * (1.0 + (1.0 - ctx.net_metering_pct) * 0.15)):.3f}, ontlaadrempel €{(PRICE_EXPENSIVE_EUR * (1.0 - ctx.net_metering_pct * 0.4)):.3f}",
             f"PV surplus: {ctx.pv_surplus_w:.0f}W",
             f"PV morgen: {ctx.pv_forecast_tomorrow_kwh:.1f} kWh",
             f"Concurrent load: {ctx.concurrent_load_w:.0f}W",

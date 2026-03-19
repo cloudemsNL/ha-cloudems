@@ -656,6 +656,12 @@ class MQTTP1Reader:
                 t = parse_telegram(payload)
                 if t.crc_valid:
                     self._latest = t
+                    # v4.6.512: parent callback voor realtime updates
+                    if getattr(self, '_on_telegram_callback', None):
+                        try:
+                            self._on_telegram_callback(t)
+                        except Exception:
+                            pass
                 else:
                     _LOGGER.debug("P1 MQTT: CRC ongeldig, telegram genegeerd")
             except Exception as ex:
@@ -692,9 +698,17 @@ class P1Reader:
         self._task:   Optional[asyncio.Task] = None
         self._spike_count = 0
 
+        # v4.6.512: callback die aangeroepen wordt bij elk nieuw geldig telegram
+        # Hiermee kan de coordinator direct updaten i.p.v. wachten op 10s poll
+        self._on_telegram_callback = None
+
         # Sub-readers
         self._mqtt_reader:     Optional[MQTTP1Reader] = None
         self._fallback_reader: Optional[HAEntityFallbackReader] = None
+
+    def set_telegram_callback(self, callback) -> None:
+        """Registreer een callback voor elk nieuw geldig telegram (realtime updates)."""
+        self._on_telegram_callback = callback
 
     @property
     def latest(self) -> Optional[P1Telegram]:
@@ -761,6 +775,9 @@ class P1Reader:
         # MQTT reader starten (parallel aan TCP/serial)
         if self._mqtt_topic and self._hass:
             self._mqtt_reader = MQTTP1Reader(self._hass, self._mqtt_topic)
+            # v4.6.512: geef callback door aan MQTT sub-reader
+            if self._on_telegram_callback:
+                self._mqtt_reader._on_telegram_callback = self._on_telegram_callback
             await self._mqtt_reader.async_start()
 
         # HA entity fallback altijd beschikbaar als hass meegegeven
@@ -801,6 +818,12 @@ class P1Reader:
                             parsed = parse_telegram(buffer)
                             if self._accept_telegram(parsed):
                                 self._latest = parsed
+                                # v4.6.512: trigger coordinator direct (realtime)
+                                if self._on_telegram_callback:
+                                    try:
+                                        self._on_telegram_callback(parsed)
+                                    except Exception:
+                                        pass
                         except Exception as ex:
                             _LOGGER.debug("P1Reader TCP parse fout: %s", ex)
                         buffer = ""
@@ -842,6 +865,12 @@ class P1Reader:
                                 break
                             if self._accept_telegram(parsed):
                                 self._latest = parsed
+                                # v4.6.512: trigger coordinator direct (realtime)
+                                if self._on_telegram_callback:
+                                    try:
+                                        self._on_telegram_callback(parsed)
+                                    except Exception:
+                                        pass
                         except Exception as ex:
                             _LOGGER.debug("P1Reader serieel parse fout: %s", ex)
                         buffer = ""
