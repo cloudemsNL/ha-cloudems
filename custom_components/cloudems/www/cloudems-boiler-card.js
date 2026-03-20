@@ -73,12 +73,30 @@ const S = `
   .donut-row-item:last-child{border:none;}
   .donut-key{color:#666;} .donut-v{color:#e0e0e0;font-weight:600;font-family:'JetBrains Mono',monospace;}
   .vtherm-ctrl{margin:6px 20px;padding:10px 14px;background:rgba(255,255,255,.04);border-radius:10px;border:1px solid rgba(255,255,255,.08);}
-  .action-row{display:flex;gap:8px;padding:10px 20px;border-top:1px solid rgba(255,255,255,0.05);}
-  .action-btn{flex:1;padding:8px 4px;border-radius:10px;font-family:'Syne',sans-serif;font-size:11px;font-weight:700;cursor:pointer;border:1px solid;transition:opacity .15s;text-align:center;}
-  .action-btn:active{opacity:.6;}
-  .btn-send{background:rgba(0,200,100,0.10);border-color:rgba(0,200,100,0.3);color:#00c878;}
-  .btn-pause{background:rgba(255,160,0,0.10);border-color:rgba(255,160,0,0.25);color:#ffa000;}
-  .btn-resume{background:rgba(100,180,255,0.10);border-color:rgba(100,180,255,0.25);color:#64b4ff;}
+  .action-section{padding:12px 16px 14px;border-top:1px solid rgba(255,255,255,0.07);}
+  .action-section-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.25);margin-bottom:10px;padding-left:2px;}
+  .action-row{display:flex;gap:8px;}
+  .action-btn{
+    flex:1;padding:11px 6px 9px;border-radius:11px;
+    font-family:'Syne',sans-serif;font-size:12px;font-weight:700;
+    cursor:pointer;border:1px solid;transition:all .15s;text-align:center;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+  }
+  .action-btn .btn-icon{font-size:16px;line-height:1;}
+  .action-btn .btn-lbl{font-size:10px;font-weight:600;letter-spacing:.03em;}
+  .action-btn .btn-sub{font-size:9px;font-weight:400;opacity:.7;letter-spacing:.02em;}
+  .action-btn:hover{filter:brightness(1.15);transform:translateY(-1px);}
+  .action-btn:active{opacity:.7;transform:translateY(0);}
+  .action-btn:disabled{opacity:.3;cursor:default;transform:none;filter:none;}
+  .btn-send{background:rgba(0,200,100,0.15);border-color:rgba(0,200,100,0.45);color:#00c878;}
+  .btn-send:hover{background:rgba(0,200,100,0.25);border-color:#00c878;}
+  .btn-green{background:rgba(52,211,153,0.15);border-color:rgba(52,211,153,0.45);color:#34d399;}
+  .btn-green:hover{background:rgba(52,211,153,0.25);border-color:#34d399;}
+  .btn-pause{background:rgba(255,160,0,0.12);border-color:rgba(255,160,0,0.38);color:#ffa000;}
+  .btn-pause:hover{background:rgba(255,160,0,0.22);border-color:#ffa000;}
+  .btn-resume{background:rgba(100,180,255,0.15);border-color:rgba(100,180,255,0.40);color:#64b4ff;}
+  .btn-resume:hover{background:rgba(100,180,255,0.25);border-color:#64b4ff;}
+  .pause-group{display:flex;gap:6px;flex:2;}
   .footer-chips{padding:10px 20px;border-top:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .chip{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px;letter-spacing:.04em;}
   .chip-boost{background:rgba(255,100,40,0.12);border:1px solid rgba(255,100,40,0.3);color:#ff6428;}
@@ -347,20 +365,55 @@ class CloudemsBoilerCard extends HTMLElement {
         <div class="stats-col">
           <div><div class="temp-label">Huidige temperatuur</div>
             <div class="temp-big"><span class="temp-val" id="tv">${tempC!=null?tempC.toFixed(1):'—'}</span>${tempC!=null?'<span class="temp-unit">°C</span>':''}</div></div>
-          <div class="sp-row"><span>🎯</span><div style="flex:1">
+          ${(()=>{const _TTB=window.CloudEMSTooltip;
+            const _ttSp=_TTB?_TTB.html('bl-sp','Setpoint',[
+              {label:'Huidig',     value:setpoint.toFixed(0)+'°C'},
+              {label:'Max (hw)',   value:maxSp?maxSp.toFixed(0)+'°C':'—'},
+              {label:'Modus',      value:b.actual_mode||b.control_mode||'—'},
+              {label:'Ramp',       value:b.ramp_setpoint_c?b.ramp_setpoint_c.toFixed(0)+'°C':'—',dim:true},
+            ],{footer:'Setpoint aangepast door PV-surplus, prijs en modus'}):{wrap:'',tip:''};
+            const _ttPow=_TTB?_TTB.html('bl-pow','Vermogen',[
+              {label:'Vermogen nu', value:powerW.toFixed(0)+' W'},
+              {label:'Nominaal',    value:b.power_w?b.power_w.toFixed(0)+' W':'—'},
+              {label:'Is aan',      value:b.is_on?'✅ Ja':'❌ Nee'},
+            ],{trusted:!!b.energy_sensor}):{wrap:'',tip:''};
+            return`
+          <div class="sp-row" style="position:relative;cursor:default" ${_ttSp.wrap}><span>🎯</span><div style="flex:1">
             <div style="display:flex;justify-content:space-between"><span class="sp-text">Setpoint</span><span class="sp-val">${setpoint.toFixed(0)}°C</span></div>
-            <div class="sp-bar-wrap"><div class="sp-bar" style="width:${spPct*100}%;background:${spColor}"></div></div></div></div>
-          <div class="sp-row" style="border-color:rgba(255,180,0,.2)"><span>⚡</span><div style="flex:1">
+            <div class="sp-bar-wrap"><div class="sp-bar" style="width:${spPct*100}%;background:${spColor}"></div></div></div>${_ttSp.tip}</div>
+          <div class="sp-row" style="border-color:rgba(255,180,0,.2);position:relative;cursor:default" ${_ttPow.wrap}><span>⚡</span><div style="flex:1">
             <div style="display:flex;justify-content:space-between"><span class="sp-text">Vermogen</span><span class="sp-val" style="color:${powerW>50?'#ffd600':'rgba(255,255,255,.4)'}">${powerW.toFixed(0)} W</span></div>
-            <div class="sp-bar-wrap"><div class="sp-bar" style="width:${powerW>50?clamp(powerW/(b.power_w||1500)*100,2,100):0}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div></div></div></div>
+            <div class="sp-bar-wrap"><div class="sp-bar" style="width:${powerW>50?clamp(powerW/(b.power_w||1500)*100,2,100):0}%;background:linear-gradient(90deg,#ff8040,#ffd600)"></div></div></div>${_ttPow.tip}</div>`;
+          })()}
         </div>
       </div>
       ${wbHtml}
       ${vtHtml}
       <div class="metrics">
-        <div class="metric"><span class="metric-icon">🚿</span><span class="metric-val accent" id="sv">${showers}</span><span class="metric-label">Douches</span></div>
-        <div class="metric"><span class="metric-icon">💧</span><span class="metric-val blue" id="lv">${usableL}</span><span class="metric-label">Liter @ ${showerT}°C</span></div>
-        <div class="metric"><span class="metric-icon">${cop?'🌡️':'⏱️'}</span><span class="metric-val green">${cop?cop.toFixed(1):(tempC!=null?clamp(Math.round((tempC-coldT)/(setpoint-coldT)*100),0,100):'—')}</span><span class="metric-label">${cop?'COP':'Geladen %'}</span></div>
+        ${(()=>{const _TTB=window.CloudEMSTooltip;
+          const _ttShw=_TTB?_TTB.html('bl-shw','Beschikbare douches',[
+            {label:'Berekend',  value:showers+' douches'},
+            {label:'Tankinhoud',value:tankL+' L ('+( cfg.tank_liters>0?'config':b.tank_liters_learned?'geleerd':'standaard')+')'},
+            {label:'Per douche',value:(durMin*flowLpm).toFixed(0)+' L ('+durMin+'min × '+flowLpm+' L/min)'},
+            {label:'Douchetem.',value:showerT+'°C'},
+            {label:'Koud water',value:coldT+'°C'},
+          ],{footer:'Berekend op basis van beschikbaar warm water boven douchetemperatuur'}):{wrap:'',tip:''};
+          const _ttLit=_TTB?_TTB.html('bl-lit','Beschikbare liters',[
+            {label:'Liters',    value:usableL+' L @ '+showerT+'°C'},
+            {label:'Tanktemp.', value:tempC!=null?tempC.toFixed(1)+'°C':'—'},
+            {label:'Setpoint',  value:setpoint.toFixed(0)+'°C'},
+            {label:'Formule',   value:'Tank × (T−T_douche) / (T_setpoint−T_koud)',dim:true},
+          ]):{wrap:'',tip:''};
+          const _ttCop=_TTB?_TTB.html('bl-cop',cop?'COP nu':'Geladen %',[
+            cop?{label:'COP',value:cop.toFixed(2)}:{label:'Geladen %',value:tempC!=null?clamp(Math.round((tempC-coldT)/(setpoint-coldT)*100),0,100)+'%':'—'},
+            {label:'Tanktemp.',value:tempC!=null?tempC.toFixed(1)+'°C':'—'},
+            {label:'Setpoint', value:setpoint.toFixed(0)+'°C'},
+            {label:'Uitleg',   value:cop?'Warmte output / elektrisch vermogen':'(T_huidig−T_koud) / (T_setpoint−T_koud)',dim:true},
+          ]):{wrap:'',tip:''};
+          return`
+        <div class="metric" style="position:relative;cursor:default" ${_ttShw.wrap}><span class="metric-icon">🚿</span><span class="metric-val accent" id="sv">${showers}</span><span class="metric-label">Douches</span>${_ttShw.tip}</div>
+        <div class="metric" style="position:relative;cursor:default" ${_ttLit.wrap}><span class="metric-icon">💧</span><span class="metric-val blue" id="lv">${usableL}</span><span class="metric-label">Liter @ ${showerT}°C</span>${_ttLit.tip}</div>
+        <div class="metric" style="position:relative;cursor:default" ${_ttCop.wrap}><span class="metric-icon">${cop?'🌡️':'⏱️'}</span><span class="metric-val green">${cop?cop.toFixed(1):(tempC!=null?clamp(Math.round((tempC-coldT)/(setpoint-coldT)*100),0,100):'—')}</span><span class="metric-label">${cop?'COP':'Geladen %'}</span>${_ttCop.tip}</div>`; })()}
       </div>
       <div class="graphs">
         <div class="dual-graph">
@@ -606,6 +659,63 @@ class CloudemsBoilerCard extends HTMLElement {
     </div>`;
   }
 
+  _renderThermischTab(b, groups){
+    // Thermisch verlies, seizoen, gebruikspatroon per uur
+    const grp = groups?.find(g=>g.boilers?.some(gb=>gb.entity_id===b.entity_id));
+    const gb  = grp?.boilers?.find(gb=>gb.entity_id===b.entity_id)||{};
+    const ls  = grp?.learn_status||{};
+
+    // ── Thermisch verlies ──────────────────────────────────────────────
+    const minCold   = gb.minutes_to_cold;
+    const reheatMin = gb.reheat_eta_min;
+    const heatRate  = gb.heat_rate_c_h||0;
+    const lossRate  = gb.thermal_loss_c_h||0;
+
+    const fmtMin = m => m==null?'—': m<120?(Math.round(m)+' min'):((m/60).toFixed(1)+' u');
+
+    const thermHtml = (minCold!=null||reheatMin!=null||heatRate>0) ? `
+      <div class="learn-title">🌡️ Thermisch verlies & voorspelling</div>
+      <div class="kv-grid">
+        <span class="kv-key">Verliessnelheid</span><span class="kv-val warn">${lossRate.toFixed(1)} °C/u</span>
+        <span class="kv-key">Warm water koud over</span><span class="kv-val">${fmtMin(minCold)}</span>
+        <span class="kv-key">Reheat ETA</span><span class="kv-val">${fmtMin(reheatMin)}</span>
+        <span class="kv-key">Opwarmsnelheid</span><span class="kv-val good">${heatRate>0?heatRate.toFixed(1)+' °C/u':'—'}</span>
+      </div>` : `<div class="learn-title">🌡️ Thermisch verlies</div>
+      <p style="font-size:11px;color:#4b5563;font-style:italic">Nog geen leerdata. Beschikbaar na enkele verwarmingscycli.</p>`;
+
+    // ── Seizoen & cascade-info ─────────────────────────────────────────
+    const seasonIcon = {'summer':'☀️','winter':'❄️'}[grp?.season]||'🍂';
+    const seasonHtml = grp ? `
+      <div class="learn-title" style="margin-top:14px">🗓️ Seizoen & cascadegroep</div>
+      <div class="kv-grid">
+        <span class="kv-key">Seizoen</span><span class="kv-val">${seasonIcon} ${grp.season||'—'}</span>
+        <span class="kv-key">Modus</span><span class="kv-val info">${grp.mode||'—'}</span>
+        <span class="kv-key">Leveringsboiler</span><span class="kv-val ${grp.delivery_learned?'good':'warn'}">${grp.delivery_learned?'✅ geleerd':'⏳ leren ('+((ls.events||0))+' cycli)'}</span>
+        ${gb.cycle_kwh?`<span class="kv-key">Cyclus verbruik</span><span class="kv-val">${parseFloat(gb.cycle_kwh).toFixed(2)} kWh</span>`:''}
+      </div>` : '';
+
+    // ── Gebruikspatroon per uur ────────────────────────────────────────
+    const hourly = ls.hourly_demand;
+    let patternHtml = `<div class="learn-title" style="margin-top:14px">📊 Gebruikspatroon per uur</div>`;
+    if(hourly && hourly.length===24){
+      const maxV = Math.max(...hourly, 0.001);
+      const bars = hourly.map((v,h)=>{
+        const pct = Math.round(v/maxV*100);
+        const col = pct>70?'#f87171':pct>40?'#fb923c':'#4ade80';
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1">
+          <div style="width:100%;height:${Math.max(3,Math.round(pct*0.4))}px;background:${col};border-radius:2px 2px 0 0;min-height:3px"></div>
+          ${h%6===0?`<span style="font-size:8px;color:#4b5563">${String(h).padStart(2,'0')}</span>`:'<span style="font-size:8px;color:transparent">·</span>'}
+        </div>`;
+      }).join('');
+      patternHtml += `<div style="display:flex;align-items:flex-end;gap:1px;height:56px;padding:4px 0">${bars}</div>
+        <p style="font-size:10px;color:#4b5563;margin-top:4px">Warm-watergebruik genormaliseerd per uur van de dag. Rood = piek.</p>`;
+    } else {
+      patternHtml += `<p style="font-size:11px;color:#4b5563;font-style:italic">Nog geen patroon beschikbaar. Wordt geleerd na ~2 weken gebruik.</p>`;
+    }
+
+    return `<div class="learn-section">${thermHtml}${seasonHtml}${patternHtml}</div>`;
+  }
+
   _render(){
     const sh=this.shadowRoot;if(!sh)return;
     const hass=this._hass,cfg=this._cfg??{};
@@ -626,7 +736,17 @@ class CloudemsBoilerCard extends HTMLElement {
     const rampSp=b.ramp_setpoint_c;
 
     let badgeCls='badge-off',badgeLbl='⚫ UIT';
-    if(isHeating&&mode.includes('boost')){badgeCls='badge-boost';badgeLbl='🔥 BOOST';}
+
+    // v4.6.522: pauze-status
+    const pausedUntil = b.boost_paused_until || 0;
+    const isPaused    = pausedUntil > 0;
+    const pauseRemSec = b.boost_paused_remaining_s || 0;
+    const pauseRemaining = isPaused
+      ? (pauseRemSec > 3600 ? `${(pauseRemSec/3600).toFixed(1)}u` : `${Math.ceil(pauseRemSec/60)}m`)
+      : '';
+
+    if(isPaused){badgeCls='badge-off';badgeLbl='⏸ GEPAUZEERD';}
+    else if(isHeating&&mode.includes('boost')){badgeCls='badge-boost';badgeLbl='🔥 BOOST';}
     else if(isOn&&mode.includes('green')){
       badgeCls='badge-green';
       // FIX 4: toon ramp-setpoint als het afwijkt van de GREEN-basis
@@ -637,14 +757,15 @@ class CloudemsBoilerCard extends HTMLElement {
     else if(isOn){badgeCls='badge-on';badgeLbl='🟢 AAN';}
 
     const boilerTabsHtml=allB.length>1?`<div class="boiler-tabs">${allB.map((bx,i)=>`<button class="boiler-tab ${i===idx?'active':''}" data-btab="${i}">${esc(bx.label||`Boiler ${i+1}`)}</button>`).join('')}</div>`:'';
-    const ctabs=['live','leren','gezondheid','log'];
-    const ctabLabels={'live':'⚡ Live','leren':'📚 Leren','gezondheid':'🏥 Gezondheid','log':'📋 Log'};
+    const ctabs=['live','leren','gezondheid','thermisch','log'];
+    const ctabLabels={'live':'⚡ Live','leren':'📚 Leren','gezondheid':'🏥 Gezondheid','thermisch':'🌡️ Thermisch','log':'📋 Log'};
     const ct=this._contentTab;
 
     let contentHtml='';
     if(ct==='live')     contentHtml=this._renderLiveTab(b,cfg,hass,st);
     else if(ct==='leren')    contentHtml=this._renderLerenTab(b,groups);
     else if(ct==='gezondheid') contentHtml=this._renderGezondheidTab(b,groups);
+    else if(ct==='thermisch') contentHtml=this._renderThermischTab(b,groups);
     else contentHtml=`<div class="log-section">${buildDecisionsHtml(st.attributes?.log??[],b.label,b.entity_id)}</div>`;
 
     sh.innerHTML=`<style>${S}</style><div class="card"><div class="inner">
@@ -653,7 +774,16 @@ class CloudemsBoilerCard extends HTMLElement {
         <div class="hdr-icon">🚿</div>
         <div><div class="hdr-title">${esc(cfg.title)} · ${esc(b.label||'Boiler')}</div>
           <div class="hdr-sub">${esc(b.brand_label||b.boiler_type||'')} · ${b.tank_liters_active||cfg.tank_liters||80}L</div></div>
-        <span class="hdr-badge ${badgeCls}">${badgeLbl}</span>
+        ${(()=>{const _TTBadge=window.CloudEMSTooltip;
+          const _ttBadge=_TTBadge?_TTBadge.html('bl-badge','Boiler status',[
+            {label:'Status',    value:badgeLbl},
+            {label:'Modus',     value:b.actual_mode||b.control_mode||'—'},
+            {label:'Is aan',    value:isOn?'✅ Ja':'❌ Nee'},
+            {label:'Verwarmt',  value:isHeating?'✅ Ja':'❌ Nee'},
+            {label:'Ramp',      value:rampSp?rampSp.toFixed(0)+'°C':'—',dim:!rampSp},
+            {label:'Pauze tot', value:isPaused&&pausedUntil?new Date(pausedUntil*1000).toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'}):'—',dim:!isPaused},
+          ],{footer:'BOOST=snel laden | GREEN=PV/prijs-gestuurd | UIT=geen vraag'}):{wrap:'',tip:''};
+          return`<span class="hdr-badge ${badgeCls}" style="position:relative;cursor:default" ${_ttBadge.wrap}>${badgeLbl}${_ttBadge.tip}</span>`; })()}
       </div>
       <div class="ctabs">${ctabs.map(t=>`<button class="ctab ${t===ct?'active':''}" data-ctab="${t}">${ctabLabels[t]}</button>`).join('')}</div>
       <div class="tab-panel active">${contentHtml}</div>
@@ -665,10 +795,47 @@ class CloudemsBoilerCard extends HTMLElement {
         ${legDays!=null?`<span class="chip ${legDays<5?'chip-cop':'chip-warn'}">🦠 Leg. ${legDays.toFixed(0)}d</span>`:''}
         ${b.stall_active?`<span class="chip chip-verify">⚠️ Stall</span>`:''}
       </div>
-      <div class="action-row">
-        <button class="action-btn btn-send" data-action="send_now" data-eid="${b.entity_id}">🚿 Nu sturen</button>
-        <button class="action-btn btn-pause" data-action="pause_boost" data-eid="${b.entity_id}">⏸ Pauze</button>
-        <button class="action-btn btn-resume" data-action="resume_boost" data-eid="${b.entity_id}">▶ Hervat</button>
+      <div class="action-section">
+        <div class="action-section-title">Handmatige sturing</div>
+        <div class="action-row">
+          <button class="action-btn btn-send" data-action="send_now" data-eid="${b.entity_id}" title="Nu direct warm water aanvragen">
+            <span class="btn-icon">🚿</span>
+            <span class="btn-lbl">Nu laden</span>
+            <span class="btn-sub">direct BOOST</span>
+          </button>
+          ${isPaused || mode.includes('green')
+            ? `<button class="action-btn btn-resume" data-action="resume_boost" data-eid="${b.entity_id}" title="Automatische CloudEMS sturing hervatten">
+                <span class="btn-icon">🔄</span>
+                <span class="btn-lbl">Hervatten</span>
+                <span class="btn-sub">${isPaused?'pauze ('+pauseRemaining+')':'was GREEN'}</span>
+               </button>`
+            : `<button class="action-btn btn-green" data-action="set_green" data-eid="${b.entity_id}" title="Schakel naar GREEN — laadt alleen op PV-surplus of lage prijs">
+                <span class="btn-icon">🌿</span>
+                <span class="btn-lbl">GREEN</span>
+                <span class="btn-sub">eco modus</span>
+               </button>`
+          }
+          ${!isPaused
+            ? `<div class="pause-group">
+                 <button class="action-btn btn-pause" data-action="pause_boost" data-eid="${b.entity_id}" data-seconds="3600" title="BOOST pauzeren voor 1 uur">
+                   <span class="btn-icon">⏸</span>
+                   <span class="btn-lbl">1 uur</span>
+                   <span class="btn-sub">pauze</span>
+                 </button>
+                 <button class="action-btn btn-pause" data-action="pause_boost" data-eid="${b.entity_id}" data-seconds="7200" title="BOOST pauzeren voor 2 uur">
+                   <span class="btn-icon">⏸</span>
+                   <span class="btn-lbl">2 uur</span>
+                   <span class="btn-sub">pauze</span>
+                 </button>
+                 <button class="action-btn btn-pause" data-action="pause_boost" data-eid="${b.entity_id}" data-seconds="14400" title="BOOST pauzeren voor 4 uur">
+                   <span class="btn-icon">⏸</span>
+                   <span class="btn-lbl">4 uur</span>
+                   <span class="btn-sub">pauze</span>
+                 </button>
+               </div>`
+            : ''
+          }
+        </div>
       </div>`:''}
     </div></div>`;
 
@@ -689,10 +856,25 @@ class CloudemsBoilerCard extends HTMLElement {
     sh.querySelectorAll('.ctab').forEach(btn=>btn.addEventListener('click',()=>{this._contentTab=btn.dataset.ctab;this._render();}));
     sh.querySelectorAll('.action-btn').forEach(btn=>btn.addEventListener('click',()=>{
       const act=btn.dataset.action,eid=btn.dataset.eid;if(!this._hass||!eid)return;
-      btn.disabled=true;setTimeout(()=>{btn.disabled=false;},2000);
-      if(act==='send_now') this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true}).catch(()=>{});
-      else if(act==='pause_boost') this._hass.callService('cloudems','boiler_pause_boost',{entity_id:eid,seconds:3600}).catch(()=>{});
-      else if(act==='resume_boost') this._hass.callService('cloudems','boiler_resume_boost',{entity_id:eid}).catch(()=>{});
+      btn.disabled=true;
+      const origText=btn.textContent;
+      btn.textContent='⏳';
+      setTimeout(()=>{btn.disabled=false;btn.textContent=origText;},3000);
+      if(act==='send_now'){
+        btn.textContent='🚿 Sturen…';
+        this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true}).catch(()=>{});
+      } else if(act==='set_green'){
+        btn.textContent='🌿 Instellen…';
+        this._hass.callService('cloudems','boiler_set_green',{entity_id:eid}).catch(()=>{});
+      } else if(act==='pause_boost'){
+        const secs=parseInt(btn.dataset.seconds||'3600');
+        const label=secs>=7200?`⏸ ${secs/3600}u…`:'⏸ 1u…';
+        btn.textContent=label;
+        this._hass.callService('cloudems','boiler_pause_boost',{entity_id:eid,seconds:secs}).catch(()=>{});
+      } else if(act==='resume_boost'){
+        btn.textContent='🔄 Hervatten…';
+        this._hass.callService('cloudems','boiler_resume_boost',{entity_id:eid}).catch(()=>{});
+      }
     }));
   }
 

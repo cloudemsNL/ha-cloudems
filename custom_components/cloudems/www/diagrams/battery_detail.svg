@@ -1,0 +1,63 @@
+<svg width="100%" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12121f"/>
+      <stop offset="100%" stop-color="#0c0c1a"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="200" rx="14" fill="url(#bg)"/>
+  <rect width="480" height="200" rx="14" fill="none" stroke="#334155" stroke-width="1"/>
+
+  <!-- Batterij hardware -->
+  <rect x="16" y="56" width="80" height="88" rx="10" fill="#1e293b" stroke="#34d399" stroke-width="1.5"/>
+  <rect x="32" y="44" width="48" height="14" rx="4" fill="#34d399" opacity=".8"/>
+  <text x="56" y="78" text-anchor="middle" font-size="9" fill="#34d399" font-weight="700">BATTERIJ</text>
+  <text x="56" y="94" text-anchor="middle" font-size="18" fill="#34d399" font-weight="800">🔋</text>
+  <text x="56" y="116" text-anchor="middle" font-size="8" fill="#64748b">Solarman /</text>
+  <text x="56" y="128" text-anchor="middle" font-size="8" fill="#64748b">Growatt / etc.</text>
+
+  <!-- Cloud API stip 1 -->
+  <circle cx="138" cy="100" r="18" fill="#0f172a" stroke="#475569" stroke-width="1.2"/>
+  <text x="138" y="97" text-anchor="middle" font-size="9" fill="#94a3b8">☁️</text>
+  <text x="138" y="111" text-anchor="middle" font-size="8" fill="#64748b">Cloud</text>
+  <text x="138" y="122" text-anchor="middle" font-size="7" fill="#475569">API</text>
+
+  <!-- Vertraging indicatie -->
+  <rect x="170" y="76" width="88" height="48" rx="8" fill="#1e293b" stroke="#f97316" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="214" y="95" text-anchor="middle" font-size="9" fill="#f97316" font-weight="700">⏱ Vertraging</text>
+  <text x="214" y="110" text-anchor="middle" font-size="10" fill="#f97316" font-weight="800">30–300 s</text>
+  <text x="214" y="124" text-anchor="middle" font-size="8" fill="#64748b">clouddata</text>
+
+  <!-- HA sensor -->
+  <rect x="276" y="72" width="76" height="56" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="314" y="92" text-anchor="middle" font-size="9" fill="#818cf8" font-weight="700">HA sensor</text>
+  <text x="314" y="106" text-anchor="middle" font-size="8" fill="#94a3b8">power_w</text>
+  <text x="314" y="119" text-anchor="middle" font-size="8" fill="#94a3b8">soc_%</text>
+
+  <!-- CloudEMS balancer -->
+  <rect x="370" y="62" width="94" height="76" rx="10" fill="#0f172a" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="417" y="82" text-anchor="middle" font-size="9" fill="#60a5fa" font-weight="700">CloudEMS</text>
+  <text x="417" y="96" text-anchor="middle" font-size="8" fill="#94a3b8">EnergyBalancer</text>
+  <rect x="382" y="104" width="70" height="14" rx="3" fill="#1e3a5f"/>
+  <text x="417" y="115" text-anchor="middle" font-size="8" fill="#34d399">lag geleerd ✓</text>
+  <text x="417" y="130" text-anchor="middle" font-size="7" fill="#64748b">Kirchhoff</text>
+
+  <!-- Pijlen -->
+  <line x1="96" y1="100" x2="120" y2="100" stroke="#34d399" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="156" y1="100" x2="170" y2="100" stroke="#f97316" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="258" y1="100" x2="276" y2="100" stroke="#818cf8" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="352" y1="100" x2="370" y2="100" stroke="#60a5fa" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Sensoren info -->
+  <rect x="16" y="162" width="448" height="28" rx="6" fill="#0f172a" fill-opacity=".8" stroke="#1e293b" stroke-width="1"/>
+  <text x="32" y="174" font-size="9" fill="#34d399" font-weight="600">power_sensor</text>
+  <text x="32" y="185" font-size="8" fill="#64748b">Vermogen (W) — positief=laden, negatief=ontladen</text>
+  <text x="240" y="174" font-size="9" fill="#60a5fa" font-weight="600">capacity_kwh</text>
+  <text x="240" y="185" font-size="8" fill="#64748b">Totale capaciteit voor efficiëntie-berekening</text>
+</svg>

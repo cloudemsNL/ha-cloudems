@@ -455,10 +455,9 @@ class ShutterController:
                 "Rolluiken vallen terug op tijdschema."
             )
         if outdoor_temp_c is None:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "ShutterController: outdoor_temp_c is None — "
-                "koppel een buitentemperatuursensor in de CloudEMS configuratie. "
-                "Thermisch comfort-sturing is beperkt zonder buitentemperatuur."
+                "thermisch comfort-sturing beperkt zonder buitentemperatuur."
             )
         # Periodiek opslaan (elke 5 minuten) als backup bij crash of harde reboot
         if self._last_timer_save is None or (dt_util.now() - self._last_timer_save).total_seconds() >= 300:
@@ -532,6 +531,19 @@ class ShutterController:
             "CloudEMS Shutters: handmatige override %s → %s voor %.1f uur",
             entity_id, action, hours,
         )
+        # v4.6.533: registreer handmatige override voor ShutterComfortLearner
+        try:
+            _coord = getattr(self, "_coordinator", None)
+            _comfort = getattr(_coord, "_shutter_comfort", None) if _coord else None
+            if _comfort:
+                import datetime as _dt_sc
+                _now = _dt_sc.datetime.now()
+                if action in ("open", "up"):
+                    _comfort.record_manual_open(entity_id, _now.weekday(), _now.hour)
+                elif action in ("close", "down"):
+                    _comfort.record_manual_close(entity_id, _now.weekday(), _now.hour)
+        except Exception:
+            pass
         # 'idle' = alleen blokkeren, geen fysieke actie uitvoeren
         if action != SHUTTER_ACTION_IDLE:
             await self._execute_action(entity_id, action, position, SHUTTER_REASON_MANUAL)

@@ -22,6 +22,7 @@ class CloudEMSNilmCard extends HTMLElement {
       h.states['sensor.cloudems_nilm_running_devices']?.last_changed,
       h.states['sensor.cloudems_nilm_review_current']?.last_changed,
       h.states['sensor.cloudems_nilm_topology']?.last_changed,
+      h.states['sensor.cloudems_nilm_groups']?.last_changed,
     ]);
     if (j !== this._prev) { this._prev = j; this._render(); }
   }
@@ -55,6 +56,7 @@ class CloudEMSNilmCard extends HTMLElement {
 
     const TABS = [
       { id: 'actief',   label: 'Actief nu' },
+      { id: 'groepen',  label: 'Groepen' },
       { id: 'review',   label: `Beoordelen${reviewPending > 0 ? ` (${reviewPending})` : ''}` },
       { id: 'alle',     label: 'Alle apparaten' },
       { id: 'topo',     label: 'Topologie' },
@@ -93,9 +95,18 @@ class CloudEMSNilmCard extends HTMLElement {
         const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#f59e0b' : '#ef4444';
         const phaseColor = d.phase === 'L1' ? '#06b6d4' : d.phase === 'L2' ? '#f59e0b' : '#34d399';
         const src = (d.source_type === 'smart_plug' || d.source_type === 'injected') ? 'plug' : 'nilm';
-        return `<div class="dev-row">
+        const _TTN = window.CloudEMSTooltip;
+        const _ttD = _TTN ? _TTN.html(`nilm-${(d.device_id||d.name||'?').replace(/[^a-z0-9]/gi,'_')}`, d.name||d.type||'?',[
+          {label:'Bron',        value:src==='plug'?'🔌 Smart plug':'🔍 NILM detectie'},
+          {label:'Zekerheid',   value:src==='plug'?'100% (directe meting)':(conf+'%')},
+          {label:'Fase',        value:d.phase||'—'},
+          {label:'Vermogen',    value:Math.round(d.power_w||0)+' W'},
+          {label:'Bevestigd',   value:d.confirmed?'✅ Ja':'⏳ Nee'},
+          {label:'Kamer',       value:d.room||'—',dim:true},
+        ],{trusted:src==='plug'}) : {wrap:'',tip:''};
+        return `<div class="dev-row" style="position:relative;cursor:default" ${_ttD.wrap}>
           <div class="dev-dot" style="background:${d.confirmed ? '#34d399' : '#f59e0b'}"></div>
-          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}"">${d.name || d.type || '?'}</span>
+          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}">${d.name || d.type || '?'}</span>
           <span class="dev-w">${Math.round(d.power_w || 0)} W</span>
           <span class="badge" style="background:${phaseColor}22;color:${phaseColor}">${d.phase_label || d.phase || '?'}</span>
           <span class="src-lbl">${src}</span>
@@ -103,6 +114,7 @@ class CloudEMSNilmCard extends HTMLElement {
             <div class="conf-bar"><div class="conf-fill" style="width:${Math.min(100,conf)}%;background:${confColor}"></div></div>
             <span class="conf-val" style="color:${confColor}">${src === 'plug' ? '100%' : conf + '%'}</span>
           </div>
+          ${_ttD.tip}
         </div>`;
       }).join('');
 
@@ -158,6 +170,109 @@ class CloudEMSNilmCard extends HTMLElement {
       }
     }
 
+    else if (this._tab === 'groepen') {
+      const ngSensor = this._hass.states['sensor.cloudems_nilm_groups'];
+      const ngAttr   = ngSensor?.attributes || {};
+      const groups   = ngAttr.groups || [];
+      const hints    = ngAttr.onboarding_hints || [];
+      const monthHist = ngAttr.month_history || {};
+
+      // Kleur per groep
+      const GRP_COLOR = {
+        verlichting: '#fde047', koken: '#fb923c', wasgoed: '#38bdf8',
+        koeling: '#67e8f9', entertainment: '#a78bfa', verwarming: '#f87171',
+        transport: '#4ade80', gereedschap: '#94a3b8', overig: '#64748b',
+      };
+
+      // Max vermogen voor balk-schaling
+      const maxPwr = Math.max(...groups.map(g => g.power_w || 0), 1);
+
+      // Groepen renderen
+      const grpHtml = groups.length ? groups.map(g => {
+        const color = GRP_COLOR[g.id] || '#94a3b8';
+        const barW  = Math.min(100, Math.round((g.power_w || 0) / maxPwr * 100));
+        const devRows = (g.devices || []).map(d => {
+          const isOn = d.is_on;
+          const dotColor = isOn ? color : 'rgba(255,255,255,0.2)';
+          const kwh = d.today_kwh > 0 ? d.today_kwh.toFixed(2)+' kWh' : '';
+          return `<div class="grp-dev-row">
+            <div class="grp-dev-dot" style="background:${dotColor}"></div>
+            <span class="grp-dev-name">${d.name || d.device_type || '?'}</span>
+            ${isOn ? `<span class="grp-dev-w">${Math.round(d.power_w||0)} W</span>` : '<span class="grp-dev-w" style="opacity:.4">—</span>'}
+            ${kwh ? `<span class="grp-dev-kwh">${kwh}</span>` : ''}
+          </div>`;
+        }).join('');
+
+        const monthKwh = g.month_kwh > 0 ? g.month_kwh.toFixed(1)+' kWh deze maand' : '';
+        const monthCost = g.month_cost_eur > 0 ? '€'+g.month_cost_eur.toFixed(2) : '';
+
+        const openClass = (this._openGroup === g.id) ? ' open' : '';
+        return `<div class="grp-card${openClass}" data-grp="${g.id}">
+          <div class="grp-header">
+            <span class="grp-icon">${g.icon}</span>
+            <span class="grp-name">${g.label}</span>
+            ${g.power_w > 0
+              ? `<span class="grp-pwr">${Math.round(g.power_w)} W</span>`
+              : `<span class="grp-pwr" style="color:rgba(255,255,255,0.25)">0 W</span>`}
+            ${g.cost_today_eur > 0
+              ? `<span class="grp-cost">€${g.cost_today_eur.toFixed(2)}/dag</span>`
+              : ''}
+          </div>
+          <div class="grp-bar-wrap">
+            <div class="grp-bar-fill" style="width:${barW}%;background:${color};opacity:0.6"></div>
+          </div>
+          <div class="grp-stats">
+            <span class="grp-stat-pill">${g.device_count} apparaat${g.device_count!==1?'en':''}</span>
+            ${g.active_count > 0 ? `<span class="grp-stat-pill" style="color:${color}">${g.active_count} actief</span>` : ''}
+            ${g.today_kwh > 0.001 ? `<span class="grp-stat-pill">${g.today_kwh.toFixed(2)} kWh vandaag</span>` : ''}
+            ${monthKwh ? `<span class="grp-stat-pill">${monthKwh}${monthCost?' · '+monthCost:''}</span>` : ''}
+          </div>
+          <div class="grp-devs">${devRows}</div>
+        </div>`;
+      }).join('') : '<div class="empty">Geen apparaten herkend — bevestig apparaten in de Beoordelen-tab.</div>';
+
+      // Onboarding hints
+      const hintsHtml = hints.length ? `<div class="hint-banner">
+        ${hints.map(h => `<div class="hint-row">
+          <span class="hint-icon">${h.icon}</span>
+          <div><div class="hint-label">${h.label} niet gevonden</div>
+          <div class="hint-text">${h.hint}</div></div>
+        </div>`).join('')}
+      </div>` : '';
+
+      // Maandhistorie staafdiagram (laatste 3 maanden, top-5 groepen)
+      const months = Object.keys(monthHist).sort();
+      const allGrpIds = [...new Set(months.flatMap(m => Object.keys(monthHist[m] || {})))];
+      const topGrps = allGrpIds
+        .map(gid => ({ gid, total: months.reduce((s,m) => s+(monthHist[m]?.[gid]||0),0) }))
+        .sort((a,b) => b.total-a.total).slice(0,5).map(x=>x.gid);
+      const maxMonthKwh = Math.max(...months.flatMap(m => topGrps.map(gid => monthHist[m]?.[gid]||0)), 0.01);
+
+      const monthHistHtml = months.length > 0 && topGrps.length > 0 ? `
+        <div class="month-hist">
+          <div class="month-hist-title">📅 Verbruik per maand (kWh)</div>
+          ${months.map(m => {
+            const bars = topGrps.map(gid => {
+              const kwh = monthHist[m]?.[gid] || 0;
+              const h2  = Math.max(2, Math.round(kwh / maxMonthKwh * 32));
+              const col = GRP_COLOR[gid] || '#94a3b8';
+              return `<div class="month-bar-item">
+                <div class="month-bar-track"><div class="month-bar-fill" style="height:${h2}px;background:${col}"></div></div>
+                <div class="month-bar-lbl" style="color:${col}">${(GRP_COLOR[gid]?gid:gid).slice(0,3)}</div>
+              </div>`;
+            }).join('');
+            const totKwh = topGrps.reduce((s,gid)=>s+(monthHist[m]?.[gid]||0),0);
+            return `<div class="month-row">
+              <span class="month-lbl">${m.slice(5)}</span>
+              <div class="month-bars">${bars}</div>
+              <span style="font-size:10px;color:rgba(255,255,255,0.3);margin-left:6px">${totKwh.toFixed(1)} kWh</span>
+            </div>`;
+          }).join('')}
+        </div>` : '';
+
+      content = `${hintsHtml}<div class="grp-list">${grpHtml}</div>${monthHistHtml}`;
+    }
+
     else if (this._tab === 'alle') {
       const q = this._search.toLowerCase();
       const filtered = allDevs.filter(d =>
@@ -167,13 +282,25 @@ class CloudEMSNilmCard extends HTMLElement {
         const isOn = d.is_on || d.running || d.state === 'on';
         const conf = Math.round((d.confidence || 0) * 100);
         const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#f59e0b' : '#ef4444';
-        return `<div class="dev-row ${isOn ? 'dev-on' : 'dev-off'}">
+        const src2 = (d.source_type === 'smart_plug' || d.source_type === 'injected') ? 'plug' : 'nilm';
+        const _TTAN = window.CloudEMSTooltip;
+        const _ttAll = _TTAN ? _TTAN.html('nilm-all-'+(d.device_id||d.name||'?').replace(/[^a-z0-9]/gi,'_'), d.name||d.type||'?', [
+          {label:'Status',     value:isOn?'● Actief':'○ Inactief'},
+          {label:'Vermogen',   value:isOn?Math.round(d.power_w||d.current_power||0)+' W':'—'},
+          {label:'Fase',       value:d.phase||'—'},
+          {label:'Zekerheid',  value:src2==='plug'?'100% (directe meting)':conf+'%'},
+          {label:'Bron',       value:src2==='plug'?'🔌 Smart plug':'🔍 NILM detectie'},
+          {label:'Bevestigd',  value:d.confirmed?'✅ Ja':'⏳ Nee'},
+          {label:'Kamer',      value:d.room||'—',dim:true},
+        ], {trusted:src2==='plug'}) : {wrap:'',tip:''};
+        return `<div class="dev-row ${isOn ? 'dev-on' : 'dev-off'}" style="position:relative;cursor:default" ${_ttAll.wrap}>
           <div class="dev-dot" style="background:${isOn ? '#34d399' : 'rgba(255,255,255,0.15)'}"></div>
-          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}"">${d.name || d.type || '?'}</span>
+          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}">${d.name || d.type || '?'}</span>
           <span class="dev-w" style="color:${isOn ? '#fff' : 'rgba(255,255,255,0.4)'}">${isOn ? Math.round(d.power_w || d.current_power || 0) + ' W' : '—'}</span>
           <span class="badge" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5)">${d.phase || '?'}</span>
           <span class="src-lbl">${d.confirmed ? '✓' : '~'}</span>
           <span class="conf-val" style="color:${confColor}">${conf}%</span>
+          ${_ttAll.tip}
         </div>`;
       }).join('');
       content = `
@@ -370,6 +497,42 @@ class CloudEMSNilmCard extends HTMLElement {
         .topo-inp { flex:1; min-width:160px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px 8px; color:#fff; font-size:11px; outline:none; }
         .topo-add-btn { background:rgba(52,211,153,0.15); border:1px solid rgba(52,211,153,0.3); color:#34d399; border-radius:6px; padding:6px 10px; font-size:11px; cursor:pointer; white-space:nowrap; }
         .unknown-row { font-size:11px; color:rgba(245,158,11,0.8); padding:6px 16px; background:rgba(245,158,11,0.06); }
+        /* Groepen tab */
+        .grp-list { padding:8px 12px; display:flex; flex-direction:column; gap:6px; }
+        .grp-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; overflow:hidden; }
+        .grp-header { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; }
+        .grp-icon { font-size:18px; flex-shrink:0; }
+        .grp-name { font-size:13px; font-weight:600; color:rgba(255,255,255,0.85); flex:1; }
+        .grp-pwr { font-family:monospace; font-size:13px; font-weight:700; color:#06b6d4; }
+        .grp-cost { font-size:11px; color:rgba(255,255,255,0.4); margin-left:6px; }
+        .grp-bar-wrap { height:3px; background:rgba(255,255,255,0.06); }
+        .grp-bar-fill { height:100%; border-radius:0 2px 0 0; transition:width .4s; }
+        .grp-devs { border-top:1px solid rgba(255,255,255,0.05); padding:6px 0; display:none; }
+        .grp-card.open .grp-devs { display:block; }
+        .grp-dev-row { display:flex; align-items:center; gap:8px; padding:5px 14px; border-bottom:1px solid rgba(255,255,255,0.03); }
+        .grp-dev-row:last-child { border-bottom:none; }
+        .grp-dev-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+        .grp-dev-name { font-size:12px; color:rgba(255,255,255,0.7); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .grp-dev-w { font-family:monospace; font-size:11px; color:rgba(255,255,255,0.5); }
+        .grp-dev-kwh { font-size:10px; color:rgba(255,255,255,0.3); margin-left:4px; }
+        .grp-stats { display:flex; gap:6px; padding:0 14px 8px; flex-wrap:wrap; }
+        .grp-stat-pill { font-size:10px; color:rgba(255,255,255,0.4); background:rgba(255,255,255,0.05); padding:2px 8px; border-radius:99px; }
+        /* Onboarding hints */
+        .hint-banner { margin:8px 12px 0; border-radius:10px; overflow:hidden; }
+        .hint-row { display:flex; align-items:flex-start; gap:10px; padding:10px 14px; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.18); border-radius:8px; margin-bottom:6px; }
+        .hint-icon { font-size:16px; flex-shrink:0; padding-top:1px; }
+        .hint-text { font-size:12px; color:rgba(255,255,255,0.65); line-height:1.5; flex:1; }
+        .hint-label { font-size:10px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
+        /* Maandhistorie tabel */
+        .month-hist { margin:4px 12px 12px; background:rgba(255,255,255,0.03); border-radius:8px; padding:10px 12px; }
+        .month-hist-title { font-size:10px; font-weight:700; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
+        .month-row { display:flex; gap:6px; margin-bottom:4px; align-items:center; }
+        .month-lbl { font-size:11px; color:rgba(255,255,255,0.4); min-width:50px; }
+        .month-bars { flex:1; display:flex; gap:3px; }
+        .month-bar-item { display:flex; flex-direction:column; align-items:center; gap:2px; flex:1; }
+        .month-bar-track { width:100%; height:32px; background:rgba(255,255,255,0.05); border-radius:3px; display:flex; align-items:flex-end; overflow:hidden; }
+        .month-bar-fill { width:100%; border-radius:2px; transition:height .4s; }
+        .month-bar-lbl { font-size:9px; color:rgba(255,255,255,0.3); text-align:center; }
       </style>
 
       <div class="card">
@@ -439,6 +602,17 @@ class CloudEMSNilmCard extends HTMLElement {
     this.shadowRoot.querySelectorAll('.tab').forEach(btn => {
       btn.addEventListener('click', () => {
         this._tab = btn.dataset.tab;
+        this._prev = '';
+        this._render();
+      });
+    });
+
+    // Groepen tab: klik op grp-header togglet uitklappen
+    this.shadowRoot.querySelectorAll('.grp-card').forEach(card => {
+      const hdr = card.querySelector('.grp-header');
+      if (hdr) hdr.addEventListener('click', () => {
+        const gid = card.dataset.grp;
+        this._openGroup = (this._openGroup === gid) ? null : gid;
         this._prev = '';
         this._render();
       });

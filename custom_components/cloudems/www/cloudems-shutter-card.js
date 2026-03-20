@@ -57,6 +57,7 @@ const CSS = `
   .pw{flex:1;height:5px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden;}
   .pf{height:100%;border-radius:3px;background:var(--s-blue);}
   .lpct{font-size:12px;color:var(--s-muted);min-width:30px;text-align:right;}
+  .leta{font-size:11px;color:var(--s-accent);min-width:36px;text-align:right;font-style:italic;}
   .lori{font-size:12px;color:var(--s-muted);min-width:60px;text-align:right;}
   .learn-panel{margin-top:10px;}
   .empty{padding:32px;text-align:center;color:var(--s-muted);font-size:13px;}
@@ -163,16 +164,28 @@ class CloudemsShutterCard extends HTMLElement {
     // Leervoortgang
     const learnRows = shutters.map(s2 => {
       const sn = (s2.entity_id||"").split(".").pop().replace(/-/g,"_");
+      const ps = h.states[`sensor.cloudems_rolluik_${sn}_leer_voortgang`];
       const prog = (() => {
-        const ps = h.states[`sensor.cloudems_rolluik_${sn}_leer_voortgang`];
         if(ps && ps.state !== "unavailable" && ps.state !== "unknown") return parseInt(ps.state)||0;
         return s2.schedule_needs_data === 0 ? 100 : 0;
       })();
-      return `<div class="lr">
+      const etaDays = (c.show_eta !== false && ps?.attributes?.eta_days > 0)
+        ? `<span class="leta" title="Geschatte resterende leertijd">~${ps.attributes.eta_days}d</span>` : "";
+      const _TTS3 = window.CloudEMSTooltip;
+      const _ttLr = _TTS3 ? _TTS3.html('sh-lr-'+sn, s2.label||sn, [
+        {label:'Voortgang',    value:prog+'%'},
+        {label:'Oriëntatie', value:s2.orientation||'lerende…'},
+        {label:'Ori. betrouwb.',value:s2.orientation_confident?'✅ Ja':'⏳ Nog niet'},
+        {label:'ETA',          value:ps?.attributes?.eta_days>0?'~'+ps.attributes.eta_days+' dagen':'—',dim:!ps?.attributes?.eta_days},
+        {label:'Sensor',       value:'cloudems_rolluik_'+sn+'_leer_voortgang',dim:true},
+      ], {footer:prog>=100?'● Tijdschema volledig geleerd':'○ Tijdschema nog aan het leren'}) : {wrap:'',tip:''};
+      return `<div class="lr" style="position:relative;cursor:default" ${_ttLr.wrap}>
         <span class="lname">${esc(s2.label||s2.entity_id||sn)}</span>
         <div class="pw"><div class="pf" style="width:${prog}%"></div></div>
         <span class="lpct">${prog}%</span>
+        ${etaDays}
         <span class="lori">${esc(s2.orientation||"leren…")}</span>
+        ${_ttLr.tip}
       </div>`;
     }).join("");
 
@@ -188,19 +201,20 @@ class CloudemsShutterCard extends HTMLElement {
         ${singleMode ? `<div class="hdr-btns">
           <button class="bs" data-action="up" data-idx="0" style="width:32px;height:32px;font-size:14px;">&#9650;</button>
           <button class="bs" data-action="dn" data-idx="0" style="width:32px;height:32px;font-size:14px;">&#9660;</button>
-        </div>` : `<div class="hdr-btns">
+        </div>` : c.show_all_buttons!==false ? `<div class="hdr-btns">
           <button class="btn-all" data-action="all-up">&#9650; Alles</button>
           <button class="btn-all" data-action="all-dn">&#9660; Alles</button>
-        </div>`}
+        </div>` : ""}
       </div>
       <div class="body">
         ${singleMode ? "" : ovRows + `<hr class="divider"><div class="detail-hdr"><label>Detail</label><select id="shutter-picker">${selectOpts}</select></div>`}
-        <div class="dr">
+        <div class="dr" style="position:relative;cursor:default" ${(()=>{const _TTS2=window.CloudEMSTooltip;return _TTS2?_TTS2.html('sh-pos','Positie & beslissing',[{label:'Positie',value:pos+'%'},{label:'Laatste actie',value:s.last_action||'—'},{label:'Reden',value:s.last_reason||'—',dim:true},{label:'Orientatie',value:s.orientation_learned||s.orientation||'leren...'},{label:'Automaat',value:auto?'✅ Aan':'❌ Uit'},{label:'Nacht sluiten',value:esc(s.schedule_close_today||'—')},{label:'Ochtend open',value:esc(s.schedule_open_today||'—')}],{footer:s.orientation_confident?'● Oriëntatie betrouwbaar geleerd':'○ Oriëntatie nog aan het leren'}).wrap:''})()}>
           <span class="dl">Positie</span>
           <div class="pos-wrap">
             <input type="range" min="0" max="100" step="5" value="${pos}" data-action="pos">
             <span class="dv" style="min-width:32px;text-align:right" id="pos-lbl">${pos}%</span>
           </div>
+          ${(()=>{const _TTS2=window.CloudEMSTooltip;return _TTS2?_TTS2.html('sh-pos','Positie & beslissing',[{label:'Positie',value:pos+'%'},{label:'Laatste actie',value:s.last_action||'—'},{label:'Reden',value:s.last_reason||'—',dim:true},{label:'Orientatie',value:s.orientation_learned||s.orientation||'leren...'},{label:'Automaat',value:auto?'✅ Aan':'❌ Uit'},{label:'Nacht sluiten',value:esc(s.schedule_close_today||'—')},{label:'Ochtend open',value:esc(s.schedule_open_today||'—')}],{footer:s.orientation_confident?'● Oriëntatie betrouwbaar geleerd':'○ Oriëntatie nog aan het leren'}).tip:'';})()}
         </div>
         <div class="dr">
           <span class="dl">🤖 Automaat</span>
@@ -213,11 +227,11 @@ class CloudemsShutterCard extends HTMLElement {
         <div class="dr"><span class="dl">Openen</span><span class="dv">${esc(s.schedule_open_today||"09:00")}</span></div>
         <div class="dr"><span class="dl">Sluiten</span><span class="dv">${esc(s.schedule_close_today||"21:00")}</span></div>
         <div class="dr"><span class="dl">Zonnestand</span><span class="dv">${sun?"☀ Zon schijnt op dit rolluik":"Geen directe zon"}</span></div>
-        ${over&&ovTime?`<div class="dr"><span class="dl">Override restant</span><span class="dv" style="color:#fbbf24">${esc(ovTime)}</span></div>`:""}
-        <button class="learn-btn" data-action="toggle-learn">
+        ${(c.show_override!==false) && over&&ovTime?`<div class="dr"><span class="dl">Override restant</span><span class="dv" style="color:#fbbf24">${esc(ovTime)}</span></div>`:""}
+        ${c.show_learning!==false?`<button class="learn-btn" data-action="toggle-learn">
           ${this._learnOpen?"▼":"▶"} Leervoortgang &amp; oriëntatie
         </button>
-        ${this._learnOpen?`<div class="learn-panel">${learnRows}</div>`:""}
+        ${this._learnOpen?`<div class="learn-panel">${c.show_orientation!==false ? learnRows : learnRows.replace(/<span class="lori">.*?<\/span>/g,"")}</div>`:""}`:""}
       </div>
     </div>`;
 
@@ -316,22 +330,82 @@ class CloudemsShutterCard extends HTMLElement {
 }
 
 class CloudemsShutterCardEditor extends HTMLElement {
-  constructor(){ super(); this.attachShadow({mode:"open"}); this._cfg={}; }
+  constructor(){ super(); this.attachShadow({mode:"open"}); this._cfg={}; this._hass=null; }
   setConfig(c){ this._cfg={...c}; this._render(); }
-  set hass(h){ this._hass=h; }
+  set hass(h){ const first=!this._hass; this._hass=h; if(first) this._render(); }
   _fire(){ this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:this._cfg},bubbles:true,composed:true})); }
+  _getShutters(){
+    if(!this._hass) return [];
+    const st = this._hass.states["sensor.cloudems_status"];
+    return (st?.attributes?.shutters?.shutters) ?? [];
+  }
   _render(){
     const cfg = this._cfg||{};
+    const h = this._hass;
+    const chk = (name, def=true) => `<input type="checkbox" name="${name}"${(cfg[name]??def)?` checked`:""}>`;
+    const shutters = this._getShutters();
+    const learnRows = shutters.length ? shutters.map(s => {
+      const sn = (s.entity_id||"").split(".").pop().replace(/-/g,"_");
+      const swId = `switch.cloudems_shutter_${sn}_learning`;
+      const swSt = h?.states[swId];
+      const isOn = swSt ? swSt.state === "on" : true;
+      const avail = !!swSt;
+      const label = s.label || s.entity_id || sn;
+      const dot = isOn ? "🟢" : "⚫";
+      const btnLabel = isOn ? "Aan" : "Uit";
+      return `<div class="row">
+        <label class="lbl">${dot} ${label}<span class="sub">${swId}</span></label>
+        <button class="learn-tog ${isOn?"tog-on":"tog-off"}" data-switch="${swId}" data-state="${isOn?"on":"off"}" ${avail?"":"disabled"} title="${avail?"Klik om leren aan/uit te zetten":"Switch niet gevonden in HA"}">${btnLabel}</button>
+      </div>`;
+    }).join("") : `<div class="row"><span class="lbl" style="color:rgba(255,255,255,.25)">Geen rolluiken gevonden (sensor.cloudems_status niet beschikbaar)</span></div>`;
     this.shadowRoot.innerHTML=`
 <style>
 .wrap{padding:8px;}
-.row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;}
+.row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+.row:last-child{border-bottom:none;}
 .lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px;}
+.sub{font-size:10px;color:rgba(255,255,255,.3);display:block;margin-top:2px;}
 input[type=text]{background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:150px;}
+input[type=checkbox]{width:16px;height:16px;accent-color:#1D9E75;cursor:pointer;flex-shrink:0;}
+.section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:rgba(255,255,255,.3);padding:10px 0 4px;}
+.learn-tog{font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer;border:1px solid;transition:all .15s;flex-shrink:0;}
+.tog-on{background:rgba(29,158,117,.2);border-color:rgba(29,158,117,.5);color:#1D9E75;}
+.tog-off{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.15);color:rgba(255,255,255,.4);}
+.learn-tog:disabled{opacity:.3;cursor:default;}
 </style>
 <div class="wrap">
-  <div class="row"><label class="lbl">Titel</label><input type="text" name="title" value="${esc(cfg.title??"Rolluiken")}"></div>
-  <div class="row"><label class="lbl">Filter op rolluik (entity_id, optioneel)</label><input type="text" name="filter_entity" value="${esc(cfg.filter_entity??"")}"></div>
+  <div class="section-title">Algemeen</div>
+  <div class="row">
+    <label class="lbl">Titel</label>
+    <input type="text" name="title" value="${esc(cfg.title??"Rolluiken")}">
+  </div>
+  <div class="row">
+    <label class="lbl">Filter op rolluik<span class="sub">entity_id, laat leeg voor alle</span></label>
+    <input type="text" name="filter_entity" value="${esc(cfg.filter_entity??"")}">
+  </div>
+  <div class="section-title">Weergave-opties</div>
+  <div class="row">
+    <label class="lbl">Toon leervoortgang sectie<span class="sub">▶ Leervoortgang &amp; oriëntatie</span></label>
+    ${chk("show_learning", true)}
+  </div>
+  <div class="row">
+    <label class="lbl">Toon override-restant<span class="sub">Oranje timer als override actief is</span></label>
+    ${chk("show_override", true)}
+  </div>
+  <div class="row">
+    <label class="lbl">Toon oriëntatie in leerpanel<span class="sub">N/NW/Z/… kolom in leervoortgang</span></label>
+    ${chk("show_orientation", true)}
+  </div>
+  <div class="row">
+    <label class="lbl">Toon geschatte resterende leertijd<span class="sub">~X dagen resterend per rolluik</span></label>
+    ${chk("show_eta", true)}
+  </div>
+  <div class="row">
+    <label class="lbl">Toon "Alles omhoog/omlaag" knoppen<span class="sub">Alleen in multi-rolluik modus</span></label>
+    ${chk("show_all_buttons", true)}
+  </div>
+  <div class="section-title">Leren per rolluik</div>
+  ${learnRows}
 </div>`;
     this.shadowRoot.querySelector("input[name=title]")?.addEventListener("change",e=>{
       this._cfg={...this._cfg,title:e.target.value}; this._fire();
@@ -341,6 +415,22 @@ input[type=text]{background:var(--card-background-color,#1c1c1c);border:1px soli
       if(v) this._cfg={...this._cfg,filter_entity:v};
       else { const c={...this._cfg}; delete c.filter_entity; this._cfg=c; }
       this._fire();
+    });
+    ["show_learning","show_override","show_orientation","show_all_buttons","show_eta"].forEach(name=>{
+      this.shadowRoot.querySelector(`input[name=${name}]`)?.addEventListener("change",e=>{
+        this._cfg={...this._cfg,[name]:e.target.checked}; this._fire();
+      });
+    });
+    this.shadowRoot.querySelectorAll(".learn-tog:not([disabled])").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const swId = btn.dataset.switch;
+        const isOn = btn.dataset.state === "on";
+        const svc = isOn ? "turn_off" : "turn_on";
+        if(this._hass) this._hass.callService("homeassistant", svc, {entity_id: swId});
+        btn.dataset.state = isOn ? "off" : "on";
+        btn.textContent = isOn ? "Uit" : "Aan";
+        btn.className = `learn-tog ${isOn?"tog-off":"tog-on"}`;
+      });
     });
   }
 }

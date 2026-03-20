@@ -44,6 +44,15 @@ const CSS = `
   .perf-row:last-child{border-bottom:none;}
 `;
 
+// Helper: kv-rij met optionele tooltip (v4.6.583)
+function _kvTT(label, val, tipLines, opts) {
+  const _TT = window.CloudEMSTooltip;
+  if (!_TT || !tipLines) return '<div class="kv"><span class="kl">'+label+'</span><span class="kv_">'+val+'</span></div>';
+  const id = 'dg-'+label.replace(/[^a-z0-9]/gi,'_').toLowerCase().slice(0,20);
+  const tt = _TT.html(id, label, tipLines, opts||{});
+  return '<div class="kv" style="position:relative;cursor:default" '+tt.wrap+'><span class="kl">'+label+'</span><span class="kv_">'+val+'</span>'+tt.tip+'</div>';
+}
+
 class CloudemsDiagnoseCard extends HTMLElement {
   constructor() {
     super();
@@ -115,13 +124,13 @@ class CloudemsDiagnoseCard extends HTMLElement {
           <div style="font-size:10px;color:var(--m);margin-top:3px">${pct}% van 10</div>
         </div>
       </div>
-      <div class="kv"><span class="kl">Versie</span><span class="kv_">v${_esc(a.version||'?')}</span></div>
-      <div class="kv"><span class="kl">Uptime</span><span class="kv_">${a.uptime_h?_fmt(a.uptime_h)+' uur':'—'}</span></div>
-      <div class="kv"><span class="kl">Update cycli</span><span class="kv_">${a.update_count||'—'}</span></div>
+      ${_kvTT("Versie",`v${_esc(a.version||'?')}`,[{label:'Sensor',value:'cloudems_system_health'},{label:'Versie',value:'v'+(a.version||'?')},{label:'Uitleg',value:'Huidig geïnstalleerde CloudEMS versie',dim:true}])}
+      ${_kvTT("Uptime",`${a.uptime_h?_fmt(a.uptime_h)+' uur':'—'}`,[{label:'Attribuut',value:'uptime_h'},{label:'Waarde',value:a.uptime_h?_fmt(a.uptime_h)+' uur':'—'},{label:'Uitleg',value:'Tijd actief zonder volledige herstart HA',dim:true}])}
+      ${_kvTT("Update cycli",`${a.update_count||'—'}`,[{label:'Attribuut',value:'update_count'},{label:'Uitleg',value:'Aantal succesvolle evaluate-cycli sinds opstart',dim:true}])}
       <div class="kv"><span class="kl">Watchdog</span><span class="kv_ ${wdCls}">${wdState}</span></div>
       <div class="kv"><span class="kl">Fouten (ooit)</span><span class="kv_ ${parseInt(wd.total_failures||0)>100?'warn':''}">${wd.total_failures||0}</span></div>
       <div class="kv"><span class="kl">Herstarts</span><span class="kv_ ${parseInt(wd.total_restarts||0)>5?'warn':''}">${wd.total_restarts||0}</span></div>
-      <div class="kv"><span class="kl">Laatste succes</span><span class="kv_">${_esc(wd.last_success_ago||'—')}</span></div>
+      ${_kvTT("Laatste succes",`${_esc(wd.last_success_ago||'—')}`,[{label:'Attribuut',value:'cloudems_watchdog → last_success_ago'},{label:'Normaal',value:'< 30s geleden',dim:true}])}
     </div>
 
     <div class="section">
@@ -157,11 +166,11 @@ class CloudemsDiagnoseCard extends HTMLElement {
       <div class="section-title">Status</div>
       <div class="kv"><span class="kl">Status</span><span class="kv_ ${wdCls}">${wdState}</span></div>
       <div class="kv"><span class="kl">Opeenvolgende fouten</span><span class="kv_ ${cons>0?'warn':''}">${cons}/${maxC}</span></div>
-      <div class="kv"><span class="kl">Totaal fouten</span><span class="kv_">${a.total_failures||0}</span></div>
+      ${_kvTT("Totaal fouten",`${a.total_failures||0}`,[{label:'Attribuut',value:'total_failures'},{label:'Normaal',value:'< 100 over volledige runtime',dim:true}])}
       <div class="kv"><span class="kl">Automatische herstarts</span><span class="kv_ ${parseInt(a.total_restarts||0)>3?'warn':''}">${a.total_restarts||0}</span></div>
-      <div class="kv"><span class="kl">Laatste fout</span><span class="kv_">${_esc(a.last_failure_ago||'—')}</span></div>
-      <div class="kv"><span class="kl">Laatste herstart</span><span class="kv_">${_esc(a.last_restart_ago||'Nooit')}</span></div>
-      <div class="kv"><span class="kl">Laatste succes</span><span class="kv_">${_esc(a.last_success_ago||'—')}</span></div>
+      ${_kvTT("Laatste fout",`${_esc(a.last_failure_ago||'—')}`,[{label:'Attribuut',value:'last_failure_ago'},{label:'Uitleg',value:'Tijd geleden dat de laatste fout optrad',dim:true}])}
+      ${_kvTT("Laatste herstart",`${_esc(a.last_restart_ago||'Nooit')}`,[{label:'Attribuut',value:'last_restart_ago'},{label:'Uitleg',value:'Tijd geleden dat watchdog een herstart triggerde',dim:true}])}
+      ${_kvTT("Laatste succes",`${_esc(a.last_success_ago||'—')}`,[{label:'Attribuut',value:'last_success_ago'},{label:'Normaal',value:'< 30s geleden',dim:true}])}
       ${a.next_restart_in_s>0?`<div class="kv"><span class="kl">Volgende herstart na</span><span class="kv_ warn">${a.next_restart_in_s}s backoff</span></div>`:''}
     </div>
     ${a.last_failure_msg ? `
@@ -186,8 +195,43 @@ class CloudemsDiagnoseCard extends HTMLElement {
     const qc = _sa(h,'sensor.cloudems_sensor_kwaliteitscheck');
     const p1 = _sa(h,'sensor.cloudems_p1_diagnostics') || _sa(h,'sensor.cloudems_status');
     const ema = _sa(h,'sensor.cloudems_ema_diagnostics');
+    const bal = _sa(h,'sensor.cloudems_energy_balancer') || {};
+    const sirDiag = bal.sensor_intervals || {};
     const issues = qc.issues || [];
     const allOk = qc.all_ok || issues.length===0;
+
+    // Helper: kleur op basis van interval verwachting
+    const _intColor = (measured, expected) => {
+      if (measured == null) return '';
+      const ratio = measured / expected;
+      if (ratio < 0.4 || ratio > 3.5) return 'err';
+      if (ratio < 0.7 || ratio > 2.0) return 'warn';
+      return 'ok';
+    };
+
+    const gridInt   = bal.grid_interval_s;
+    const batInt    = bal.battery_interval_s;
+    const batLag    = bal.battery_lag_learned_s;
+    const batConf   = bal.battery_lag_confidence;
+    const batSampl  = bal.battery_lag_samples || 0;
+    const p1Meas    = bal.p1_measured_interval_s;
+    const p1Samp    = bal.p1_telegram_samples || 0;
+    const dsmrType  = bal.dsmr_type_configured || 'universal';
+    const dsmrCorr  = bal.dsmr_type_auto_corrected || false;
+    const lagComp   = bal.lag_compensated || false;
+    const fastRamp  = bal.fast_ramp_active || false;
+    const fastEst   = bal.fast_ramp_battery_est_w;
+    const stale     = bal.stale_sensors || [];
+
+    // DSMR type labels
+    const dsmrLabels = {dsmr4:'DSMR 4 (~10s)', dsmr5:'DSMR 5 (~1s)', universal:'Universeel'};
+    const dsmrExpected = {dsmr4:10, dsmr5:1, universal:null};
+    const dsmrLabel = dsmrLabels[dsmrType] || dsmrType;
+    const dsmrExp   = dsmrExpected[dsmrType];
+
+    // P1 interval kleur vs. geconfigureerd DSMR type
+    const p1Color = (p1Meas != null && dsmrExp != null) ? _intColor(p1Meas, dsmrExp) : '';
+    const p1MismatchWarn = p1Color === 'err' || p1Color === 'warn';
 
     return `
     <div class="section">
@@ -197,18 +241,46 @@ class CloudemsDiagnoseCard extends HTMLElement {
     </div>
 
     <div class="section">
-      <div class="section-title">P1 / DSMR Netmeting</div>
-      ${(() => {
-        const phase = _sa(h,'sensor.cloudems_nilm_devices').phase_sources || {};
-        const certain = _sa(h,'sensor.cloudems_nilm_devices').phase_certain || {};
-        const p1Mode = Object.values(phase)[0] || '?';
-        const offline = p1Mode === 'total_split';
-        return `
-        <div class="kv"><span class="kl">P1 modus</span><span class="kv_ ${offline?'err':'ok'}">${offline?'⚠ OFFLINE (total_split)':p1Mode}</span></div>
-        <div class="kv"><span class="kl">L1 zeker</span><span class="kv_ ${certain.L1?'ok':'warn'}">${certain.L1?'✅':'❓'}</span></div>
-        <div class="kv"><span class="kl">L2 zeker</span><span class="kv_ ${certain.L2?'ok':'warn'}">${certain.L2?'✅':'❓'}</span></div>
-        <div class="kv"><span class="kl">L3 zeker</span><span class="kv_ ${certain.L3?'ok':'warn'}">${certain.L3?'✅':'❓'}</span></div>`;
-      })()}
+      <div class="section-title">⚡ P1 / DSMR Updatesnelheid</div>
+      <div class="kv"><span class="kl">DSMR-type ingesteld</span><span class="kv_ ${dsmrCorr?'warn':'ok'}">${dsmrLabel}${dsmrCorr?' (auto-gecorrigeerd)':''}</span></div>
+      ${p1Meas != null
+        ? `<div class="kv"><span class="kl">Gemeten P1-interval</span><span class="kv_ ${p1Color}">${p1Meas.toFixed(2)}s <span style="font-size:10px;opacity:.7">(n=${p1Samp})</span></span></div>
+           ${p1MismatchWarn ? `<div class="kv"><span class="kl err" style="font-size:11px">⚠ Ingesteld type klopt niet met gemeten snelheid.<br>Pas DSMR-type aan via Instellingen → Netsensoren.</span></div>` : ''}`
+        : `<div class="kv"><span class="kl">Gemeten P1-interval</span><span class="kv_ warn">Nog geen data (P1 niet via directe verbinding)</span></div>`
+      }
+      ${gridInt != null ? `<div class="kv"><span class="kl">Grid sensor interval</span><span class="kv_ ${_intColor(gridInt, dsmrExp||10)}">${gridInt.toFixed(1)}s <span style="font-size:10px;opacity:.7">(geleerd)</span></span></div>` : ''}
+      <div class="kv"><span class="kl">Stale sensoren</span><span class="kv_ ${stale.length?'warn':'ok'}">${stale.length?stale.join(', '):'✅ Geen'}</span></div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">🔋 Accu Cloud-Vertraging (EnergyBalancer)</div>
+      ${batLag != null
+        ? `<div class="kv"><span class="kl">Geleerde vertraging</span><span class="kv_ ok">${batLag.toFixed(1)}s</span></div>
+           <div class="kv"><span class="kl">Betrouwbaarheid</span><span class="kv_ ${batConf>0.6?'ok':batConf>0.3?'warn':'err'}">${batConf!=null?(batConf*100).toFixed(0)+'%':'—'} <span style="font-size:10px;opacity:.7">(${batSampl} metingen)</span></span></div>`
+        : `<div class="kv"><span class="kl">Geleerde vertraging</span><span class="kv_ warn">Nog aan het leren (${batSampl}/${8} metingen)</span></div>`
+      }
+      <div class="kv"><span class="kl">Lag-compensatie actief</span><span class="kv_ ${lagComp?'ok':''}">${lagComp?'✅ Ja':'Nee'}</span></div>
+      ${fastRamp
+        ? `<div class="kv"><span class="kl">⚡ Fast-ramp inferentie</span><span class="kv_ warn">Actief${fastEst!=null?' ('+Math.round(fastEst)+'W)':''}</span></div>`
+        : ''
+      }
+      ${batInt != null ? `<div class="kv"><span class="kl">Accu sensor interval</span><span class="kv_">${batInt.toFixed(1)}s</span></div>` : ''}
+    </div>
+
+    <div class="section">
+      <div class="section-title">📡 Sensorsnelheden (${sirDiag.total_sensors||0} sensoren)</div>
+      ${sirDiag.total_sensors > 0 ? `
+      <div class="kv"><span class="kl">⚡ Realtime (&lt;2s)</span><span class="kv_ ok">${(sirDiag.by_speed||{}).realtime||0}</span></div>
+      <div class="kv"><span class="kl">🟢 Snel (&lt;8s)</span><span class="kv_ ok">${(sirDiag.by_speed||{}).fast||0}</span></div>
+      <div class="kv"><span class="kl">🟡 Middel (&lt;30s)</span><span class="kv_">${(sirDiag.by_speed||{}).medium||0}</span></div>
+      <div class="kv"><span class="kl">🟠 Traag (&lt;120s)</span><span class="kv_ ${((sirDiag.by_speed||{}).slow||0)>0?'warn':''}">${(sirDiag.by_speed||{}).slow||0}</span></div>
+      <div class="kv"><span class="kl">☁️ Cloud (≥120s)</span><span class="kv_ ${((sirDiag.by_speed||{}).cloud||0)>0?'warn':''}">${(sirDiag.by_speed||{}).cloud||0}</span></div>
+      ${Object.entries(sirDiag.sensors||{})
+          .filter(([,v])=>v.speed==='cloud'||v.speed==='slow')
+          .slice(0,5)
+          .map(([eid,v])=>`<div class="kv"><span class="kl" style="font-size:10px;opacity:.7">${eid.split('.')[1]}</span><span class="kv_ warn">${v.interval_s!=null?v.interval_s.toFixed(1)+'s':'?'} (${v.speed})</span></div>`)
+          .join('')}
+      ` : '<div style="color:var(--m);font-size:12px">Nog geen sensordata — komt automatisch na een paar cycli.</div>'}
     </div>
 
     <div class="section">

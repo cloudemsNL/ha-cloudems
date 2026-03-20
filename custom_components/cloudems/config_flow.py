@@ -26,6 +26,7 @@ from .const import (
     CONF_P1_ENABLED, CONF_P1_HOST, CONF_P1_PORT,
     CONF_DSMR_SOURCE, DSMR_SOURCE_INTEGRATION, DSMR_SOURCE_HA_ENTITIES,
     DSMR_SOURCE_DIRECT, DSMR_SOURCE_ESPHOME, DSMR_SOURCE_LABELS, DSMR_HA_PLATFORMS,
+    CONF_DSMR_TYPE, DSMR_TYPE_4, DSMR_TYPE_5, DSMR_TYPE_UNIVERSAL, DSMR_TYPE_LABELS,
     CONF_ESPHOME_POWER_L1, CONF_ESPHOME_POWER_L2, CONF_ESPHOME_POWER_L3,
     CONF_ESPHOME_POWER_FACTOR_L1, CONF_ESPHOME_POWER_FACTOR_L2, CONF_ESPHOME_POWER_FACTOR_L3,
     CONF_ESPHOME_INRUSH_L1, CONF_ESPHOME_INRUSH_L2, CONF_ESPHOME_INRUSH_L3,
@@ -47,7 +48,7 @@ from .const import (
     GRID_SENSOR_KEYWORDS,
     PHASE_SENSOR_KEYWORDS_L1, PHASE_SENSOR_KEYWORDS_L2, PHASE_SENSOR_KEYWORDS_L3,
     GRID_EXCLUDE_KEYWORDS, PHASE_EXCLUDE_KEYWORDS, CURRENT_EXCLUDE_KEYWORDS, VOLTAGE_EXCLUDE_KEYWORDS,
-    CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED,
+    CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED, WIZARD_MODE_ONBOARDING,
     CONF_AI_PROVIDER, AI_PROVIDER_NONE, AI_PROVIDER_CLOUDEMS,
     AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC, AI_PROVIDER_OLLAMA,
     AI_PROVIDER_LABELS, AI_PROVIDERS_NEEDING_KEY,
@@ -105,8 +106,9 @@ def _ai_provider_selector():
 
 def _wizard_mode_selector():
     opts = [
-        selector.SelectOptionDict(value=WIZARD_MODE_BASIC,    label="🟢 Basic — quick setup, essential sensors only"),
-        selector.SelectOptionDict(value=WIZARD_MODE_ADVANCED, label="🔧 Advanced — full control over all sensors & features"),
+        selector.SelectOptionDict(value=WIZARD_MODE_BASIC,      label="🟢 Basic — quick setup, essential sensors only"),
+        selector.SelectOptionDict(value=WIZARD_MODE_ADVANCED,   label="🔧 Advanced — full control over all sensors & features"),
+        selector.SelectOptionDict(value=WIZARD_MODE_ONBOARDING, label="🚀 Interactieve wizard — sensoren kiezen via browser"),
     ]
     return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="list"))
 
@@ -296,6 +298,33 @@ BOILER_BRAND_PRESETS: dict[str, dict] = {
         "min_temp_c":           40.0,
         "hardware_deadband_c":  3.0,
     },
+    # ── Dimmer / vermogensregeling ────────────────────────────────────────────
+    "dimmerlink": {
+        "_label":               "💡 DimmerLink / RBDimmer (vermogensregeling via dimmer)",
+        "boiler_type":          "resistive",
+        "control_mode":         "dimmer",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       75.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           40.0,
+        "dimmer_on_pct":        100.0,
+        "dimmer_off_pct":       0.0,
+    },
+    "acrouter": {
+        "_label":               "🔌 ACRouter (RobotDyn DimmerLink via IP)",
+        "boiler_type":          "resistive",
+        "control_mode":         "acrouter",
+        "preset_on":            "on",
+        "preset_off":           "off",
+        "max_setpoint_boost_c": 75.0,
+        "surplus_setpoint_c":   75.0,
+        "hardware_max_c":       75.0,
+        "setpoint_c":           60.0,
+        "min_temp_c":           40.0,
+    },
 }
 
 def _boiler_brand_selector() -> selector.SelectSelector:
@@ -304,6 +333,27 @@ def _boiler_brand_selector() -> selector.SelectSelector:
         for k, v in BOILER_BRAND_PRESETS.items()
     ]
     return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="dropdown"))
+
+
+def _brand_category(brand_key: str) -> str:
+    """Bepaal welke velden getoond worden op basis van het gekozen merk.
+
+    known_brand  — preset bevat alle sturingsinstellingen, alleen setpoint + sensoren tonen
+    generic_switch — aan/uit of setpoint, geen dimmer
+    generic_heatpump — setpoint only, geen dimmer
+    dimmer       — dimmer% velden tonen, geen preset/control_mode keuze
+    manual       — alle velden zichtbaar (volledig handmatig)
+    """
+    if brand_key == "unknown":
+        return "manual"
+    if brand_key == "generic_resistive":
+        return "generic_switch"
+    if brand_key == "generic_heatpump":
+        return "generic_heatpump"
+    if brand_key in ("dimmerlink", "acrouter"):
+        return "dimmer"
+    # Alle andere bekende merken (Ariston, Daikin, Vaillant, etc.)
+    return "known_brand"
 
 
 # ── Auto-detection ────────────────────────────────────────────────────────────
@@ -475,6 +525,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input=None):
         if user_input is not None:
             self._config.update(user_input)
+            # Onboarding wizard modus: minimale setup + HA-notificatie met URL
+            if user_input.get(CONF_WIZARD_MODE) == WIZARD_MODE_ONBOARDING:
+                return await self.async_step_onboarding_redirect()
             # Auto-discover vanuit HA Energy dashboard
             from .energy_autodiscover import async_discover_from_energy_dashboard
             disc = await async_discover_from_energy_dashboard(self.hass)
@@ -499,6 +552,34 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "buy_me_coffee_url": BUY_ME_COFFEE_URL,
                 "website": "https://cloudems.eu",
             },
+        )
+
+    async def async_step_onboarding_redirect(self, user_input=None):
+        """Toon de wizard-URL en voltooi de setup met basisdefaults."""
+        _ONBOARDING_URL = "http://homeassistant.local:8123/local/cloudems/onboarding.html"
+        if user_input is not None:
+            # Zet wizard mode terug op basic voor de daadwerkelijke flow
+            self._config[CONF_WIZARD_MODE] = WIZARD_MODE_BASIC
+            # Stuur HA-notificatie met URL
+            try:
+                await self.hass.services.async_call(
+                    "persistent_notification", "create", {
+                        "title": "CloudEMS — Interactieve wizard",
+                        "message": (
+                            f"Open de interactieve setup wizard in je browser:\n\n"
+                            f"**[{_ONBOARDING_URL}]({_ONBOARDING_URL})**\n\n"
+                            f"De wizard helpt je sensoren en apparaten koppelen "
+                            f"zonder handmatig typen."
+                        ),
+                        "notification_id": "cloudems_onboarding_url",
+                    }
+                )
+            except Exception:
+                pass
+            return await self.async_step_grid_connection()
+        return self.async_show_form(
+            step_id="onboarding_redirect",
+            description_placeholders={"onboarding_url": _ONBOARDING_URL},
         )
 
     async def async_step_ha_energy_import(self, user_input=None):
@@ -586,24 +667,36 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ── 2b. Custom limits ─────────────────────────────────────────────────────
     async def async_step_phase_custom(self, user_input=None):
         if user_input is not None:
-            count = int(user_input.get(CONF_PHASE_COUNT, 3))
-            l1    = float(user_input.get(CONF_MAX_CURRENT_L1, DEFAULT_MAX_CURRENT))
+            count   = int(user_input.get(CONF_PHASE_COUNT, 3))
+            l1      = float(user_input.get(CONF_MAX_CURRENT_L1, DEFAULT_MAX_CURRENT))
+            dsmr_t  = user_input.get(CONF_DSMR_TYPE, DSMR_TYPE_UNIVERSAL)
             self._config.update({
                 CONF_PHASE_COUNT:           count,
                 CONF_MAX_CURRENT_L1:        l1,
                 CONF_MAX_CURRENT_PER_PHASE: l1,
-                CONF_MAX_CURRENT_L2: float(user_input.get(CONF_MAX_CURRENT_L2, l1)) if count == 3 else None,
-                CONF_MAX_CURRENT_L3: float(user_input.get(CONF_MAX_CURRENT_L3, l1)) if count == 3 else None,
+                # L2 en L3 altijd gelijk aan L1 — gebruiker hoeft maar 1 waarde in te vullen
+                CONF_MAX_CURRENT_L2: l1 if count == 3 else None,
+                CONF_MAX_CURRENT_L3: l1 if count == 3 else None,
+                CONF_DSMR_TYPE:             dsmr_t,
             })
             return await self.async_step_dsmr_source()
+
+        dsmr_type_opts = [
+            selector.SelectOptionDict(value=k, label=v)
+            for k, v in DSMR_TYPE_LABELS.items()
+        ]
         return self.async_show_form(
             step_id="phase_custom",
             data_schema=vol.Schema({
                 vol.Required(CONF_PHASE_COUNT, default=3): vol.In({1: "1 phase", 3: "3 phases"}),
                 vol.Required(CONF_MAX_CURRENT_L1, default=DEFAULT_MAX_CURRENT): vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
-                vol.Optional(CONF_MAX_CURRENT_L2, default=DEFAULT_MAX_CURRENT): vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
-                vol.Optional(CONF_MAX_CURRENT_L3, default=DEFAULT_MAX_CURRENT): vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
+                vol.Required(CONF_DSMR_TYPE, default=DSMR_TYPE_UNIVERSAL): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=dsmr_type_opts, mode=selector.SelectSelectorMode.LIST)
+                ),
             }),
+            description_placeholders={
+                "diagram_url": "/local/cloudems/diagrams/phase_custom.svg",
+            },
         )
 
     # ── 3. DSMR / Meter bron keuze ───────────────────────────────────────────
@@ -1191,6 +1284,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "battery_num": str(i),
                 "total":       str(self._bat_count),
+                "diagram_url": "/local/cloudems/diagrams/battery_detail.svg",
             },
         )
 
@@ -1790,6 +1884,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                              default=ex.get(CONF_CV_SUMMER_CUTOFF_C, DEFAULT_CV_SUMMER_CUTOFF_C)):
                     vol.All(vol.Coerce(float), vol.Range(min=10, max=30)),
             }),
+            description_placeholders={
+                "diagram_url": "/local/cloudems/diagrams/climate_zones.svg",
+            },
         )
 
     async def async_step_climate_zones(self, user_input=None):
@@ -1996,9 +2093,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="boiler_brand",
             description_placeholders={
-                "idx":   str(idx + 1),
-                "total": str(total),
-                "group": getattr(self, "_boiler_group_name", "?"),
+                "idx":         str(idx + 1),
+                "total":       str(total),
+                "group":       getattr(self, "_boiler_group_name", "?"),
+                "diagram_url": "/local/cloudems/diagrams/boiler_brand.svg",
             },
             data_schema=vol.Schema({
                 vol.Required("brand", default="unknown"): _boiler_brand_selector(),
@@ -2042,6 +2140,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "max_setpoint_entity":  user_input.get("max_setpoint_entity", ""),
                 "brand":                bp.get("_brand_key", "unknown"),
                 "modes":                ["cheap_hours", "negative_price", "pv_surplus", "export_reduce"],
+                # v4.6.561: tankvolume en ramp-max opslaan uit wizard
+                "tank_liters":          int(user_input.get("tank_liters",       bp.get("tank_liters",       0))),
+                "cheap_ramp_max_c":     int(user_input.get("cheap_ramp_max_c",  bp.get("cheap_ramp_max_c",  65))),
             }
             getattr(self, "_boiler_units_tmp", []).append(unit)
             self._boiler_unit_index = idx + 1
@@ -2108,59 +2209,76 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ),
         }
 
-        # Geavanceerde velden alleen tonen als merk onbekend/generiek is
-        if not _is_known_brand:
-            _default_cm   = bp.get("control_mode", "switch")
-            _default_type = bp.get("boiler_type",  "resistive")
-            _default_pon  = bp.get("preset_on",    "on")
-            _default_poff = bp.get("preset_off",   "off")
+        # v4.6.562: categorie-gebaseerde velden — toon alleen wat relevant is
+        _cat = _brand_category(_brand_key)
+        _default_cm   = bp.get("control_mode", "switch")
+        _default_type = bp.get("boiler_type",  "resistive")
+        _default_pon  = bp.get("preset_on",    "on")
+        _default_poff = bp.get("preset_off",   "off")
+
+        # manual + generic_switch: sturingmodus zonder dimmer-opties
+        if _cat in ("manual",):
             schema_dict.update({
                 vol.Optional("min_temp_c", default=_default_min): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=20, max=60, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
+                                                  mode="slider", unit_of_measurement="°C")),
                 vol.Optional("max_setpoint_boost_c", default=_default_mxsp): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
+                                                  mode="slider", unit_of_measurement="°C")),
                 vol.Optional("boiler_type", default=_default_type): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
-                        {"value": "resistive", "label": "⚡ Elektrisch weerstand (boiler, geiser)"},
+                        {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
                         {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
-                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand, bijv. Ariston Lydos Hybrid)"},
-                    ], mode="list")
-                ),
+                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
+                    ], mode="list")),
                 vol.Optional("control_mode", default=_default_cm): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
-                        {"value": "switch",         "label": "🔌 Aan/uit schakelaar (switch / input_boolean)"},
-                        {"value": "setpoint",       "label": "🌡️ Setpoint instellen (climate / water_heater)"},
+                        {"value": "switch",         "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint",       "label": "🌡️ Setpoint instellen"},
                         {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
-                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
-                        {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling (RBDimmer, number)"},
-                    ], mode="list")
-                ),
+                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. GREEN/BOOST)"},
+                    ], mode="list")),
                 vol.Optional("preset_on",  default=_default_pon):  selector.TextSelector(
                     selector.TextSelectorConfig(type="text")),
                 vol.Optional("preset_off", default=_default_poff): selector.TextSelector(
                     selector.TextSelectorConfig(type="text")),
-                vol.Optional("dimmer_on_pct",  default=100): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
-                vol.Optional("dimmer_off_pct", default=0):   selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
             })
 
-        # v4.6.427: tankvolume en ramp-max altijd configureerbaar — ook bij bekende merken
+        elif _cat == "generic_switch":
+            # Generiek elektrisch: switch of setpoint, geen dimmer, geen preset
+            schema_dict.update({
+                vol.Optional("min_temp_c", default=_default_min): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=20, max=60, step=1,
+                                                  mode="slider", unit_of_measurement="°C")),
+                vol.Optional("control_mode", default=_default_cm): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",   "label": "🔌 Aan/uit schakelaar (switch)"},
+                        {"value": "setpoint", "label": "🌡️ Setpoint instellen (climate / water_heater)"},
+                    ], mode="list")),
+            })
+
+        elif _cat == "dimmer":
+            # DimmerLink / ACRouter: dimmer% velden, geen preset/control_mode keuze
+            schema_dict.update({
+                vol.Optional("dimmer_on_pct",  default=int(bp.get("dimmer_on_pct", 100))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+                vol.Optional("dimmer_off_pct", default=int(bp.get("dimmer_off_pct", 0))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+            })
+        # known_brand + generic_heatpump: geen extra velden — preset bevat alles
+
+        # Tankvolume en ramp-max: altijd instelbaar
         _default_tank    = int(bp.get("tank_liters", 0))
         _default_rampmax = int(bp.get("cheap_ramp_max_c", 65))
         schema_dict.update({
             vol.Optional("tank_liters", default=_default_tank): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=0, max=500, step=5,
-                                              mode="slider", unit_of_measurement="L")
-            ),
+                                              mode="slider", unit_of_measurement="L")),
             vol.Optional("cheap_ramp_max_c", default=_default_rampmax): selector.NumberSelector(
                 selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                              mode="slider", unit_of_measurement="°C")
-            ),
+                                              mode="slider", unit_of_measurement="°C")),
         })
 
         return self.async_show_form(
@@ -2278,7 +2396,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="generator",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={},
+            description_placeholders={
+                "diagram_url": "/local/cloudems/diagrams/generator.svg",
+            },
         )
 
     async def async_step_diagnostics(self, user_input=None):
@@ -2948,8 +3068,18 @@ class CloudEMSOptionsFlow(_OptionsBase):
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
+            # L1 is leidend — L2 en L3 automatisch gelijk stellen als 3-fase
+            _l1 = float(user_input.get(CONF_MAX_CURRENT_L1, DEFAULT_MAX_CURRENT))
+            if phase_count == 3:
+                user_input[CONF_MAX_CURRENT_L2] = _l1
+                user_input[CONF_MAX_CURRENT_L3] = _l1
+            user_input[CONF_MAX_CURRENT_PER_PHASE] = _l1
             return self._save(user_input)
 
+        dsmr_type_opts = [
+            selector.SelectOptionDict(value=k, label=v)
+            for k, v in DSMR_TYPE_LABELS.items()
+        ]
         use_sep = bool(data.get(CONF_USE_SEPARATE_IE, False))
         schema: dict = {
             vol.Optional(CONF_USE_SEPARATE_IE, default=use_sep): bool,
@@ -2958,46 +3088,92 @@ class CloudEMSOptionsFlow(_OptionsBase):
             vol.Optional(CONF_PHASE_COUNT, default=phase_count): vol.In({1: "1 phase", 3: "3 phases"}),
             vol.Optional(CONF_MAX_CURRENT_L1, default=float(data.get(CONF_MAX_CURRENT_L1, DEFAULT_MAX_CURRENT))):
                 vol.All(vol.Coerce(float), vol.Range(min=6, max=63)),
+            vol.Optional(CONF_DSMR_TYPE, default=data.get(CONF_DSMR_TYPE, DSMR_TYPE_UNIVERSAL)):
+                selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=dsmr_type_opts, mode=selector.SelectSelectorMode.LIST)
+                ),
         }
         if not use_sep:
             schema[vol.Optional(CONF_GRID_SENSOR, default=data.get(CONF_GRID_SENSOR) or vol.UNDEFINED)] = _ent()
         else:
             schema[vol.Optional(CONF_IMPORT_SENSOR, default=data.get(CONF_IMPORT_SENSOR) or vol.UNDEFINED)] = _ent()
             schema[vol.Optional(CONF_EXPORT_SENSOR, default=data.get(CONF_EXPORT_SENSOR) or vol.UNDEFINED)] = _ent()
-        if phase_count == 3:
-            for k in (CONF_MAX_CURRENT_L2, CONF_MAX_CURRENT_L3):
-                schema[vol.Optional(k, default=float(data.get(k, DEFAULT_MAX_CURRENT)))] = \
-                    vol.All(vol.Coerce(float), vol.Range(min=6, max=63))
         return self.async_show_form(step_id="sensors", data_schema=vol.Schema(schema))
 
     async def async_step_phase_sensors(self, user_input=None):
+        """Redirect naar L1 — entry point blijft werken vanuit het menu."""
+        return await self.async_step_phase_sensors_l1(user_input)
+
+    async def async_step_phase_sensors_l1(self, user_input=None):
+        """⚡ Fase L1 — stroom, spanning, vermogen."""
         data = self._data()
         phase_count = int(data.get(CONF_PHASE_COUNT, 3))
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
-            return self._save(user_input)
+            self._pending = {**self._pending, **user_input} if hasattr(self, "_pending") else dict(user_input)
+            if phase_count == 3:
+                return await self.async_step_phase_sensors_l2()
+            # 1-fase: sla direct op
+            return self._save(self._pending)
 
         schema: dict = {}
-        for k in [CONF_PHASE_SENSORS+"_L1", CONF_VOLTAGE_L1, CONF_POWER_L1]:
+        for k in [CONF_PHASE_SENSORS+"_L1", CONF_VOLTAGE_L1, CONF_POWER_L1,
+                  "power_sensor_l1_export"]:
             schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
-        if phase_count == 3:
-            for k in [
-                CONF_PHASE_SENSORS+"_L2", CONF_VOLTAGE_L2, CONF_POWER_L2,
-                CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3,
-            ]:
-                schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
-        # v1.15.0: DSMR5 per-phase export sensors (bidirectional meters)
-        # Sommige slimme meters (DSMR5) meten teruglevering per fase apart.
-        # Als geconfigureerd: netto_fase = import_fase − export_fase.
-        for exp_key in ("power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"):
-            schema[vol.Optional(exp_key, default=data.get(exp_key) or vol.UNDEFINED)] = _ent()
         return self.async_show_form(
-            step_id="phase_sensors",
+            step_id="phase_sensors_l1",
             data_schema=vol.Schema(schema),
             description_placeholders={
-                "diagram_url":  "/local/cloudems/diagrams/phase_sensors.svg",
-                "phase_count":  str(self.config_entry.data.get("phase_count", 3)),
+                "diagram_url": "/local/cloudems/diagrams/phase_sensor_l1.svg",
+                "phase_count": str(phase_count),
+            },
+        )
+
+    async def async_step_phase_sensors_l2(self, user_input=None):
+        """⚡ Fase L2 — stroom, spanning, vermogen."""
+        data = self._data()
+        phase_count = int(data.get(CONF_PHASE_COUNT, 3))
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            self._pending = {**getattr(self, "_pending", {}), **user_input}
+            return await self.async_step_phase_sensors_l3()
+
+        schema: dict = {}
+        for k in [CONF_PHASE_SENSORS+"_L2", CONF_VOLTAGE_L2, CONF_POWER_L2,
+                  "power_sensor_l2_export"]:
+            schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
+        return self.async_show_form(
+            step_id="phase_sensors_l2",
+            data_schema=vol.Schema(schema),
+            description_placeholders={
+                "diagram_url": "/local/cloudems/diagrams/phase_sensor_l2.svg",
+                "phase_count": str(phase_count),
+            },
+        )
+
+    async def async_step_phase_sensors_l3(self, user_input=None):
+        """⚡ Fase L3 — stroom, spanning, vermogen."""
+        data = self._data()
+        phase_count = int(data.get(CONF_PHASE_COUNT, 3))
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            merged = {**getattr(self, "_pending", {}), **user_input}
+            self._pending = {}
+            return self._save(merged)
+
+        schema: dict = {}
+        for k in [CONF_PHASE_SENSORS+"_L3", CONF_VOLTAGE_L3, CONF_POWER_L3,
+                  "power_sensor_l3_export"]:
+            schema[vol.Optional(k, default=data.get(k) or vol.UNDEFINED)] = _ent()
+        return self.async_show_form(
+            step_id="phase_sensors_l3",
+            data_schema=vol.Schema(schema),
+            description_placeholders={
+                "diagram_url": "/local/cloudems/diagrams/phase_sensor_l3.svg",
+                "phase_count": str(phase_count),
             },
         )
 
@@ -4959,14 +5135,80 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 return await self.async_step_boiler_group_edit()
             return self._save(self._opts)
 
-        _default_cm   = bp.get("control_mode",         "setpoint")
         _default_sp   = bp.get("setpoint_c",            DEFAULT_BOILER_SETPOINT_C)
-        _default_srsp = bp.get("surplus_setpoint_c",    75.0)
-        _default_mxsp = bp.get("max_setpoint_boost_c",  75.0)
-        _default_type = bp.get("boiler_type",           "resistive")
-        _default_pon  = bp.get("preset_on",             "on")
-        _default_poff = bp.get("preset_off",            "off")
         _brand_label  = bp.get("_label",                "❓ Onbekend")
+        _cat_gu       = _brand_category(brand_key)
+
+        # Basis schema — altijd getoond
+        gu_schema: dict = {
+            vol.Required("bu_entity"): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["switch", "climate", "water_heater", "input_boolean"]
+                )
+            ),
+            vol.Optional("bu_temp_sensor"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+            ),
+            vol.Optional("bu_energy_sensor"): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor",
+                    device_class=["power", "energy"])
+            ),
+            vol.Optional("bu_label", default=f"Boiler {u_step+1}"): str,
+            vol.Optional("bu_setpoint", default=_default_sp): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=30, max=85, step=1,
+                                              mode="slider", unit_of_measurement="°C")
+            ),
+        }
+
+        # Categorie-gebaseerde extra velden
+        if _cat_gu == "manual":
+            gu_schema.update({
+                vol.Optional("bu_boiler_type", default=bp.get("boiler_type", "resistive")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
+                        {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
+                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
+                    ], mode="list")),
+                vol.Optional("bu_control_mode", default=bp.get("control_mode", "setpoint")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",         "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint",       "label": "🌡️ Setpoint instellen"},
+                        {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
+                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. GREEN/BOOST)"},
+                    ], mode="list")),
+                vol.Optional("bu_preset_on",  default=bp.get("preset_on",  "on")):  selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("bu_preset_off", default=bp.get("preset_off", "off")): selector.TextSelector(
+                    selector.TextSelectorConfig(type="text")),
+                vol.Optional("bu_max_setpoint_boost", default=bp.get("max_setpoint_boost_c", 75.0)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")),
+            })
+        elif _cat_gu == "generic_switch":
+            gu_schema.update({
+                vol.Optional("bu_control_mode", default=bp.get("control_mode", "switch")): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",   "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint", "label": "🌡️ Setpoint instellen"},
+                    ], mode="list")),
+            })
+        elif _cat_gu == "dimmer":
+            gu_schema.update({
+                vol.Optional("bu_dimmer_on_pct",  default=int(bp.get("dimmer_on_pct",  100))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+                vol.Optional("bu_dimmer_off_pct", default=int(bp.get("dimmer_off_pct", 0))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=100, step=5,
+                                                  mode="slider", unit_of_measurement="%")),
+            })
+        # known_brand + generic_heatpump: geen extra velden
+
+        # Tankvolume altijd instelbaar
+        gu_schema.update({
+            vol.Optional("bu_tank_liters", default=int(bp.get("tank_liters", 0))): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=500, step=5,
+                                              mode="slider", unit_of_measurement="L")),
+        })
 
         return self.async_show_form(
             step_id="boiler_group_unit",
@@ -4976,57 +5218,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "group_name":  group.get("name", "?"),
                 "brand_label": _brand_label,
             },
-            data_schema=vol.Schema({
-                vol.Required("bu_entity"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(
-                        domain=["switch", "climate", "water_heater", "input_boolean"]
-                    )
-                ),
-                vol.Optional("bu_temp_sensor"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
-                ),
-                vol.Optional("bu_energy_sensor"): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor",
-                        device_class=["power", "energy"])
-                ),
-                vol.Optional("bu_label", default=f"Boiler {u_step+1}"): str,
-                vol.Optional("bu_boiler_type", default=_default_type): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=[
-                        {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
-                        {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
-                        {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
-                    ], mode="list")
-                ),
-                vol.Optional("bu_setpoint", default=_default_sp): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=30, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("bu_surplus_setpoint", default=_default_srsp): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("bu_max_setpoint_boost", default=_default_mxsp): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("bu_control_mode", default=_default_cm): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=[
-                        {"value": "switch",             "label": "🔌 Aan/uit schakelaar"},
-                        {"value": "setpoint",           "label": "🌡️ Setpoint instellen"},
-                        {"value": "setpoint_boost",     "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
-                        {"value": "preset",             "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
-                        {"value": "dimmer",             "label": "💡 Dimmer / vermogensregeling"},
-                    ], mode="list")
-                ),
-                vol.Optional("bu_preset_on",  default=_default_pon):  selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")),
-                vol.Optional("bu_preset_off", default=_default_poff): selector.TextSelector(
-                    selector.TextSelectorConfig(type="text")),
-                vol.Optional("bu_dimmer_on_pct", default=100): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
-                vol.Optional("bu_dimmer_off_pct", default=0): selector.NumberSelector(
-                    selector.NumberSelectorConfig(min=0, max=100, step=5, mode="slider", unit_of_measurement="%")),
-            }),
+            data_schema=vol.Schema(gu_schema),
         )
 
 
@@ -5089,6 +5281,9 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "dimmer_on_pct":        float(user_input.get("bu_dimmer_on_pct",  unit.get("dimmer_on_pct",  100))),
                 "dimmer_off_pct":       float(user_input.get("bu_dimmer_off_pct", unit.get("dimmer_off_pct", 0))),
                 "brand":                brand_key,
+                # v4.6.561: tankvolume en ramp-max opslaan
+                "tank_liters":          int(user_input.get("bu_tank_liters",    unit.get("tank_liters",       0))),
+                "cheap_ramp_max_c":     int(user_input.get("bu_cheap_ramp_max", unit.get("cheap_ramp_max_c", 65))),
             })
             units[u_idx] = updated
             groups[g_idx]["units"] = units
@@ -5153,52 +5348,63 @@ class CloudEMSOptionsFlow(_OptionsBase):
             ),
         }
 
-        # Geavanceerde velden alleen tonen als merk onbekend/generiek is
-        if not _is_known_brand:
+        # v4.6.562: categorie-gebaseerde velden in edit-wizard
+        _cat_edit = _brand_category(cur_brand)
+        _def_cm   = unit.get("control_mode", bp.get("control_mode", "setpoint"))
+        _def_type = unit.get("boiler_type",  bp.get("boiler_type",  "resistive"))
+        _def_pon  = unit.get("preset_on",    bp.get("preset_on",    "on"))
+        _def_poff = unit.get("preset_off",   bp.get("preset_off",   "off"))
+
+        if _cat_edit == "manual":
             edit_schema.update({
                 vol.Optional("bu_surplus_setpoint",
                              default=unit.get("surplus_setpoint_c", bp.get("surplus_setpoint_c", 75.0))): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
+                                                  mode="slider", unit_of_measurement="°C")),
                 vol.Optional("bu_max_setpoint_boost",
                              default=unit.get("max_setpoint_boost_c", bp.get("max_setpoint_boost_c", 75.0))): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=40, max=85, step=1,
-                                                  mode="slider", unit_of_measurement="°C")
-                ),
-                vol.Optional("bu_boiler_type",
-                             default=unit.get("boiler_type", bp.get("boiler_type", "resistive"))): selector.SelectSelector(
+                                                  mode="slider", unit_of_measurement="°C")),
+                vol.Optional("bu_boiler_type", default=_def_type): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         {"value": "resistive", "label": "⚡ Elektrisch weerstand"},
                         {"value": "heat_pump", "label": "♻️ Warmtepomp boiler"},
                         {"value": "hybrid",    "label": "🔥 Hybride (WP + weerstand)"},
-                    ], mode="list")
-                ),
-                vol.Optional("bu_control_mode",
-                             default=unit.get("control_mode", bp.get("control_mode", "setpoint"))): selector.SelectSelector(
+                    ], mode="list")),
+                vol.Optional("bu_control_mode", default=_def_cm): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         {"value": "switch",         "label": "🔌 Aan/uit schakelaar"},
                         {"value": "setpoint",       "label": "🌡️ Setpoint instellen"},
                         {"value": "setpoint_boost", "label": "🌡️⚡ Setpoint + Boost bij PV-surplus"},
-                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. Ariston GREEN/BOOST)"},
-                        {"value": "dimmer",         "label": "💡 Dimmer / vermogensregeling"},
-                    ], mode="list")
-                ),
-                vol.Optional("bu_preset_on",
-                             default=unit.get("preset_on",  bp.get("preset_on",  "on"))): selector.TextSelector(
+                        {"value": "preset",         "label": "🎛️ Preset modus (bijv. GREEN/BOOST)"},
+                    ], mode="list")),
+                vol.Optional("bu_preset_on",  default=_def_pon):  selector.TextSelector(
                     selector.TextSelectorConfig(type="text")),
-                vol.Optional("bu_preset_off",
-                             default=unit.get("preset_off", bp.get("preset_off", "off"))): selector.TextSelector(
+                vol.Optional("bu_preset_off", default=_def_poff): selector.TextSelector(
                     selector.TextSelectorConfig(type="text")),
+            })
+
+        elif _cat_edit == "generic_switch":
+            edit_schema.update({
+                vol.Optional("bu_control_mode", default=_def_cm): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=[
+                        {"value": "switch",   "label": "🔌 Aan/uit schakelaar"},
+                        {"value": "setpoint", "label": "🌡️ Setpoint instellen"},
+                    ], mode="list")),
+            })
+
+        elif _cat_edit == "dimmer":
+            edit_schema.update({
                 vol.Optional("bu_dimmer_on_pct",
-                             default=unit.get("dimmer_on_pct", 100)): selector.NumberSelector(
+                             default=unit.get("dimmer_on_pct", bp.get("dimmer_on_pct", 100))): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=100, step=5,
                                                   mode="slider", unit_of_measurement="%")),
                 vol.Optional("bu_dimmer_off_pct",
-                             default=unit.get("dimmer_off_pct", 0)): selector.NumberSelector(
+                             default=unit.get("dimmer_off_pct", bp.get("dimmer_off_pct", 0))): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=0, max=100, step=5,
                                                   mode="slider", unit_of_measurement="%")),
             })
+        # known_brand + generic_heatpump: geen extra velden
 
         return self.async_show_form(
             step_id="boiler_unit_edit",
@@ -5206,7 +5412,17 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "unit_label": unit.get("label", unit.get("entity_id", f"Boiler {u_idx+1}")),
                 "group_name": group.get("name", "?"),
             },
-            data_schema=vol.Schema(edit_schema),
+            data_schema=vol.Schema({
+                **edit_schema,
+                vol.Optional("bu_tank_liters",
+                             default=int(unit.get("tank_liters", 0))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=0, max=500, step=5,
+                                                  mode="slider", unit_of_measurement="L")),
+                vol.Optional("bu_cheap_ramp_max",
+                             default=int(unit.get("cheap_ramp_max_c", 65))): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=40, max=85, step=1,
+                                                  mode="slider", unit_of_measurement="°C")),
+            }),
         )
 
 

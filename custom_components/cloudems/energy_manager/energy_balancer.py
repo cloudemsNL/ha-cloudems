@@ -59,6 +59,12 @@ LAG_MATCH_THRESHOLD = 0.6    # fractie van grid-sprong die target moet volgen
 
 KIRCHHOFF_TOL_W     = 50.0
 
+# ── Battery bijsturing bij sterke afwijking (v4.6.545) ────────────────────────
+# Grid heeft max ~10s vertraging (P1 direct), battery tot 5 minuten (cloud-API).
+# Bij een Kirchhoff-imbalans is de sensor met de grootste geleerde lag de schuldige.
+# We vervangen die volledig via Kirchhoff-inverse — geen blend, geen stale-timeout.
+BATTERY_DRIFT_THRESHOLD_W  = 300.0  # W: imbalans groter dan dit → battery bijsturen
+
 # ── Slimme battery-vs-PV discriminatie (v4.5.66) ─────────────────────────────
 # PV-omvormers veranderen langzaam (wolken, zonshoek) — max typisch ~200 W/s.
 # Batterijen kunnen in één stap springen: 0 → ±10 000 W in <1 update-cyclus.
@@ -273,14 +279,18 @@ class EnergyBalancer:
         self._prev_grid_ts:      float = 0.0
         self._prev_battery_w:    float = 0.0
         self._prev_solar_w:      float = 0.0
-        self._fast_ramp_active:  bool  = False   # True als grid-sprong > FAST_RAMP_W_S
-        self._fast_ramp_battery_est: Optional[float] = None  # inferentie tijdens ramp
+        self._fast_ramp_active:  bool  = False
+        self._fast_ramp_battery_est: Optional[float] = None
+        self._fast_ramp_start_battery_w: float = 0.0
+        self._fast_ramp_cycles: int = 0
         self._lag_solar   = _LagLearner("solar")
 
-        self._house_trend:      float = 0.0
-        self._prev_grid_w:      float = 0.0
-        self._last_balanced:    Optional[BalancedReading] = None
-        self._imbalance_log_ts: float = 0.0
+        self._house_trend:         float = 0.0
+        self._house_trend_samples: int   = 0   # v4.6.548: teller voor opwarmperiode
+        self._prev_grid_w:         float = 0.0
+        self._last_balanced:       Optional[BalancedReading] = None
+        self._imbalance_log_ts:    float = 0.0
+        self._start_ts:            float = time.time()  # v4.6.548: voor opwarmguard
 
     # ── Publieke interface ────────────────────────────────────────────────────
 
@@ -316,13 +326,18 @@ class EnergyBalancer:
             b_delta = abs(self._battery.last_value - self._prev_battery_w)
             s_delta = abs(self._solar.last_value   - self._prev_solar_w)
 
-            if (grid_ramp_ws >= FAST_RAMP_W_S
-                    and b_delta < abs(g_jump) * 0.3):   # battery reageert nog niet
+            if False:  # v4.6.543: fast-ramp uitgeschakeld — veroorzaakte 10+ MW vals bij herstart
+                pass  # Lag-compensatie via _LagLearner + stale-detectie doet hetzelfde veiliger
+            if False and (grid_ramp_ws >= FAST_RAMP_W_S
+                    and b_delta < abs(g_jump) * 0.3):   # disabled
                 # Solar kan maximaal langzaam veranderd zijn — alles wat sneller is dan PV
                 # gaat naar de battery.
                 max_solar_delta = self._solar.last_value * 0.15  # 15% max PV-variatie per stap
                 _inferred_bat = g_jump - min(s_delta, max_solar_delta)
-                self._fast_ramp_battery_est = self._battery.last_value + _inferred_bat
+                _est = self._battery.last_value + _inferred_bat
+                # v4.6.542: hard cap — nooit meer dan 2x grid_w (fysisch onmogelijk)
+                self._fast_ramp_battery_est = min(_est, abs(g_now) * 2.0)
+                self._fast_ramp_start_battery_w = self._battery.last_value
                 self._fast_ramp_active = True
                 _LOGGER.debug(
                     "EnergyBalancer: snelle grid-ramp %.0fW/s (%.0fW in %.1fs) → "
@@ -338,10 +353,11 @@ class EnergyBalancer:
 
         else:
             # Kleine of geen sprong — als ramp-inferentie actief was, reset na één stap
+            # zodra de battery-sensor een waarde stuurt of bewogen is.
+            # v4.6.542: eenvoudige veilige reset — vermijdt vastzetten bij herstart.
             if self._fast_ramp_active:
                 b_delta = abs(self._battery.last_value - self._prev_battery_w)
                 if b_delta > abs(g_jump) * 0.5 or battery_w is not None:
-                    # Battery-sensor heeft nu ingehaald — inferentie niet meer nodig
                     self._fast_ramp_active = False
                     self._fast_ramp_battery_est = None
 
@@ -401,6 +417,45 @@ class EnergyBalancer:
             g_val = self._house_trend + b_val - s_val
             g_est = True
 
+        # v4.6.548: Proactieve battery bijsturing bij Kirchhoff-imbalans
+        #
+        # Principe: grid heeft max ~10s vertraging (P1 direct).
+        #           battery kan tot 5 minuten achterlopen (cloud-API, Zonneplan Nexus).
+        #           Bij een grote imbalans wijzen we altijd de sensor met de grootste
+        #           geleerde lag aan als schuldige en vervangen die volledig via
+        #           Kirchhoff-inverse — geen blend, geen wachten op stale-timeout.
+        #
+        # Kirchhoff:  battery_kirchhoff = solar + grid - house_trend
+        # Imbalans:   |battery_sensor - battery_kirchhoff| > BATTERY_DRIFT_THRESHOLD_W
+        #
+        # We corrigeren alleen als:
+        #   1. Battery niet al stale of geschat is (dan regelt de compensator het al)
+        #   2. house_trend voldoende opgewarmd is (>= 30 samples ≈ 5 min)
+        #   3. De battery-lag groter is dan de grid-lag (structureel de traagste)
+        #
+        # Opwarmguard (v4.6.548): bij een verse herstart is house_trend=0 of gebaseerd
+        # op slechts enkele samples. De drift-correctie zou dan een lege trend als anker
+        # gebruiken en een verkeerde battery-waarde berekenen (zie 5.30kW/6.80kW bug).
+        _trend_warm = self._house_trend_samples >= 30   # ~5 min bij 10s cyclus
+        if not b_stale and not b_est and self._house_trend > 0 and _trend_warm:
+            kirchhoff_battery = s_val + g_val - self._house_trend
+            drift = kirchhoff_battery - b_val
+            abs_drift = abs(drift)
+
+            # Battery-lag structureel groter dan grid (~10s)?
+            battery_lag = self._lag_battery.learned_lag_s or 30.0
+            grid_lag_assumed = 10.0  # P1 is altijd snel
+
+            if abs_drift > BATTERY_DRIFT_THRESHOLD_W and battery_lag > grid_lag_assumed:
+                _LOGGER.debug(
+                    "EnergyBalancer: battery drift %.0fW (sensor=%.0fW kirchhoff=%.0fW "
+                    "battery_lag=%.0fs) → volledig bijgesteld via Kirchhoff",
+                    abs_drift, b_val, kirchhoff_battery, battery_lag,
+                )
+                b_val    = kirchhoff_battery
+                b_est    = True
+                lag_comp = True
+
         # v4.5.61 Fix: solar sensor rapporteert 0 terwijl grid sterk negatief is
         # (teruglevering zonder solar is fysiek onmogelijk tenzij accu leeg is).
         # Als grid < -500W én solar = 0 én solar is niet stale → sensor geeft
@@ -423,6 +478,7 @@ class EnergyBalancer:
         self._house_trend = (TREND_ALPHA * house_w +
                              (1.0 - TREND_ALPHA) * self._house_trend
                              if self._house_trend else house_w)
+        self._house_trend_samples += 1
 
         # 6. Imbalans-check vs ruwe waarden
         imbalance = 0.0
@@ -544,6 +600,8 @@ class EnergyBalancer:
             "solar_stale":             self._solar.is_stale(),
             "battery_stale":           self._battery.is_stale(),
             "house_trend_w":           round(self._house_trend, 1),
+            "house_trend_samples":     self._house_trend_samples,
+            "drift_correction_active": self._house_trend_samples >= 30,
             "grid_trend_w":            round(self._grid.trend, 1),
             "solar_trend_w":           round(self._solar.trend, 1),
             "battery_trend_w":         round(self._battery.trend, 1),

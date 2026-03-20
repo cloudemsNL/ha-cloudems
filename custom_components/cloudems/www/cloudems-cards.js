@@ -3,6 +3,61 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
+ * CloudEMSTooltip — v4.6.567
+ * Gedeelde tooltip helper voor alle CloudEMS custom cards.
+ *
+ * Gebruik:
+ *   CloudEMSTooltip.html(id, title, lines, options)
+ *
+ * Geeft twee strings terug: { wrap, tip }
+ *   wrap = attribuutstring voor het wrapper-element  (onmouseenter/leave/touchstart)
+ *   tip  = de tooltip-div HTML (plaatsen ín het wrapper-element)
+ *
+ * lines: [{label, value, dim?}]  — max 8 regels
+ * options: { footer?, trusted?, width? }
+ *
+ * Voorbeeld:
+ *   const {wrap, tip} = CloudEMSTooltip.html('import-w', 'Afname grid', [
+ *     {label:'Sensor', value:'sensor.cloudems_grid_import_power'},
+ *     {label:'Bron',   value:'P1 DSMR', trusted:true},
+ *   ], {footer:'● = directe meting', trusted:true});
+ *   return `<div class="sr" style="position:relative" ${wrap}>${content}${tip}</div>`;
+ */
+window.CloudEMSTooltip = {
+  html(id, title, lines, opts = {}) {
+    const w    = opts.width  || 240;
+    const foot = opts.footer || null;
+    const trusted = opts.trusted != null ? opts.trusted : null;
+    const tipId = `cem-tip-${id}`;
+
+    const rowsHtml = (lines || []).slice(0, 8).map(l => {
+      const val = l.value != null ? String(l.value) : '—';
+      return `<div style="display:flex;justify-content:space-between;gap:8px">` +
+        `<span style="color:rgba(255,255,255,0.4);flex-shrink:0">${l.label}</span>` +
+        `<span style="color:${l.dim ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.85)'};text-align:right;word-break:break-all">${val}</span>` +
+        `</div>`;
+    }).join('');
+
+    const footHtml = (foot || trusted != null) ? `
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);font-size:10px">
+        ${foot || (trusted ? '✅ Directe meting' : '⚠️ Afgeleid / berekend')}
+      </div>` : '';
+
+    const tip = `<div id="${tipId}" style="display:none;position:absolute;z-index:999;left:0;top:calc(100% + 4px);min-width:${w}px;max-width:320px;background:#1a1f2e;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;font-size:11px;line-height:1.8;color:rgba(255,255,255,0.85);box-shadow:0 4px 20px rgba(0,0,0,0.55);pointer-events:none">
+      <div style="font-weight:700;font-size:12px;margin-bottom:5px;color:#fff">${title}</div>
+      ${rowsHtml}
+      ${footHtml}
+    </div>`;
+
+    const wrap = `onmouseenter="(function(el){const t=el.querySelector('#${tipId}');if(t)t.style.display='block'})(this)" ` +
+                 `onmouseleave="(function(el){const t=el.querySelector('#${tipId}');if(t)t.style.display='none'})(this)" ` +
+                 `ontouchstart="(function(el){const t=el.querySelector('#${tipId}');if(t)t.style.display=t.style.display==='block'?'none':'block'})(this)"`;
+
+    return { wrap, tip };
+  }
+};
+
+/**
  * CloudEMS Custom Card Bundle
  * Version: 1.6.5
  * 
@@ -816,10 +871,26 @@
         entertainment:'#c084fc', light:'#fbbf24', computer:'#94a3b8',
       };
 
+      // Dedupliceer op naam — bij duplicaten wint smart_plug boven NILM (hogere betrouwbaarheid)
+      const _dedupedRunning = Object.values(
+        running
+          .filter(d => (d.power_w || d.current_power || 0) > 1)
+          .filter(d => !this._isDedicatedNode(d.name, d.device_type || d.type, d))
+          .reduce((acc, d) => {
+            const key = (d.name || d.device_type || '?').toLowerCase().trim();
+            if (!acc[key]) { acc[key] = d; return acc; }
+            // Bestaand entry: smart_plug wint altijd; anders hoogste confidence
+            const cur = acc[key];
+            const curIsPlug = (cur.source_type || cur.source) === 'smart_plug';
+            const newIsPlug = (d.source_type || d.source) === 'smart_plug';
+            if (newIsPlug && !curIsPlug) acc[key] = d;
+            else if (!curIsPlug && !newIsPlug && (d.confidence||0) > (cur.confidence||0)) acc[key] = d;
+            return acc;
+          }, {})
+      );
+
       // Top 5 op vermogen, skip dedicated nodes
-      return running
-        .filter(d => (d.power_w || d.current_power || 0) > 1)
-        .filter(d => !this._isDedicatedNode(d.name, d.device_type || d.type, d))
+      return _dedupedRunning
         .sort((a, b) => (b.power_w || b.current_power || 0) - (a.power_w || a.current_power || 0))
         .slice(0, 5)
         .map(d => ({

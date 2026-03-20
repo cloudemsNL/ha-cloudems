@@ -16,9 +16,95 @@ class CloudEMSHomeCard extends HTMLElement {
     this._hass=null; this._config={}; this._tab='status';
     this._expanded=new Set(); this._prev='';
     this._swipeX=0; this._lastTap=0; this._devSearch='';
+    // v4.6.524: VU-meter peak hold — {barId: {peak, ts}}
+    this._peaks={};
   }
   setConfig(c){this._config=c||{};}
   set hass(h){this._hass=h;this._render();}
+
+  /* ── VU-METER BAR met peak hold ─────────────────────────────────────────────
+   * id      : unieke string voor peak-tracking (bijv. 'import', 'l1a')
+   * value   : huidige waarde (W of A)
+   * maxVal  : schaal-maximum (bijv. maxA*230*phases of maxA)
+   * color   : CSS kleur van de balk
+   * height  : balkdikte in px (default 4)
+   * ─────────────────────────────────────────────────────────────────────────*/
+  _vuBar(id, value, maxVal, color, height=4){
+    const now = Date.now();
+    const PEAK_HOLD_MS = 3000;
+    if(maxVal <= 0) maxVal = 1;
+    const barPct = Math.min(100, Math.max(0, Math.round(Math.abs(value) / maxVal * 100)));
+
+    // Peak bijhouden — altijd updaten als hoger
+    if(!this._peaks[id] || barPct >= this._peaks[id].pct){
+      this._peaks[id] = {pct: barPct, ts: now};
+    }
+    const p = this._peaks[id];
+    const peakAge = now - p.ts;
+    const decayMs = 600;
+    const showPeak = p.pct > barPct;
+
+    // Verwijder verlopen peaks
+    if(peakAge > PEAK_HOLD_MS + decayMs) delete this._peaks[id];
+
+    const peakOpacity = (!showPeak) ? '0'
+      : peakAge < PEAK_HOLD_MS ? '1'
+      : Math.max(0, 1 - (peakAge - PEAK_HOLD_MS) / decayMs).toFixed(2);
+
+    const r = height / 2;
+    return `<div style="flex:1;height:${height}px;background:rgba(255,255,255,0.07);border-radius:${r}px;margin:0 8px;position:relative;overflow:visible">
+      <div style="height:100%;width:${barPct}%;background:${color};border-radius:${r}px;transition:width .5s ease"></div>
+      <div style="position:absolute;top:-3px;bottom:-3px;left:calc(${p.pct}% - 1px);width:2px;background:${color};border-radius:1px;opacity:${peakOpacity};box-shadow:0 0 5px ${color};transition:opacity .3s ease;pointer-events:none"></div>
+    </div>`;
+  }
+
+  /* ── BIDIRECTIONELE VU-METER BAR (ampèremeters) ─────────────────────────
+   * Midden = 0A. Positief (import) groeit naar rechts.
+   * Negatief (export) groeit naar links. Peak-streepje aan beide kanten.
+   * value : gesigneerde ampère (positief=import, negatief=export)
+   * maxVal: max per kant (bijv. maxA = 25)
+   * ───────────────────────────────────────────────────────────────────── */
+  _vuBarBi(id, value, maxVal, colorImport, colorExport, height=5){
+    const now = Date.now();
+    const PEAK_HOLD_MS = 3000;
+    const decayMs = 600;
+    if(maxVal <= 0) maxVal = 1;
+
+    const isExp   = value < 0;
+    const abs     = Math.abs(value);
+    // halfPct: 0..50 — de balk vult maximaal de helft (= maxVal)
+    const halfPct = Math.min(50, Math.round(abs / maxVal * 50));
+    const color   = isExp ? colorExport : colorImport;
+
+    // Peak bijhouden
+    const existing = this._peaks[id];
+    if(!existing || halfPct >= existing.pct){
+      this._peaks[id] = {pct: halfPct, ts: now, exp: isExp};
+    }
+    const p = this._peaks[id];
+    const peakAge = now - p.ts;
+    if(peakAge > PEAK_HOLD_MS + decayMs) delete this._peaks[id];
+    const showPeak = p && p.pct > halfPct;
+    const peakOpacity = !showPeak ? '0'
+      : peakAge < PEAK_HOLD_MS ? '1'
+      : Math.max(0, 1-(peakAge-PEAK_HOLD_MS)/decayMs).toFixed(2);
+    const peakColor = p?.exp ? colorExport : colorImport;
+
+    // Peak positie in % van de volledige balk (0=linker rand, 50=midden, 100=rechter rand)
+    // Import-peak: midden + p.pct %, export-peak: midden - p.pct %
+    const peakLeftPct = p?.exp ? (50 - p.pct) : (50 + p.pct);
+
+    // Gebruik pk-bg class (flex:1 overflow:hidden position:relative) — exact zelfde als onbalans-balk
+    // Vul de import-helft RECHTS van midden, export-helft LINKS van midden
+    return `<div class="pk-bg" style="height:${height}px">
+      <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,0.2)"></div>
+      ${isExp
+        ? `<div style="position:absolute;top:0;bottom:0;right:50%;width:${halfPct}%;background:${color};border-radius:3px 0 0 3px;transition:width .4s ease"></div>`
+        : `<div style="position:absolute;top:0;bottom:0;left:50%;width:${halfPct}%;background:${color};border-radius:0 3px 3px 0;transition:width .4s ease"></div>`
+      }
+      <div style="position:absolute;top:-2px;bottom:-2px;left:${peakLeftPct}%;width:2px;margin-left:-1px;background:${peakColor};border-radius:1px;opacity:${peakOpacity};transition:opacity .3s ease;pointer-events:none"></div>
+    </div>`;
+  }
   _s(e){return this._hass?.states?.[e]||null;}
   _v(e,d=0){const s=this._s(e);if(!s||s.state==='unavailable'||s.state==='unknown')return d;return parseFloat(s.state)||d;}
   _a(e,k,d=null){return this._s(e)?.attributes?.[k]??d;}
@@ -319,7 +405,11 @@ ${t==='history'?this._tabHistory():''}
     const boilers=this._a('sensor.cloudems_boiler_status','boilers')||[];
     const b=boilers[0]||{};
     const btemp=b.temp_c??'—'; const bsp=b.active_setpoint_c??b.setpoint_c??'—';
-    const bpow=b.current_power_w??0; const bmode=(b.actual_mode||'').toUpperCase();
+    const bpow=b.current_power_w??0;
+    const bmode=(b.actual_mode||'').toUpperCase();
+    const bmodeSince=b.actual_mode_since_s!=null?b.actual_mode_since_s:null;
+    const _fmtDur=(s)=>{if(s==null)return'';if(s<60)return`${Math.round(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}u${Math.floor((s%3600)/60)}m`;};
+    const bmodeLbl=bmode+(bmodeSince!=null?` · ${_fmtDur(bmodeSince)}`:'');
     const imp=gw>50; const exp=gw<-50;
     // Price
     const priceSt=this._s('sensor.cloudems_price_current_hour');
@@ -334,13 +424,16 @@ ${t==='history'?this._tabHistory():''}
     // phases komt uit sensor.cloudems_status.attributes.phases — direct uit de limiter.
     // current_a is al gesigneerd: positief=import, negatief=export.
     const _phases=this._a('sensor.cloudems_status','phases')||{};
+    const _gridNetW=this._v('sensor.cloudems_grid_net_power')||0;  // negatief=export
     const _signedA=(ph)=>{
       const pd=_phases[ph];
       if(pd&&pd.current_a!=null) return pd.current_a;
-      // Fallback: ruwe stroom * teken van vermogen
+      // Fallback: ruwe stroom * teken van per-fase vermogen indien beschikbaar,
+      // anders netto grid-richting (export = negatief)
       const raw=Math.abs(this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0);
-      const pw=pd?.power_w??this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)??0;
-      return raw*(pw<0?-1:1);
+      const pw=pd?.power_w??this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)??null;
+      const sign=pw!=null?(pw<0?-1:1):(_gridNetW<0?-1:1);
+      return raw*sign;
     };
     // v1.8.1: sanity clamp — waarden >100A zijn opstartartefacten
     const _clampA=(a)=>Math.abs(a)>100?0:a;
@@ -398,7 +491,14 @@ ${t==='history'?this._tabHistory():''}
   <div class="sc" data-nav="bat">
     <div class="sc-l">🔋 Batterij</div>
     <div class="sc-v" style="color:#34d399">${Math.round(soc)}%</div>
-    <div class="sc-s">${this._fmt(Math.abs(bw))} · ${bw>50?'laden':bw<-50?'ontladen':'idle'}</div>
+    ${(()=>{
+      const batState=bw>50?'laden':bw<-50?'ontladen':'idle';
+      const batReason=(batAction.reason||'').toLowerCase();
+      // Korte reden: neem alles vóór de eerste '(' of '-' om het beknopt te houden
+      const shortReason=batReason.replace(/\(.*?\)/g,'').replace(/[–—].*/,'').trim().slice(0,32);
+      const reasonLbl=shortReason?` · ${shortReason}`:'';
+      return`<div class="sc-s" title="${batAction.reason||''}">${this._fmt(Math.abs(bw))} · ${batState}${reasonLbl}</div>`;
+    })()}
     <div class="soc-bar"><div class="soc-f" style="width:${soc}%;background:${soc>30?'#34d399':'#f87171'}"></div></div>
   </div>
   <div class="sc" data-nav="prices">
@@ -411,14 +511,39 @@ ${t==='history'?this._tabHistory():''}
     <div class="sc-l">🚿 Boiler</div>
     <div class="sc-v" style="color:#EF9F27">${btemp}°C</div>
     <div class="sc-s">setpoint ${bsp}°C · ${this._fmt(bpow)}</div>
-    ${bmode?`<div class="sc-b" style="color:#f87171;border-color:rgba(239,64,64,0.25);background:rgba(239,64,64,0.1)">${bmode}</div>`:''}
-    ${typeof bsp==='number'?`<div class="boiler-sp-ctrl" data-slug="${(b.label||'boiler_1').toLowerCase().replace(/[^a-z0-9]+/g,'_')}">
-      <button class="sp-btn sp-dn" data-sp="${bsp-1}">−</button>
-      <span class="sp-val">${bsp}°C</span>
-      <button class="sp-btn sp-up" data-sp="${bsp+1}">+</button>
-    </div>`:''}
+    ${bmode?`<div class="sc-b" style="color:#f87171;border-color:rgba(239,64,64,0.25);background:rgba(239,64,64,0.1)">${bmodeLbl}</div>`:''}
   </div>
 </div>
+
+${(()=>{
+  // v4.6.570: gecorrigeerde entity_id — was sensor.cloudems_gas (bestaat niet)
+  const _gasVal = parseFloat(this._s('sensor.cloudems_gasstand')?.state || 0);
+  if (!(_gasVal > 0)) return '';
+  const _fibRows = this._a('sensor.cloudems_gasstand','gas_fib_hours',[]) || [];
+  const _1u      = _fibRows.find(r=>r.hours===1);
+  const _rate    = (_1u?.rate_m3h != null) ? _1u.rate_m3h : null;
+  const _dagM3   = this._a('sensor.cloudems_gasstand','dag_m3', null);
+  const _prijs   = this._a('sensor.cloudems_gasstand','gas_prijs_per_m3', 1.25);
+  const _rateNum = _rate ?? 0;
+  const _gasMax  = parseFloat(this._a('sensor.cloudems_gasstand', 'gas_rate_max_m3h', 0)) || Math.max(_rateNum, 1);
+  const _gc      = _rateNum > _gasMax * 0.5 ? '#f87171' : _rateNum > _gasMax * 0.15 ? '#f97316' : '#34d399';
+  const _barPct  = Math.min(100, Math.round(_rateNum / _gasMax * 100));
+  const _dagKost = _dagM3 !== null ? (parseFloat(_dagM3) * parseFloat(_prijs)).toFixed(2) : null;
+  return`<div style="margin:6px 0 2px;padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:10px;border:1px solid rgba(255,255,255,0.06)">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,0.35)">🔥 Gas</span>
+      <div style="flex:1;height:5px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${_barPct}%;background:${_gc};border-radius:3px;transition:width .4s"></div>
+      </div>
+      <span style="font-size:15px;font-weight:700;color:${_gc};min-width:60px;text-align:right">${_rate !== null ? _rateNum.toFixed(3)+' m³/u' : '—'}</span>
+    </div>
+    <div style="display:flex;gap:12px;font-size:11px;color:rgba(255,255,255,0.4)">
+      ${_dagM3 !== null ? `<span>Vandaag: <b style="color:rgba(255,255,255,0.7)">${parseFloat(_dagM3).toFixed(3)} m³</b></span>` : ''}
+      ${_dagKost !== null ? `<span>Kosten: <b style="color:rgba(255,255,255,0.7)">€${_dagKost}</b></span>` : ''}
+      <span style="margin-left:auto;color:rgba(255,255,255,0.25)">laatste uur</span>
+    </div>
+  </div>`;
+})()}
 
 ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<div class="insight-strip">${ins}</div>`:''})()}
 
@@ -427,38 +552,67 @@ ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<
   <div class="blbl">Piekschaving <span>limiet ${maxA}A / ${Math.round(maxA*230)} W</span></div>
   ${[['L1',l1a],['L2',l2a],['L3',l3a]].map(([phase,a])=>{
     const isExp=a<0;
-    const lbl=phase;
     const abs=Math.abs(a);
-    const pct=Math.min(50,Math.round(abs/maxA*50));
     const over=a>maxA;
     const warn=!isExp&&a>maxA*0.8;
     const c=isExp?'#34d399':_loadColor(a);
-    const ec='#34d399';
     const pulse=over||warn?'animation:pk-pulse 1s ease-in-out infinite;':'';
-    const lblColor=isExp?ec:c;
-    return`<div class="pk-row">
-      <div class="pk-l" style="color:${lblColor}">${lbl}</div>
-      <div class="pk-bg" style="position:relative">
-        <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,0.2)"></div>
-        ${isExp
-          ? `<div style="position:absolute;right:50%;top:0;bottom:0;width:${pct}%;background:#34d399;border-radius:3px 0 0 3px;${pulse}"></div>`
-          : `<div style="position:absolute;left:50%;top:0;bottom:0;width:${pct}%;background:${c};border-radius:0 3px 3px 0;${pulse}"></div>`
-        }
+    const lblColor=isExp?'#34d399':c;
+    // Bidirectionele VU-bar: midden=0, rechts=import, links=export
+    const vuHtml = this._vuBarBi(`phase_${phase}`, a, maxA, _loadColor(a), '#34d399', 5);
+    // v4.6.548: tooltip met broninformatie
+    const pd=_phases[phase]||{};
+    const src_a=pd.source_entity_a||'';
+    const src_p=pd.source_entity_p||'';
+    const derived=pd.derived_from||'';
+    const raw_a_val=pd.raw_a!=null?pd.raw_a.toFixed(2):null;
+    const raw_p_val=pd.raw_p!=null?pd.raw_p.toFixed(0):null;
+    const p1_a_val=pd.p1_a!=null&&pd.p1_a>0?pd.p1_a.toFixed(2):null;
+    const p1_net=pd.p1_net_w!=null&&pd.p1_net_w!==0?pd.p1_net_w.toFixed(0):null;
+    const methodLabel={'fusion':'Fusie (gewogen gemiddelde)','fusion_kirchhoff':'Kirchhoff-correctie (schaling)','direct':'Directe sensor','p1_current':'P1 stroomsensor','power_div_voltage':'Vermogen ÷ spanning'}[derived]||derived||'Onbekend';
+    const isTrusted=src_a&&src_a!=='p1'&&src_a!=='berekend';
+    const srcLabel=isTrusted?`🔌 ${src_a.split('.').pop()?.replace(/_/g,' ')}`:(p1_a_val?`📡 P1 stroom (${p1_a_val}A unsigned)`:'📡 P1 / berekend');
+    const tooltipId=`pk-tip-${phase}`;
+    const tooltipHtml=`<div id="${tooltipId}" class="pk-tooltip" style="display:none;position:absolute;z-index:999;left:0;top:calc(100% + 4px);min-width:220px;background:#1a1f2e;border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;font-size:11px;line-height:1.7;color:rgba(255,255,255,0.85);box-shadow:0 4px 20px rgba(0,0,0,0.5)">
+      <div style="font-weight:700;font-size:12px;margin-bottom:6px;color:#fff">Fase ${phase} — herkomst</div>
+      <div><span style="color:rgba(255,255,255,0.45)">Methode:</span> ${methodLabel}</div>
+      <div><span style="color:rgba(255,255,255,0.45)">Bron stroom:</span> ${srcLabel}</div>
+      ${src_p?`<div><span style="color:rgba(255,255,255,0.45)">Bron vermogen:</span> 🔌 ${src_p.split('.').pop()?.replace(/_/g,' ')}</div>`:''}
+      ${raw_a_val?`<div><span style="color:rgba(255,255,255,0.45)">Sensor rauw:</span> ${raw_a_val} A</div>`:''}
+      ${raw_p_val&&raw_p_val!=='0'?`<div><span style="color:rgba(255,255,255,0.45)">Vermogen rauw:</span> ${raw_p_val} W</div>`:''}
+      ${p1_a_val?`<div><span style="color:rgba(255,255,255,0.45)">P1 unsigned:</span> ${p1_a_val} A</div>`:''}
+      ${p1_net?`<div><span style="color:rgba(255,255,255,0.45)">P1 netto:</span> ${p1_net} W</div>`:''}
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.4);font-size:10px">${isTrusted?'✅ Betrouwbare meter geconfigureerd':'⚠️ Geen directe meter — waarde afgeleid'}
       </div>
-      <div class="pk-v" style="color:${isExp?ec:c}">${isExp?'-':''}${abs.toFixed(2)} A</div>
-      <div class="pk-s" style="color:${isExp?ec:c};border-color:${isExp?'rgba(52,211,153,0.3)':c+'44'};background:${isExp?'rgba(52,211,153,0.1)':c+'18'}">${over?'OVER':isExp?'EXPORT':'IMPORT'}</div>
+    </div>`;
+    return`<div class="pk-row" style="position:relative" 
+      onmouseenter="const t=this.querySelector('.pk-tooltip');if(t)t.style.display='block'"
+      onmouseleave="const t=this.querySelector('.pk-tooltip');if(t)t.style.display='none'"
+      ontouchstart="const t=this.querySelector('.pk-tooltip');if(t)t.style.display=t.style.display==='block'?'none':'block'">
+      <div class="pk-l" style="color:${lblColor};${pulse};cursor:default">${phase} <span style="font-size:9px;opacity:0.45">${isTrusted?'●':'○'}</span></div>
+      ${vuHtml}
+      <div class="pk-v" style="color:${isExp?'#34d399':c}">${isExp?'-':''}${abs.toFixed(2)} A</div>
+      <div class="pk-s" style="color:${isExp?'#34d399':c};border-color:${isExp?'rgba(52,211,153,0.3)':c+'44'};background:${isExp?'rgba(52,211,153,0.1)':c+'18'}">${over?'OVER':isExp?'EXPORT':'IMPORT'}</div>
+      ${tooltipHtml}
     </div>`;
   }).join('')}
   ${(()=>{
-    // v4.6.511: onbalans op absolute waarden — richting (import/export) telt niet mee
+    // v4.6.558: onbalans op absolute waarden — richting (import/export) telt niet mee
     const vals=[Math.abs(l1a),Math.abs(l2a),Math.abs(l3a)]; const mx=Math.max(...vals); const mn=Math.min(...vals); const diff=mx-mn;
-    const bc=diff>5?'#ef4444':diff>3?'#f97316':'#34d399';
+    // v4.6.558: onderdruk ALERT/WARN als Kirchhoff-correctie actief was op alle fasen
+    // (fase-stromen zijn dan proportioneel herschaald naar grid_total — de onbalans
+    // is een P1-meetartefact van bijv. Zonneplan Nexus, niet een echte netfout)
+    const allKirchhoff = ['L1','L2','L3'].every(p=>(_phases[p]?.derived_from||'') === 'fusion_kirchhoff');
+    const bc=allKirchhoff?'rgba(255,255,255,0.25)':(diff>5?'#ef4444':diff>3?'#f97316':'#34d399');
     const bpct=Math.min(100,Math.round(diff/maxA*100));
-    return`<div class="pk-row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);padding-top:4px">
-      <div class="pk-l" style="color:${bc}">Fase onbalans</div>
+    const statusLbl=allKirchhoff?'OK*':(diff>5?'ALERT':diff>3?'WARN':'OK');
+    return`<div class="pk-row" style="margin-top:4px;border-top:1px solid rgba(255,255,255,0.07);padding-top:4px"
+      title="${allKirchhoff?'Fase-stromen zijn herschaald via Kirchhoff-correctie (P1 meetartefact) — onbalans niet betrouwbaar':''}"
+    >
+      <div class="pk-l" style="color:${bc}">Fase onbalans${allKirchhoff?' <span style="font-size:9px;opacity:0.5" title="Kirchhoff-correctie actief">🔧</span>':''}</div>
       <div class="pk-bg"><div style="height:100%;width:${bpct}%;background:${bc};border-radius:3px;opacity:0.7"></div></div>
       <div class="pk-v" style="color:${bc}">${diff.toFixed(2)} A</div>
-      <div class="pk-s" style="color:${bc};border-color:${bc+'44'};background:${bc+'18'}">${diff>5?'ALERT':diff>3?'WARN':'OK'}</div>
+      <div class="pk-s" style="color:${bc};border-color:${bc+'44'};background:${bc+'18'}">${statusLbl}</div>
     </div>`;
   })()}
   ${(()=>{
@@ -469,11 +623,12 @@ ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<
       ${shed.map(e=>`<div style="font-size:11px;color:rgba(255,255,255,0.7);padding:2px 0">🔌 ${e.split('.')[1]?.replace(/_/g,' ')}</div>`).join('')}
     </div>`;
   })()}
-  ${monthPeak>0?`<div class="pk-row" style="margin-top:3px">
+  ${monthPeak>0?`<div class="pk-row" style="margin-top:3px;position:relative" ${(()=>{const _TT=window.CloudEMSTooltip;return _TT?_TT.html('pk-maand','Maand piek',[{label:'Sensor',value:'cloudems_kwartier_piek'},{label:'Piek deze maand',value:this._fmt(monthPeak)},{label:'Huidig kwartiervermogen',value:this._fmt(peakW)},{label:'Waarschuwing actief',value:peakWarn?'⚠️ Ja':'Nee'},{label:'Capaciteitstarief',value:'Geldt voor hoogste kwartierpiek/maand',dim:true}],{footer:'Belgisch/NL capaciteitstarief — maandpiek bepaalt netkosten'}).wrap:'';})()}>
     <div class="pk-l" style="color:rgba(255,255,255,0.35)">Max deze maand</div>
     <div class="pk-bg"><div class="pk-bar" style="width:${Math.min(100,Math.round(monthPeak/(maxA*230)*100))}%;background:#EF9F27"></div></div>
     <div class="pk-v" style="color:#EF9F27">${this._fmt(monthPeak)}</div>
     <div class="pk-s" style="color:#EF9F27;border-color:rgba(239,159,39,0.3);background:rgba(239,159,39,0.08)">PIEK</div>
+    ${(()=>{const _TT=window.CloudEMSTooltip;return _TT?_TT.html('pk-maand','Maand piek',[{label:'Sensor',value:'cloudems_kwartier_piek'},{label:'Piek deze maand',value:this._fmt(monthPeak)},{label:'Huidig kwartiervermogen',value:this._fmt(peakW)},{label:'Waarschuwing actief',value:peakWarn?'⚠️ Ja':'Nee'},{label:'Capaciteitstarief',value:'Geldt voor hoogste kwartierpiek/maand',dim:true}],{footer:'Belgisch/NL capaciteitstarief — maandpiek bepaalt netkosten'}).tip:'';})()}
   </div>`:''}
 </div>
 
@@ -503,19 +658,78 @@ ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<
 
 <!-- STATUSINFORMATIE RIJEN -->
 ${(()=>{
-  const _maxPwr=Math.max(importW,exportW,hw,500);
-  const _bar=(w,color)=>`<div style="flex:1;height:3px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden;margin:0 8px"><div style="width:${Math.min(100,Math.round(w/_maxPwr*100))}%;height:100%;background:${color};border-radius:2px"></div></div>`;
+  // v4.6.524: schaal op werkelijk max grid vermogen = maxA × 230V × aantal fasen
+  const phases = this._config.phase_count || 3;
+  const _maxPwr = maxA * 230 * phases;
+  const _TT=window.CloudEMSTooltip;
+  const _eb=this._a('sensor.cloudems_energy_balancer','source')||'';
+  const _hasP1=_eb==='p1'||_eb.toLowerCase().includes('p1')||_eb.toLowerCase().includes('dsmr');
+  const _hrA=this._s('sensor.cloudems_home_rest')?.attributes||{};
+  const _ttImp=_TT?_TT.html('sr-import','Afname grid',[
+    {label:'Sensor',    value:'cloudems_grid_import_power'},
+    {label:'Bron',      value:_hasP1?'P1 DSMR (OBIS 1-0:1.7.0)':'Berekend via balancer'},
+    {label:'Waarde',    value:this._fmt(importW)},
+    {label:'Max limiet',value:this._fmt(_maxPwr)},
+  ],{trusted:_hasP1}):{wrap:'',tip:''};
+  const _ttExp=_TT?_TT.html('sr-export','Teruglevering',[
+    {label:'Sensor',    value:'cloudems_grid_export_power'},
+    {label:'Bron',      value:_hasP1?'P1 DSMR (OBIS 1-0:2.7.0)':'Berekend via balancer'},
+    {label:'Waarde',    value:this._fmt(exportW)},
+  ],{trusted:_hasP1}):{wrap:'',tip:''};
+  const _ttHuis=_TT?_TT.html('sr-huis','Huisverbruik',[
+    {label:'Sensor',   value:'cloudems_home_rest'},
+    {label:'Formule',  value:'Zonne + Grid − Batterij − Beheerd',dim:true},
+    {label:'Zonne',    value:this._fmt(_hrA.solar_w||0)},
+    {label:'Grid',     value:this._fmt(_hrA.grid_w||0)},
+    {label:'Batterij', value:this._fmt(_hrA.battery_w||0),dim:true},
+    {label:'Beheerd',  value:this._fmt(_hrA.total_managed_w||0),dim:true},
+  ],{footer:'○ Afgeleid — som van bekende stromen'}):{wrap:'',tip:''};
   return`
-<div class="sr"><div class="sr-l"><span class="sr-icon">🔌</span>Afname grid</div>${_bar(importW,'#f87171')}<div class="sr-r" style="color:${importW>100?'#f87171':'rgba(255,255,255,0.5)'}">${this._fmt(importW)}</div></div>
-<div class="sr"><div class="sr-l"><span class="sr-icon">⬆️</span>Teruglevering</div>${_bar(exportW,'#34d399')}<div class="sr-r" style="color:${exportW>100?'#34d399':'rgba(255,255,255,0.5)'}">${this._fmt(exportW)}</div></div>
-<div class="sr"><div class="sr-l"><span class="sr-icon">🏠</span>Huisverbruik</div>${_bar(hw,'#818cf8')}<div class="sr-r">${this._fmt(hw)} <span class="sr-sub">nu</span></div></div>`;
+<div class="sr" style="position:relative" ${_ttImp.wrap}><div class="sr-l"><span class="sr-icon">🔌</span>Afname grid</div>${this._vuBar('import',importW,_maxPwr,'#f87171')}<div class="sr-r" style="color:${importW>100?'#f87171':'rgba(255,255,255,0.5)'}">${this._fmt(importW)}</div>${_ttImp.tip}</div>
+<div class="sr" style="position:relative" ${_ttExp.wrap}><div class="sr-l"><span class="sr-icon">⬆️</span>Teruglevering</div>${this._vuBar('export',exportW,_maxPwr,'#34d399')}<div class="sr-r" style="color:${exportW>100?'#34d399':'rgba(255,255,255,0.5)'}">${this._fmt(exportW)}</div>${_ttExp.tip}</div>
+<div class="sr" style="position:relative" ${_ttHuis.wrap}><div class="sr-l"><span class="sr-icon">🏠</span>Huisverbruik</div>${this._vuBar('house',hw,_maxPwr,'#818cf8')}<div class="sr-r">${this._fmt(hw)} <span class="sr-sub">nu</span></div>${_ttHuis.tip}</div>`;
 })()}
-<div class="sr"><div class="sr-l"><span class="sr-icon">🏆</span>Hoogste verbruiker</div><div class="sr-r">${this._cap(this._a('sensor.cloudems_kamers_overzicht','top_room')||'—')}</div></div>
-${(()=>{const uw=this._v('sensor.cloudems_onverklaard_vermogen')||this._a('sensor.cloudems_status','undefined_power_w',0)||0;const un=this._a('sensor.cloudems_status','undefined_power_name','Onverklaard vermogen')||'Onverklaard vermogen';return uw>50?`<div class="sr"><div class="sr-l"><span class="sr-icon">❓</span>${un}</div><div class="sr-r" style="color:#fbbf24">${this._fmt(uw)}</div></div>`:'';})()}
-<div class="sr"><div class="sr-l"><span class="sr-icon">📅</span>Dagtype</div><div class="sr-r" style="color:rgba(255,255,255,0.7)">${dagtype}</div></div>
-<div class="sr"><div class="sr-l"><span class="sr-icon">⚡</span>Flex vermogen</div><div class="sr-r">${this._fmt(flexW)}</div></div>
-<div class="sr"><div class="sr-l"><span class="sr-icon">🏡</span>Aanwezig</div><div class="sr-r" style="color:${aanwezig?'#34d399':'rgba(255,255,255,0.4)'}">${aanwezig?'✅ Ja':'❌ Nee'}</div></div>
-<div class="sr"><div class="sr-l"><span class="sr-icon">🔁</span>Zelfconsumptie</div><div class="sr-r">${zelfcons.toFixed(1)}%</div></div>
+${(()=>{const _TT=window.CloudEMSTooltip;const topRoom=this._a('sensor.cloudems_kamers_overzicht','top_room')||'—';const topW=this._a('sensor.cloudems_kamers_overzicht','top_room_w',null);const _tt=_TT?_TT.html('sr-top','🏆 Hoogste verbruiker',[
+  {label:'Kamer',   value:topRoom},
+  {label:'Vermogen',value:topW!=null?Math.round(topW)+' W':'—'},
+  {label:'Sensor',  value:'cloudems_kamers_overzicht → top_room',dim:true},
+],{footer:'Kamer met het hoogste actuele verbruik'}):{wrap:'',tip:''};
+return`<div class="sr" style="position:relative;cursor:default" ${_tt.wrap}><div class="sr-l"><span class="sr-icon">🏆</span>Hoogste verbruiker</div><div class="sr-r">${this._cap(topRoom)}</div>${_tt.tip}</div>`;})()}
+${(()=>{const uw=this._v('sensor.cloudems_onverklaard_vermogen')||this._a('sensor.cloudems_status','undefined_power_w',0)||0;const un=this._a('sensor.cloudems_status','undefined_power_name','Onverklaard vermogen')||'Onverklaard vermogen';if(uw<=50)return'';const _TT=window.CloudEMSTooltip;const _tt=_TT?_TT.html('sr-onv','Onverklaard vermogen',[{label:'Sensor',value:'cloudems_onverklaard_vermogen'},{label:'Waarde',value:this._fmt(uw)},{label:'Naam',value:un},{label:'Formule',value:'Grid + Zonne − Alle bekende loads',dim:true}],{footer:'○ Niet direct gemeten — restpost Kirchhoff'}):{wrap:'',tip:''};return`<div class="sr" style="position:relative" ${_tt.wrap}><div class="sr-l"><span class="sr-icon">❓</span>${un}</div><div class="sr-r" style="color:#fbbf24">${this._fmt(uw)}</div>${_tt.tip}</div>`;})()}
+${(()=>{const _TT=window.CloudEMSTooltip;const dtA=this._a('sensor.cloudems_day_type',null)||{};const _tt=_TT?_TT.html('sr-dag','📅 Dagtype',[
+  {label:'Type',       value:dagtype||'—'},
+  {label:'Sensor',     value:'cloudems_day_type'},
+  {label:'Zekerheid',  value:dtA.confidence!=null?(dtA.confidence*100).toFixed(0)+'%':'—',dim:true},
+  {label:'Verwacht kWh',value:dtA.expected_kwh!=null?parseFloat(dtA.expected_kwh).toFixed(1)+' kWh':'—',dim:true},
+  {label:'Uitleg',     value:'Patroon geleerd op basis van historisch verbruik',dim:true},
+],{footer:'Dagtype bepaalt of CloudEMS extra flexibel stuurt'}):{wrap:'',tip:''};
+return`<div class="sr" style="position:relative;cursor:default" ${_tt.wrap}><div class="sr-l"><span class="sr-icon">📅</span>Dagtype</div><div class="sr-r" style="color:rgba(255,255,255,0.7)">${dagtype}</div>${_tt.tip}</div>`;})()}
+${(()=>{const _TT=window.CloudEMSTooltip;
+  const _ttFlex=_TT?_TT.html('sr-flex','Flexibel vermogen',[
+    {label:'Sensor',   value:'cloudems_flexibel_vermogen'},
+    {label:'Batterij', value:this._fmt((this._a('sensor.cloudems_flexibel_vermogen','battery_kw',0)||0)*1000)},
+    {label:'EV',       value:this._fmt((this._a('sensor.cloudems_flexibel_vermogen','ev_kw',0)||0)*1000)},
+    {label:'Boiler',   value:this._fmt((this._a('sensor.cloudems_flexibel_vermogen','boiler_kw',0)||0)*1000)},
+    {label:'NILM',     value:this._fmt((this._a('sensor.cloudems_flexibel_vermogen','nilm_kw',0)||0)*1000)},
+  ],{footer:'Totaal verschuifbaar vermogen op dit moment'}):{wrap:'',tip:''};
+  const _ttAanw=_TT?_TT.html('sr-aanw','Aanwezigheid',[
+    {label:'Sensor',  value:'cloudems_aanwezigheid_op_basis_van_stroom'},
+    {label:'Status',  value:aanwezig?'Aanwezig':'Niet aanwezig'},
+    {label:'Methode', value:'Stroomverbruik boven drempel',dim:true},
+  ],{footer:aanwezig?'● Aanwezig gedetecteerd':'○ Geen aanwezigheid gedetecteerd'}):{wrap:'',tip:''};
+  const _ttSc=_TT?_TT.html('sr-sc','Zelfconsumptie',[
+    {label:'Sensor',       value:'cloudems_self_consumption'},
+    {label:'Ratio',        value:zelfcons.toFixed(1)+'%'},
+    {label:'PV vandaag',   value:(this._a('sensor.cloudems_self_consumption','pv_today_kwh',0)||0).toFixed(2)+' kWh'},
+    {label:'Zelf verbruikt',value:(this._a('sensor.cloudems_self_consumption','self_consumed_kwh',null)!=null?(this._a('sensor.cloudems_self_consumption','self_consumed_kwh',0)||0).toFixed(2)+' kWh':'lerende...')},
+    {label:'Teruggeleverd', value:(this._a('sensor.cloudems_self_consumption','exported_kwh',null)!=null?(this._a('sensor.cloudems_self_consumption','exported_kwh',0)||0).toFixed(2)+' kWh':'—'),dim:true},
+    {label:'Formule',      value:'(PV − Export) / PV × 100',dim:true},
+  ],{footer:'Hogere % = meer zonne-energie direct thuis verbruikt'}):{wrap:'',tip:''};
+  return`
+<div class="sr" style="position:relative" ${_ttFlex.wrap}><div class="sr-l"><span class="sr-icon">⚡</span>Flex vermogen</div><div class="sr-r">${this._fmt(flexW)}</div>${_ttFlex.tip}</div>
+<div class="sr" style="position:relative" ${_ttAanw.wrap}><div class="sr-l"><span class="sr-icon">🏡</span>Aanwezig</div><div class="sr-r" style="color:${aanwezig?'#34d399':'rgba(255,255,255,0.4)'}\">${aanwezig?'✅ Ja':'❌ Nee'}</div>${_ttAanw.tip}</div>
+<div class="sr" style="position:relative" ${_ttSc.wrap}><div class="sr-l"><span class="sr-icon">🔁</span>Zelfconsumptie</div><div class="sr-r">${zelfcons.toFixed(1)}%</div>${_ttSc.tip}</div>`;
+})()}
 ${kostenVandaag!==null&&kostenVandaag!=='unavailable'?`<div class="sr"><div class="sr-l"><span class="sr-icon">💰</span>Kosten vandaag</div><div class="sr-r">${kostenVandaag}</div></div>`:''}
 ${batAction.action?`<div class="sr"><div class="sr-l"><span class="sr-icon">🔋</span>Batterij beslissing</div><div class="sr-r" style="color:#60a5fa">${batAction.action==='charge'?'Laden':batAction.action==='discharge'?'Ontladen':'Idle'}</div></div>`:''}
 ${monthCost!==null&&budget!==null?`<div class="sr"><div class="sr-l"><span class="sr-icon">📊</span>Maandbudget</div><div class="sr-r" style="color:${monthCost>budget*0.85?'#f97316':'rgba(255,255,255,0.85)'}">€${parseFloat(monthCost).toFixed(0)} / €${parseFloat(budget).toFixed(0)}</div></div>`:''}
@@ -653,7 +867,27 @@ ${filtered.slice(0,20).map((d,i)=>{
 
   /* ── ZONNE ───────────────────────────────────────────────────────────────── */
   _tabSolar(){
-    const invs=this._a('sensor.cloudems_solar_system','inverters',[])||[];
+    // v4.6.550: probeer eerst solar_system, dan fallback naar inverter_data uit status
+    let invs=this._a('sensor.cloudems_solar_system','inverters',[])||[];
+    if(!invs.length){
+      // Fallback: inverter_data uit sensor.cloudems_status (zit er altijd in via coordinator)
+      const invData=this._a('sensor.cloudems_status','inverter_data',[])||[];
+      if(invData.length) invs=invData.map(i=>({
+        label:                    i.label,
+        current_w:                i.current_w,
+        peak_w:                   i.peak_w,
+        peak_w_7d:                i.peak_w_7d,
+        estimated_wp:             i.estimated_wp,
+        utilisation_pct:          i.utilisation_pct,
+        azimuth_compass:          i.azimuth_compass,
+        tilt_deg:                 i.tilt_deg,
+        phase:                    i.phase,
+        phase_certain:            i.phase_certain,
+        orientation_confident:    i.orientation_confident,
+        orientation_learning_pct: i.orientation_learning_pct||0,
+        orientation_samples_needed: i.orientation_samples_needed,
+      }));
+    }
     if(!invs.length)return`<div class="empty">Geen omvormers geconfigureerd</div>`;
     return invs.map(inv=>{
       const w=parseFloat(inv.current_w||0); const peak=parseFloat(inv.peak_w||0)||1;
@@ -920,26 +1154,40 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
 
   /* ── PRIJZEN ─────────────────────────────────────────────────────────────── */
   _tabPrices(){
-    const prices=this._a('sensor.cloudems_price_current_hour','next_hours',[])||[];
+    // next_hours zit in sensor.cloudems_epex_today, niet in price_current_hour
+    const prices=this._a('sensor.cloudems_epex_today','next_hours',[])||[];
     const cur=this._s('sensor.cloudems_price_current_hour');
-    const curCt=cur?parseFloat(cur.state)*100:null;
-    if(!prices.length&&curCt===null)return`<div class="empty">Prijsdata niet beschikbaar.</div>`;
+    const curCt=cur&&cur.state!=='unavailable'&&cur.state!=='unknown'?parseFloat(cur.state)*100:null;
+    // Fallback: huidige prijs uit epex_today als price_current_hour unavailable is
+    const curCtFb=curCt??( (()=>{const p=this._a('sensor.cloudems_epex_today','current_price_display',null);return p!==null?parseFloat(p)*100:null;})() );
+    if(!prices.length&&curCtFb===null)return`<div class="empty">Prijsdata niet beschikbaar.</div>`;
     const now=new Date();
-    const all=[{hour:now.getHours(),ct:curCt,current:true},...prices.slice(0,23).map((p,i)=>({
-      hour:(now.getHours()+i+1)%24,ct:p.price_eur_kwh*100,current:false
+    const all=[{hour:now.getHours(),ct:curCtFb,current:true},...prices.slice(0,23).map((p,i)=>({
+      hour:(now.getHours()+i+1)%24,ct:(p.price_eur_kwh??p.price??null)!==null?(p.price_eur_kwh??p.price)*100:null,current:false
     }))];
     const vals=all.map(p=>p.ct).filter(v=>v!==null);
     const mx=Math.max(...vals,35); const mn=Math.min(...vals,0);
     const minCt=Math.min(...vals); const minIdx=all.findIndex(p=>p.ct===minCt);
+
+    // v4.6.558: laad/ontlaad planning uit battery EPEX schema
+    const chargeHours=this._a('sensor.cloudems_batterij_epex_schema','charge_hours',[])||[];
+    const dischargeHours=this._a('sensor.cloudems_batterij_epex_schema','discharge_hours',[])||[];
+    const boilerCheap=this._a('sensor.cloudems_price_current_hour','cheapest_2h_start',null);
+    const chSet=new Set(chargeHours.map(h=>typeof h==='object'?h.hour:h));
+    const disSet=new Set(dischargeHours.map(h=>typeof h==='object'?h.hour:h));
+
     return`<div style="padding:8px 0">
       <div style="display:flex;align-items:flex-end;gap:2px;padding:0 12px">
         ${all.map((p,i)=>{
           const h=p.ct!==null?Math.max(6,Math.round((p.ct-mn)/(mx-mn||1)*60+6)):6;
           const isCheapest=i===minIdx;
+          const isCharge=chSet.has(p.hour);
+          const isDis=disSet.has(p.hour);
+          const planIcon=isCharge?'⚡':isDis?'↑':'';
           return`<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex:1;min-width:0">
-            ${isCheapest?`<div style="font-size:7px;color:#34d399;text-align:center">★</div>`:''}
+            ${isCheapest?`<div style="font-size:7px;color:#34d399;text-align:center">★</div>`:(planIcon?`<div style="font-size:7px;color:${isCharge?'#60a5fa':'#f97316'};text-align:center">${planIcon}</div>`:'<div style="font-size:7px;color:transparent">.</div>')}
             ${p.current?`<div style="font-size:7px;color:rgba(255,255,255,0.5);text-align:center">nu</div>`:'<div style="font-size:7px;color:transparent">.</div>'}
-            <div style="width:100%;height:${h}px;background:${p.ct!==null?PCOL(p.ct):'rgba(255,255,255,0.1)'};border-radius:2px;opacity:${p.current?1:0.7};${p.current?'outline:1px solid rgba(255,255,255,0.3)':''}"></div>
+            <div style="width:100%;height:${h}px;background:${p.ct!==null?PCOL(p.ct):'rgba(255,255,255,0.1)'};border-radius:2px;opacity:${p.current?1:0.7};${p.current?'outline:1px solid rgba(255,255,255,0.3)':''}${isCharge?';outline:1px solid rgba(96,165,250,0.5)':''}${isDis?';outline:1px solid rgba(249,115,22,0.5)':''}"></div>
             <div style="font-size:7px;color:rgba(255,255,255,${p.current?'0.8':'0.25'});text-align:center">${String(p.hour).padStart(2,'0')}</div>
           </div>`;
         }).join('')}
@@ -947,8 +1195,13 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
       ${minIdx>=0?`<div style="margin:10px 12px 0;padding:8px 10px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.2);border-radius:7px;font-size:11px;color:#34d399">
         ⭐ Goedkoopste uur: ${String(all[minIdx].hour).padStart(2,'0')}:00 — ${all[minIdx].ct!==null?all[minIdx].ct.toFixed(1)+'ct':'—'}
       </div>`:''}
+      ${chSet.size>0||disSet.size>0?`<div style="margin:8px 12px 0;padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:7px;font-size:11px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,0.3);margin-bottom:6px">Batterij planning</div>
+        ${chSet.size>0?`<div style="color:#60a5fa;margin-bottom:3px">⚡ Laden: ${[...chSet].sort((a,b)=>a-b).map(h=>String(h).padStart(2,'0')+':00').join(', ')}</div>`:''}
+        ${disSet.size>0?`<div style="color:#f97316">↑ Ontladen: ${[...disSet].sort((a,b)=>a-b).map(h=>String(h).padStart(2,'0')+':00').join(', ')}</div>`:''}
+      </div>`:''}
       <div style="display:flex;justify-content:space-between;padding:8px 12px 0;font-size:10px;color:rgba(255,255,255,0.3)">
-        <span>Nu: ${curCt!==null?curCt.toFixed(1)+'ct':'—'}</span>
+        <span>Nu: ${curCtFb!==null?curCtFb.toFixed(1)+'ct':'—'}</span>
         <span>Min: ${Math.min(...vals).toFixed(1)}ct</span>
         <span>Max: ${Math.max(...vals).toFixed(1)}ct</span>
       </div>
@@ -1058,7 +1311,7 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
   }
 
   static getConfigElement(){return document.createElement('cloudems-home-card-editor');}
-  static getStubConfig(){return {title:'CloudEMS Home', max_ampere:25};}
+  static getStubConfig(){return {title:'CloudEMS Home', max_ampere:25, phase_count:3};}
 }
 
 class CloudEMSHomeCardEditor extends HTMLElement {
@@ -1067,11 +1320,20 @@ class CloudEMSHomeCardEditor extends HTMLElement {
   connectedCallback(){
     if(this._built)return; this._built=true;
     this.innerHTML=`<div style="padding:12px;font-size:13px;display:flex;flex-direction:column;gap:8px">
-      <label>Max ampere per fase<br><input type="number" id="max_a" value="${this._config.max_ampere||25}" min="10" max="40" style="width:80px;margin-top:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:inherit"></label>
+      <label>Max ampere per fase<br><input type="number" id="max_a" value="${this._config.max_ampere||25}" min="10" max="63" style="width:80px;margin-top:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:inherit"></label>
+      <label>Aantal fasen<br><select id="phases" style="margin-top:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:inherit">
+        <option value="1" ${(this._config.phase_count||3)===1?'selected':''}>1 fase</option>
+        <option value="3" ${(this._config.phase_count||3)===3?'selected':''}>3 fasen</option>
+      </select></label>
+      <div style="font-size:10px;color:rgba(255,255,255,0.4)">Max grid = ${this._config.max_ampere||25}A × 230V × ${this._config.phase_count||3} = ${(this._config.max_ampere||25)*230*(this._config.phase_count||3)} W</div>
     </div>`;
-    this.querySelector('#max_a').addEventListener('change',e=>{
-      this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:{...this._config,max_ampere:parseInt(e.target.value)}},bubbles:true,composed:true}));
-    });
+    const fire = () => this.dispatchEvent(new CustomEvent('config-changed',{
+      detail:{config:{...this._config,
+        max_ampere: parseInt(this.querySelector('#max_a').value),
+        phase_count: parseInt(this.querySelector('#phases').value),
+      }},bubbles:true,composed:true}));
+    this.querySelector('#max_a').addEventListener('change', fire);
+    this.querySelector('#phases').addEventListener('change', fire);
   }
 }
 

@@ -1,0 +1,70 @@
+<svg width="100%" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12121f"/>
+      <stop offset="100%" stop-color="#0c0c1a"/>
+    </linearGradient>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <rect width="480" height="200" rx="14" fill="url(#bg)"/>
+  <rect width="480" height="200" rx="14" fill="none" stroke="#334155" stroke-width="1"/>
+
+  <!-- Netvoeding -->
+  <rect x="14" y="64" width="72" height="56" rx="10" fill="#1e293b" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="50" y="85" text-anchor="middle" font-size="9" fill="#38bdf8" font-weight="700">NET</text>
+  <text x="50" y="100" text-anchor="middle" font-size="13">⚡</text>
+  <text x="50" y="115" text-anchor="middle" font-size="7" fill="#64748b">normaal</text>
+
+  <!-- Lijn van net naar ATS -->
+  <line x1="86" y1="92" x2="118" y2="92" stroke="#38bdf8" stroke-width="1.5"/>
+
+  <!-- Generator -->
+  <rect x="14" y="138" width="72" height="50" rx="10" fill="#1e293b" stroke="#f97316" stroke-width="1.5"/>
+  <text x="50" y="157" text-anchor="middle" font-size="9" fill="#f97316" font-weight="700">GENERATOR</text>
+  <text x="50" y="172" text-anchor="middle" font-size="13">🔌</text>
+
+  <!-- Lijn van gen naar ATS -->
+  <line x1="86" y1="163" x2="110" y2="130" stroke="#f97316" stroke-width="1.5"/>
+
+  <!-- ATS schakelaar -->
+  <rect x="110" y="72" width="72" height="76" rx="10" fill="#1e293b" stroke="#fbbf24" stroke-width="2"/>
+  <text x="146" y="93" text-anchor="middle" font-size="9" fill="#fbbf24" font-weight="700">ATS</text>
+  <text x="146" y="107" text-anchor="middle" font-size="8" fill="#94a3b8">Automatische</text>
+  <text x="146" y="119" text-anchor="middle" font-size="8" fill="#94a3b8">Transfer</text>
+  <text x="146" y="131" text-anchor="middle" font-size="8" fill="#94a3b8">Schakelaar</text>
+  <text x="146" y="143" text-anchor="middle" font-size="7" fill="#64748b">switch/button</text>
+
+  <!-- Pijl ATS naar huis -->
+  <line x1="182" y1="110" x2="218" y2="110" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Huis/meterkast -->
+  <rect x="218" y="78" width="72" height="64" rx="10" fill="#1e293b" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="254" y="100" text-anchor="middle" font-size="9" fill="#94a3b8" font-weight="700">HUIS</text>
+  <text x="254" y="115" text-anchor="middle" font-size="16">🏠</text>
+  <text x="254" y="134" text-anchor="middle" font-size="7" fill="#64748b">verbruikers</text>
+
+  <!-- CloudEMS -->
+  <rect x="316" y="62" width="148" height="96" rx="12" fill="#0f172a" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="390" y="82" text-anchor="middle" font-size="9" fill="#60a5fa" font-weight="700">CloudEMS</text>
+
+  <!-- Status sensor -->
+  <rect x="328" y="90" width="124" height="22" rx="5" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="390" y="105" text-anchor="middle" font-size="8" fill="#94a3b8">status_entity → AAN/UIT</text>
+
+  <!-- Vermogen sensor -->
+  <rect x="328" y="118" width="124" height="22" rx="5" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+  <text x="390" y="133" text-anchor="middle" font-size="8" fill="#94a3b8">power_sensor → W</text>
+
+  <!-- Pijl huis naar cloudems -->
+  <line x1="290" y1="100" x2="316" y2="100" stroke="#60a5fa" stroke-width="1.2" stroke-dasharray="3,2" marker-end="url(#arr)"/>
+
+  <!-- Pijl gen naar cloudems autostart -->
+  <line x1="290" y1="163" x2="390" y2="158" stroke="#f97316" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arr)"/>
+  <text x="330" y="175" font-size="8" fill="#f97316" opacity=".7">autostart</text>
+
+  <!-- Bottom label -->
+  <rect x="14" y="170" width="96" height="16" rx="4" fill="#1e3a5f"/>
+  <text x="62" y="182" text-anchor="middle" font-size="8" fill="#38bdf8">Noodstroom actief</text>
+</svg>

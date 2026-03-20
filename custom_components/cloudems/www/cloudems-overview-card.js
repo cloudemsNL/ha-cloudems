@@ -43,6 +43,15 @@ const CSS = `
   .ecell{padding:10px 12px;border-right:1px solid var(--bdr);display:flex;flex-direction:column;gap:2px;}
   .ecell:last-child{border-right:none;}
   .el{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);}
+  /* GAS STRIP */
+  .gasstrip{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--bdr);background:rgba(251,146,60,.04);}
+  .gasstrip .gs-icon{font-size:16px;line-height:1;}
+  .gasstrip .gs-rate{font-size:18px;font-weight:700;color:var(--amb);font-family:var(--mono);}
+  .gasstrip .gs-unit{font-size:10px;color:var(--mut);margin-left:2px;}
+  .gasstrip .gs-dag{font-size:10px;color:var(--sub);margin-left:8px;}
+  .gasstrip .gs-bar-wrap{flex:1;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;min-width:40px;}
+  .gasstrip .gs-bar-fill{height:100%;border-radius:2px;background:var(--amb);transition:width .4s;}
+  .gasstrip .gs-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);}
   .ev{font-family:var(--mono);font-size:16px;font-weight:700;}
   .eu{font-family:var(--mono);font-size:9px;color:var(--sub);}
 
@@ -263,6 +272,14 @@ class CloudemsControlCard extends HTMLElement {
     const price   = this._fn("sensor.cloudems_energy_price_current_hour") || this._fn("sensor.cloudems_price_current_hour");
     const costDay = this._fn("sensor.cloudems_energy_cost");
 
+    // Gas — lees van sensor.cloudems_gasstand
+    const gasAttr    = this._hass?.states["sensor.cloudems_gasstand"]?.attributes ?? {};
+    const gasDagM3   = parseFloat(gasAttr.dag_m3) || 0;
+    const gasFib     = Array.isArray(gasAttr.gas_fib_hours) ? gasAttr.gas_fib_hours : [];
+    const gasFib1h   = gasFib.find(f => f.hours === 1);
+    const gasRateM3h = (gasFib1h && gasFib1h.rate_m3h != null) ? gasFib1h.rate_m3h : null;
+    const hasGas     = this._hass?.states["sensor.cloudems_gasstand"] != null;
+
     // Battery SoC — with Zonneplan fallback chain
     const socDirect = parseFloat(this._st("sensor.cloudems_battery_so_c"));
     const epexAttr  = h.states["sensor.cloudems_batterij_epex_schema"]?.attributes ?? {};
@@ -357,13 +374,20 @@ class CloudemsControlCard extends HTMLElement {
       <div class="mod-grid">
         ${modules.map(m => {
           const on = this._sw(m.sw);
-          return `<div class="mod ${on?"on":"off"}" data-sw="${esc(m.sw)}">
+          const _TTM=window.CloudEMSTooltip;
+          const _ttMod=_TTM?_TTM.html('ov-mod-'+m.sw.replace(/[^a-z0-9]/gi,'_'),m.name,[
+            {label:'Module',  value:m.sw},
+            {label:'Status',  value:on?'✅ Aan':'❌ Uit'},
+            {label:'Status',  value:esc(m.d())},
+          ],{footer:'Klik om module aan/uit te zetten'}):{wrap:'',tip:''};
+          return `<div class="mod ${on?"on":"off"}" data-sw="${esc(m.sw)}" style="position:relative" ${_ttMod.wrap}>
             <div class="mod-top">
               <span class="micon">${m.icon}</span>
               <span class="mname">${esc(m.name)}</span>
               <span class="mbadge ${on?"on":"off"}">${on?"AAN":"UIT"}</span>
             </div>
             <div class="mdetail">${esc(m.d())}</div>
+            ${_ttMod.tip}
           </div>`;
         }).join("")}
       </div>
@@ -489,11 +513,50 @@ class CloudemsControlCard extends HTMLElement {
     <div class="hdr-badge">v${esc(version)}</div>
   </div>
   <div class="estrip">
-    <div class="ecell"><div class="el">☀️ Solar</div><div class="ev" style="color:var(--ylw)">${solarW>0?solarW.toFixed(0):"0"}</div><div class="eu">W</div></div>
-    <div class="ecell"><div class="el">${gridW>=0?"⬇ Import":"⬆ Export"}</div><div class="ev" style="color:${gridW>=0?"var(--red)":"var(--grn)"}">${Math.abs(gridW).toFixed(0)}</div><div class="eu" style="color:${pCol}">€${price.toFixed(3)}</div></div>
-    <div class="ecell"><div class="el">🔋 ${batW>=0?"Laden":"Ontladen"}</div><div class="ev" style="color:${batW>=0?"var(--sky)":"var(--grn)"}">${Math.abs(batW).toFixed(0)}</div><div class="eu">W · ${soc>0?soc.toFixed(0):"—"}%</div></div>
-    <div class="ecell"><div class="el">🏠 Huis</div><div class="ev">${homeW>0?homeW.toFixed(0):"—"}</div><div class="eu">W · €${costDay.toFixed(2)}</div></div>
+    ${(()=>{const _TTO=window.CloudEMSTooltip;
+      const _ttSol=_TTO?_TTO.html('ov-sol','Zonne-energie',[
+        {label:'Sensor',  value:'cloudems_solar_system'},
+        {label:'Nu',      value:solarW.toFixed(0)+' W'},
+        {label:'Forecast',value:this._fn('sensor.cloudems_pv_forecast_today',null)!=null?this._fn('sensor.cloudems_pv_forecast_today',null).toFixed(1)+' kWh vandaag':'—'},
+      ],{trusted:solarW>0}):{wrap:'',tip:''};
+      const _ttGrid=_TTO?_TTO.html('ov-grid',gridW>=0?'Import':'Export',[
+        {label:'Sensor', value:'cloudems_grid_net_power'},
+        {label:'Nu',     value:(gridW>=0?'▼ Import ':'▲ Export ')+Math.abs(gridW).toFixed(0)+' W'},
+        {label:'Prijs',  value:'€'+price.toFixed(4)+'/kWh'},
+      ],{trusted:true}):{wrap:'',tip:''};
+      const _ttBat=_TTO?_TTO.html('ov-bat',batW>=0?'Batterij laden':'Batterij ontladen',[
+        {label:'Sensor', value:'cloudems_battery_so_c'},
+        {label:'Nu',     value:(batW>=0?'▲ Laden ':'▼ Ontladen ')+Math.abs(batW).toFixed(0)+' W'},
+        {label:'SoC',    value:soc.toFixed(0)+'%'},
+      ],{trusted:soc>0}):{wrap:'',tip:''};
+      const _ttHuis=_TTO?_TTO.html('ov-huis','Huisverbruik',[
+        {label:'Sensor',       value:'cloudems_home_rest'},
+        {label:'Nu',           value:homeW.toFixed(0)+' W'},
+        {label:'Kosten vandaag',value:'€'+costDay.toFixed(2)},
+      ],{trusted:homeW>0}):{wrap:'',tip:''};
+      return`
+    <div class="ecell" style="position:relative;cursor:default" ${_ttSol.wrap}><div class="el">☀️ Solar</div><div class="ev" style="color:var(--ylw)">${solarW>0?solarW.toFixed(0):"0"}</div><div class="eu">W</div>${_ttSol.tip}</div>
+    <div class="ecell" style="position:relative;cursor:default" ${_ttGrid.wrap}><div class="el">${gridW>=0?"⬇ Import":"⬆ Export"}</div><div class="ev" style="color:${gridW>=0?"var(--red)":"var(--grn)"}">${Math.abs(gridW).toFixed(0)}</div><div class="eu" style="color:${pCol}">€${price.toFixed(3)}</div>${_ttGrid.tip}</div>
+    <div class="ecell" style="position:relative;cursor:default" ${_ttBat.wrap}><div class="el">🔋 ${batW>=0?"Laden":"Ontladen"}</div><div class="ev" style="color:${batW>=0?"var(--sky)":"var(--grn)"}">${Math.abs(batW).toFixed(0)}</div><div class="eu">W · ${soc>0?soc.toFixed(0):"—"}%</div>${_ttBat.tip}</div>
+    <div class="ecell" style="position:relative;cursor:default" ${_ttHuis.wrap}><div class="el">🏠 Huis</div><div class="ev">${homeW>0?homeW.toFixed(0):"—"}</div><div class="eu">W · €${costDay.toFixed(2)}</div>${_ttHuis.tip}</div>`;
+    })()}
   </div>
+  ${hasGas ? (()=>{const _TTG=window.CloudEMSTooltip;
+    const _ttGas=_TTG?_TTG.html('ov-gas','Gasverbruik',[
+      {label:'Sensor',    value:'cloudems_gasstand'},
+      {label:'Stroom',    value:gasRateM3h!=null?gasRateM3h.toFixed(3)+' m³/u':'—'},
+      {label:'Vandaag',   value:gasDagM3.toFixed(3)+' m³'},
+      {label:'Max geleerd',value:gasAttr.gas_rate_max_m3h?parseFloat(gasAttr.gas_rate_max_m3h).toFixed(3)+' m³/u (EMA)':'—',dim:true},
+      {label:'Bron',      value:gasRateM3h!=null?'● P1 DSMR realtime':'○ Berekend uit dagstand',dim:true},
+    ],{footer:'Balk = huidig t.o.v. geleerd maximum verbruik'}):{wrap:'',tip:''};
+    return`<div class="gasstrip" style="position:relative;cursor:default" ${_ttGas.wrap}>
+    <span class="gs-icon">🔥</span>
+    <span class="gs-label">Gas</span>
+    <span class="gs-rate">${gasRateM3h != null ? gasRateM3h.toFixed(3) : "—"}</span><span class="gs-unit">m³/u</span>
+    <div class="gs-bar-wrap"><div class="gs-bar-fill" style="width:${gasRateM3h != null ? Math.min(100, (gasRateM3h / Math.max(gasAttr.gas_rate_max_m3h || 1, gasRateM3h)) * 100).toFixed(1) : 0}%"></div></div>
+    <span class="gs-dag">vandaag ${gasDagM3.toFixed(3)} m³</span>
+    ${_ttGas.tip}
+  </div>`;})() : ""}
   <div class="nav">
     ${tabs.map(t => `<button class="nav-btn${t.id===this._tab?" active":""}" data-tab="${t.id}">${t.label}</button>`).join("")}
   </div>

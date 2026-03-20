@@ -39,6 +39,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -97,6 +98,7 @@ class LearningBackup:
         self._high_path      = os.path.join(self._dir, HIGH_LOG_NAME)
         self._decisions_path = os.path.join(self._dir, DECISIONS_LOG_NAME)
         self._nilm_path      = os.path.join(self._dir, NILM_LOG_NAME)
+        self._rotate_lock    = threading.Lock()  # v4.6.566: voorkomt race condition bij gelijktijdige executor-jobs
 
     async def async_setup(self) -> None:
         """Maak de backup-directory aan als die niet bestaat."""
@@ -320,12 +322,15 @@ class LearningBackup:
         max_bytes:    int,
         backup_count: int,
     ) -> None:
-        """Voeg een regel toe; roteer indien nodig."""
+        """Voeg een regel toe; roteer indien nodig.
+        v4.6.566: lock voorkomt TOCTOU race condition bij gelijktijdige executor-jobs.
+        """
         self._ensure_dir()
-        if os.path.exists(log_path) and os.path.getsize(log_path) >= max_bytes:
-            self._rotate(log_path, backup_count)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(line)
+        with self._rotate_lock:
+            if os.path.exists(log_path) and os.path.getsize(log_path) >= max_bytes:
+                self._rotate(log_path, backup_count)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line)
 
     @staticmethod
     def _rotate(base: str, count: int) -> None:

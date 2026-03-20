@@ -139,6 +139,8 @@ async def async_setup_entry(
         CloudEMSPriceCurrentSensor(coordinator, entry),
         CloudEMSPriceNextHourSensor(coordinator, entry),
         CloudEMSNILMStatsSensor(coordinator, entry),
+        # v4.6.584: NILM apparaatgroepen sensor
+        CloudEMSNilmGroupsSensor(coordinator, entry),
         # v1.5: NILM running-devices list sensors (plain + with power)
         CloudEMSNILMRunningDevicesSensor(coordinator, entry),
         CloudEMSNILMRunningDevicesPowerSensor(coordinator, entry),
@@ -216,6 +218,8 @@ async def async_setup_entry(
         CloudEMSSanitySensor(coordinator, entry),
         # v4.3.6: runtime warnings sensor (P1 spikes, fase-clamp, learning freeze)
         CloudEMSRuntimeWarningsSensor(coordinator, entry),
+        # v4.6.583: data quality monitor sensor
+        CloudEMSDataQualitySensor(coordinator, entry),
         # v4.5.51: meter topologie boom + upstream learning
         CloudEMSMeterTopologySensor(coordinator, entry),
         # v1.16.0: schaduwdetectie & clipping-voorspelling
@@ -2151,6 +2155,48 @@ class CloudEMSCheapHourBinarySensor(CoordinatorEntity, BinarySensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 # NILM sensors
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSNilmGroupsSensor(CoordinatorEntity, SensorEntity):
+    """
+    v4.6.584: NILM apparaatgroepen — Regelneef-stijl categorisering.
+
+    State  = aantal actieve groepen met vermogen > 0
+    Attributes:
+        groups          — lijst van groep-dicts (id, label, icon, power_w, today_kwh, cost_today_eur, devices)
+        onboarding_hints — lijst van hints voor ontbrekende categorieën
+        month_history   — {YYYY-MM: {groep: kwh}} (laatste 3 maanden)
+        total_groups    — totaal aantal groepen met apparaten
+    """
+    _attr_name = "CloudEMS · NILM Groepen"
+    _attr_icon = "mdi:shape-outline"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_nilm_groups"
+        self.entity_id = "sensor.cloudems_nilm_groups"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_NILM)
+
+    @property
+    def native_value(self) -> int:
+        ng = (self.coordinator.data or {}).get("nilm_groups", {})
+        return ng.get("groups_with_power", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        ng = (self.coordinator.data or {}).get("nilm_groups", {})
+        return {
+            "groups":           ng.get("groups", []),
+            "onboarding_hints": ng.get("onboarding_hints", []),
+            "month_history":    ng.get("month_history", {}),
+            "total_groups":     ng.get("total_groups", 0),
+            "groups_with_power": ng.get("groups_with_power", 0),
+        }
+
 
 class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
     _attr_name = "CloudEMS NILM · Devices"
@@ -5142,6 +5188,8 @@ class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
             "day_records":          ga.get("day_records", []),
             # v4.6.388: fibonacci m³/uur resultaten (server-berekend, veilig formaat)
             "gas_fib_hours":        g.get("gas_fib_hours", []),
+            # v4.6.574: geleerde maximale flow voor schaling balkjes in JS (geen hardcode)
+            "gas_rate_max_m3h":     g.get("gas_rate_max_m3h", 3.0),
         }
         return attrs
 
@@ -5873,6 +5921,14 @@ class CloudEMSBalancerSensor(CoordinatorEntity, SensorEntity):
             "battery_lag_samples":     d.get("battery_lag_samples", 0),
             "solar_lag_learned_s":     d.get("solar_learned_lag_s"),
             "solar_lag_confidence":    d.get("solar_lag_confidence"),
+            # v4.6.522: P1-reader interval meting en DSMR-type
+            "p1_measured_interval_s":  d.get("p1_measured_interval_s"),
+            "p1_telegram_samples":     d.get("p1_telegram_samples", 0),
+            "dsmr_type_configured":    d.get("dsmr_type_configured"),
+            "dsmr_type_auto_corrected": d.get("dsmr_type_auto_corrected", False),
+            # Fast-ramp diagnostics
+            "fast_ramp_active":          d.get("fast_ramp_active", False),
+            "fast_ramp_battery_est_w":   d.get("fast_ramp_battery_est_w"),
         }
 
 
@@ -7403,6 +7459,62 @@ class CloudEMSRuntimeWarningsSensor(CoordinatorEntity, SensorEntity):
         }
 
 
+class CloudEMSDataQualitySensor(CoordinatorEntity, SensorEntity):
+    """
+    v4.6.583: Data Quality Monitor — automatische detectie van dashboard-dataproblemen.
+
+    State  = aantal actieve data-kwaliteitsissues (0 = alles ok)
+    Attributes:
+        issues      — lijst van actieve issues (code, level, category, message, detail)
+        issue_count — zelfde als state maar als integer
+        has_warning — True als er minstens één issue is
+        codes       — lijst van actieve issue-codes
+        checks      — welke checks worden uitgevoerd (informatief)
+    """
+    _attr_name = "CloudEMS · Data Quality"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:database-check-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_data_quality"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self) -> int:
+        issues = (self.coordinator.data or {}).get("data_quality", [])
+        return len(issues)
+
+    @property
+    def icon(self) -> str:
+        issues = (self.coordinator.data or {}).get("data_quality", [])
+        if any(x.get("level") == "error" for x in issues):
+            return "mdi:database-alert"
+        if issues:
+            return "mdi:database-search"
+        return "mdi:database-check-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        issues = (self.coordinator.data or {}).get("data_quality", [])
+        return {
+            "issues":      issues,
+            "issue_count": len(issues),
+            "has_warning": bool(issues),
+            "codes":       [i.get("code") for i in issues],
+            "checks": [
+                "self_cons_zero_with_pv",
+                "phase_badge_mismatch",
+                "boiler_power_while_off",
+                "capacity_null_with_soc",
+            ],
+        }
+
+
 class CloudEMSMeterTopologySensor(CoordinatorEntity, SensorEntity):
     """
     Meter topologie — boom van upstream/downstream meter-relaties.
@@ -8534,6 +8646,10 @@ class CloudEMSShutterLearnProgressSensor(CoordinatorEntity, SensorEntity):
             "close_confidence": avg_conf("close"),
             "open_today":       s.get("schedule_open_today"),
             "close_today":      s.get("schedule_close_today"),
+            # v4.6.574: geschatte resterende leertijd
+            # needs_data = ontbrekende dag-slots (max 2 per dag: open + close)
+            # eta_days = ceil(needs_data / 2) — elke dag vult max 2 slots
+            "eta_days":         max(0, -(-s.get("schedule_needs_data", 0) // 2)) if s.get("schedule_needs_data", 0) > 0 else 0,
         }
 
 

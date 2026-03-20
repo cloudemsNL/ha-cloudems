@@ -274,7 +274,24 @@ class CloudemsPriceCard extends HTMLElement {
     const priceNowEl = this.shadowRoot.getElementById('price-now');
     if (priceNowEl) {
       const ct = v => v != null ? (parseFloat(v)*100).toFixed(1)+' ct' : '—';
-      priceNowEl.innerHTML = `Nu: <strong>${ct(curPrice)}/kWh</strong>`;
+      const _TTP = window.CloudEMSTooltip;
+      const _ttPrc = _TTP ? _TTP.html('pr-now','Prijs opbouw',[
+        {label:'EPEX inkoop',      value:ct(attr.base_epex_price)+'/kWh'},
+        {label:'Energiebelasting', value:attr.tax_per_kwh!=null?ct(attr.tax_per_kwh)+'/kWh':'—'},
+        {label:'BTW',              value:attr.vat_rate!=null?(parseFloat(attr.vat_rate)*100).toFixed(0)+'%':'—',dim:true},
+        {label:'Leverancier',      value:attr.supplier_markup_kwh!=null?ct(attr.supplier_markup_kwh)+'/kWh':'—',dim:true},
+        {label:'All-in totaal',    value:ct(attr.price_all_in||curPrice)+'/kWh'},
+        {label:'Bron',             value:attr.price_source||'EPEX',dim:true},
+      ],{footer:'Prijs = EPEX + energiebelasting + BTW + leveranciersopslag'}) : {wrap:'',tip:''};
+      priceNowEl.style.position = 'relative';
+      priceNowEl.style.cursor = 'default';
+      priceNowEl.setAttribute('data-tt-init','1');
+      priceNowEl.innerHTML = `Nu: <strong>${ct(curPrice)}/kWh</strong>${_ttPrc.tip}`;
+      if (_ttPrc.wrap) {
+        priceNowEl.onmouseenter = () => { const t=priceNowEl.querySelector('[id^="cem-tip-"]'); if(t)t.style.display='block'; };
+        priceNowEl.onmouseleave = () => { const t=priceNowEl.querySelector('[id^="cem-tip-"]'); if(t)t.style.display='none'; };
+        priceNowEl.ontouchstart = () => { const t=priceNowEl.querySelector('[id^="cem-tip-"]'); if(t)t.style.display=t.style.display==='block'?'none':'block'; };
+      }
     }
 
     // Tomorrow tab label
@@ -430,8 +447,30 @@ class CloudemsPriceCard extends HTMLElement {
       const priceColor = isExp?'#ff6040':in1?'#FFD700':in2?'#B0B8C0':in3?'#CD8840':in4?'#5599ee':'#fff';
       const ct = v => (v*100).toFixed(1);
 
+      const _TTP2 = window.CloudEMSTooltip;
+      const _planLabels = [];
+      if(hasBatCharge)  _planLabels.push('⚡ Accu laden');
+      if(hasBatDisch)   _planLabels.push('↓ Accu ontladen');
+      if(hasEV)         _planLabels.push('🔌 EV laden');
+      if(hasBoiler)     _planLabels.push('🔥 Boiler boost');
+      if(hasPool)       _planLabels.push('🏊 Zwembad');
+      if(hasSurplus)    _planLabels.push('☀️ PV surplus (' + Math.round(pvW) + ' W)');
+      const _ttRow = _TTP2 ? _TTP2.html('pr-'+dayId+'-'+hour, String(hour).padStart(2,'0')+':00 — prijs & planning', [
+        {label:'Prijs',       value:ct(price)+' ct/kWh'},
+        {label:'t.o.v. gem.', value:(parseFloat(vsAvg)>=0?'+':'')+vsAvg+'%', dim:Math.abs(parseFloat(vsAvg))<5},
+        {label:'Min/Max dag', value:ct(min)+' / '+ct(max)+' ct'},
+        {label:'Planning',    value:_planLabels.length?_planLabels.join(', '):'— Geen actie', dim:!_planLabels.length},
+      ], {footer: isCurrent ? '▶ Huidig uur' : in1 ? '⭐ Goedkoopste uur' : in2 ? '⭐⭐ Top 2' : ''}) : {wrap:'',tip:''};
+
       const row = document.createElement('div');
       row.className = 'row' + (isCurrent ? ' current' : '');
+      row.style.position = 'relative';
+      row.style.cursor = 'default';
+      if (_ttRow.wrap) {
+        row.addEventListener('mouseenter', () => { const t=row.querySelector('[id^="cem-tip-"]'); if(t)t.style.display='block'; });
+        row.addEventListener('mouseleave', () => { const t=row.querySelector('[id^="cem-tip-"]'); if(t)t.style.display='none'; });
+        row.addEventListener('touchstart', (e) => { e.stopPropagation(); const t=row.querySelector('[id^="cem-tip-"]'); if(t)t.style.display=t.style.display==='block'?'none':'block'; }, {passive:true});
+      }
       row.innerHTML = `
         <div class="block-strips">
           <div class="strip s4${in4?' on':''}"></div>
@@ -457,6 +496,7 @@ class CloudemsPriceCard extends HTMLElement {
           </div>
         </div>
         <div class="row-price" style="color:${priceColor}">${ct(price)}ct</div>
+        ${_ttRow.tip}
       `;
       container.appendChild(row);
       barEls.push(row.querySelector('.bar'));

@@ -387,12 +387,33 @@ class CloudemsSolarCard extends HTMLElement {
     }
 
     // ── PV Samenvatting ───────────────────────────────────────────────────────
+    const _TTS = window.CloudEMSTooltip;
+    const _ttPvNu = _TTS ? _TTS.html('sl-pvnu','PV vermogen nu',[
+      {label:'Sensor',    value:'cloudems_solar_system'},
+      {label:'Vermogen',  value:Math.round(totalW)+' W'},
+      {label:'Piek 7d',   value:peakW?Math.round(peakW)+' W':'—'},
+      {label:'Omvormers', value:inverters.length?inverters.map(i=>i.label||'?').join(', '):'—'},
+      {label:'Clipping',  value:clipping?'⚠️ Actief':'Geen',dim:!clipping},
+    ],{trusted:true}) : {wrap:'',tip:''};
+    const _ttScSol = _TTS ? _TTS.html('sl-sc','Zelfconsumptie',[
+      {label:'Sensor',        value:'cloudems_self_consumption'},
+      {label:'Ratio',         value:scPct.toFixed(1)+'%'},
+      {label:'Formule',       value:'(PV − Export) / PV × 100',dim:true},
+      {label:'PV vandaag',    value:pvTodayKwh?pvTodayKwh.toFixed(2)+' kWh':'—'},
+      {label:'Zelf verbruikt',value:selfKwh!=null?selfKwh.toFixed(2)+' kWh':'lerende...'},
+      {label:'Teruggeleverd', value:exportKwh!=null?exportKwh.toFixed(2)+' kWh':'—',dim:true},
+    ],{footer:'Hogere % = meer zonne-energie direct thuis verbruikt'}) : {wrap:'',tip:''};
+    const _ttFcSol = _TTS ? _TTS.html('sl-fc','PV Forecast',[
+      {label:'Vandaag',  value:fcKwh.toFixed(1)+' kWh'},
+      {label:'Morgen',   value:fcTomKwh.toFixed(1)+' kWh'},
+      {label:'Bron',     value:'Open-Meteo + oriëntatie leren',dim:true},
+    ],{footer:'Nauwkeurigheid neemt toe naarmate het systeem langer draait'}) : {wrap:'',tip:''};
     const summaryHtml=`<div class="sec">
       <div class="sec-title">☀️ PV samenvatting</div>
       <table class="summary-table">
-        <tr><td class="lbl">☀️ <strong>PV nu</strong></td><td class="val" style="color:#f0c040">${Math.round(totalW)} W</td></tr>
-        <tr><td class="lbl">♻️ Zelfconsumptie</td><td class="val" style="color:${scPct>60?"#86efac":scPct>30?"#fbbf24":"rgba(255,255,255,.5)"}">${scPct.toFixed(1)} %</td></tr>
-        <tr><td class="lbl">⏰ Piekuur vandaag</td><td class="val">${peakHour!=null?peakHour+":00":"—"}</td></tr>
+        <tr style="position:relative;cursor:default" ${_ttPvNu.wrap}><td class="lbl">☀️ <strong>PV nu</strong></td><td class="val" style="color:#f0c040">${Math.round(totalW)} W</td>${_ttPvNu.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttScSol.wrap}><td class="lbl">♻️ Zelfconsumptie</td><td class="val" style="color:${scPct>60?"#86efac":scPct>30?"#fbbf24":"rgba(255,255,255,.5)"}">${scPct.toFixed(1)} %</td>${_ttScSol.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttFcSol.wrap}><td class="lbl">⏰ Piekuur vandaag</td><td class="val">${peakHour!=null?peakHour+":00":"—"}</td>${_ttFcSol.tip}</tr>
       </table>
     </div>`;
 
@@ -400,11 +421,38 @@ class CloudemsSolarCard extends HTMLElement {
     const selfHtml=`<div class="sec">
       <div class="sec-title">♻️ Zelfconsumptie</div>
       <table class="summary-table">
-        <tr><td class="lbl">PV productie vandaag</td><td class="val" style="color:#86efac">${pvTodayKwh?pvTodayKwh.toFixed(2)+" kWh":"—"}</td></tr>
-        <tr><td class="lbl">Zelf verbruikt</td><td class="val" style="color:#86efac">${selfKwh!=null?selfKwh.toFixed(2)+" kWh":"—"}</td></tr>
-        <tr><td class="lbl">Teruggeleverd</td><td class="val">${exportKwh!=null?exportKwh.toFixed(2)+" kWh":"—"}</td></tr>
-        <tr><td class="lbl">Beste zonuur</td><td class="val">${bestHour!=null?bestHour+":00":"—"}</td></tr>
-        <tr><td class="lbl">Besparing / maand</td><td class="val" style="color:#f0c040">${monthSaving!=null?"€ "+monthSaving.toFixed(2):"—"}</td></tr>
+        ${(()=>{const _TT2=window.CloudEMSTooltip;
+          const _ttPv  =_TT2?_TT2.html('sl-sc-pv','PV productie vandaag',[
+            {label:'Sensor', value:'cloudems_self_consumption → pv_today_kwh'},
+            {label:'Waarde', value:pvTodayKwh?pvTodayKwh.toFixed(2)+' kWh':'—'},
+            {label:'Bron',   value:pvTodayKwh>0?'● Gemeten':'○ Forecast fallback',dim:true},
+          ],{trusted:pvTodayKwh>0}):{wrap:'',tip:''};
+          const _ttSelf=_TT2?_TT2.html('sl-sc-self','Zelf verbruikt',[
+            {label:'Sensor',  value:'cloudems_self_consumption → self_consumed_kwh'},
+            {label:'Waarde',  value:selfKwh!=null?selfKwh.toFixed(2)+' kWh':'lerende…'},
+            {label:'Formule', value:'PV productie − Teruglevering',dim:true},
+          ],{footer:'Energie direct thuis verbruikt zonder via net te gaan'}):{wrap:'',tip:''};
+          const _ttExp =_TT2?_TT2.html('sl-sc-exp','Teruggeleverd',[
+            {label:'Sensor',  value:'cloudems_self_consumption → exported_kwh'},
+            {label:'Waarde',  value:exportKwh!=null?exportKwh.toFixed(2)+' kWh':'—'},
+            {label:'Formule', value:'PV productie − Zelf verbruikt',dim:true},
+          ]):{wrap:'',tip:''};
+          const _ttBest=_TT2?_TT2.html('sl-sc-best','Beste zonuur',[
+            {label:'Sensor', value:'cloudems_self_consumption → best_solar_hour'},
+            {label:'Uur',    value:bestHour!=null?bestHour+':00':'—'},
+            {label:'Gebruik',value:'Optimaal tijdstip voor PV-afhankelijke apparaten',dim:true},
+          ]):{wrap:'',tip:''};
+          const _ttSav =_TT2?_TT2.html('sl-sc-sav','Besparing per maand',[
+            {label:'Sensor',  value:'cloudems_self_consumption → monthly_saving_eur'},
+            {label:'Waarde',  value:monthSaving!=null?'€'+monthSaving.toFixed(2):'lerende…'},
+            {label:'Formule', value:'Zelf verbruikt kWh × import-tariefprijs',dim:true},
+          ],{footer:'Schatting — groeit naarmate meer data beschikbaar is'}):{wrap:'',tip:''};
+          return`
+        <tr style="position:relative;cursor:default" ${_ttPv.wrap}><td class="lbl">PV productie vandaag</td><td class="val" style="color:#86efac">${pvTodayKwh?pvTodayKwh.toFixed(2)+" kWh":"—"}</td>${_ttPv.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttSelf.wrap}><td class="lbl">Zelf verbruikt</td><td class="val" style="color:#86efac">${selfKwh!=null?selfKwh.toFixed(2)+" kWh":"—"}</td>${_ttSelf.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttExp.wrap}><td class="lbl">Teruggeleverd</td><td class="val">${exportKwh!=null?exportKwh.toFixed(2)+" kWh":"—"}</td>${_ttExp.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttBest.wrap}><td class="lbl">Beste zonuur</td><td class="val">${bestHour!=null?bestHour+":00":"—"}</td>${_ttBest.tip}</tr>
+        <tr style="position:relative;cursor:default" ${_ttSav.wrap}><td class="lbl">Besparing / maand</td><td class="val" style="color:#f0c040">${monthSaving!=null?"€ "+monthSaving.toFixed(2):"—"}</td>${_ttSav.tip}</tr>`; })()}
       </table>
     </div>`;
 
@@ -470,9 +518,28 @@ class CloudemsSolarCard extends HTMLElement {
         return html;
       })()}
       <div class="top-strip">
-        <div class="top-box"><span class="top-label">Nu</span><span class="top-val" style="color:var(--sl-gold)">${Math.round(totalW)} W</span>${peakW?`<span class="top-sub">piek ${Math.round(peakW)} W</span>`:""}</div>
-        <div class="top-box"><span class="top-label">Vandaag</span><span class="top-val" style="color:${scA.pv_today_kwh > 0.05 ? 'var(--sl-green)' : 'var(--sl-amber)'}">${scA.pv_today_kwh > 0.05 ? scA.pv_today_kwh.toFixed(1) : fcKwh.toFixed(1)} kWh</span><span class="top-sub">${scA.pv_today_kwh > 0.05 ? 'gemeten' : 'dagschatting'}</span></div>
-        <div class="top-box"><span class="top-label">Morgen</span><span class="top-val">${fcTomKwh.toFixed(1)} kWh</span><span class="top-sub">verwacht</span></div>
+        ${(()=>{const _TTS=window.CloudEMSTooltip;
+          const _ttNu=_TTS?_TTS.html('sl-top-nu','PV vermogen nu',[
+            {label:'Sensor',   value:'cloudems_solar_system'},
+            {label:'Vermogen', value:Math.round(totalW)+' W'},
+            {label:'Piek 7d',  value:peakW?Math.round(peakW)+' W':'\u2014'},
+            {label:'Clipping', value:clipping?'\u26a1 Actief':'Geen',dim:!clipping},
+          ],{trusted:totalW>0}):{wrap:'',tip:''};
+          const _ttVandaag=_TTS?_TTS.html('sl-top-vd','Productie vandaag',[
+            {label:'Sensor',   value:'cloudems_self_consumption'},
+            {label:'Gemeten',  value:scA.pv_today_kwh>0.05?scA.pv_today_kwh.toFixed(2)+' kWh':'nog niet'},
+            {label:'Forecast', value:fcKwh.toFixed(2)+' kWh',dim:scA.pv_today_kwh>0.05},
+            {label:'Bron',     value:scA.pv_today_kwh>0.05?'\u25cf Gemeten':'\u25cb Dagforecast',dim:true},
+          ],{trusted:scA.pv_today_kwh>0.05}):{wrap:'',tip:''};
+          const _ttMorgen=_TTS?_TTS.html('sl-top-tm','Forecast morgen',[
+            {label:'Sensor',   value:'cloudems_pv_forecast_tomorrow'},
+            {label:'Verwacht', value:fcTomKwh.toFixed(2)+' kWh'},
+            {label:'Bron',     value:'Open-Meteo + ori\u00ebntatie',dim:true},
+          ],{footer:'Nauwkeurigheid neemt toe na meer meetdagen'}):{wrap:'',tip:''};
+          return`
+        <div class="top-box" style="position:relative;cursor:default" ${_ttNu.wrap}><span class="top-label">Nu</span><span class="top-val" style="color:var(--sl-gold)">${Math.round(totalW)} W</span>${peakW?`<span class="top-sub">piek ${Math.round(peakW)} W</span>`:""} ${_ttNu.tip}</div>
+        <div class="top-box" style="position:relative;cursor:default" ${_ttVandaag.wrap}><span class="top-label">Vandaag</span><span class="top-val" style="color:${scA.pv_today_kwh > 0.05 ? 'var(--sl-green)' : 'var(--sl-amber)'}">${scA.pv_today_kwh > 0.05 ? scA.pv_today_kwh.toFixed(1) : fcKwh.toFixed(1)} kWh</span><span class="top-sub">${scA.pv_today_kwh > 0.05 ? 'gemeten' : 'dagschatting'}</span>${_ttVandaag.tip}</div>
+        <div class="top-box" style="position:relative;cursor:default" ${_ttMorgen.wrap}><span class="top-label">Morgen</span><span class="top-val">${fcTomKwh.toFixed(1)} kWh</span><span class="top-sub">verwacht</span>${_ttMorgen.tip}</div>`; })()}
       </div>
 
       <div class="tab-bar">

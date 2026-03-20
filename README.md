@@ -21,6 +21,27 @@
 >
 > **Dashboard:** The CloudEMS dashboard is created automatically on first install. On some setups a **double restart** of Home Assistant is required before the dashboard appears in the sidebar. This is a known Lovelace API limitation.
 
+---
+
+> [!TIP]
+> ## 🚀 Setup wizard
+>
+> Na installatie open je de **interactieve setup wizard** om je sensoren en apparaten te koppelen:
+>
+> ```
+> http://homeassistant.local:8123/local/cloudems/onboarding.html
+> ```
+>
+> De wizard helpt je stap voor stap met:
+> - Je slimme meter (P1) koppelen
+> - Fase-sensoren instellen
+> - Zonnepanelen / omvormer koppelen
+> - EV-lader koppelen
+> - Piekschaving instellen
+> - NILM apparaten opgeven (voor sneller leren)
+>
+> Alles wordt live vanuit jouw HA-installatie opgehaald — geen handmatig typen.
+
 CloudEMS transforms your smart meter into an intelligent energy brain. It observes, learns, predicts and acts — automatically aligning every flexible load in your home to the cheapest electricity, maximising solar self-consumption, protecting circuits from overload, and keeping your home safe while you're away.
 
 Everything runs **100% locally** on your Home Assistant instance. No cloud. No subscription. No data ever leaves your home.

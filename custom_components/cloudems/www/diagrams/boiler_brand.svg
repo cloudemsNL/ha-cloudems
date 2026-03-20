@@ -1,0 +1,63 @@
+<svg width="100%" viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12121f"/>
+      <stop offset="100%" stop-color="#0c0c1a"/>
+    </linearGradient>
+  </defs>
+  <rect width="480" height="200" rx="14" fill="url(#bg)"/>
+  <rect width="480" height="200" rx="14" fill="none" stroke="#334155" stroke-width="1"/>
+
+  <!-- Elektrische boiler -->
+  <rect x="14" y="40" width="96" height="110" rx="10" fill="#1e293b" stroke="#f87171" stroke-width="1.5"/>
+  <text x="62" y="60" text-anchor="middle" font-size="9" fill="#f87171" font-weight="700">ELEKTRISCH</text>
+  <!-- Tank -->
+  <rect x="28" y="68" width="68" height="52" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+  <!-- Verwarmingselement -->
+  <line x1="46" y1="104" x2="78" y2="104" stroke="#f87171" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="52" y1="110" x2="72" y2="110" stroke="#f87171" stroke-width="1.5" stroke-linecap="round" opacity=".5"/>
+  <text x="62" y="136" text-anchor="middle" font-size="8" fill="#94a3b8">schakelaar /</text>
+  <text x="62" y="147" text-anchor="middle" font-size="8" fill="#94a3b8">setpoint</text>
+
+  <!-- Warmtepomp -->
+  <rect x="126" y="40" width="96" height="110" rx="10" fill="#1e293b" stroke="#34d399" stroke-width="1.5"/>
+  <text x="174" y="60" text-anchor="middle" font-size="9" fill="#34d399" font-weight="700">WARMTEPOMP</text>
+  <rect x="140" y="68" width="68" height="52" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+  <!-- Compressor symbool -->
+  <circle cx="174" cy="90" r="14" fill="none" stroke="#34d399" stroke-width="1.5"/>
+  <line x1="166" y1="90" x2="182" y2="90" stroke="#34d399" stroke-width="1.5"/>
+  <line x1="174" y1="82" x2="174" y2="98" stroke="#34d399" stroke-width="1.5"/>
+  <text x="174" y="136" text-anchor="middle" font-size="8" fill="#94a3b8">COP gestuurd</text>
+  <text x="174" y="147" text-anchor="middle" font-size="8" fill="#94a3b8">GREEN / BOOST</text>
+
+  <!-- Hybride -->
+  <rect x="238" y="40" width="96" height="110" rx="10" fill="#1e293b" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="286" y="60" text-anchor="middle" font-size="9" fill="#fbbf24" font-weight="700">HYBRIDE</text>
+  <rect x="252" y="68" width="68" height="52" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+  <!-- Hybride: WP + gas -->
+  <circle cx="276" cy="90" r="10" fill="none" stroke="#34d399" stroke-width="1.2"/>
+  <text x="276" y="94" text-anchor="middle" font-size="9" fill="#34d399">HP</text>
+  <text x="294" y="90" text-anchor="middle" font-size="9" fill="#f97316">+</text>
+  <rect x="298" y="82" width="16" height="16" rx="3" fill="none" stroke="#f97316" stroke-width="1.2"/>
+  <text x="306" y="94" text-anchor="middle" font-size="8" fill="#f97316">G</text>
+  <text x="286" y="136" text-anchor="middle" font-size="8" fill="#94a3b8">ramp setpoint</text>
+  <text x="286" y="147" text-anchor="middle" font-size="8" fill="#94a3b8">EPEX prijs</text>
+
+  <!-- Gas / Ariston -->
+  <rect x="350" y="40" width="116" height="110" rx="10" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="408" y="58" text-anchor="middle" font-size="9" fill="#818cf8" font-weight="700">PRESET-MODE</text>
+  <text x="408" y="70" text-anchor="middle" font-size="7" fill="#64748b">Ariston / Daikin / etc.</text>
+  <rect x="364" y="76" width="88" height="44" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1"/>
+  <!-- Preset mode symbool -->
+  <rect x="374" y="84" width="24" height="12" rx="3" fill="#1e3a5f" stroke="#818cf8" stroke-width="1"/>
+  <text x="386" y="93" text-anchor="middle" font-size="7" fill="#818cf8">ECO</text>
+  <rect x="406" y="84" width="36" height="12" rx="3" fill="#1e3a5f" stroke="#818cf8" stroke-width="1"/>
+  <text x="424" y="93" text-anchor="middle" font-size="7" fill="#818cf8">BOOST</text>
+  <rect x="374" y="100" width="68" height="12" rx="3" fill="#3b0764" stroke="#818cf8" stroke-width="1"/>
+  <text x="408" y="109" text-anchor="middle" font-size="7" fill="#c084fc">COMFORT</text>
+  <text x="408" y="136" text-anchor="middle" font-size="8" fill="#94a3b8">water_heater</text>
+  <text x="408" y="147" text-anchor="middle" font-size="8" fill="#94a3b8">entiteit</text>
+
+  <!-- Bottom text -->
+  <text x="240" y="170" text-anchor="middle" font-size="9" fill="#475569">CloudEMS past sturing automatisch aan op gekozen merk/type</text>
+</svg>

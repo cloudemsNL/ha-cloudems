@@ -52,6 +52,7 @@ except ImportError:
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from .cloud_command_queue import CloudCommandQueue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -157,9 +158,13 @@ LEGIONELLA_PRICE_RANK     = 4      # plan in één van de goedkoopste N uren van
 ARISTON_VERIFY_DELAY_S    = 15     # eerste verify: 15s na send
 ARISTON_RETRY_BACKOFF     = [15, 30, 60, 120]  # delays tussen retries (seconden)
 ARISTON_MAX_RETRIES       = 4      # maximaal 4 pogingen na de initiële send
-ARISTON_RATE_LIMIT_S      = 180    # bij 429: 3 minuten wachten voor nieuwe pogingen
+ARISTON_RATE_LIMIT_S      = 180    # DEPRECATED v4.6.560 — backoff nu via CloudCommandQueue
 ARISTON_PRESET_TOLERANCE  = 0      # preset moet exact kloppen (string compare)
 ARISTON_TEMP_TOLERANCE    = 1.0    # setpoint mag ±1°C afwijken (float compare)
+# v4.6.550: debounce — stuur commando pas als gewenste state 10 min stabiel is.
+# Voorkomt 429-errors bij Ariston cloud door te frequente API-aanroepen.
+# Het laatste gewenste commando wint altijd (geen stale commands).
+ARISTON_CMD_DEBOUNCE_S    = 600    # 10 minuten wachten voor versturen
 
 # ─── Thermisch model: geleerde opwarmsnelheid ────────────────────────────────
 HEAT_RATE_ALPHA           = 0.10   # EMA-factor voor g_heat_rate bijwerking
@@ -364,6 +369,17 @@ class BoilerState:
     _pending_retries:   int   = field(default=0,   repr=False)  # aantal retries gedaan
     _next_verify_ts:    float = field(default=0.0, repr=False)  # wanneer volgende verify
     _rate_limited_until:float = field(default=0.0, repr=False)  # 429-block tot ts
+
+    # v4.6.557: Debounce voor preset-commando's (Ariston 429-preventie)
+    # Gewenste preset wordt pas gestuurd als die ARISTON_CMD_DEBOUNCE_S stabiel is.
+    # Het laatste gewenste commando wint altijd.
+    _desired_preset:    str   = field(default="",  repr=False)  # gewenste preset (nog niet gestuurd)
+    _desired_setpoint:  float = field(default=0.0, repr=False)  # gewenst setpoint (nog niet gestuurd)
+    _desired_max_sp:    float = field(default=0.0, repr=False)  # gewenste max_sp (nog niet gestuurd)
+    _desired_since:     float = field(default=0.0, repr=False)  # ts van eerste keer dat dit doel gezien werd
+    # v4.6.557: Tijd in huidige werkelijke mode (voor display)
+    _actual_preset:     str   = field(default="",  repr=False)  # laatste bekende werkelijke preset
+    _actual_mode_since: float = field(default=0.0, repr=False)  # ts waarop werkelijke mode veranderde
 
     # ── v4.5.125: ACRouter (RobotDyn DimmerLink) hardware-integratie ──────────
     # Configuratie: stel control_mode="acrouter" + acrouter_host="192.168.x.x" in.
@@ -1177,10 +1193,16 @@ class BoilerController:
         # v4.6.125: persisteer laatste bekende temp per boiler — overleeft herstart + Ariston 429
         self._temp_store  = Store(hass, 1, "cloudems_boiler_last_temp_v1")
         self._ramp_store  = Store(hass, 1, "cloudems_boiler_ramp_state_v1")
-        # FIX 1: ramp-snelheid op basis van AAN-periodes, niet cycli
-        # _ramp_on_since: timestamp waarop boiler voor ramp-doeleinden AAN ging
-        # _ramp_on_minutes_acc: geaccumuleerde minuten dat boiler AAN was in huidige ramp-stap
-        self._ramp_min_on_per_step: float = 30.0  # minuten AAN vereist voor +1 ramp-stap
+        self._ramp_min_on_per_step: float = 30.0
+
+        # v4.6.557: generieke command queue voor cloud-API rate-limiting
+        # Ariston: max 6 calls/min, 10 min debounce om 429 te voorkomen
+        # Debounce voorkomt dat elke 10s coordinator-cyclus een API-aanroep doet.
+        self._cmd_queue = CloudCommandQueue(
+            api_key      = "ariston",
+            debounce_s   = ARISTON_CMD_DEBOUNCE_S,
+            rate_per_min = 6.0,
+        )  # minuten AAN vereist voor +1 ramp-stap
 
     def _build_boiler(self, cfg: dict) -> BoilerState:
         # v4.6.16: brand-veld → auto-defaults voor bekende merken.
@@ -1908,27 +1930,34 @@ class BoilerController:
                 want_on = True
                 _heat_up_min = b.heat_up_hours * 60 if b.heat_up_hours > 0 else 600
                 _mts = b.minutes_to_setpoint or 0
-                # v4.6.229: Boost alleen bij PV surplus, negatieve prijs of boven GREEN-cap.
-                # Goedkope uren alleen boost toestaan als GREEN de setpoint NIET kan halen.
-                # Reden: warmtepomp (COP≈3-4) is efficiënter dan weerstandselement.
-                _boost_by_surplus = solar_surplus_w > surplus_threshold_w * 0.8
-                _boost_by_price   = _is_negative
-                _boost_needed     = _above_green_max
+
+                # v4.6.550: Harde regel — als GREEN het setpoint kan bereiken, NOOIT boost.
+                # Boost (weerstandselement, COP=1) is altijd duurder dan GREEN (warmtepomp, COP≈3-4).
+                # Ongeacht surplus, goedkope uren of andere redenen: als setpoint ≤ green_max → force_green.
+                # Definitie: GREEN kan setpoint bereiken als active_setpoint_c ≤ max_setpoint_green_c.
                 _boost_green_possible = (
                     b.max_setpoint_green_c > 0
-                    and _has_temp
-                    and b.current_temp_c < b.max_setpoint_green_c - 1.0
+                    and b.active_setpoint_c <= b.max_setpoint_green_c
                 )
-                # Boost bij goedkoop uur alleen als GREEN het setpoint niet kan halen
-                _boost_cheap_ok = _boost_allowed and not _boost_green_possible
+                _above_green_max = b.max_setpoint_green_c > 0 and b.active_setpoint_c > b.max_setpoint_green_c
+
+                _boost_by_price   = _is_negative
+                _boost_needed     = _above_green_max  # setpoint boven GREEN-cap → boost onvermijdelijk
+                # Goedkoop uur: boost alleen als GREEN setpoint NIET kan halen
+                _boost_cheap_ok   = _boost_allowed and not _boost_green_possible
+                # Surplus: boost alleen als GREEN setpoint NIET kan halen
+                _boost_by_surplus = (
+                    solar_surplus_w > surplus_threshold_w * 0.8
+                    and not _boost_green_possible
+                )
 
                 if _boost_by_surplus or _boost_by_price or _boost_needed or _boost_cheap_ok:
                     b.force_green = False  # boost: weerstandselement
                     if _above_green_max and not (_boost_by_surplus or _boost_by_price):
                         cop_str = f" COP≈{_cop_wp:.1f}" if _outside is not None else ""
-                        reason = f"WP boost{cop_str}: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
+                        reason = f"WP boost{cop_str}: setpoint ({b.active_setpoint_c:.0f}°C) > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
                     elif _boost_by_surplus:
-                        reason = f"WP boost: PV surplus {solar_surplus_w:.0f}W"
+                        reason = f"WP boost: PV surplus {solar_surplus_w:.0f}W (boven GREEN-cap)"
                     elif _boost_by_price:
                         reason = f"WP boost: negatieve prijs {_current_price:.4f} €/kWh"
                     else:
@@ -1944,9 +1973,15 @@ class BoilerController:
                     reason += f" [WP €{_wp_th*100:.1f}ct vs gas €{_gas_th_wp*100:.1f}ct/kWh_th]"
             elif not _has_temp and price_info.get(f"in_cheapest_{effective_rank}h"):
                 want_on = True; reason = f"WP green: goedkoopste {effective_rank}u (geen temp sensor)"
+            # v4.6.550: onderstaande fallback ALLEEN boost als GREEN setpoint niet kan halen
             if not want_on and _boost_allowed and solar_surplus_w > surplus_threshold_w:
-                want_on = True; b.force_green = False
-                reason = f"WP boost: PV surplus {solar_surplus_w:.0f}W"
+                _bgp = b.max_setpoint_green_c > 0 and b.active_setpoint_c <= b.max_setpoint_green_c
+                if not _bgp:
+                    want_on = True; b.force_green = False
+                    reason = f"WP boost: PV surplus {solar_surplus_w:.0f}W (boven GREEN-cap)"
+                else:
+                    want_on = True; b.force_green = True
+                    reason = f"WP green: PV surplus {solar_surplus_w:.0f}W (setpoint ≤ GREEN-max, geen boost nodig)"
 
         # ── TYPE 3: HYBRID — green (WP) altijd bij tekort, boost selectief ────────────
         # Bijv. Ariston Lydos Hybrid. green = WP-element, boost = weerstandselement.
@@ -1975,7 +2010,14 @@ class BoilerController:
                 want_on = True
                 # v4.6.229: zelfde logica als heat_pump — boost alleen bij surplus,
                 # negatieve prijs of boven GREEN-cap. Niet alleen op basis van goedkoop uur.
-                _boost_by_surplus_h = solar_surplus_w > surplus_threshold_w * 0.8
+                _boost_green_possible_h = (
+                    b.max_setpoint_green_c > 0
+                    and b.active_setpoint_c <= b.max_setpoint_green_c
+                )
+                _boost_by_surplus_h = (
+                    solar_surplus_w > surplus_threshold_w * 0.8
+                    and not _boost_green_possible_h   # v4.6.550: GREEN kan setpoint bereiken → geen boost
+                )
                 _boost_by_price_h   = _is_negative
                 _boost_needed_h     = _above_green_max_h
                 # v4.6.402: _boost_cheap_ok_h verwijderd voor HYBRID.
@@ -2038,22 +2080,36 @@ class BoilerController:
                         _LOGGER.debug("BoilerController demand-boost check fout: %s", _dem_err)
 
                 if _boost_by_surplus_h or _boost_by_price_h or _boost_needed_h or _boost_cheap_ok_h or _boost_demand_h:
-                    b.force_green = False  # boost actief
-                    if _above_green_max_h and not (_boost_by_surplus_h or _boost_by_price_h):
-                        reason = f"Hybrid boost verplicht: {b.current_temp_c:.1f}°C > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
-                    elif _boost_by_surplus_h:
-                        reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W"
-                    elif _boost_by_price_h:
-                        reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
-                    elif _boost_demand_h:
-                        reason = f"Hybrid boost: warm water verwacht, WP te traag, stroom goedkoper dan gas"
+                    # v4.6.550: harde blokkade — als GREEN setpoint kan bereiken én geen demand-boost,
+                    # nooit boost sturen ongeacht andere redenen
+                    if _boost_green_possible_h and not _boost_needed_h and not _boost_demand_h:
+                        b.force_green = True
+                        reason = f"Hybrid green (WP{cop_str_h}): {_deficit:.1f}°C tekort (GREEN kan setpoint bereiken, geen boost)"
                     else:
-                        reason = f"Hybrid boost: {_deficit:.1f}°C tekort, GREEN-cap ({b.max_setpoint_green_c:.0f}°C) bereikt"
+                        b.force_green = False  # boost actief
+                        if _above_green_max_h and not (_boost_by_surplus_h or _boost_by_price_h):
+                            reason = f"Hybrid boost verplicht: setpoint ({b.active_setpoint_c:.0f}°C) > GREEN-max ({b.max_setpoint_green_c:.0f}°C)"
+                        elif _boost_by_surplus_h:
+                            reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W (boven GREEN-cap)"
+                        elif _boost_by_price_h:
+                            reason = f"Hybrid boost: negatieve prijs {_current_price:.4f} €/kWh"
+                        elif _boost_demand_h:
+                            reason = f"Hybrid boost: warm water verwacht, WP te traag, stroom goedkoper dan gas"
+                        else:
+                            reason = f"Hybrid boost: {_deficit:.1f}°C tekort, GREEN-cap ({b.max_setpoint_green_c:.0f}°C) bereikt"
                 else:
                     b.force_green = True   # alleen WP-element
                     reason = f"Hybrid green (WP{cop_str_h}): {_deficit:.1f}°C tekort" if _has_temp else f"Hybrid green (WP{cop_str_h}): geen temp sensor"
+            # v4.6.550: fallback surplus — ook hier harde blokkade als GREEN setpoint kan bereiken
             if not want_on and _boost_allowed and solar_surplus_w > surplus_threshold_w:
-                want_on = True; reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W"
+                _bgp_h = b.max_setpoint_green_c > 0 and b.active_setpoint_c <= b.max_setpoint_green_c
+                want_on = True
+                if not _bgp_h:
+                    b.force_green = False
+                    reason = f"Hybrid boost: PV surplus {solar_surplus_w:.0f}W (boven GREEN-cap)"
+                else:
+                    b.force_green = True
+                    reason = f"Hybrid green: PV surplus {solar_surplus_w:.0f}W (setpoint ≤ GREEN-max, geen boost nodig)"
 
         # ── TYPE 4: VARIABLE — proportioneel 0-100% op surplus/prijs ────────────────
         # Dimmerlink boiler: intern vast setpoint, CloudEMS regelt alleen vermogen%.
@@ -3066,6 +3122,74 @@ class BoilerController:
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("ACRouter [%s]: communicatiefout — %s", boiler.label, err)
 
+    async def _send_setpoint_sequence(
+        self,
+        boiler: Optional["BoilerState"],
+        entity_id: str,
+        preset: str,
+        target_sp: float,
+        max_setpoint_entity: str,
+    ) -> None:
+        """
+        Stap 2-5 van de Ariston stuurvolgorde: max_setpoint + temperature.
+        Aangroepen vanuit de CloudCommandQueue executor.
+        """
+        # Stap 3: max_setpoint number aanpassen ná mode-switch
+        if boiler and max_setpoint_entity:
+            _max_ent_state = self._hass.states.get(max_setpoint_entity)
+            if _max_ent_state is not None:
+                _is_boost = (preset == boiler.preset_on)
+                if _is_boost:
+                    _ramp_active = (
+                        boiler.boiler_type == BOILER_TYPE_HYBRID
+                        and boiler._cheap_ramp_setpoint_c > 0
+                        and boiler._manual_override_until <= time.time()
+                    )
+                    _desired_max = (
+                        min(boiler._cheap_ramp_setpoint_c + 2.0, boiler.max_setpoint_boost_c)
+                        if _ramp_active else boiler.max_setpoint_boost_c
+                    )
+                else:
+                    _desired_max = boiler.max_setpoint_green_c
+                try:
+                    _hw_max = _max_ent_state.attributes.get("max")
+                    if _hw_max is not None:
+                        _desired_max = min(_desired_max, float(_hw_max))
+                    _cur_max = float(_max_ent_state.state)
+                except (ValueError, TypeError):
+                    _cur_max = None
+                if _cur_max is None or abs(_cur_max - _desired_max) > 0.5:
+                    _domain = max_setpoint_entity.split(".")[0]
+                    if self._hass.services.has_service(_domain, "set_value"):
+                        _attrs = _max_ent_state.attributes
+                        _min = float(_attrs.get("min", 0))
+                        _max = float(_attrs.get("max", 99999))
+                        _desired_max = max(_min, min(_max, _desired_max))
+                        await self._hass.services.async_call(
+                            _domain, "set_value",
+                            {"entity_id": max_setpoint_entity, "value": _desired_max},
+                            blocking=True,
+                        )
+                        _LOGGER.debug(
+                            "BoilerController [%s]: max_setpoint '%s' → %.1f°C (preset=%s)",
+                            boiler.label, max_setpoint_entity, _desired_max, preset,
+                        )
+                        # Stap 4: wacht tot max_setpoint actief is
+                        await asyncio.sleep(1)
+
+        # Stap 5: setpoint sturen
+        if self._hass.services.has_service("water_heater", "set_temperature"):
+            await self._hass.services.async_call(
+                "water_heater", "set_temperature",
+                {"entity_id": entity_id, "temperature": target_sp},
+                blocking=True,
+            )
+        _LOGGER.info(
+            "BoilerController [%s]: ✓ water_heater preset=%s max=%.0f°C setpoint=%.1f°C",
+            boiler.label if boiler else entity_id, preset,
+            boiler.max_setpoint_boost_c if boiler else 0, target_sp,
+        )
+
     async def _switch(self, entity_id: str, on: bool,
                       boiler: Optional[BoilerState] = None) -> None:
         domain = entity_id.split(".")[0] if "." in entity_id else "switch"
@@ -3186,92 +3310,66 @@ class BoilerController:
                         )
                         _preset_to_send = _matched
 
-                # v4.6.57: stuurvolgorde voor Ariston Lydos (mode → max_setpoint → temperature)
-                # met delays zodat de cloud-sync niet wordt overgeslagen:
-                # 1) set_operation_mode — blocking
-                # 2) 2s wachten zodat Ariston cloud de mode-switch verwerkt
-                # 3) max_setpoint number aanpassen — blocking
-                # 4) 1s wachten zodat max_setpoint actief is
-                # 5) set_temperature — blocking
+                # v4.6.557: CloudCommandQueue gate — debounce + rate-limit + backoff
+                # Bouw het volledige commando dat we willen sturen
+                _desired_cmd = {
+                    "preset":   _preset_to_send,
+                    "setpoint": target_sp,
+                    "entity":   entity_id,
+                }
+                # executor: de volledige stuurvolgorde als async callable
+                async def _ariston_executor(cmd: dict) -> None:
+                    _ep  = cmd["preset"]
+                    _esp = cmd["setpoint"]
+                    _eid = cmd["entity"]
+                    # Stap 1: mode-switch
+                    if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                        await self._hass.services.async_call("water_heater", "set_operation_mode",
+                            {"entity_id": _eid, "operation_mode": _ep}, blocking=True)
+                    elif self._hass.services.has_service("water_heater", "set_preset_mode"):
+                        await self._hass.services.async_call("water_heater", "set_preset_mode",
+                            {"entity_id": _eid, "preset_mode": _ep}, blocking=True)
+                    # Stap 2: pauze na mode-switch
+                    if boiler and _resolved_max_entity:
+                        await asyncio.sleep(2)
+                    # Stap 3 t/m 5: max_setpoint + setpoint (zie originele code hieronder)
+                    await self._send_setpoint_sequence(boiler, _eid, _ep, _esp, _resolved_max_entity)
 
-                # Stap 1: mode-switch
-                if self._hass.services.has_service("water_heater", "set_operation_mode"):
-                    await self._hass.services.async_call("water_heater", "set_operation_mode",
-                        {"entity_id": entity_id, "operation_mode": _preset_to_send}, blocking=True)
-                elif self._hass.services.has_service("water_heater", "set_preset_mode"):
-                    await self._hass.services.async_call("water_heater", "set_preset_mode",
-                        {"entity_id": entity_id, "preset_mode": _preset_to_send}, blocking=True)
-                else:
-                    _LOGGER.debug("BoilerController [%s]: geen preset service beschikbaar, overgeslagen",
-                                  boiler.label if boiler else entity_id)
+                _sent = await self._cmd_queue.request(
+                    device_id = entity_id,
+                    command   = _desired_cmd,
+                    executor  = _ariston_executor,
+                )
+                if not _sent:
+                    # Gedebounced of geblokkeerd — log alleen op debug niveau
+                    _q_diag = self._cmd_queue.get_diagnostics()
+                    _slot   = _q_diag.get("devices", {}).get(entity_id, {})
+                    _stable = time.time() - _slot.get("desired_since", time.time())
+                    _backoff = _slot.get("backoff_until", 0) - time.time()
+                    if _backoff > 0:
+                        _LOGGER.debug(
+                            "BoilerController [%s]: commando geblokkeerd (backoff %.0fs)",
+                            boiler.label if boiler else entity_id, _backoff,
+                        )
+                    else:
+                        _LOGGER.debug(
+                            "BoilerController [%s]: debounce %.0f/%.0fs (preset=%s sp=%.1f°C)",
+                            boiler.label if boiler else entity_id,
+                            _stable, self._cmd_queue.debounce_s,
+                            _preset_to_send, target_sp,
+                        )
+                    return
 
-                # Stap 2: korte pauze na mode-switch voor cloud-sync
-                if boiler and _resolved_max_entity:
-                    await asyncio.sleep(2)
-
-                # Stap 3: max_setpoint number aanpassen ná mode-switch
-                if boiler and _resolved_max_entity:
-                    _max_ent_state2 = self._hass.states.get(_resolved_max_entity)
-                    if _max_ent_state2 is not None:
-                        _is_boost_preset2 = (preset == boiler.preset_on)
-                        if _is_boost_preset2:
-                            # v4.6.495: max_setpoint volgt de ramp, niet altijd 75°C
-                            _ramp_active2 = (
-                                boiler.boiler_type == BOILER_TYPE_HYBRID
-                                and boiler._cheap_ramp_setpoint_c > 0
-                                and boiler._manual_override_until <= time.time()
-                            )
-                            if _ramp_active2:
-                                # Zet hardware-cap op ramp + kleine marge zodat setpoint bereikbaar is
-                                _desired_max2 = min(boiler._cheap_ramp_setpoint_c + 2.0, boiler.max_setpoint_boost_c)
-                            else:
-                                _desired_max2 = boiler.max_setpoint_boost_c
-                        else:
-                            _desired_max2 = boiler.max_setpoint_green_c
-                        _hw_max2 = _max_ent_state2.attributes.get("max")
-                        if _hw_max2 is not None:
-                            try:
-                                _desired_max2 = min(_desired_max2, float(_hw_max2))
-                            except (ValueError, TypeError):
-                                pass
-                        try:
-                            _cur_max2 = float(_max_ent_state2.state)
-                        except (ValueError, TypeError):
-                            _cur_max2 = None
-                        if _cur_max2 is None or abs(_cur_max2 - _desired_max2) > 0.5:
-                            _max_domain2 = _resolved_max_entity.split(".")[0]
-                            if self._hass.services.has_service(_max_domain2, "set_value"):
-                                _ent_attrs2 = _max_ent_state2.attributes
-                                _ent_min2 = float(_ent_attrs2.get("min", 0))
-                                _ent_max2 = float(_ent_attrs2.get("max", 99999))
-                                _desired_max2 = max(_ent_min2, min(_ent_max2, _desired_max2))
-                                await self._hass.services.async_call(
-                                    _max_domain2, "set_value",
-                                    {"entity_id": _resolved_max_entity, "value": _desired_max2},
-                                    blocking=True,
-                                )
-                                _LOGGER.debug(
-                                    "BoilerController [%s]: max_setpoint '%s' → %.1f°C (preset=%s)",
-                                    boiler.label, _resolved_max_entity, _desired_max2, preset,
-                                )
-                                # Stap 4: wacht tot max_setpoint actief is voordat setpoint gestuurd wordt
-                                await asyncio.sleep(1)
-
-                # Stap 5: setpoint sturen
-                if self._hass.services.has_service("water_heater", "set_temperature"):
-                    await self._hass.services.async_call("water_heater", "set_temperature",
-                        {"entity_id": entity_id, "temperature": target_sp}, blocking=True)
-                _LOGGER.info("BoilerController [%s]: ✓ water_heater preset=%s max=%.0f°C setpoint=%.1f°C",
-                              boiler.label if boiler else entity_id, _preset_to_send,
-                              boiler.max_setpoint_boost_c if boiler else 0, target_sp)
-
-                # v4.6.60: registreer als pending voor cloud verify/retry
+                # Succes — registreer als pending voor cloud verify/retry
                 if boiler:
                     _max_sp_pending = 0.0
                     if _resolved_max_entity:
                         _is_boost_p = (preset == boiler.preset_on)
                         _max_sp_pending = boiler.max_setpoint_boost_c if _is_boost_p else boiler.max_setpoint_green_c
                     self._set_pending(boiler, _preset_to_send, target_sp, _max_sp_pending)
+                return
+
+
                 return
 
         if ctrl in ("setpoint", "setpoint_boost"):
@@ -3469,6 +3567,22 @@ class BoilerController:
         boiler.force_green = _prev_force_green
         return True
 
+    def force_green_permanent(self, entity_id: str) -> bool:
+        """Forceer GREEN mode permanent — CloudEMS stuurt nooit BOOST tenzij gebruiker reset.
+        Verschil met pause_boost: geen tijdslimiet, boost_paused_until blijft 0.
+        CloudEMS respecteert force_green=True totdat gebruiker resume_boost aanroept."""
+        all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_b:
+            if b.entity_id == entity_id:
+                b.force_green          = True
+                b._boost_paused_until  = 0.0   # geen tijdslimiet
+                b._manual_override_until = 0.0
+                # Reset debounce zodat de GREEN-opdracht onmiddellijk gestuurd wordt
+                self._cmd_queue.reset_debounce(entity_id)
+                _LOGGER.info("BoilerController [%s]: GREEN mode geforceerd (permanent tot reset)", b.label)
+                return True
+        return False
+
     def pause_boost(self, entity_id: str, seconds: float = 3600.0) -> bool:
         """Pauzeer BOOST voor de opgegeven boiler voor `seconds` seconden.
         De boiler schakelt direct naar preset_off (GREEN/ECO) en CloudEMS
@@ -3617,13 +3731,15 @@ class BoilerController:
             # Nog niet tijd voor verify
             if now < b._next_verify_ts:
                 continue
-            # Rate-limited
-            if now < b._rate_limited_until:
+            # Rate-limited — gebruik de queue's backoff ipv de verouderde _rate_limited_until
+            _q_slot = self._cmd_queue.get_diagnostics().get("devices", {}).get(b.entity_id, {})
+            _q_backoff = _q_slot.get("backoff_until", 0)
+            if now < _q_backoff:
                 _LOGGER.debug(
-                    "BoilerController [%s]: rate-limited, verify uitgesteld (nog %.0fs)",
-                    b.label, b._rate_limited_until - now,
+                    "BoilerController [%s]: rate-limited via queue, verify uitgesteld (nog %.0fs)",
+                    b.label, _q_backoff - now,
                 )
-                b._next_verify_ts = b._rate_limited_until + 5
+                b._next_verify_ts = _q_backoff + 5
                 continue
             # Max retries bereikt → opgeven
             if b._pending_retries >= ARISTON_MAX_RETRIES:
@@ -3672,57 +3788,52 @@ class BoilerController:
             )
             b._next_verify_ts = now + delay
 
-            # Stuur opnieuw — stap voor stap zoals in de normale _switch()
+            # Stuur opnieuw via de CloudCommandQueue — rate-limiting + backoff
             try:
-                # Stap 1: operation mode
-                if self._hass.services.has_service("water_heater", "set_operation_mode"):
-                    await self._hass.services.async_call(
-                        "water_heater", "set_operation_mode",
-                        {"entity_id": b.entity_id, "operation_mode": b._pending_preset},
-                        blocking=True,
-                    )
-                await asyncio.sleep(2)
-
-                # Stap 2: max_setpoint indien nodig
-                max_ent = b.max_setpoint_entity or b._cached_max_setpoint_entity
-                if b._pending_max_sp > 0.1 and max_ent:
-                    ms = self._hass.states.get(max_ent)
-                    if ms:
-                        try:
-                            cur = float(ms.state)
-                        except (ValueError, TypeError):
-                            cur = None
-                        if cur is None or abs(cur - b._pending_max_sp) > ARISTON_TEMP_TOLERANCE:
-                            _dom = max_ent.split(".")[0]
-                            if self._hass.services.has_service(_dom, "set_value"):
-                                _attrs = ms.attributes
-                                _min = float(_attrs.get("min", 0))
-                                _max = float(_attrs.get("max", 99999))
-                                _v = max(_min, min(_max, b._pending_max_sp))
-                                await self._hass.services.async_call(
-                                    _dom, "set_value",
-                                    {"entity_id": max_ent, "value": _v},
-                                    blocking=True,
-                                )
-                                await asyncio.sleep(1)
-
-                # Stap 3: setpoint
-                if b._pending_setpoint > 0.1:
-                    if self._hass.services.has_service("water_heater", "set_temperature"):
+                async def _retry_executor(cmd: dict) -> None:
+                    # Stap 1: operation mode
+                    if self._hass.services.has_service("water_heater", "set_operation_mode"):
                         await self._hass.services.async_call(
-                            "water_heater", "set_temperature",
-                            {"entity_id": b.entity_id, "temperature": b._pending_setpoint},
+                            "water_heater", "set_operation_mode",
+                            {"entity_id": b.entity_id, "operation_mode": b._pending_preset},
                             blocking=True,
                         )
+                    await asyncio.sleep(2)
+                    # Stap 2 + 3: max_setpoint + setpoint
+                    max_ent = b.max_setpoint_entity or b._cached_max_setpoint_entity
+                    await self._send_setpoint_sequence(
+                        b, b.entity_id, b._pending_preset,
+                        b._pending_setpoint, max_ent or "",
+                    )
+
+                # reset_debounce: retry moet onmiddellijk sturen, niet wachten op debounce
+                self._cmd_queue.reset_debounce(b.entity_id)
+                _sent = await self._cmd_queue.request(
+                    device_id = b.entity_id,
+                    command   = {
+                        "preset":   b._pending_preset,
+                        "setpoint": b._pending_setpoint,
+                        "entity":   b.entity_id,
+                    },
+                    executor  = _retry_executor,
+                )
+                if not _sent:
+                    _LOGGER.debug(
+                        "BoilerController [%s]: verify-retry geblokkeerd door queue (backoff/rate-limit)",
+                        b.label,
+                    )
 
             except Exception as _retry_err:
                 err_str = str(_retry_err)
+                self._cmd_queue.report_error(
+                    b.entity_id,
+                    status_code=429 if ("429" in err_str or "too many" in err_str.lower()) else 500,
+                    message=err_str[:100],
+                )
                 if "429" in err_str or "Too Many" in err_str.lower() or "rate" in err_str.lower():
-                    b._rate_limited_until = now + ARISTON_RATE_LIMIT_S
-                    b._next_verify_ts = now + ARISTON_RATE_LIMIT_S + 5
                     _LOGGER.warning(
-                        "BoilerController [%s]: Ariston 429 rate-limit — pauze %ds",
-                        b.label, ARISTON_RATE_LIMIT_S,
+                        "BoilerController [%s]: Ariston 429 rate-limit — queue neemt het over",
+                        b.label,
                     )
                 else:
                     _LOGGER.warning(
@@ -3730,6 +3841,34 @@ class BoilerController:
                     )
 
 
+
+    def _get_actual_preset(self, b: BoilerState) -> str:
+        """Geef de werkelijke operation mode terug van de boiler entity.
+
+        Voor preset-mode boilers (water_heater): lees operation_mode direct uit HA state.
+        Fallback naar CloudEMS desired state als de entity niet leesbaar is.
+        Bijwerken van _actual_mode_since bij mode-wisseling.
+        """
+        if b.control_mode == "preset" or b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
+            actual_preset, _, _ = self._read_ariston_state(b)
+            if actual_preset:
+                # Track wanneer de mode veranderde
+                if actual_preset.lower() != b._actual_preset.lower():
+                    b._actual_preset     = actual_preset
+                    b._actual_mode_since = time.time()
+                return actual_preset
+            # Fallback: CloudEMS desired state
+            desired = b.preset_off if b.force_green else b.preset_on
+            if desired.lower() != b._actual_preset.lower():
+                b._actual_preset     = desired
+                b._actual_mode_since = time.time()
+            return desired
+        # Niet-preset boilers
+        state = "on" if self._is_on(b.entity_id, b) else "off"
+        if state != b._actual_preset:
+            b._actual_preset     = state
+            b._actual_mode_since = time.time()
+        return state
 
     def get_status(self) -> list[dict]:
         # Inclusief groepsboilers — anders ziet de flow-kaart 0W bij cascade-configuraties
@@ -3739,22 +3878,24 @@ class BoilerController:
              "is_on": self._is_on(b.entity_id, b),
              "temp_c": b.current_temp_c, "setpoint_c": b.active_setpoint_c or b.setpoint_c,
              "active_setpoint_c": b.active_setpoint_c,  # gecapped op hw-max; None vóór eerste cyclus
-             # current_power_w kan None zijn voor de eerste _read_sensors() cyclus.
-             # Fallback: als de boiler nu aan staat, gebruik b.power_w als schatting.
-             "power_w": b.current_power_w,
+             # v4.6.575: power_w = 0 als boiler niet aan staat (is_on=False).
+             # Een niet-geïnstalleerde of offline boiler kan via cloud-sensor toch
+             # een waarde rapporteren — die negeren we als de boiler niet actief is.
+             "power_w": b.current_power_w if self._is_on(b.entity_id, b) else 0.0,
              "current_power_w": b.current_power_w,
              "cycle_kwh": round(b.cycle_kwh, 3),
              "thermal_loss_c_h": b.thermal_loss_c_h, "control_mode": b.control_mode,
              "boiler_type": b.boiler_type, "has_gas_heating": b.has_gas_heating,
              "post_saldering_mode": b.post_saldering_mode, "delta_t_optimize": b.delta_t_optimize,
-             # v4.6.12: actieve modus + werkelijk verwarmt op basis van vermogen
-             # v4.6.16: ook preset-mode boilers (bijv. Ariston via water_heater) correct weergeven
-             "actual_mode": (b.preset_off if b.force_green else b.preset_on)
-                            if (b.boiler_type in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID)
-                                or b.control_mode == "preset")
-                            else ("on" if self._is_on(b.entity_id, b) else "off"),
+             # v4.6.555: actieve modus — lees de werkelijke mode van de water_heater entity
+             # zodat de badge de Ariston-staat toont, niet de CloudEMS-gewenste staat.
+             # Fallback naar CloudEMS desired state als de entity niet leesbaar is.
+             "actual_mode": self._get_actual_preset(b),
+             "actual_mode_since_s": round(time.time() - b._actual_mode_since, 0) if b._actual_mode_since > 0 else None,
              "is_heating": (b.current_power_w or 0.0) > 50.0,
              "stall_active": b._stall_active,
+             "boost_paused_until": b._boost_paused_until if b._boost_paused_until > time.time() else 0.0,
+             "boost_paused_remaining_s": max(0.0, round(b._boost_paused_until - time.time(), 0)) if b._boost_paused_until > time.time() else 0.0,
              "brand": b.brand,
              "brand_label": _BRAND_LABELS.get(b.brand, b.brand) if b.brand else "",
              # v4.5.92: gezondheid & veiligheid

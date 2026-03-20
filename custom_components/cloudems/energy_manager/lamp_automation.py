@@ -179,6 +179,64 @@ class LampAutomationEngine:
             _LOGGER.warning("LampAutomation build_suggestions: %s", err)
         return suggestions
 
+    def auto_configure_from_ha(
+        self,
+        ha_areas: dict,
+        ha_entities: dict,
+    ) -> list[dict]:
+        """Bouw lamp-lijst op basis van pre-gebouwde area/entity dicts vanuit coordinator.
+
+        ha_areas:    {area_id: {"name": str}}
+        ha_entities: {entity_id: {"name": str, "area_id": str, "device_class": str}}
+        Retourneert dezelfde structuur als build_suggestions().
+        """
+        suggestions = []
+        try:
+            area_map = {aid: info.get("name", "") for aid, info in ha_areas.items()}
+
+            # Bouw presence-sensor lookup: area_id → eerste motion/occupancy/presence sensor
+            presence_by_area: dict[str, str] = {}
+            for eid, info in ha_entities.items():
+                if not eid.startswith("binary_sensor."):
+                    continue
+                dc = info.get("device_class", "")
+                if dc not in ("motion", "occupancy", "presence"):
+                    continue
+                aid = info.get("area_id", "")
+                if aid and aid not in presence_by_area:
+                    presence_by_area[aid] = eid
+
+            for eid, info in ha_entities.items():
+                if not eid.startswith("light."):
+                    continue
+
+                area_id   = info.get("area_id", "") or ""
+                area_name = area_map.get(area_id, "")
+                label     = info.get("name", "") or eid.split(".")[-1].replace("_", " ").title()
+
+                # Modus op basis van ruimtenaam
+                mode, is_outdoor = "manual", False
+                for kw, (m, o) in ROOM_DEFAULT_MODE.items():
+                    if kw in area_name.lower():
+                        mode, is_outdoor = m, o
+                        break
+
+                suggestions.append({
+                    "entity_id":       eid,
+                    "label":           label,
+                    "mode":            mode,
+                    "area_id":         area_id,
+                    "area_name":       area_name,
+                    "presence_sensor": presence_by_area.get(area_id),
+                    "auto_on":         True,
+                    "auto_off":        True,
+                    "outdoor":         is_outdoor,
+                    "excluded":        False,
+                })
+        except Exception as err:
+            _LOGGER.warning("LampAutomation auto_configure_from_ha: %s", err)
+        return suggestions
+
     async def async_tick(
         self,
         absence_state: str,

@@ -1,0 +1,58 @@
+<svg viewBox="0 0 480 200" xmlns="http://www.w3.org/2000/svg" font-family="system-ui,sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#12121f"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="480" height="200" rx="14" fill="url(#bg)"/>
+  <rect width="480" height="200" rx="14" fill="none" stroke="#4ade80" stroke-width="1.5" stroke-opacity=".3"/>
+
+  <!-- Phase label badge -->
+  <rect x="16" y="14" width="44" height="22" rx="6" fill="#4ade80" fill-opacity=".15" stroke="#4ade80" stroke-width="1.2" stroke-opacity=".6"/>
+  <text x="38" y="29" text-anchor="middle" font-size="12" font-weight="700" fill="#4ade80">L3</text>
+  <text x="74" y="29" font-size="12" font-weight="600" fill="#e2e8f0">Fase 3 — sensoren</text>
+
+  <!-- Wire L3 -->
+  <line x1="16" y1="80" x2="464" y2="80" stroke="#4ade80" stroke-width="5" stroke-linecap="round" filter="url(#glow)"/>
+
+  <!-- CT clamp -->
+  <ellipse cx="130" cy="80" rx="18" ry="11" fill="none" stroke="#94a3b8" stroke-width="2.5"/>
+  <ellipse cx="130" cy="80" rx="10" ry="6" fill="#1e293b" stroke="#64748b" stroke-width="1"/>
+  <line x1="130" y1="69" x2="130" y2="46" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <rect x="92" y="30" width="76" height="22" rx="6" fill="#1e293b" stroke="#4ade80" stroke-width="1.2" stroke-opacity=".5"/>
+  <text x="130" y="45" text-anchor="middle" font-size="10" font-weight="600" fill="#4ade80">~</text>
+  <text x="148" y="45" font-size="10" fill="#94a3b8"> Stroom (A)</text>
+  <text x="130" y="58" text-anchor="middle" font-size="9" fill="#64748b">CT-klem</text>
+
+  <!-- Voltage tap -->
+  <circle cx="250" cy="80" r="6" fill="#4ade80" fill-opacity=".3" stroke="#4ade80" stroke-width="1.5"/>
+  <line x1="250" y1="74" x2="250" y2="46" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <rect x="208" y="30" width="84" height="22" rx="6" fill="#1e293b" stroke="#38bdf8" stroke-width="1.2" stroke-opacity=".5"/>
+  <text x="250" y="45" text-anchor="middle" font-size="10" font-weight="600" fill="#38bdf8">V</text>
+  <text x="262" y="45" font-size="10" fill="#94a3b8"> Spanning (V)</text>
+  <text x="250" y="58" text-anchor="middle" font-size="9" fill="#64748b">optioneel</text>
+
+  <!-- Power meter -->
+  <rect x="350" y="68" width="36" height="24" rx="4" fill="#1e293b" stroke="#4ade80" stroke-width="1.5" stroke-opacity=".6"/>
+  <text x="368" y="84" text-anchor="middle" font-size="10" font-weight="700" fill="#4ade80">W</text>
+  <line x1="368" y1="68" x2="368" y2="46" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <rect x="316" y="30" width="104" height="22" rx="6" fill="#1e293b" stroke="#4ade80" stroke-width="1.2" stroke-opacity=".5"/>
+  <text x="368" y="45" text-anchor="middle" font-size="10" font-weight="600" fill="#4ade80">W</text>
+  <text x="378" y="45" font-size="10" fill="#94a3b8"> Vermogen (W)</text>
+  <text x="368" y="58" text-anchor="middle" font-size="9" fill="#64748b">optioneel</text>
+
+  <!-- Bottom explanation -->
+  <rect x="16" y="112" width="448" height="72" rx="8" fill="#0f172a" fill-opacity=".6" stroke="#334155" stroke-width="1"/>
+  <text x="32" y="132" font-size="10" font-weight="600" fill="#4ade80">Laatste fase — bijna klaar</text>
+  <text x="32" y="147" font-size="9.5" fill="#94a3b8">CT-klem op de L3-kabel.</text>
+  <text x="32" y="160" font-size="9.5" fill="#94a3b8">Vaak: EV-lader, airco of de zonnepanelen-groep.</text>
+  <text x="240" y="132" font-size="10" font-weight="600" fill="#64748b">Klaar na dit scherm</text>
+  <text x="240" y="147" font-size="9.5" fill="#94a3b8">CloudEMS heeft nu alle fase-data.</text>
+  <text x="240" y="160" font-size="9.5" fill="#94a3b8">Piekbeperking en fase-balans werken</text>
+  <text x="240" y="175" font-size="9.5" fill="#64748b">automatisch.</text>
+</svg>

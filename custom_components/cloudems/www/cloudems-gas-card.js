@@ -156,12 +156,21 @@ class CloudEMSGasCard extends HTMLElement {
         }).join('') + `${items.some(i=>i.indicatief) ? '<div class="indicatief-note">* indicatief op basis van huidige prijs</div>' : ''}</div>`;
       }
 
+      const _TTGas = window.CloudEMSTooltip;
+      const _ttProw = _TTGas ? _TTGas.html('gs-'+p.id, p.label, [
+        {label:'Sensor',    value:'cloudems_gasstand'},
+        {label:'Verbruik',  value:gasActive ? fmtM3(p.m3) : '—'},
+        {label:'Kosten',    value:gasActive && p.eur > 0 ? fmtEur(p.eur) : '—'},
+        {label:'Gem. per dag', value:gasActive ? fmtM3(p.avg)+'/dag' : '—', dim:true},
+        {label:'Gasprijs',  value:prijs ? fmtEur(prijs)+'/m³' : '—', dim:true},
+      ], {footer: canDrill ? 'Klik om uit te klappen per periode' : '● Gemeten via P1 of gasmeter'}) : {wrap:'',tip:''};
       periodeRows += `
-        <div class="prow ${canDrill ? 'clickable' : ''} ${isOpen ? 'open' : ''}" data-id="${p.id}">
+        <div class="prow ${canDrill ? 'clickable' : ''} ${isOpen ? 'open' : ''}" data-id="${p.id}" style="position:relative" ${_ttProw.wrap}>
           <span class="plabel">${p.label}${canDrill ? `<span class="chevron">${isOpen ? '▲' : '▼'}</span>` : ''}</span>
           <div class="pbar-wrap"><div class="pbar" style="width:${barW}%"></div></div>
           <span class="pval">${gasActive ? fmtM3(p.m3) : '—'}</span>
           <span class="peur">${gasActive && p.eur > 0 ? fmtEur(p.eur) : '—'}</span>
+          ${_ttProw.tip}
         </div>
         ${drillHtml}`;
     });

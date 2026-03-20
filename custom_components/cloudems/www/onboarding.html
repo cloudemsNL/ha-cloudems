@@ -27,10 +27,8 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--fb); overflow: hidden; }
 
-    /* ── Shell ── */
     .shell { height: 100vh; display: grid; grid-template-columns: 260px 1fr; }
 
-    /* ── Sidebar ── */
     .sidebar {
       background: var(--surface);
       border-right: 1px solid var(--border);
@@ -60,7 +58,6 @@
       padding: .6rem 1.5rem; cursor: pointer;
       border-left: 2px solid transparent;
       transition: background .12s, border-color .12s;
-      position: relative;
     }
     .nav-item:hover { background: rgba(255,255,255,0.025); }
     .nav-item.active { background: var(--green-g); border-left-color: var(--green); }
@@ -84,9 +81,7 @@
       font-family: var(--fm); font-size: .62rem; color: var(--muted);
     }
 
-    /* ── Main ── */
     .main { display: flex; flex-direction: column; overflow: hidden; }
-
     .topbar {
       display: flex; align-items: center; gap: 1.5rem;
       padding: .9rem 2rem; border-bottom: 1px solid var(--border);
@@ -104,11 +99,10 @@
     }
     .skip-btn:hover { color: var(--text); background: var(--surface2); }
 
-    /* ── Steps ── */
     .steps-wrap { flex: 1; position: relative; overflow: hidden; }
     .step {
       position: absolute; inset: 0;
-      display: grid; grid-template-columns: 1fr 380px;
+      display: grid; grid-template-columns: 1fr 360px;
       opacity: 0; pointer-events: none;
       transform: translateX(28px);
       transition: opacity .3s ease, transform .3s ease;
@@ -116,37 +110,104 @@
     .step.active { opacity: 1; pointer-events: all; transform: translateX(0); }
     .step.exit   { opacity: 0; transform: translateX(-28px); }
 
-    /* ── Left: text ── */
     .step-text {
-      padding: 2.5rem 2.5rem 1.5rem;
-      display: flex; flex-direction: column; gap: 1.2rem;
+      padding: 2rem 2.5rem 1.5rem;
+      display: flex; flex-direction: column; gap: 1rem;
       overflow-y: auto;
     }
     .step-text::-webkit-scrollbar { width: 3px; }
     .step-text::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
 
     .eyebrow { font-family: var(--fm); font-size: .62rem; letter-spacing: .14em; text-transform: uppercase; color: var(--green); }
-    .step-title { font-family: var(--fh); font-size: 1.9rem; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: #fff; }
+    .step-title { font-family: var(--fh); font-size: 1.75rem; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; color: #fff; }
     .step-title em { color: var(--green); font-style: normal; }
-    .step-desc { font-size: .875rem; line-height: 1.75; color: var(--muted); }
+    .step-desc { font-size: .84rem; line-height: 1.7; color: var(--muted); }
     .step-desc strong { color: var(--text); font-weight: 500; }
-    .step-desc a { color: var(--blue); text-decoration: none; }
-    .step-desc a:hover { text-decoration: underline; }
 
-    .features { display: flex; flex-direction: column; gap: .55rem; }
-    .feature { display: flex; align-items: flex-start; gap: .75rem; font-size: .83rem; color: var(--muted); line-height: 1.5; }
-    .feature-dot { width: 5px; height: 5px; background: var(--green); border-radius: 50%; margin-top: .48rem; flex-shrink: 0; }
-    .feature strong { color: var(--text); font-weight: 500; }
+    /* ── Interactive fields ── */
+    .field-group { display: flex; flex-direction: column; gap: .55rem; }
+    .field-label {
+      font-size: .75rem; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .field-label .badge {
+      font-size: .62rem; padding: .1rem .4rem; border-radius: 99px;
+      font-weight: 500; font-family: var(--fm);
+    }
+    .badge-opt { background: rgba(78,95,114,.25); color: var(--muted); border: 1px solid rgba(78,95,114,.3); }
+    .badge-req { background: rgba(255,171,0,.1); color: var(--amber); border: 1px solid rgba(255,171,0,.25); }
+
+    .field-row { display: flex; gap: .5rem; align-items: center; }
+    .field-select, .field-input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: .8rem; font-family: var(--fb);
+      padding: .5rem .75rem; outline: none;
+      transition: border-color .15s;
+      appearance: none; -webkit-appearance: none;
+    }
+    .field-select:focus, .field-input:focus { border-color: var(--green); }
+    .field-select option { background: #1c2333; }
+
+    .validate-btn {
+      width: 34px; height: 34px; border-radius: 7px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: .85rem;
+      transition: all .15s; flex-shrink: 0;
+    }
+    .validate-btn:hover { border-color: var(--green); color: var(--green); }
+    .validate-btn.ok  { border-color: var(--green-d); color: var(--green); background: var(--green-g); }
+    .validate-btn.err { border-color: var(--red); color: var(--red); }
+    .validate-btn.spin { animation: spin .6s linear infinite; pointer-events:none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .field-hint { font-size: .72rem; color: var(--muted); line-height: 1.5; }
+    .field-status { font-size: .72rem; padding: .3rem .6rem; border-radius: 5px; margin-top: .15rem; display: none; }
+    .field-status.ok  { display: block; color: var(--green); background: var(--green-g); }
+    .field-status.err { display: block; color: var(--red); background: rgba(255,82,82,.08); }
+
+    /* Radio row */
+    .radio-row { display: flex; gap: .6rem; }
+    .radio-opt {
+      flex: 1; padding: .65rem .9rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface2); cursor: pointer; transition: all .15s;
+      display: flex; align-items: center; gap: .55rem; font-size: .82rem;
+    }
+    .radio-opt:hover { border-color: var(--green-d); }
+    .radio-opt.selected { border-color: var(--green); background: var(--green-g); color: var(--green); }
+    .radio-dot {
+      width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--muted);
+      flex-shrink: 0; transition: all .15s; display: flex; align-items: center; justify-content: center;
+    }
+    .radio-opt.selected .radio-dot { border-color: var(--green); background: var(--green); }
+    .radio-opt.selected .radio-dot::after { content: ''; width: 5px; height: 5px; background: #000; border-radius: 50%; }
+
+    /* NILM checkboxes */
+    .nilm-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .45rem;
+    }
+    .nilm-item {
+      padding: .55rem .75rem; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--surface2); cursor: pointer; transition: all .15s;
+      display: flex; align-items: center; gap: .5rem; font-size: .78rem;
+    }
+    .nilm-item:hover { border-color: var(--green-d); }
+    .nilm-item.checked { border-color: var(--green); background: var(--green-g); color: var(--green); }
+    .nilm-check {
+      width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--muted);
+      flex-shrink: 0; transition: all .15s; display: flex; align-items: center; justify-content: center;
+    }
+    .nilm-item.checked .nilm-check { border-color: var(--green); background: var(--green); }
+    .nilm-item.checked .nilm-check::after { content: '✓'; font-size: .6rem; color: #000; font-weight: 700; }
 
     .tip {
       background: var(--surface2); border: 1px solid var(--border);
       border-left: 3px solid var(--green-d); border-radius: 9px;
-      padding: .9rem 1.1rem; font-size: .8rem; line-height: 1.6; color: var(--muted);
+      padding: .75rem 1rem; font-size: .78rem; line-height: 1.6; color: var(--muted);
       display: flex; gap: .75rem;
     }
-    .tip-icon { font-size: 1rem; flex-shrink: 0; padding-top: .05rem; }
+    .tip-icon { font-size: .95rem; flex-shrink: 0; padding-top: .05rem; }
 
-    .actions { display: flex; gap: .75rem; align-items: center; margin-top: auto; padding-top: 1.5rem; }
+    .actions { display: flex; gap: .75rem; align-items: center; margin-top: auto; padding-top: 1rem; }
     .btn {
       display: inline-flex; align-items: center; gap: .45rem;
       padding: .65rem 1.4rem; border-radius: 8px;
@@ -155,31 +216,55 @@
     }
     .btn-primary { background: var(--green); color: #000; }
     .btn-primary:hover { background: #2ffb80; transform: translateY(-1px); box-shadow: 0 4px 18px rgba(0,230,118,.25); }
+    .btn-primary:disabled { background: var(--muted); cursor: not-allowed; transform: none; box-shadow: none; opacity: .5; }
     .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-secondary:hover { background: rgba(255,255,255,.05); }
     .btn-arrow { font-size: 1rem; transition: transform .15s; }
     .btn-primary:hover .btn-arrow { transform: translateX(3px); }
 
-    /* ── Right: diagram ── */
+    .save-status {
+      font-size: .75rem; padding: .4rem .8rem; border-radius: 6px;
+      display: none; margin-left: auto;
+    }
+    .save-status.ok  { display: block; color: var(--green); background: var(--green-g); }
+    .save-status.err { display: block; color: var(--red); background: rgba(255,82,82,.08); }
+
+    /* Right panel */
     .step-visual {
       background: var(--surface); border-left: 1px solid var(--border);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 2rem; gap: 1.2rem; position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
+      padding: 1.5rem; gap: 1rem; position: relative; overflow-y: auto;
     }
     .step-visual::before {
       content: ''; position: absolute; inset: 0;
       background: radial-gradient(ellipse 70% 50% at 50% 60%, var(--green-g), transparent);
       pointer-events: none;
     }
-    .diagram-wrap {
-      width: 100%; background: #1c1c2e; border-radius: 12px;
-      border: 1px solid var(--border); overflow: hidden;
+    .vis-title { font-family: var(--fm); font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); position: relative; z-index:1; }
+    .sensor-list { display: flex; flex-direction: column; gap: .35rem; position: relative; z-index:1; flex:1; overflow-y:auto; }
+    .sensor-list::-webkit-scrollbar { width: 3px; }
+    .sensor-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+    .sensor-item {
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+      padding: .45rem .7rem; font-size: .74rem; cursor: pointer;
+      transition: border-color .12s, background .12s;
+      display: flex; align-items: center; gap: .5rem;
+    }
+    .sensor-item:hover { border-color: var(--green-d); background: rgba(0,230,118,.04); }
+    .sensor-item.active { border-color: var(--green); background: var(--green-g); }
+    .sensor-state { font-family: var(--fm); color: var(--green); flex-shrink: 0; font-size: .7rem; }
+    .sensor-name { color: var(--muted); flex:1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sensor-item.active .sensor-name { color: var(--text); }
+    .search-input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; color: var(--text); font-size: .78rem; font-family: var(--fb);
+      padding: .45rem .75rem; outline: none; transition: border-color .15s;
       position: relative; z-index: 1;
     }
-    .diagram-wrap img { width: 100%; display: block; }
-    .diagram-caption { font-family: var(--fm); font-size: .65rem; color: var(--muted); text-align: center; position: relative; z-index: 1; }
+    .search-input:focus { border-color: var(--green); }
+    .loading-msg { font-size: .75rem; color: var(--muted); text-align: center; padding: 2rem; position: relative; z-index:1; }
 
-    /* ── Completion ── */
+    /* Completion */
     .complete-wrap {
       grid-column: 1 / -1;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -216,8 +301,6 @@
 </head>
 <body>
 <div class="shell">
-
-  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="logo">
       <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
@@ -230,10 +313,9 @@
       </div>
     </div>
     <nav class="nav" id="nav"></nav>
-    <div class="sidebar-foot">v3.2.1 · cloudems.eu</div>
+    <div class="sidebar-foot" id="sidebarFoot">CloudEMS · Laden…</div>
   </aside>
 
-  <!-- Main -->
   <main class="main">
     <div class="topbar">
       <span class="step-counter" id="counter">Stap 1 van 8</span>
@@ -248,143 +330,99 @@
 </div>
 
 <script>
-const DIAGRAMS_BASE = '/local/cloudems/diagrams/';
+// ── HA API ──────────────────────────────────────────────────────────────────
+let _haToken = null;
+let _haStates = null;   // cache: { entity_id: stateObj }
 
-const STEPS = [
-  {
-    nav: "Welkom",
-    eyebrow: "Introductie",
-    title: "Welkom bij <em>CloudEMS</em>",
-    desc: `CloudEMS is een volledig lokaal energie-managementsysteem voor Home Assistant —
-           geen cloud, geen abonnement, alle intelligentie draait op je eigen hardware.`,
-    features: [
-      { icon: "⚡", text: "<strong>Slim laden</strong> — EV en boiler laden op het goedkoopste moment" },
-      { icon: "☀️", text: "<strong>Zelfconsumptie</strong> — maximaal eigen zonnestroom benutten" },
-      { icon: "📊", text: "<strong>Capaciteitstarief</strong> — kwartier-piek bewaken en afvlakken" },
-      { icon: "🔌", text: "<strong>NILM</strong> — apparaten automatisch detecteren op stroompatroon" },
-      { icon: "🚨", text: "<strong>Netcongestie</strong> — waarschuwingen bij overbelasting in jouw wijk" },
-    ],
-    tip: "Deze wizard duurt ongeveer 5 minuten. Je kunt hem altijd opnieuw doorlopen via Instellingen → Integraties → CloudEMS → Opnieuw instellen.",
-    diagram: "welcome.svg",
-    diagramCaption: "CloudEMS beheert alle energiestromen automatisch",
-  },
-  {
-    nav: "Aansluiting",
-    eyebrow: "Stap 1 — Elektriciteitsnet",
-    title: "<em>Type aansluiting</em> kiezen",
-    desc: `Vertel CloudEMS hoe jouw aansluiting op het elektriciteitsnet eruit ziet.
-           Dit bepaalt de maximale stroomsterkte en of fase-balancering mogelijk is.`,
-    features: [
-      { icon: "🏠", text: "<strong>1-fase</strong> — standaard in de meeste woningen. Max. 1×16A (~3,7 kW) of 1×25A (~5,75 kW)" },
-      { icon: "⚡", text: "<strong>3-fase</strong> — zwaardere aansluiting, vaak bij warmtepomp of grote laadpaal. Max. 3×16A (~11 kW)" },
-    ],
-    tip: "Kijk op je meterkast. Staat er één schakelaar voor het hele huis? Dan 1-fase. Meerdere schakelaren naast elkaar (rood/zwart/blauw)? Dan 3-fase.",
-    diagram: "grid_connection.svg",
-    diagramCaption: "1-fase vs. 3-fase aansluiting",
-  },
-  {
-    nav: "Netmeting",
-    eyebrow: "Stap 2 — Slimme meter",
-    title: "Jouw <em>slimme meter</em> koppelen",
-    desc: `CloudEMS leest het net-vermogen als basis voor alle beslissingen.
-           Koppel de sensor van je P1-lezer of integratie.`,
-    features: [
-      { icon: "📡", text: "<strong>Nettosensor</strong> — één sensor: positief = afname, negatief = teruglevering (W of kW)" },
-      { icon: "↕️", text: "<strong>Aparte import/export</strong> — sommige meters leveren twee positieve sensoren" },
-      { icon: "⚡", text: "<strong>P1 directe koppeling</strong> — praat direct met je P1-lezer via TCP voor ~1s responstijd" },
-    ],
-    tip: "Gebruik je een SLIMMELEZER, P1 Dongle of Homewizard? Activeer dan ook de P1 directe koppeling in de volgende stap voor de snelste reactietijd.",
-    diagram: "grid_sensors.svg",
-    diagramCaption: "Slimme meter → P1-lezer → Home Assistant",
-  },
-  {
-    nav: "Fase-sensoren",
-    eyebrow: "Stap 3 — Optioneel",
-    title: "<em>Fase-sensoren</em> installeren",
-    desc: `Met CT-klemmen (stroomtransformatoren) op elke fase meet CloudEMS het vermogen per fase.
-           Optioneel maar sterk aanbevolen bij een 3-fase aansluiting.`,
-    features: [
-      { icon: "🔄", text: "<strong>Fase-balancering</strong> — CloudEMS herverdeelt EV-stroom automatisch over fasen" },
-      { icon: "🛡️", text: "<strong>Overbelasting voorkomen</strong> — waarschuwing als één fase zijn maximum nadert" },
-      { icon: "📊", text: "<strong>Nauwkeuriger piek-detectie</strong> — beter capaciteitstarief bewaken per fase" },
-    ],
-    tip: "Populaire CT-sensor hardware: Shelly EM, Emporia Vue, iotawatt, Eastron SDM230. Klemmen worden om de inkomende kabel geknipt — geen elektricien nodig.",
-    diagram: "phase_sensors.svg",
-    diagramCaption: "CT-klemmen op L1, L2 en L3",
-  },
-  {
-    nav: "Zonnepanelen",
-    eyebrow: "Stap 4 — PV-systeem",
-    title: "Zonnepanelen <em>configureren</em>",
-    desc: `Koppel je omvormer(s) zodat CloudEMS weet hoeveel zonnestroom beschikbaar is.
-           Nauwkeurige oriëntatie-data verbetert de productievoorspelling.`,
-    features: [
-      { icon: "🌞", text: "<strong>Vermogenssensor</strong> — momentaan PV-vermogen in W of kW van je omvormer" },
-      { icon: "🧭", text: "<strong>Azimut</strong> — richting van de panelen: 0°=N, 90°=O, 180°=Z, 270°=W" },
-      { icon: "📐", text: "<strong>Helling</strong> — hoek met horizontaal: 0°=plat dak, 30–35°=standaard, 90°=verticaal" },
-      { icon: "🔁", text: "<strong>Meerdere omvormers</strong> — elk met eigen oriëntatie, CloudEMS behandelt ze als één systeem" },
-    ],
-    tip: "Laat azimut en helling leeg als je het niet weet — CloudEMS leert ze automatisch op basis van het dagelijkse productiepatroon (na ~5 zonnige dagen).",
-    diagram: "inverter_detail.svg",
-    diagramCaption: "Omvormer configuratie per dakrichting",
-  },
-  {
-    nav: "Apparaten",
-    eyebrow: "Stap 5 — Slim laden",
-    title: "EV, boiler & <em>batterij</em>",
-    desc: `Koppel de apparaten die CloudEMS mag aansturen. Elk apparaat krijgt een eigen
-           slimme laadstrategie op basis van EPEX-spotprijzen en zonneopbrengst.`,
-    features: [
-      { icon: "🚗", text: "<strong>EV-laadpaal</strong> — laden op goedkoopste uren of op zonne-energie. Setpoint via number entiteit" },
-      { icon: "🚿", text: "<strong>Boiler cascade</strong> — thermisch accumuleren als stroom goedkoop of zon beschikbaar is" },
-      { icon: "🔋", text: "<strong>Thuisbatterij</strong> — laden/ontladen op basis van prijzen en verbruik" },
-    ],
-    tip: "Heb je een Zappi, EVCC of andere slimme laadpaal? Stel dan de setpoint entiteit in — CloudEMS stuurt het laadvermogen aan via een number.* entiteit.",
-    diagram: "solar_ev.svg",
-    diagramCaption: "Omvormer + batterij + laadpaal koppeling",
-  },
-  {
-    nav: "Tarieven",
-    eyebrow: "Stap 6 — Energieprijzen",
-    title: "EPEX <em>spotprijzen</em> instellen",
-    desc: `CloudEMS haalt automatisch de dag-van-tevoren EPEX-spotprijzen op voor Nederland (NL) en buurlanden.
-           Dit is de basis voor tijdgestuurde laadoptimalisatie.`,
-    features: [
-      { icon: "📈", text: "<strong>Dynamisch tarief</strong> — stroom is elke dag een ander prijs per uur" },
-      { icon: "🇳🇱", text: "<strong>NL/BE/DE/FR</strong> — kies jouw marktzone" },
-      { icon: "⚡", text: "<strong>Negatieve prijzen</strong> — CloudEMS herkent perioden waarop stroom gratis of betaald is" },
-      { icon: "📅", text: "<strong>Dagelijks bijwerken</strong> — nieuwe prijzen worden om 13:00 opgehaald" },
-    ],
-    tip: "Heb je geen dynamisch tarief? CloudEMS werkt ook met een vast dag/nachttarief. Vul dan handmatig het dal- en piektarief in.",
-    diagram: "welcome.svg",
-    diagramCaption: "CloudEMS integreert alle energiestromen",
-  },
-  {
-    nav: "Capaciteitstarief",
-    eyebrow: "Stap 7 — Netcongestie & Piek",
-    title: "Capaciteitstarief <em>bewaken</em>",
-    desc: `In Nederland betaal je naarmate 2026 een capaciteitstarief op basis van je hoogste kwartier-piek per maand.
-           CloudEMS bewaakt dit automatisch en schakelt laadpunten uit als de drempel nadert.`,
-    features: [
-      { icon: "📊", text: "<strong>Kwartier-piek</strong> — hoogste gemiddeld vermogen over een kwartier per kalendermaand" },
-      { icon: "🚨", text: "<strong>Load shedding</strong> — EV en boiler worden tijdelijk uitgeschakeld bij dreigende overschrijding" },
-      { icon: "💶", text: "<strong>Drempel instellen</strong> — bijv. 6 kW (boven 2,5 kW wordt capaciteitstarief berekend)" },
-      { icon: "📅", text: "<strong>Historiek</strong> — 12 maanden piekhistorie en maandelijkse kostenschatting" },
-    ],
-    tip: "Bij Liander kost elke kW boven 2,5 kW ongeveer €4,37 per maand. Stel je drempel in op je gewenste maximum — CloudEMS schakelt preventief als de piek die drempel nadert.",
-    diagram: "grid_sensors.svg",
-    diagramCaption: "Net-vermogen bewaking voor capaciteitstarief",
-  },
+async function _getToken() {
+  if (_haToken) return _haToken;
+  const keys = Object.keys(localStorage).filter(k => k.startsWith('hassTokens'));
+  for (const k of keys) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(k));
+      if (parsed?.access_token) { _haToken = parsed.access_token; return _haToken; }
+    } catch {}
+  }
+  return null;
+}
+
+async function _loadStates() {
+  if (_haStates) return _haStates;
+  const token = await _getToken();
+  if (!token) { _haStates = {}; return {}; }
+  try {
+    const r = await fetch('/api/states', {
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }
+    });
+    if (!r.ok) { _haStates = {}; return {}; }
+    const arr = await r.json();
+    _haStates = {};
+    arr.forEach(s => { _haStates[s.entity_id] = s; });
+    return _haStates;
+  } catch { _haStates = {}; return {}; }
+}
+
+async function _callService(domain, service, data) {
+  const token = await _getToken();
+  if (!token) return false;
+  try {
+    const r = await fetch(`/api/services/${domain}/${service}`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+function _filterSensors(states, keywords, excludeKeywords, domains) {
+  const allowed = domains || ['sensor', 'input_number', 'number'];
+  return Object.values(states)
+    .filter(s => {
+      const d = s.entity_id.split('.')[0];
+      if (!allowed.includes(d)) return false;
+      const id = s.entity_id.toLowerCase();
+      const name = (s.attributes?.friendly_name || '').toLowerCase();
+      const combined = id + ' ' + name;
+      const hasKw = !keywords || keywords.some(k => combined.includes(k));
+      const excluded = excludeKeywords && excludeKeywords.some(k => combined.includes(k));
+      return hasKw && !excluded;
+    })
+    .sort((a, b) => {
+      const aScore = keywords ? keywords.filter(k => (a.entity_id + ' ' + (a.attributes?.friendly_name||'')).toLowerCase().includes(k)).length : 0;
+      const bScore = keywords ? keywords.filter(k => (b.entity_id + ' ' + (b.attributes?.friendly_name||'')).toLowerCase().includes(k)).length : 0;
+      return bScore - aScore || a.entity_id.localeCompare(b.entity_id);
+    });
+}
+
+// ── Wizard state ─────────────────────────────────────────────────────────────
+const wizardData = {
+  grid_sensor: '',
+  grid_phases: 1,
+  max_current_per_phase: 25,
+  power_sensor_l1: '',
+  power_sensor_l2: '',
+  power_sensor_l3: '',
+  solar_sensor: '',
+  ev_charger_entity: '',
+  peak_shaving_limit_w: 6000,
+  peak_shaving_enabled: true,
+  nilm_device_hints: [],
+};
+
+// ── Step definitions ──────────────────────────────────────────────────────────
+const NAV_LABELS = [
+  'Welkom', 'Aansluiting', 'Netmeting', 'Fase-sensoren',
+  'Zonnepanelen', 'Apparaten', 'Tarieven & piek', 'NILM apparaten'
 ];
 
-// ── State ─────────────────────────────────────────────────────────────────────
 let current = 0;
-const total  = STEPS.length + 1; // +1 voor completion
+const TOTAL_STEPS = NAV_LABELS.length + 1; // +1 completion
 
 // ── Build nav ─────────────────────────────────────────────────────────────────
 function buildNav() {
   const nav = document.getElementById('nav');
-  STEPS.forEach((s, i) => {
+  NAV_LABELS.forEach((label, i) => {
     if (i > 0) {
       const div = document.createElement('div');
       div.className = 'nav-divider';
@@ -393,75 +431,490 @@ function buildNav() {
     const item = document.createElement('div');
     item.className = 'nav-item' + (i === 0 ? ' active' : '');
     item.dataset.index = i;
-    item.innerHTML = `
-      <div class="nav-num">${i + 1}</div>
-      <div class="nav-label">${s.nav}</div>
-    `;
+    item.innerHTML = `<div class="nav-num">${i + 1}</div><div class="nav-label">${label}</div>`;
     item.addEventListener('click', () => goTo(i));
     nav.appendChild(item);
   });
 }
 
-// ── Build steps ───────────────────────────────────────────────────────────────
+// ── Step renderers ────────────────────────────────────────────────────────────
+function _fieldRow(id, label, optional, hint) {
+  return `
+    <div class="field-group">
+      <div class="field-label">${label} <span class="badge ${optional ? 'badge-opt' : 'badge-req'}">${optional ? 'optioneel' : 'vereist'}</span></div>
+      <div class="field-row">
+        <select class="field-select" id="${id}">
+          <option value="">— kies sensor —</option>
+        </select>
+        <button class="validate-btn" id="${id}_btn" onclick="_validateField('${id}')" title="Valideer">⟳</button>
+      </div>
+      <div class="field-status" id="${id}_status"></div>
+      ${hint ? `<div class="field-hint">${hint}</div>` : ''}
+    </div>`;
+}
+
+function _radioRow(name, opts, initial, onchange) {
+  return `<div class="radio-row" id="radio_${name}">
+    ${opts.map(o => `
+      <div class="radio-opt ${o.value === initial ? 'selected' : ''}" onclick="_radioSelect('${name}', '${o.value}', this, ${onchange})" data-value="${o.value}">
+        <div class="radio-dot"></div>${o.icon || ''} ${o.label}
+      </div>`).join('')}
+  </div>`;
+}
+
+function _radioSelect(name, val, el, cb) {
+  el.closest('.radio-row').querySelectorAll('.radio-opt').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  if (cb) cb(val);
+}
+
+async function _fillSelect(id, keywords, excludeKeywords, domains) {
+  const states = await _loadStates();
+  const sensors = _filterSensors(states, keywords, excludeKeywords, domains);
+  const sel = document.getElementById(id);
+  if (!sel) return sensors;
+  const cur = wizardData[id] || '';
+  // keep placeholder
+  while (sel.options.length > 1) sel.remove(1);
+  sensors.slice(0, 80).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.entity_id;
+    const name = s.attributes?.friendly_name || s.entity_id;
+    const val = s.state;
+    opt.textContent = `${name}  [${val}]`;
+    if (s.entity_id === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.onchange = () => { wizardData[id] = sel.value; };
+  if (cur) sel.value = cur;
+  return sensors;
+}
+
+async function _validateField(id) {
+  const sel = document.getElementById(id);
+  const btn = document.getElementById(id + '_btn');
+  const status = document.getElementById(id + '_status');
+  if (!sel || !sel.value) {
+    _showStatus(status, 'err', 'Geen sensor geselecteerd');
+    return;
+  }
+  btn.classList.add('spin');
+  btn.textContent = '↻';
+  const states = await _loadStates();
+  const s = states[sel.value];
+  btn.classList.remove('spin');
+  if (!s) {
+    btn.classList.add('err'); btn.textContent = '✗';
+    _showStatus(status, 'err', `Sensor niet gevonden: ${sel.value}`);
+    return;
+  }
+  const val = parseFloat(s.state);
+  if (isNaN(val) && s.state !== 'unavailable') {
+    btn.classList.add('ok'); btn.textContent = '✓';
+    _showStatus(status, 'ok', `✓ ${s.attributes?.friendly_name || sel.value} · staat: "${s.state}"`);
+  } else if (s.state === 'unavailable') {
+    btn.classList.add('err'); btn.textContent = '⚠';
+    _showStatus(status, 'err', `⚠ Sensor is momenteel unavailable — check je integratie`);
+  } else {
+    btn.classList.add('ok'); btn.textContent = '✓';
+    _showStatus(status, 'ok', `✓ ${s.attributes?.friendly_name || sel.value} · ${val.toFixed(1)} ${s.attributes?.unit_of_measurement || ''}`);
+  }
+  wizardData[id] = sel.value;
+}
+
+function _showStatus(el, type, msg) {
+  if (!el) return;
+  el.className = 'field-status ' + type;
+  el.textContent = msg;
+}
+
+// ── Right panel: sensor list ──────────────────────────────────────────────────
+let _visPanelActive = null;
+
+async function _buildVisPanel(containerId, keywords, excludeKeywords, targetField, domains) {
+  const cont = document.getElementById(containerId);
+  if (!cont) return;
+  _visPanelActive = { target: targetField, container: containerId };
+  cont.innerHTML = `<div class="vis-title">Beschikbare sensoren</div>
+    <input class="search-input" id="${containerId}_search" placeholder="Zoeken…">
+    <div class="sensor-list" id="${containerId}_list"><div class="loading-msg">Laden…</div></div>`;
+
+  const search = cont.querySelector('.search-input');
+  const list = cont.querySelector('.sensor-list');
+
+  const states = await _loadStates();
+  let sensors = _filterSensors(states, keywords, excludeKeywords, domains);
+
+  function render(filtered) {
+    list.innerHTML = filtered.length
+      ? filtered.slice(0, 60).map(s => {
+          const name = s.attributes?.friendly_name || s.entity_id;
+          const val = s.state + (s.attributes?.unit_of_measurement ? ' ' + s.attributes.unit_of_measurement : '');
+          const active = wizardData[targetField] === s.entity_id ? ' active' : '';
+          return `<div class="sensor-item${active}" onclick="_selectSensor('${targetField}', '${s.entity_id}', '${containerId}')">
+            <span class="sensor-state">${val.length > 10 ? val.slice(0,10)+'…' : val}</span>
+            <span class="sensor-name">${name}</span>
+          </div>`;
+        }).join('')
+      : '<div class="loading-msg">Geen sensoren gevonden</div>';
+  }
+
+  render(sensors);
+  search.oninput = () => {
+    const q = search.value.toLowerCase();
+    render(sensors.filter(s =>
+      s.entity_id.toLowerCase().includes(q) ||
+      (s.attributes?.friendly_name || '').toLowerCase().includes(q)
+    ));
+  };
+}
+
+function _selectSensor(field, entityId, containerId) {
+  wizardData[field] = entityId;
+  const sel = document.getElementById(field);
+  if (sel) {
+    // add option if not there
+    let found = false;
+    for (const o of sel.options) { if (o.value === entityId) { sel.value = entityId; found = true; break; } }
+    if (!found) {
+      const states = _haStates || {};
+      const s = states[entityId];
+      const name = s?.attributes?.friendly_name || entityId;
+      const opt = document.createElement('option');
+      opt.value = entityId; opt.textContent = name; sel.appendChild(opt);
+      sel.value = entityId;
+    }
+  }
+  // refresh active state in list
+  const list = document.getElementById(containerId + '_list');
+  if (list) {
+    list.querySelectorAll('.sensor-item').forEach(el => {
+      const onclick = el.getAttribute('onclick') || '';
+      el.classList.toggle('active', onclick.includes(`'${entityId}'`));
+    });
+  }
+}
+
+// ── Build all steps ───────────────────────────────────────────────────────────
 function buildSteps() {
   const wrap = document.getElementById('stepsWrap');
 
-  STEPS.forEach((s, i) => {
-    const el = document.createElement('div');
-    el.className = 'step' + (i === 0 ? ' active' : '');
-    el.id = `step-${i}`;
+  // Step 0: Welkom
+  wrap.appendChild(_makeStep(0, `
+    <div class="eyebrow">Introductie</div>
+    <h1 class="step-title">Welkom bij <em>CloudEMS</em></h1>
+    <p class="step-desc">
+      CloudEMS is een volledig lokaal energie-managementsysteem voor Home Assistant —
+      geen cloud, geen abonnement, alle intelligentie draait op je eigen hardware.<br><br>
+      <strong>Deze wizard</strong> helpt je de sensoren en apparaten te koppelen. Je selecteert
+      elke sensor rechtstreeks vanuit jouw HA-installatie — geen handmatig typen.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:.45rem">
+      ${['⚡ Slim laden — EV en boiler laden op het goedkoopste moment',
+         '☀️ Zelfconsumptie — maximaal eigen zonnestroom benutten',
+         '📊 Capaciteitstarief — kwartier-piek bewaken en afvlakken',
+         '🔌 NILM — apparaten automatisch detecteren op stroompatroon',
+         '🚨 Netcongestie — waarschuwingen bij overbelasting in jouw wijk',
+        ].map(f => `<div style="display:flex;gap:.75rem;font-size:.83rem;color:var(--muted);align-items:flex-start">
+          <span style="font-size:.95rem;margin-top:.05rem">${f.split(' ')[0]}</span>
+          <span>${f.slice(f.indexOf(' ')+1)}</span></div>`).join('')}
+    </div>
+    <div style="background:var(--surface2);border:1px solid rgba(0,230,118,0.2);border-radius:9px;padding:.75rem 1rem;font-size:.78rem;line-height:1.6;">
+      <div style="font-family:var(--fm);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;color:var(--green);margin-bottom:.4rem">📌 Bladwijzer deze pagina</div>
+      <div style="font-family:var(--fm);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.4rem .7rem;color:var(--text);font-size:.72rem;user-select:all;cursor:text;" id="wizard-url">http://homeassistant.local:8123/local/cloudems/onboarding.html</div>
+      <div style="color:var(--muted);font-size:.7rem;margin-top:.35rem">Ook bereikbaar via: Instellingen → Integraties → CloudEMS → Configureren</div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Deze wizard duurt ongeveer 5 minuten. Je kunt hem altijd opnieuw doorlopen via
+      Instellingen → Integraties → CloudEMS.</span></div>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="goTo(1)">Start configuratie <span class="btn-arrow">→</span></button>
+    </div>
+  `, `
+    <div class="vis-title">Energiestroom overzicht</div>
+    <div style="position:relative;z-index:1;flex:1;display:flex;align-items:center;justify-content:center">
+      <svg viewBox="0 0 280 260" width="260" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" style="stop-color:#00e676;stop-opacity:0.8"/>
+            <stop offset="100%" style="stop-color:#00b844;stop-opacity:0.4"/>
+          </linearGradient>
+        </defs>
+        <!-- Grid -->
+        <rect x="10" y="105" width="70" height="50" rx="8" fill="#161e2e" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+        <text x="45" y="126" text-anchor="middle" fill="#4e5f72" font-size="9" font-family="Inter,sans-serif">Slimme</text>
+        <text x="45" y="138" text-anchor="middle" fill="#4e5f72" font-size="9" font-family="Inter,sans-serif">meter</text>
+        <text x="45" y="150" text-anchor="middle" fill="#00e676" font-size="8" font-family="DM Mono,monospace">P1</text>
+        <!-- HA hub -->
+        <rect x="105" y="95" width="70" height="70" rx="10" fill="url(#g1)"/>
+        <text x="140" y="127" text-anchor="middle" fill="#000" font-size="10" font-weight="700" font-family="Syne,sans-serif">Cloud</text>
+        <text x="140" y="141" text-anchor="middle" fill="#000" font-size="10" font-weight="700" font-family="Syne,sans-serif">EMS</text>
+        <!-- Solar -->
+        <rect x="200" y="20" width="70" height="50" rx="8" fill="#161e2e" stroke="rgba(255,171,0,0.3)" stroke-width="1"/>
+        <text x="235" y="42" text-anchor="middle" fill="#ffab00" font-size="14">☀️</text>
+        <text x="235" y="60" text-anchor="middle" fill="#4e5f72" font-size="9" font-family="Inter,sans-serif">Zonnepanelen</text>
+        <!-- Battery -->
+        <rect x="200" y="105" width="70" height="50" rx="8" fill="#161e2e" stroke="rgba(64,196,255,0.3)" stroke-width="1"/>
+        <text x="235" y="127" text-anchor="middle" fill="#40c4ff" font-size="14">🔋</text>
+        <text x="235" y="145" text-anchor="middle" fill="#4e5f72" font-size="9" font-family="Inter,sans-serif">Batterij / EV</text>
+        <!-- Boiler -->
+        <rect x="200" y="190" width="70" height="50" rx="8" fill="#161e2e" stroke="rgba(0,230,118,0.2)" stroke-width="1"/>
+        <text x="235" y="212" text-anchor="middle" fill="#00e676" font-size="14">🚿</text>
+        <text x="235" y="230" text-anchor="middle" fill="#4e5f72" font-size="9" font-family="Inter,sans-serif">Boiler</text>
+        <!-- Lines -->
+        <line x1="80" y1="130" x2="105" y2="130" stroke="#00e676" stroke-width="1.5" stroke-dasharray="4,3" opacity=".6"/>
+        <line x1="175" y1="115" x2="200" y2="70"  stroke="#ffab00" stroke-width="1.5" stroke-dasharray="4,3" opacity=".6"/>
+        <line x1="175" y1="130" x2="200" y2="130" stroke="#40c4ff" stroke-width="1.5" stroke-dasharray="4,3" opacity=".6"/>
+        <line x1="175" y1="145" x2="200" y2="205" stroke="#00e676" stroke-width="1.5" stroke-dasharray="4,3" opacity=".6"/>
+      </svg>
+    </div>
+  `));
 
-    const featuresHtml = s.features.map(f => `
-      <div class="feature">
-        <span style="font-size:.95rem;flex-shrink:0;width:1.4rem">${f.icon}</span>
-        <span>${f.text}</span>
+  // Step 1: Aansluiting
+  wrap.appendChild(_makeStep(1, `
+    <div class="eyebrow">Stap 1 — Elektriciteitsnet</div>
+    <h1 class="step-title"><em>Type aansluiting</em> kiezen</h1>
+    <p class="step-desc">Vertel CloudEMS hoe jouw aansluiting eruit ziet. Dit bepaalt maximale stroom en of fase-balancering mogelijk is.</p>
+    <div class="field-group">
+      <div class="field-label">Aantal fasen <span class="badge badge-req">vereist</span></div>
+      ${_radioRow('phases', [
+        {value:'1', icon:'🏠', label:'1-fase'},
+        {value:'3', icon:'⚡', label:'3-fase'},
+      ], '1', `function(v){ wizardData.grid_phases=parseInt(v); _updatePhaseTip(v); }`)}
+      <div class="field-hint" id="phase_tip">Standaard in de meeste woningen. Kijk op je meterkast: één grote zekering = 1-fase.</div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Maximale stroom per fase <span class="badge badge-req">vereist</span></div>
+      <div class="field-row">
+        ${_radioRow('maxA', [
+          {value:'16', label:'16A'},
+          {value:'25', label:'25A'},
+          {value:'32', label:'32A'},
+          {value:'40', label:'40A'},
+        ], '25', `function(v){ wizardData.max_current_per_phase=parseInt(v); }`)}
       </div>
-    `).join('');
-
-    const backBtn = i > 0
-      ? `<button class="btn btn-secondary" onclick="goTo(${i-1})">← Terug</button>`
-      : '';
-
-    const nextLabel = i < STEPS.length - 1 ? 'Volgende' : 'Afronden';
-
-    el.innerHTML = `
-      <div class="step-text">
-        <div class="eyebrow">${s.eyebrow}</div>
-        <h1 class="step-title">${s.title}</h1>
-        <p class="step-desc">${s.desc}</p>
-        <div class="features">${featuresHtml}</div>
-        <div class="tip">
-          <span class="tip-icon">💡</span>
-          <span>${s.tip}</span>
-        </div>
-        <div class="actions">
-          ${backBtn}
-          <button class="btn btn-primary" onclick="goTo(${i + 1})">
-            ${nextLabel} <span class="btn-arrow">→</span>
-          </button>
+      <div class="field-hint">Staat op je hoofdzekering op de meterkast.</div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Twijfel je? Kijk op je netcontract of vraag je netbeheerder. Bij een warmtepomp of grote laadpaal is 3-fase gebruikelijk.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(0)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(2)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, `
+    <div class="vis-title">Aansluittype</div>
+    <div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;gap:1rem;padding-top:.5rem">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1rem">
+        <div style="font-size:.75rem;color:var(--muted);margin-bottom:.5rem">1-fase aansluiting</div>
+        <div style="display:flex;gap:.5rem;align-items:center">
+          <div style="width:8px;height:40px;background:#00e676;border-radius:2px"></div>
+          <div style="font-size:.72rem;color:var(--muted)">L1 · max 25A · 5,75 kW</div>
         </div>
       </div>
-      <div class="step-visual">
-        <div class="diagram-wrap">
-          <img src="${DIAGRAMS_BASE}${s.diagram}" alt="${s.diagramCaption}" loading="lazy">
+      <div style="background:var(--surface2);border:1px solid rgba(255,171,0,.3);border-radius:10px;padding:1rem">
+        <div style="font-size:.75rem;color:var(--amber);margin-bottom:.5rem">3-fase aansluiting</div>
+        <div style="display:flex;flex-direction:column;gap:.4rem">
+          ${['L1','L2','L3'].map((l,i) => `
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <div style="width:8px;height:24px;background:${['#f44','#ffab00','#40c4ff'][i]};border-radius:2px"></div>
+              <div style="font-size:.72rem;color:var(--muted)">${l} · max 25A · 5,75 kW</div>
+            </div>`).join('')}
+          <div style="border-top:1px solid var(--border);margin-top:.3rem;padding-top:.3rem;font-size:.72rem;color:var(--amber)">Totaal: 3×25A = 17,25 kW</div>
         </div>
-        <div class="diagram-caption">${s.diagramCaption}</div>
       </div>
-    `;
-    wrap.appendChild(el);
-  });
+    </div>
+  `));
+
+  // Step 2: Netmeting
+  wrap.appendChild(_makeStep(2, `
+    <div class="eyebrow">Stap 2 — Slimme meter</div>
+    <h1 class="step-title">Jouw <em>slimme meter</em> koppelen</h1>
+    <p class="step-desc">CloudEMS leest het net-vermogen als basis voor <strong>alle</strong> beslissingen. Koppel de netto vermogenssensor van je P1-lezer.</p>
+    ${_fieldRow('grid_sensor', '⚡ Netto net-vermogen', false,
+      'Positief = afname uit net, negatief = teruglevering. In Watt of kW. Bijv. van HomeWizard, P1 Dongle, Shelly 3EM.')}
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Gebruik je een SLIMMELEZER of P1 Dongle? Zoek op "net" of "power" — kies de sensor met een wisselend positief/negatief getal.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(1)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(3)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, null, async () => {
+    await _buildVisPanel('vis_2', ['power','net','grid','watt','vermogen','p1','stroom'], ['solar','pv','zon','battery','batt','ev','charger','lamp','temp','humidity'], 'grid_sensor');
+  }));
+
+  // Step 3: Fase-sensoren
+  wrap.appendChild(_makeStep(3, `
+    <div class="eyebrow">Stap 3 — Optioneel</div>
+    <h1 class="step-title"><em>Fase-sensoren</em> koppelen</h1>
+    <p class="step-desc">CT-klemmen per fase geven CloudEMS inzicht in de belasting per fase. Optioneel maar sterk aanbevolen bij een 3-fase aansluiting.</p>
+    ${_fieldRow('power_sensor_l1', '🔴 L1 vermogen', true, 'Vermogen fase L1 in Watt.')}
+    ${_fieldRow('power_sensor_l2', '🟡 L2 vermogen', true, 'Vermogen fase L2 in Watt.')}
+    ${_fieldRow('power_sensor_l3', '🔵 L3 vermogen', true, 'Vermogen fase L3 in Watt.')}
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Heb je een Shelly 3EM, Eastron SDM630 of iotawatt? Zoek op "L1", "L2", "L3" in de rechterkolom.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(2)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(4)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, null, async () => {
+    const kw = ['l1','l2','l3','fase','phase','power','watt','stroom'];
+    await _buildVisPanel('vis_3', kw, ['solar','pv','ev','battery','temp'], 'power_sensor_l1');
+  }));
+
+  // Step 4: Zonnepanelen
+  wrap.appendChild(_makeStep(4, `
+    <div class="eyebrow">Stap 4 — PV-systeem</div>
+    <h1 class="step-title">Zonnepanelen <em>koppelen</em></h1>
+    <p class="step-desc">Koppel je omvormer zodat CloudEMS weet hoeveel zonnestroom beschikbaar is voor zelfconsumptie, batterij en boiler.</p>
+    ${_fieldRow('solar_sensor', '☀️ PV-vermogen', true,
+      'Momentaan vermogen van je omvormer in Watt. Bijv. sensor.solarman_active_power of sensor.solaredge_current_power.')}
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Zoek op "solar", "pv" of de naam van je merk (Solarman, SolarEdge, Growatt, Huawei, Enphase). Kies de sensor met waarden in Watt.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(3)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(5)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, null, async () => {
+    await _buildVisPanel('vis_4', ['solar','pv','zon','omvormer','inverter','power','watt','yield'], ['battery','ev','l1','l2','l3','temp','humidity'], 'solar_sensor');
+  }));
+
+  // Step 5: Apparaten
+  wrap.appendChild(_makeStep(5, `
+    <div class="eyebrow">Stap 5 — Slim laden</div>
+    <h1 class="step-title">EV & <em>laadpaal</em> koppelen</h1>
+    <p class="step-desc">Koppel je EV-lader zodat CloudEMS slim kan laden op goedkoopste uren of zonne-energie. De EV-entiteit wordt gebruikt voor sturing.</p>
+    ${_fieldRow('ev_charger_entity', '🚗 EV-lader entiteit', true,
+      'Number of select entiteit waarmee het laadvermogen wordt ingesteld. Bijv. number.zappi_charge_rate of number.easee_dynamic_charger_current.')}
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Heb je een Zappi, EVCC, Easee of Alfen? Zoek op "charger", "lader" of "ev" in de rechterkolom. Kies een number.* of select.* entiteit.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(4)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(6)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, null, async () => {
+    await _buildVisPanel('vis_5', ['ev','charger','lader','zappi','easee','alfen','evcc','charge','ampere'], [], 'ev_charger_entity', ['sensor','number','select','input_number']);
+  }));
+
+  // Step 6: Tarieven & piek
+  wrap.appendChild(_makeStep(6, `
+    <div class="eyebrow">Stap 6 — Capaciteitstarief</div>
+    <h1 class="step-title">Piekschaving <em>instellen</em></h1>
+    <p class="step-desc">CloudEMS bewaakt je kwartier-piek en schakelt EV/boiler uit als de drempel nadert. Stel hier je gewenste maximum in.</p>
+    <div class="field-group">
+      <div class="field-label">Piekschaving actief <span class="badge badge-opt">optioneel</span></div>
+      ${_radioRow('peak_en', [
+        {value:'true', icon:'✅', label:'Ja, bewaken'},
+        {value:'false', icon:'⬜', label:'Nee, uitschakelen'},
+      ], 'true', `function(v){ wizardData.peak_shaving_enabled=(v==='true'); }`)}
+    </div>
+    <div class="field-group">
+      <div class="field-label">Piekgrens (Watt) <span class="badge badge-opt">optioneel</span></div>
+      <div class="field-row">
+        <input class="field-input" type="number" id="peak_input" value="6000" min="1000" max="40000" step="500"
+          oninput="wizardData.peak_shaving_limit_w=parseInt(this.value)||6000">
+      </div>
+      <div class="field-hint">Stel bijv. 6000W (6 kW) in. Kosten: Liander rekent ~€4,37/kW boven 2,5 kW per maand.</div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Bij een 3-fase 25A aansluiting is 6 kW een verstandige startwaarde. CloudEMS leert je piekgedrag en past de drempel automatisch aan.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(5)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(7)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, `
+    <div class="vis-title">Piekschaving visualisatie</div>
+    <div style="position:relative;z-index:1;flex:1;padding-top:.5rem">
+      <svg viewBox="0 0 280 200" width="100%" xmlns="http://www.w3.org/2000/svg">
+        <!-- Grid lines -->
+        <line x1="30" y1="30" x2="30" y2="160" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+        <line x1="30" y1="160" x2="270" y2="160" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+        <!-- Drempel lijn -->
+        <line x1="30" y1="75" x2="270" y2="75" stroke="#ff5252" stroke-width="1.5" stroke-dasharray="6,3"/>
+        <text x="272" y="79" fill="#ff5252" font-size="8" font-family="DM Mono">6kW</text>
+        <!-- Bars -->
+        ${[40,65,90,110,140,120,80,55,70,95,125,85,60].map((h,i) => {
+          const x = 35 + i * 18;
+          const barH = h;
+          const y = 160 - barH;
+          const over = h > 85;
+          return `<rect x="${x}" y="${y}" width="13" height="${barH}" rx="2"
+            fill="${over ? 'rgba(255,82,82,0.6)' : 'rgba(0,230,118,0.5)'}"/>`;
+        }).join('')}
+        <!-- Label -->
+        <text x="150" y="185" text-anchor="middle" fill="#4e5f72" font-size="8" font-family="Inter">Kwartieren vandaag</text>
+        <text x="270" y="185" fill="#ff5252" font-size="7" font-family="DM Mono">■ boven grens</text>
+      </svg>
+      <div style="font-size:.72rem;color:var(--muted);text-align:center">Rood = CloudEMS schakelt EV/boiler uit</div>
+    </div>
+  `));
+
+  // Step 7: NILM
+  wrap.appendChild(_makeStep(7, `
+    <div class="eyebrow">Stap 7 — NILM apparaten</div>
+    <h1 class="step-title">Welke apparaten <em>heb je?</em></h1>
+    <p class="step-desc">CloudEMS detecteert apparaten automatisch via stroompatronen. Als je aangeeft welke apparaten je hebt, leert het NILM-systeem <strong>sneller en nauwkeuriger</strong>.</p>
+    <div class="field-group">
+      <div class="field-label">Apparaten aanwezig in je woning <span class="badge badge-opt">optioneel</span></div>
+      <div class="nilm-grid" id="nilm_grid">
+        ${[
+          {type:'washing_machine', icon:'👕', label:'Wasmachine'},
+          {type:'dishwasher',      icon:'🍽️', label:'Vaatwasser'},
+          {type:'dryer',           icon:'💨', label:'Droger'},
+          {type:'electric_oven',   icon:'🍳', label:'Oven'},
+          {type:'refrigerator',    icon:'🧊', label:'Koelkast'},
+          {type:'freezer',         icon:'🧊', label:'Vriezer'},
+          {type:'heat_pump',       icon:'♨️', label:'Warmtepomp'},
+          {type:'electric_vehicle',icon:'🚗', label:'Elektrische auto'},
+          {type:'home_office',     icon:'💻', label:'Thuiskantoor'},
+          {type:'tv_entertainment',icon:'📺', label:'TV / Entertain.'},
+          {type:'air_conditioning',icon:'❄️', label:'Airco'},
+          {type:'electric_boiler', icon:'🚿', label:'Boiler'},
+        ].map(a => `
+          <div class="nilm-item" id="nilm_${a.type}" onclick="_toggleNilm('${a.type}', this)">
+            <div class="nilm-check"></div>
+            <span style="font-size:.9rem">${a.icon}</span>
+            <span>${a.label}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Selecteer alle apparaten die je hebt — ook als ze niet aan HA gekoppeld zijn. CloudEMS zoekt hier actief naar in je verbruikspatroon.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(6)">← Terug</button>
+      <button class="btn btn-primary" id="save_btn" onclick="_saveAndFinish()">Opslaan & afronden <span class="btn-arrow">→</span></button>
+      <span class="save-status" id="save_status"></span>
+    </div>
+  `, `
+    <div class="vis-title">NILM detectie</div>
+    <div style="position:relative;z-index:1;flex:1;padding-top:.5rem;display:flex;flex-direction:column;gap:.7rem">
+      <div style="font-size:.75rem;color:var(--muted)">Hoe NILM werkt:</div>
+      ${[
+        {icon:'📡', title:'Stroompatroon meten', desc:'Elke 10 seconden lees CloudEMS het netto vermogen van je P1 meter'},
+        {icon:'🔍', title:'Transient detectie', desc:'Bij een sprong in vermogen zoekt het systeem naar bekende "handtekeningen"'},
+        {icon:'🧠', title:'Bayesiaans leren', desc:'Na 50+ detecties verhoogt de betrouwbaarheid automatisch naar 95%+'},
+        {icon:'✅', title:'Bevestigen', desc:'Jij bevestigt in de NILM-kaart welke apparaten correct zijn'},
+      ].map(s => `
+        <div style="display:flex;gap:.6rem;align-items:flex-start">
+          <span style="font-size:1.1rem;flex-shrink:0">${s.icon}</span>
+          <div>
+            <div style="font-size:.75rem;font-weight:600;color:var(--text)">${s.title}</div>
+            <div style="font-size:.7rem;color:var(--muted);line-height:1.5">${s.desc}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+  `));
 
   // Completion screen
   const done = document.createElement('div');
   done.className = 'step';
-  done.id = `step-${STEPS.length}`;
+  done.id = `step-8`;
   done.innerHTML = `
     <div class="complete-wrap">
       <div class="complete-icon">✓</div>
       <h1 class="complete-title">CloudEMS is <span>klaar</span>!</h1>
       <p class="complete-sub">
         Je hebt de setup wizard afgerond. CloudEMS begint nu met leren en optimaliseren.
-        De eerste aanbevelingen verschijnen na een paar uur meting.
+        De eerste beslissingen verschijnen na een paar uur meting.
       </p>
       <div class="next-cards">
         <a class="next-card" href="/cloudems" target="_top">
@@ -480,52 +933,135 @@ function buildSteps() {
           <div class="next-card-sub">Configuratie aanpassen of wizard opnieuw doorlopen</div>
         </a>
       </div>
-      <button class="btn btn-secondary" onclick="goTo(${STEPS.length - 1})" style="margin-top:.5rem">← Terug</button>
+      <button class="btn btn-secondary" onclick="goTo(7)" style="margin-top:.5rem">← Terug naar wizard</button>
     </div>
   `;
   wrap.appendChild(done);
 }
 
+function _makeStep(index, leftHtml, rightHtml, onActive) {
+  const el = document.createElement('div');
+  el.className = 'step' + (index === 0 ? ' active' : '');
+  el.id = `step-${index}`;
+  el._onActive = onActive || null;
+
+  if (rightHtml === null) {
+    // right panel will be built dynamically (vis panel)
+    el.innerHTML = `
+      <div class="step-text">${leftHtml}</div>
+      <div class="step-visual" id="vis_${index}">
+        <div class="loading-msg">Sensoren laden…</div>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="step-text">${leftHtml}</div>
+      <div class="step-visual">${rightHtml}</div>`;
+  }
+  return el;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function _updatePhaseTip(v) {
+  const el = document.getElementById('phase_tip');
+  if (el) el.textContent = v === '3'
+    ? '3-fase: EV-laadpalen, warmtepompen en zwaardere installaties. Controleer je meterkast op 3 dikke kabels.'
+    : 'Standaard in de meeste woningen. Kijk op je meterkast: één grote zekering = 1-fase.';
+}
+
+function _toggleNilm(type, el) {
+  el.classList.toggle('checked');
+  if (el.classList.contains('checked')) {
+    if (!wizardData.nilm_device_hints.includes(type)) wizardData.nilm_device_hints.push(type);
+  } else {
+    wizardData.nilm_device_hints = wizardData.nilm_device_hints.filter(t => t !== type);
+  }
+}
+
+async function _saveAndFinish() {
+  const btn = document.getElementById('save_btn');
+  const status = document.getElementById('save_status');
+  btn.disabled = true;
+  btn.textContent = 'Opslaan…';
+  status.className = 'save-status';
+
+  const ok = await _callService('cloudems', 'wizard_save_config', {
+    grid_sensor:            wizardData.grid_sensor || '',
+    grid_phases:            wizardData.grid_phases,
+    max_current_per_phase:  wizardData.max_current_per_phase,
+    power_sensor_l1:        wizardData.power_sensor_l1 || '',
+    power_sensor_l2:        wizardData.power_sensor_l2 || '',
+    power_sensor_l3:        wizardData.power_sensor_l3 || '',
+    solar_sensor:           wizardData.solar_sensor || '',
+    ev_charger_entity:      wizardData.ev_charger_entity || '',
+    peak_shaving_limit_w:   wizardData.peak_shaving_limit_w,
+    peak_shaving_enabled:   wizardData.peak_shaving_enabled,
+    nilm_device_hints:      wizardData.nilm_device_hints,
+  });
+
+  btn.disabled = false;
+  btn.innerHTML = ok ? 'Opgeslagen ✓' : 'Probeer opnieuw';
+  if (ok) {
+    status.className = 'save-status ok';
+    status.textContent = '✓ Config opgeslagen in CloudEMS';
+    setTimeout(() => goTo(8), 1200);
+  } else {
+    status.className = 'save-status err';
+    status.textContent = '⚠ Opslaan mislukt — check HA logs';
+    btn.innerHTML = 'Probeer opnieuw <span class="btn-arrow">→</span>';
+  }
+}
+
 // ── Navigation ────────────────────────────────────────────────────────────────
-function goTo(index) {
-  if (index < 0 || index > STEPS.length) return;
+async function goTo(index) {
+  if (index < 0 || index > 8) return;
 
   const prevEl = document.getElementById(`step-${current}`);
   const nextEl = document.getElementById(`step-${index}`);
+  if (!nextEl) return;
 
   prevEl.classList.add('exit');
   setTimeout(() => { prevEl.classList.remove('active', 'exit'); }, 300);
   nextEl.classList.add('active');
 
-  // Nav
   document.querySelectorAll('.nav-item').forEach(el => {
     const i = parseInt(el.dataset.index);
+    if (isNaN(i)) return;
     el.classList.toggle('active', i === index);
     el.classList.toggle('done', i < index);
-    if (el.classList.contains('done')) el.querySelector('.nav-num').textContent = '✓';
-    else el.querySelector('.nav-num').textContent = i + 1;
+    el.querySelector('.nav-num').textContent = i < index ? '✓' : i + 1;
   });
 
   current = index;
   updateProgress();
+
+  // Trigger dynamic panel build
+  if (nextEl._onActive) {
+    nextEl._onActive();
+  }
 }
 
-function finish() { goTo(STEPS.length); }
+function finish() { goTo(8); }
 
 function updateProgress() {
-  const pct = Math.round((current / STEPS.length) * 100);
+  const pct = Math.round((current / 8) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressPct').textContent =
-    current < STEPS.length ? STEPS[current].nav : 'Klaar!';
-  document.getElementById('counter').textContent =
-    current < STEPS.length
-      ? `Stap ${current + 1} van ${STEPS.length}`
-      : 'Voltooid';
+  document.getElementById('progressPct').textContent = current < 8 ? (NAV_LABELS[current] || 'Klaar!') : 'Klaar!';
+  document.getElementById('counter').textContent = current < 8 ? `Stap ${current + 1} van ${NAV_LABELS.length}` : 'Voltooid';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 buildNav();
 buildSteps();
+
+// Load HA version into footer
+_getToken().then(token => {
+  if (!token) return;
+  fetch('/api/', {headers:{'Authorization':'Bearer '+token}})
+    .then(r => r.json())
+    .then(d => {
+      document.getElementById('sidebarFoot').textContent = `CloudEMS · HA ${d.version || ''}`;
+    }).catch(() => {});
+});
 </script>
 </body>
 </html>

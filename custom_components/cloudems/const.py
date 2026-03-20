@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "4.6.521"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "4.6.591"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "4.6.521"  # manifest.json ongeldig
+    VERSION = "4.6.591"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -59,8 +59,9 @@ DEFAULT_MAINS_VOLTAGE_V      = 230.0
 
 # ── v1.5: Wizard mode ─────────────────────────────────────────────────────────
 CONF_WIZARD_MODE      = "wizard_mode"
-WIZARD_MODE_BASIC     = "basic"
-WIZARD_MODE_ADVANCED  = "advanced"
+WIZARD_MODE_BASIC       = "basic"
+WIZARD_MODE_ADVANCED    = "advanced"
+WIZARD_MODE_ONBOARDING  = "onboarding"
 
 # ── v1.5: AI Provider ─────────────────────────────────────────────────────────
 CONF_AI_PROVIDER      = "ai_provider"
@@ -404,6 +405,28 @@ DSMR_HA_PLATFORMS = [
 CONF_P1_SERIAL_PORT           = "p1_serial_port"
 DEFAULT_P1_PORT               = 8088
 DSMR_TELEGRAM_INTERVAL        = 10
+
+# DSMR-type instelling — bepaalt verwacht telegram-interval voor sturing
+CONF_DSMR_TYPE                = "dsmr_type"
+DSMR_TYPE_4                   = "dsmr4"        # ~10 seconden per telegram
+DSMR_TYPE_5                   = "dsmr5"        # ~1 seconde per telegram
+DSMR_TYPE_UNIVERSAL           = "universal"    # Geen P1 / onbekend interval
+DSMR_TYPE_LABELS = {
+    DSMR_TYPE_4:         "DSMR 4 (slimme meter — ~10 seconden)",
+    DSMR_TYPE_5:         "DSMR 5 (slimme meter — ~1 seconde, bijna realtime)",
+    DSMR_TYPE_UNIVERSAL: "Universeel / geen DSMR (geen P1-telegram)",
+}
+# Verwacht interval per type (seconden) — gebruikt voor sturing en auto-detectie
+DSMR_TYPE_EXPECTED_INTERVAL = {
+    DSMR_TYPE_4:         10.0,
+    DSMR_TYPE_5:         1.0,
+    DSMR_TYPE_UNIVERSAL: None,   # geen verwachting
+}
+# Grenswaarden voor auto-detectie: interval < FAST_THRESHOLD → DSMR5, anders DSMR4
+DSMR_AUTODETECT_FAST_THRESHOLD_S = 3.0   # sneller dan 3s → DSMR5
+DSMR_AUTODETECT_SLOW_THRESHOLD_S = 6.0   # trager dan 6s → DSMR4
+DSMR_AUTODETECT_MIN_SAMPLES      = 5     # minimaal 5 metingen voor betrouwbare conclusie
+
 CONF_COST_TRACKING            = "cost_tracking_enabled"
 
 GRID_SENSOR_KEYWORDS     = ["grid","net","import","export","p1","dsmr","mains","totaal","verbruik","levering","main","house","home"]

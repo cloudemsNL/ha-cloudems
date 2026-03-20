@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 # Max entries in memory (24u bij 1 beslissing per minuut per categorie = 24*60*5 ≈ 7200)
 # We bewaren max 1000 entries — bij 5 categorieën elke 10s = ~2880/uur → we samplen
 MAX_ENTRIES        = 2000
-MAX_SENSOR_ENTRIES = 200   # v4.6.409: meer entries → langere zichtbare history in kaart
+MAX_SENSOR_ENTRIES = 50    # v4.6.566: verlaagd van 200 → 50 zodat attributes <16KB blijven
 HISTORY_FILENAME   = "cloudems_decisions_history.json"
 # v4.6.409: grotere deduplicatievensters — ongewijzigde beslissingen (hold_off, idle)
 # worden minder frequent opgeslagen zodat de history niet volpropt raakt.
@@ -121,10 +121,29 @@ class DecisionsHistory:
             _LOGGER.warning("CloudEMS DecisionsHistory: schrijffout: %s", err)
 
     def sensor_attributes(self) -> dict:
-        """Geef attributen voor de sensor entity."""
+        """Geef attributen voor de sensor entity.
+        v4.6.566: entries worden getrimd tot alleen de velden die JS-cards lezen,
+        en strings worden afgekapt op 120 tekens — zodat attributes <16KB blijven.
+        """
+        _KEEP = {"ts", "iso", "cat", "action", "reason", "message", "type", "msg",
+                 "source", "label",
+                 "solar_w", "grid_w", "soc_pct", "price_eur",
+                 "curtailment_pct", "target_w", "session_kwh", "charge_pct",
+                 "temp_c", "setpoint_c"}
+
+        def _trim(e: dict) -> dict:
+            out: dict[str, Any] = {}
+            for k, v in e.items():
+                if k not in _KEEP:
+                    continue
+                if isinstance(v, str) and len(v) > 120:
+                    v = v[:120]
+                out[k] = v
+            return out
+
         recent = self.get_recent(limit=MAX_SENSOR_ENTRIES)
         return {
-            "decisions":    recent,
+            "decisions":    [_trim(e) for e in recent],
             "total_24h":    len(self.get_recent(limit=99999)),
             "last_updated": _iso(time.time()),
         }

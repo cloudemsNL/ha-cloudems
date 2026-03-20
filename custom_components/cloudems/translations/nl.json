@@ -24,7 +24,7 @@
         },
         "data_description": {
           "energy_prices_country": "Kies je land voor de juiste EPEX day-ahead stroomprijzen.",
-          "wizard_mode": "Basis: snel installeren met de belangrijkste sensoren. Geavanceerd: volledige controle over alle sensoren, omvormers en P1.",
+          "wizard_mode": "Basis: snel installeren met de belangrijkste sensoren. Geavanceerd: volledige controle over alle sensoren, omvormers en P1. Interactieve wizard: open een visuele wizard in je browser met live sensor-picker.",
           "battery_sensor": "⚠️ Cloud-batterijen (bijv. Zonneplan) kunnen 30–300s vertraging hebben. CloudEMS past EMA-smoothing toe.",
           "grid_sensor": "Moet in Watt (W) zijn, niet kWh of kW. P1-sensoren geven doorgaans W.",
           "solar_sensor": "Moet in Watt (W) zijn. Sommige omvormers geven kW — gebruik dan een template om × 1000 te doen."
@@ -79,13 +79,12 @@
         }
       },
       "phase_custom": {
-        "title": "⚡ Aangepaste stroomlimieten",
-        "description": "Voer de maximale stroom per fase in. CloudEMS zal deze waarden nooit overschrijden.",
+        "title": "⚡ Stroomlimiet & Metertype",
+        "description": "Voer de maximale stroom in. Bij 3-fase geldt dezelfde waarde voor alle fasen. Kies ook het type slimme meter voor optimale sturing.\n\n![]({diagram_url})",
         "data": {
           "phase_count": "Aantal fasen",
-          "max_current_l1": "Max. stroom L1 (A)",
-          "max_current_l2": "Max. stroom L2 (A)",
-          "max_current_l3": "Max. stroom L3 (A)",
+          "max_current_l1": "Max. stroom per fase (A)",
+          "dsmr_type": "DSMR-type / P1-metersnelheid",
           "back_to_menu": "← Terug naar menu",
           "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
           "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
@@ -102,9 +101,8 @@
           "shutter_smoke_sensor": "Rookmelder (optioneel)"
         },
         "data_description": {
-          "max_current_l1": "Maximale netbelasting op fase L1 — typisch je zekeringswaarde (bijv. 25 A).",
-          "max_current_l2": "Maximale netbelasting op fase L2. Alleen bij 3-fase.",
-          "max_current_l3": "Maximale netbelasting op fase L3. Alleen bij 3-fase."
+          "max_current_l1": "Maximale netbelasting per fase — typisch je zekeringswaarde (bijv. 25 A). Bij 3-fase geldt dit voor L1, L2 én L3.",
+          "dsmr_type": "DSMR 4 = ~10 seconden per telegram. DSMR 5 = ~1 seconde (bijna realtime). CloudEMS past de stuursnelheid hierop aan en waarschuwt als het ingestelde type niet overeenkomt met de gemeten snelheid."
         }
       },
       "grid_sensors": {
@@ -116,31 +114,17 @@
           "import_power_sensor": "Import / verbruik sensor (W of kW)",
           "export_power_sensor": "Export / teruglevering sensor (W of kW)",
           "mains_voltage": "Fallback-netspanning (V)",
-          "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5",
-          "back_to_menu": "← Terug naar menu",
-          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
-          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
-          "budget_enabled": "Energiebudget inschakelen",
-          "budget_gas_m3_month": "Maandbudget gas (m³)",
-          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Apparaten uitsluiten",
-          "nilm_shift_include": "Apparaten opnemen",
-          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
-          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
-          "pool_filter_power_entity": "Vermogenssensor filterpomp",
-          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "power_sensor_l1_export": "L1 teruglevering sensor (W) — optioneel",
+          "power_sensor_l2_export": "L2 teruglevering sensor (W) — optioneel",
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — optioneel"
         },
         "data_description": {
-          "use_separate_import_export": "⚙️ Gebruik aparte sensoren als je meter import en export afzonderlijk meet (bijv. DSMR5)",
+          "use_separate_import_export": "⚙️ Gebruik aparte sensoren als je meter import en export afzonderlijk meet",
           "grid_sensor": "🔌 Eén bidirectionele sensor (positief = afname, negatief = teruglevering)",
           "import_power_sensor": "🔌 Sensor voor stroomafname van het net",
           "export_power_sensor": "Sensor voor teruglevering aan het net",
           "mains_voltage": "─────────── Netspanning ───────────",
-          "power_sensor_l1_export": "Teruglevering per fase L1 (alleen DSMR5 / bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
+          "power_sensor_l1_export": "Teruglevering per fase L1 (bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
           "power_sensor_l2_export": "Teruglevering per fase L2.",
           "power_sensor_l3_export": "Teruglevering per fase L3."
         },
@@ -171,9 +155,9 @@
           "power_sensor_l1": "L1 vermogenssensor (W)",
           "power_sensor_l2": "L2 vermogenssensor (W)",
           "power_sensor_l3": "L3 vermogenssensor (W)",
-          "power_sensor_l1_export": "L1 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l2_export": "L2 teruglevering sensor (W) — DSMR5",
-          "power_sensor_l3_export": "L3 teruglevering sensor (W) — DSMR5",
+          "power_sensor_l1_export": "L1 teruglevering sensor (W) — optioneel",
+          "power_sensor_l2_export": "L2 teruglevering sensor (W) — optioneel",
+          "power_sensor_l3_export": "L3 teruglevering sensor (W) — optioneel",
           "back_to_menu": "← Terug naar menu",
           "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
           "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
@@ -193,7 +177,7 @@
           "phase_sensors_L1": "─────────── Stroomsensoren (A) ───────────",
           "power_sensor_l1": "─────────── Vermogenssensoren (W) ───────────",
           "voltage_sensor_l1": "─────────── Spanningssensoren (V) ───────────",
-          "power_sensor_l1_export": "Teruglevering per fase L1 (alleen DSMR5 / bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
+          "power_sensor_l1_export": "Teruglevering per fase L1 (bidirectionele meter). Laat leeg als uw meter dit niet apart meet.",
           "power_sensor_l2_export": "Teruglevering per fase L2.",
           "power_sensor_l3_export": "Teruglevering per fase L3.",
           "phase_sensors_L2": "Stroom in ampère op fase L2.",
@@ -530,7 +514,7 @@
       },
       "battery_detail": {
         "title": "🔋 Batterij {battery_num} van {total}",
-        "description": "Configureer batterij {battery_num}.",
+        "description": "Configureer batterij {battery_num}. CloudEMS meet automatisch de cloud-vertraging van je batterij-API en compenseert dit in de energiebalans.\n\n![]({diagram_url})",
         "data": {
           "bat_power_sensor": "Vermogenssensor (W, positief=laden) *",
           "bat_soc_sensor": "Laadniveau sensor (%) — optioneel",
@@ -716,7 +700,7 @@
       },
       "climate_boiler": {
         "title": "🏠 Zone Control — CV-ketel",
-        "description": "Configureer de CV-ketel en zone-instellingen.",
+        "description": "Configureer de CV-ketel en zone-instellingen. CloudEMS stuurt de ketel aan op basis van de verwarmingsvraag van alle zones samen.\n\n![]({diagram_url})",
         "data": {
           "cv_boiler_entity": "CV-ketel schakelaar / thermostaat",
           "cv_min_zones": "Min. actieve zones voor CV aan",
@@ -1065,7 +1049,7 @@
       },
       "boiler_brand": {
         "title": "🏷️ Merk / type boiler {idx} van {total}",
-        "description": "Selecteer het merk van de boiler. CloudEMS vult automatisch de juiste sturingmodus, setpoints en veiligheidslimieten in.",
+        "description": "Selecteer het merk van de boiler. CloudEMS vult automatisch de juiste sturingmodus, setpoints en veiligheidslimieten in.\n\n![]({diagram_url})",
         "data": {
           "brand": "Merk / type",
           "back_to_menu": "← Terug naar menu",
@@ -1132,6 +1116,7 @@
       },
       "generator": {
         "title": "Generator & noodstroom",
+        "description": "Configureer een noodstroomgenerator met automatische omschakelaar (ATS). CloudEMS bewaakt de generatorstatus en past de sturing aan bij noodstroom.\n\n![]({diagram_url})",
         "data": {
           "generator_enabled": "Generator / noodstroom inschakelen",
           "generator_power_sensor": "Vermogenssensor generator (optioneel)",
@@ -1365,6 +1350,11 @@
       "noodstroom": {
         "title": "⚡ Noodstroom & Backup",
         "data": {}
+      },
+      "onboarding_redirect": {
+        "title": "🚀 Interactieve wizard",
+        "description": "Open de interactieve setup wizard in je browser om sensoren en apparaten te koppelen — geen handmatig typen, alles wordt live uit jouw HA-installatie opgehaald.\n\n**Wizard-URL:**\n```\n{onboarding_url}\n```\n\nKlik op **Volgende** om de basisinstallatie alvast af te ronden. Je kunt daarna via de wizard alle details invullen en opslaan.",
+        "data": {}
       }
     },
     "abort": {
@@ -1408,9 +1398,8 @@
           "export_power_sensor": "Exportsensor",
           "mains_voltage": "Fallback-netspanning (V)",
           "phase_count": "Aantal fasen",
-          "max_current_l1": "Max. stroom L1 (A)",
-          "max_current_l2": "Max. stroom L2 (A)",
-          "max_current_l3": "Max. stroom L3 (A)",
+          "max_current_l1": "Max. stroom per fase (A)",
+          "dsmr_type": "DSMR-type / P1-metersnelheid",
           "back_to_menu": "← Terug naar menu",
           "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
           "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
@@ -1430,34 +1419,81 @@
       },
       "phase_sensors": {
         "title": "⚡ Fase-sensoren",
-        "description": "Per-fase stroom, spanning en vermogen. DSMR5 bidirectionele meter: vul ook de teruglevering-sensoren in voor netto fase-vermogen.",
+        "description": "Per-fase stroom, spanning en vermogen. Bij een bidirectionele meter: vul ook de teruglevering-sensoren in voor netto fase-vermogen."
+      },
+      "phase_sensors_l1": {
+        "title": "⚡ Fase L1 — sensoren",
+        "description": "Koppel de sensoren voor fase L1. Stroom (A) via een CT-klem is het meest nauwkeurig. Spanning en vermogen zijn optioneel.\n\n![]({diagram_url})",
         "data": {
-          "phase_sensors_L1": "L1 stroomsensor",
-          "phase_sensors_L2": "L2 stroomsensor",
-          "phase_sensors_L3": "L3 stroomsensor",
-          "voltage_sensor_l1": "L1 spanningssensor",
-          "voltage_sensor_l2": "L2 spanningssensor",
-          "voltage_sensor_l3": "L3 spanningssensor",
-          "power_sensor_l1": "L1 vermogenssensor",
-          "power_sensor_l2": "L2 vermogenssensor",
-          "power_sensor_l3": "L3 vermogenssensor",
-          "power_sensor_l1_export": "DSMR5 teruglevering L1 (W) — optioneel",
-          "power_sensor_l2_export": "DSMR5 teruglevering L2 (W) — optioneel",
-          "power_sensor_l3_export": "DSMR5 teruglevering L3 (W) — optioneel",
-          "back_to_menu": "← Terug naar menu",
-          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
-          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
-          "budget_enabled": "Energiebudget inschakelen",
-          "budget_gas_m3_month": "Maandbudget gas (m³)",
-          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Apparaten uitsluiten",
-          "nilm_shift_include": "Apparaten opnemen",
-          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
-          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
-          "pool_filter_power_entity": "Vermogenssensor filterpomp",
-          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "phase_sensors_L1": "Stroomsensor L1 (A)",
+          "voltage_sensor_l1": "Spanningssensor L1 (V)",
+          "power_sensor_l1": "Vermogenssensor L1 (W)",
+          "power_sensor_l1_export": "Teruglevering L1 (W) — optioneel",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "data_description": {
+          "phase_sensors_L1": "CT-klem op de inkomende L1-kabel. Shelly EM, iotaWatt of Eastron SDM.",
+          "voltage_sensor_l1": "Optioneel — CloudEMS gebruikt 230V als fallback.",
+          "power_sensor_l1": "Optioneel — heeft voorkeur boven stroom × spanning.",
+          "power_sensor_l1_export": "Alleen bij bidirectionele meter die teruglevering per fase meet."
+        },
+        "placeholders": {
+          "diagram_url": {
+            "example": "/local/cloudems/diagrams/phase_sensor_l1.svg"
+          },
+          "phase_count": {
+            "example": "3"
+          }
+        }
+      },
+      "phase_sensors_l2": {
+        "title": "⚡ Fase L2 — sensoren",
+        "description": "Koppel de sensoren voor fase L2. Gebruik een tweede CT-klem op de L2-kabel in de meterkast.\n\n![]({diagram_url})",
+        "data": {
+          "phase_sensors_L2": "Stroomsensor L2 (A)",
+          "voltage_sensor_l2": "Spanningssensor L2 (V)",
+          "power_sensor_l2": "Vermogenssensor L2 (W)",
+          "power_sensor_l2_export": "Teruglevering L2 (W) — optioneel",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "data_description": {
+          "phase_sensors_L2": "CT-klem op de L2-kabel. Vaak: wasmachine, droger, kookplaat.",
+          "voltage_sensor_l2": "Optioneel.",
+          "power_sensor_l2": "Optioneel.",
+          "power_sensor_l2_export": "Alleen bij bidirectionele meter."
+        },
+        "placeholders": {
+          "diagram_url": {
+            "example": "/local/cloudems/diagrams/phase_sensor_l2.svg"
+          },
+          "phase_count": {
+            "example": "3"
+          }
+        }
+      },
+      "phase_sensors_l3": {
+        "title": "⚡ Fase L3 — sensoren",
+        "description": "Laatste fase. Koppel de sensoren voor fase L3. Vaak hangt hier de EV-lader, airco of zonnepanelen-groep op.\n\n![]({diagram_url})",
+        "data": {
+          "phase_sensors_L3": "Stroomsensor L3 (A)",
+          "voltage_sensor_l3": "Spanningssensor L3 (V)",
+          "power_sensor_l3": "Vermogenssensor L3 (W)",
+          "power_sensor_l3_export": "Teruglevering L3 (W) — optioneel",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "data_description": {
+          "phase_sensors_L3": "CT-klem op de L3-kabel. Vaak: EV-lader, airco, omvormer.",
+          "voltage_sensor_l3": "Optioneel.",
+          "power_sensor_l3": "Optioneel.",
+          "power_sensor_l3_export": "Alleen bij bidirectionele meter."
+        },
+        "placeholders": {
+          "diagram_url": {
+            "example": "/local/cloudems/diagrams/phase_sensor_l3.svg"
+          },
+          "phase_count": {
+            "example": "3"
+          }
         }
       },
       "solar_ev_opts": {

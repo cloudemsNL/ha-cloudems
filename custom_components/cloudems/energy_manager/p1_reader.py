@@ -702,6 +702,13 @@ class P1Reader:
         # Hiermee kan de coordinator direct updaten i.p.v. wachten op 10s poll
         self._on_telegram_callback = None
 
+        # v4.6.522: interval-meting — bijhouden van timestamps per geldig telegram
+        # Gebruikt voor auto-detectie van DSMR4 vs DSMR5 in coordinator
+        import time as _time_mod
+        self._telegram_timestamps: list = []   # laatste N timestamps (unix)
+        self._telegram_ts_maxlen  = 20         # bewaar max 20 samples
+        self._telegram_ts_module  = _time_mod  # bewaard voor gebruik in methoden
+
         # Sub-readers
         self._mqtt_reader:     Optional[MQTTP1Reader] = None
         self._fallback_reader: Optional[HAEntityFallbackReader] = None
@@ -728,6 +735,30 @@ class P1Reader:
     @property
     def spike_count(self) -> int:
         return self._spike_count
+
+    @property
+    def measured_interval_s(self) -> Optional[float]:
+        """Gemiddeld gemeten interval tussen telegrams (seconden), of None als te weinig data.
+
+        Betrouwbaar na DSMR_AUTODETECT_MIN_SAMPLES geldige telegrams.
+        """
+        ts = self._telegram_timestamps
+        if len(ts) < 2:
+            return None
+        deltas = [ts[i] - ts[i - 1] for i in range(1, len(ts))]
+        return round(sum(deltas) / len(deltas), 2)
+
+    @property
+    def telegram_sample_count(self) -> int:
+        """Aantal gemeten telegram-intervallen (= timestamps - 1)."""
+        return max(0, len(self._telegram_timestamps) - 1)
+
+    def _record_telegram_time(self) -> None:
+        """Sla huidige timestamp op voor interval-meting."""
+        now = self._telegram_ts_module.time()
+        self._telegram_timestamps.append(now)
+        if len(self._telegram_timestamps) > self._telegram_ts_maxlen:
+            self._telegram_timestamps.pop(0)
 
     @property
     def source(self) -> str:
@@ -767,6 +798,7 @@ class P1Reader:
                 _LOGGER.warning("P1Reader: spike sprong %.0fW->%.0fW", prev, cur)
                 self._spike_count += 1
                 return False
+        self._record_telegram_time()
         return True
 
     async def async_start(self) -> None:

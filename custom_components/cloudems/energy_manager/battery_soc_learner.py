@@ -589,3 +589,75 @@ class BatterySocLearner:
             s.inferred_soc = soc
 
         return soc, conf, "inferred"
+
+
+# ── v4.6.531: Capaciteitsafwijking-waarschuwing ───────────────────────────────
+
+def check_capacity_drift(
+    learned_kwh: float,
+    configured_kwh: float,
+    hint_engine,
+    decisions_history=None,
+) -> Optional[str]:
+    """
+    Vergelijk geleerde capaciteit met ingestelde capaciteit.
+    Geeft classificatie terug: 'ok' / 'minor_drift' / 'significant_drift' / 'major_drift'
+    Emitteert hint als afwijking significant is.
+    """
+    if learned_kwh <= 0 or configured_kwh <= 0:
+        return None
+
+    ratio = learned_kwh / configured_kwh
+    diff_pct = abs(ratio - 1.0) * 100
+
+    if diff_pct < 8:
+        classification = "ok"
+    elif diff_pct < 20:
+        classification = "minor_drift"
+    elif diff_pct < 40:
+        classification = "significant_drift"
+    else:
+        classification = "major_drift"
+
+    if classification in ("significant_drift", "major_drift") and hint_engine:
+        direction = "lager" if learned_kwh < configured_kwh else "hoger"
+        hint_id = "battery_capacity_drift"
+        try:
+            hint_engine._emit_hint(
+                hint_id    = hint_id,
+                title      = "Batterijcapaciteit wijkt af van instelling",
+                message    = (
+                    f"CloudEMS heeft geleerd dat de bruikbare batterijcapaciteit "
+                    f"~{learned_kwh:.1f} kWh is, maar je hebt {configured_kwh:.1f} kWh ingesteld "
+                    f"({diff_pct:.0f}% {direction}). "
+                    f"{'De laadplanning kan suboptimaal zijn.' if diff_pct > 20 else ''} "
+                    f"Pas de capaciteit aan via Instellingen → CloudEMS → Batterij."
+                ),
+                action     = "Pas batterijcapaciteit aan in CloudEMS instellingen",
+                confidence = min(0.95, 0.6 + diff_pct / 100),
+            )
+        except Exception as _e:
+            import logging as _log
+            _log.getLogger(__name__).debug("capacity drift hint fout: %s", _e)
+
+    if decisions_history and classification != "ok":
+        try:
+            decisions_history.add(
+                category = "battery_capacity",
+                action   = f"capacity_{classification}",
+                reason   = f"geleerd={learned_kwh:.1f}kWh config={configured_kwh:.1f}kWh",
+                message  = (
+                    f"Batterijcapaciteit: geleerd {learned_kwh:.1f} kWh vs "
+                    f"ingesteld {configured_kwh:.1f} kWh ({diff_pct:.0f}% afwijking)"
+                ),
+                extra    = {
+                    "learned_kwh":    round(learned_kwh, 2),
+                    "configured_kwh": round(configured_kwh, 2),
+                    "diff_pct":       round(diff_pct, 1),
+                    "classification": classification,
+                },
+            )
+        except Exception:
+            pass
+
+    return classification

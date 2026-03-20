@@ -211,6 +211,52 @@ class CloudemsBatteryCard extends HTMLElement {
     const pwrCls=powerW<-50?'pos':powerW>50?'neg':'zero';
     const wear=parseFloat(zpAttr.forecast?.wear_cost_ct_per_kwh||0)||parseFloat(schA.wear_cost_ct||0)||0;
 
+    // v4.6.571: tooltip variabelen
+    const _TT = window.CloudEMSTooltip;
+    const _balA = h.states['sensor.cloudems_energy_balancer']?.attributes||{};
+    const _lagS  = _balA.battery_lag_learned_s;
+    const _lagN  = _balA.battery_lag_samples||0;
+    const _fastRamp = _balA.fast_ramp_active||false;
+    const _fastEst  = _balA.fast_ramp_battery_est_w;
+    const _bde  = schA.battery_decision||{};
+    const _bdeAction = _bde.action||action||'idle';
+    const _bdePrio   = _bde.priority;
+    const _bdeConf   = _bde.confidence;
+    const _bdeSrc    = _bde.source||'—';
+    const _bdeExpl   = _bde.explain||'';
+    const _socSrc    = socAvail ? 'sensor.cloudems_battery_so_c' : 'Zonneplan fallback';
+
+    const _ttSoc = _TT ? _TT.html('bat-soc','Batterij SoC',[
+      {label:'Sensor',    value:_socSrc},
+      {label:'SoC',       value:soc.toFixed(1)+'%'},
+      {label:'Capaciteit',value:capKwh ? capKwh.toFixed(1)+' kWh' : (sA.estimated_capacity_kwh ? '~'+parseFloat(sA.estimated_capacity_kwh).toFixed(1)+' kWh (lerende)' : '—')},
+      {label:'Opgeslagen',value:capKwh?(capKwh*soc/100).toFixed(2)+' kWh':'—'},
+      {label:'Leer-cycli',value:(()=>{const c=sA.capacity_cycles??0;const n=sA.capacity_cycles_needed??3;return c>=n?'✅ Klaar':c+' / '+n+' cycli (nog '+(n-c)+' nodig)';})(),dim:!(sA.capacity_cycles>=( sA.capacity_cycles_needed??3))},
+      {label:'Bron',      value:socAvail?'● Directe sensor':'○ Zonneplan attribute',dim:!socAvail},
+    ],{trusted:socAvail}) : {wrap:'',tip:''};
+
+    const _ttPwr = _TT ? _TT.html('bat-pwr','Batterij vermogen',[
+      {label:'Sensor',      value:'cloudems_battery_power'},
+      {label:'Vermogen nu', value:pwrStr},
+      {label:'Geleerde lag',value:_lagS!=null?_lagS.toFixed(1)+'s':'nog aan het leren'},
+      {label:'Lag samples', value:_lagN.toString()},
+      {label:'Fast-ramp',   value:_fastRamp?('actief · '+(_fastEst?Math.round(_fastEst)+' W est.':'')):'inactief',dim:!_fastRamp},
+    ],{trusted:true}) : {wrap:'',tip:''};
+
+    const _ttWear = _TT ? _TT.html('bat-wear','Slijtagekosten',[
+      {label:'Waarde',  value:wear.toFixed(2)+' ct/kWh'},
+      {label:'Formule', value:'Batterijprijs ÷ garantied cycli × 100',dim:true},
+      {label:'Gebruik', value:'Verrekend in EPEX laad/ontlaad beslissing',dim:true},
+    ],{footer:'Lager = goedkopere batterijslijtage per kWh doorvoer'}) : {wrap:'',tip:''};
+
+    const _ttDec = _TT ? _TT.html('bat-dec','BDE Beslissing',[
+      {label:'Actie',       value:_bdeAction},
+      {label:'Prioriteit',  value:_bdePrio!=null?_bdePrio.toString():'—'},
+      {label:'Zekerheid',   value:_bdeConf!=null?((_bdeConf*100).toFixed(0)+'%'):'—'},
+      {label:'Bron',        value:_bdeSrc},
+      {label:'Reden',       value:_bdeExpl||reason||'—'},
+    ],{footer:'BDE = Battery Decision Engine'}) : {wrap:'',tip:''};
+
     // Schedule timeline
     let tlHtml='';
     if(schedule.length>0){
@@ -370,7 +416,7 @@ class CloudemsBatteryCard extends HTMLElement {
         <span class="action-pill ${ac}">${actLabel(action)}</span>
       </div>
       <div class="main-row">
-        <div class="arc-wrap">
+        <div class="arc-wrap" style="position:relative;cursor:default" ${_ttSoc.wrap}>
           <svg class="arc-svg" width="130" height="130" viewBox="0 0 130 130">
             <circle cx="65" cy="65" r="52" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="9"/>
             <circle cx="65" cy="65" r="52" fill="none" stroke="${color}" stroke-width="9"
@@ -381,11 +427,13 @@ class CloudemsBatteryCard extends HTMLElement {
             <span class="arc-pct" style="color:${color}">${soc.toFixed(0)}<span style="font-size:14px;color:var(--b-subtext)">%</span></span>
             ${capKwh?`<span class="arc-kwh">${(capKwh*soc/100).toFixed(2)} kWh</span><span class="arc-cap">van ${capKwh.toFixed(1)} kWh</span>`:''}
           </div>
+          ${_ttSoc.tip}
         </div>
         <div class="stats-col">
-          <div class="stat"><span class="stat-label">Vermogen</span><span class="stat-val ${pwrCls}">${esc(pwrStr)}</span></div>
+          <div class="stat" style="position:relative;cursor:default" ${_ttPwr.wrap}><span class="stat-label">Vermogen</span><span class="stat-val ${pwrCls}">${esc(pwrStr)}</span>${_ttPwr.tip}</div>
+          <div class="stat"><span class="stat-label">Capaciteit</span><span class="stat-val" style="font-size:13px">${capKwh?capKwh.toFixed(1)+' kWh':(sA.estimated_capacity_kwh?`~${parseFloat(sA.estimated_capacity_kwh).toFixed(1)} kWh`:'—')}</span></div>
           <div class="stat"><span class="stat-label">SoC doel</span><span class="stat-val">${schA.soc_target_pct!=null?schA.soc_target_pct+'%':zpDec.soc_target!=null?zpDec.soc_target+'%':'—'}</span></div>
-          ${wear?`<div class="stat"><span class="stat-label">Slijtage</span><span class="stat-val" style="font-size:13px">${wear.toFixed(2)} ct/kWh</span></div>`:''}
+          ${wear?`<div class="stat" style="position:relative;cursor:default" ${_ttWear.wrap}><span class="stat-label">Slijtage</span><span class="stat-val" style="font-size:13px">${wear.toFixed(2)} ct/kWh</span>${_ttWear.tip}</div>`:''}
         </div>
       </div>
       <div class="kwh-row">
@@ -414,7 +462,7 @@ class CloudemsBatteryCard extends HTMLElement {
       ${tlHtml}
       ${provHtml}
       ${zpHtml}
-      ${reason?`<div class="reason"><span>💡</span><span>${esc(reason)}</span></div>`:''}
+      ${reason?`<div class="reason" style="position:relative;cursor:default" ${_ttDec.wrap}><span>💡</span><span>${esc(reason)}</span>${_ttDec.tip}</div>`:''}
     </div>`;
 
     // Bind events

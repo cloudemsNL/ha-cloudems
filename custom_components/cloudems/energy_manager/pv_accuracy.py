@@ -301,3 +301,69 @@ class PVForecastAccuracyTracker:
             })
             self._dirty     = False
             self._last_save = time.time()
+
+
+# ── v4.6.531: Per-uur correctie ───────────────────────────────────────────────
+
+class HourlyBiasLearner:
+    """
+    Leert per-uur systematische bias van PV-voorspelling.
+    Bijv. ochtend altijd te optimistisch (bewolking), middag goed, avond te pessimistisch.
+
+    Gebruik:
+        learner = HourlyBiasLearner()
+        learner.observe(hour=10, forecast_w=800, actual_w=650)
+        factor = learner.get_correction(hour=10)  # 0.81
+    """
+    EMA_ALPHA   = 0.10
+    MIN_SAMPLES = 5
+
+    def __init__(self) -> None:
+        # {hour: {"ema_ratio": float, "samples": int}}
+        self._hourly: dict[int, dict] = {
+            h: {"ema_ratio": 1.0, "samples": 0} for h in range(24)
+        }
+
+    def observe(self, hour: int, forecast_w: float, actual_w: float) -> None:
+        """Verwerk één uur-observatie."""
+        if forecast_w < 10:
+            return   # te weinig productie om betrouwbaar te meten
+        ratio = actual_w / forecast_w
+        ratio = max(0.1, min(3.0, ratio))   # clamp outliers
+        h = self._hourly[hour % 24]
+        h["ema_ratio"] = self.EMA_ALPHA * ratio + (1 - self.EMA_ALPHA) * h["ema_ratio"]
+        h["samples"]   = min(h["samples"] + 1, 9999)
+
+    def get_correction(self, hour: int) -> float:
+        """Geef correctiefactor voor dit uur. 1.0 als onvoldoende data."""
+        h = self._hourly[hour % 24]
+        if h["samples"] < self.MIN_SAMPLES:
+            return 1.0
+        return round(h["ema_ratio"], 3)
+
+    def apply_to_forecast(self, hour: int, forecast_w: float) -> float:
+        """Pas correctiefactor toe op forecast."""
+        return forecast_w * self.get_correction(hour)
+
+    def to_dict(self) -> dict:
+        return {str(h): v for h, v in self._hourly.items()}
+
+    def from_dict(self, d: dict) -> None:
+        for h_str, v in d.items():
+            try:
+                h = int(h_str)
+                if 0 <= h < 24:
+                    self._hourly[h] = v
+            except (ValueError, TypeError):
+                pass
+
+    def get_diagnostics(self) -> dict:
+        return {
+            h: {
+                "correction": round(v["ema_ratio"], 3),
+                "samples":    v["samples"],
+                "trusted":    v["samples"] >= self.MIN_SAMPLES,
+            }
+            for h, v in self._hourly.items()
+            if v["samples"] > 0
+        }

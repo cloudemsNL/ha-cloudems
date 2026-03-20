@@ -360,3 +360,79 @@ class HomeBaselineLearner:
             "model_ready":      trained_slots >= 96,   # at least 4 weekday-days fully trained
             "standby_hunters":  hunters,
         }
+
+
+# ── v4.6.531: Cross-validatie met andere bronnen ──────────────────────────────
+
+class BaselineCrossValidator:
+    """
+    Vergelijkt de baseline-afwijking met andere verklaringen:
+    - Is er een bekende NILM-apparaat actief (wasmachine, droger)?
+    - Is er een EV aan het laden?
+    - Is de boiler in BOOST?
+    Als de anomalie verklaard wordt door bekende grote verbruikers → geen alarm.
+
+    Gebruik:
+        cv = BaselineCrossValidator()
+        explained = cv.is_explained(deviation_w=800, active_appliances_w=750)
+        # → True (wasmachine verklaart de afwijking)
+    """
+    EXPLANATION_MARGIN = 0.80   # 80% van de afwijking verklaard → ok
+
+    def is_explained(
+        self,
+        deviation_w: float,
+        active_large_appliances_w: float = 0.0,
+        ev_charging_w: float             = 0.0,
+        boiler_boost_w: float            = 0.0,
+    ) -> bool:
+        """
+        Geeft True als de afwijking grotendeels verklaard is door bekende verbruikers.
+        """
+        explained_w = active_large_appliances_w + ev_charging_w + boiler_boost_w
+        if deviation_w <= 0:
+            return True
+        return explained_w >= deviation_w * self.EXPLANATION_MARGIN
+
+    def classify_anomaly(
+        self,
+        deviation_w: float,
+        active_large_appliances_w: float = 0.0,
+        ev_charging_w: float             = 0.0,
+        boiler_boost_w: float            = 0.0,
+        sigma_w: float                   = 0.0,
+    ) -> dict:
+        """
+        Geeft uitgebreide classificatie van een anomalie.
+        Returns: {explained, explanation, unexplained_w, severity}
+        """
+        explained = self.is_explained(
+            deviation_w, active_large_appliances_w, ev_charging_w, boiler_boost_w
+        )
+        explained_w = active_large_appliances_w + ev_charging_w + boiler_boost_w
+        unexplained_w = max(0.0, deviation_w - explained_w)
+
+        parts = []
+        if active_large_appliances_w > 50:
+            parts.append(f"apparaten {active_large_appliances_w:.0f}W")
+        if ev_charging_w > 50:
+            parts.append(f"EV {ev_charging_w:.0f}W")
+        if boiler_boost_w > 50:
+            parts.append(f"boiler {boiler_boost_w:.0f}W")
+        explanation = ", ".join(parts) if parts else "onbekend"
+
+        # Ernst op basis van onverklaarde afwijking t.o.v. σ
+        if unexplained_w < sigma_w or sigma_w == 0:
+            severity = "low"
+        elif unexplained_w < sigma_w * 2:
+            severity = "medium"
+        else:
+            severity = "high"
+
+        return {
+            "explained":      explained,
+            "explanation":    explanation,
+            "explained_w":    round(explained_w, 1),
+            "unexplained_w":  round(unexplained_w, 1),
+            "severity":       severity,
+        }

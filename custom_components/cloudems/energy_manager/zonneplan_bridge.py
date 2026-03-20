@@ -2090,7 +2090,7 @@ class ZonneplanProvider(BatteryProvider):
         # HA heeft de Zonneplan-entiteit al geupdated via polling.
         sent_w = clamped_w
 
-        def _readback(_now) -> None:
+        async def _readback(_now) -> None:
             # Nooit learned_max aanpassen tijdens een actieve probe — probe doet dit zelf
             if self._probe_active:
                 return
@@ -2127,7 +2127,7 @@ class ZonneplanProvider(BatteryProvider):
                 else:
                     self._slider_max_solar_w = new_max
                 self._slider_max_dirty = True
-                self._hass.async_create_task(self._async_save())
+                await self._async_save()
 
         async_call_later(self._hass, 30, _readback)
 

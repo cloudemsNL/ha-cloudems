@@ -33,14 +33,21 @@ class _PhaseState:
     max_ampere:    float = 25.0
     current_a:     float = 0.0
     power_w:       float = 0.0
-    voltage_v:     float = GRID_VOLTAGE   # ← FIX: was missing in v1.4.0
-    voltage_ema:   float = 0.0            # EMA voor afgevlakte spanning (0 = nog niet geïnitialiseerd)
-    derived_from:  str   = "direct"       # ← FIX: was missing in v1.4.0
+    voltage_v:     float = GRID_VOLTAGE
+    voltage_ema:   float = 0.0
+    derived_from:  str   = "direct"
     solar_w:       float = 0.0
     battery_w:     float = 0.0
     limited:       bool  = False
     last_limit_ts: float = 0.0
-    has_data:      bool  = False          # reserved
+    has_data:      bool  = False
+    # v4.6.548: broninformatie voor tooltip/diagnostics
+    source_entity_a:  str   = ""     # entity_id van de stroomsensor (of "p1" / "berekend")
+    source_entity_p:  str   = ""     # entity_id van de vermogenssensor (of "p1" / "")
+    raw_a:            float = 0.0    # ruwe sensorwaarde stroom (voor berekening)
+    raw_p:            float = 0.0    # ruwe sensorwaarde vermogen (voor berekening)
+    p1_a:             float = 0.0    # P1 stroomwaarde (DSMR, unsigned)
+    p1_net_w:         float = 0.0    # P1 netto vermogen per fase (DSMR5 only)
 
 
 class CurrentLimiter:
@@ -91,23 +98,34 @@ class CurrentLimiter:
         derived_from: str = "direct",
         solar_w:   float = 0.0,
         battery_w: float = 0.0,
+        # v4.6.548: broninformatie
+        source_entity_a: str   = "",
+        source_entity_p: str   = "",
+        raw_a:           float = 0.0,
+        raw_p:           float = 0.0,
+        p1_a:            float = 0.0,
+        p1_net_w:        float = 0.0,
     ) -> None:
         """Update phase readings. current_a is the authoritative value."""
         p = self._phases.get(phase)
         if not p:
             return
-        p.current_a    = current_a
-        p.power_w      = power_w
-        p.derived_from = derived_from
-        p.has_data     = True
-        p.solar_w      = solar_w
-        p.battery_w    = battery_w
-        # EMA spanning (α=0.15 ≈ ~13 samples tijdconstante bij 10s polling)
-        # Hiermee worden korte P1-telegram pieken/dalen weggefilterd.
+        p.current_a      = current_a
+        p.power_w        = power_w
+        p.derived_from   = derived_from
+        p.has_data       = True
+        p.solar_w        = solar_w
+        p.battery_w      = battery_w
+        p.source_entity_a = source_entity_a
+        p.source_entity_p = source_entity_p
+        p.raw_a           = raw_a
+        p.raw_p           = raw_p
+        p.p1_a            = p1_a
+        p.p1_net_w        = p1_net_w
         raw_v = voltage_v if voltage_v and voltage_v > 50 else GRID_VOLTAGE
         _EMA_ALPHA = 0.15
         if p.voltage_ema < 50:
-            p.voltage_ema = raw_v   # initialiseer met eerste meting
+            p.voltage_ema = raw_v
         else:
             p.voltage_ema = _EMA_ALPHA * raw_v + (1 - _EMA_ALPHA) * p.voltage_ema
         p.voltage_v = round(p.voltage_ema, 1)
@@ -165,16 +183,23 @@ class CurrentLimiter:
     def get_phase_summary(self) -> dict[str, Any]:
         return {
             phase: {
-                "current_a":     round(p.current_a, 3),
-                "max_import_a":  p.max_ampere,
-                "power_w":       round(p.power_w, 1),
-                "voltage_v":     round(p.voltage_v, 1),   # ← FIX
-                "derived_from":  p.derived_from,           # ← FIX
-                "limited":       p.limited,
-                "utilisation_pct": (
+                "current_a":        round(p.current_a, 3),
+                "max_import_a":     p.max_ampere,
+                "power_w":          round(p.power_w, 1),
+                "voltage_v":        round(p.voltage_v, 1),
+                "derived_from":     p.derived_from,
+                "limited":          p.limited,
+                "utilisation_pct":  (
                     round(abs(p.current_a) / p.max_ampere * 100, 1)
                     if p.max_ampere else 0.0
                 ),
+                # v4.6.548: broninformatie voor tooltip
+                "source_entity_a":  p.source_entity_a,
+                "source_entity_p":  p.source_entity_p,
+                "raw_a":            round(p.raw_a, 3),
+                "raw_p":            round(p.raw_p, 1),
+                "p1_a":             round(p.p1_a, 3),
+                "p1_net_w":         round(p.p1_net_w, 1),
             }
             for phase, p in self._phases.items()
         }

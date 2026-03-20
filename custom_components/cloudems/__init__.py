@@ -1253,6 +1253,13 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             entity_id = call.data["entity_id"]
             coordinator._boiler_ctrl.resume_boost(entity_id)
 
+    def boiler_set_green(call: ServiceCall):
+        """Forceer GREEN mode permanent — CloudEMS stuurt geen BOOST meer.
+        Gebruik boiler_resume_boost om terug naar automatische sturing te gaan."""
+        if coordinator._boiler_ctrl:
+            entity_id = call.data["entity_id"]
+            coordinator._boiler_ctrl.force_green_permanent(entity_id)
+
     hass.services.async_register(DOMAIN, "confirm_device",         confirm_device)
     hass.services.async_register(DOMAIN, "dismiss_device",         dismiss_device)
     hass.services.async_register(DOMAIN, "nilm_feedback",          nilm_feedback)
@@ -1423,6 +1430,8 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         schema=vol.Schema({vol.Required("entity_id"): str, vol.Optional("seconds", default=3600.0): vol.Coerce(float)}))
     hass.services.async_register(DOMAIN, "boiler_resume_boost",    boiler_resume_boost,
         schema=vol.Schema({vol.Required("entity_id"): str}))
+    hass.services.async_register(DOMAIN, "boiler_set_green",       boiler_set_green,
+        schema=vol.Schema({vol.Required("entity_id"): str}))
     hass.services.async_register(DOMAIN, "set_boiler_setpoint",    set_boiler_setpoint,
         schema=vol.Schema({
             vol.Required("entity_id"): str,
@@ -1440,6 +1449,70 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "reset_delivery_learning",
         reset_delivery_learning,
         schema=vol.Schema({vol.Optional("group_id", default=""): str}))
+
+    # v4.6.585: wizard_save_config — sla sensor-selecties op vanuit interactieve onboarding wizard
+    async def wizard_save_config(call: ServiceCall):
+        """Sla wizard-configuratie op vanuit de interactieve onboarding wizard."""
+        import copy
+        data = call.data
+        new_opts = copy.deepcopy(dict(entry.options))
+
+        # Netmeting
+        if data.get("grid_sensor"):
+            new_opts["grid_sensor"] = data["grid_sensor"]
+        if data.get("grid_phases") in (1, 3):
+            new_opts["grid_phases"] = data["grid_phases"]
+        if data.get("max_current_per_phase"):
+            new_opts["max_current_per_phase"] = int(data["max_current_per_phase"])
+
+        # Fase-sensoren
+        for ph in ("l1", "l2", "l3"):
+            key = f"power_sensor_{ph}"
+            if data.get(key):
+                new_opts[key] = data[key]
+
+        # PV / omvormer
+        if data.get("solar_sensor"):
+            new_opts["solar_sensor"] = data["solar_sensor"]
+
+        # EV
+        if data.get("ev_charger_entity"):
+            new_opts["ev_charger_entity"] = data["ev_charger_entity"]
+
+        # Piekschaving
+        if data.get("peak_shaving_limit_w") is not None:
+            new_opts["peak_shaving_limit_w"] = float(data["peak_shaving_limit_w"])
+        if data.get("peak_shaving_enabled") is not None:
+            new_opts["peak_shaving_enabled"] = bool(data["peak_shaving_enabled"])
+
+        # NILM hints (lijst van device_type strings die aanwezig zijn)
+        if data.get("nilm_device_hints"):
+            new_opts["nilm_device_hints"] = list(data["nilm_device_hints"])
+
+        # Pas opties toe op de config entry
+        hass.config_entries.async_update_entry(entry, options=new_opts)
+        await coordinator.async_request_refresh()
+
+        await hass.services.async_call("persistent_notification", "create", {
+            "title": "CloudEMS — Setup wizard",
+            "message": "✅ Configuratie opgeslagen vanuit setup wizard.",
+            "notification_id": "cloudems_wizard_saved",
+        })
+
+    hass.services.async_register(DOMAIN, "wizard_save_config", wizard_save_config,
+        schema=vol.Schema({
+            vol.Optional("grid_sensor",          default=""): str,
+            vol.Optional("grid_phases",          default=1): vol.Coerce(int),
+            vol.Optional("max_current_per_phase",default=25): vol.Coerce(int),
+            vol.Optional("power_sensor_l1",      default=""): str,
+            vol.Optional("power_sensor_l2",      default=""): str,
+            vol.Optional("power_sensor_l3",      default=""): str,
+            vol.Optional("solar_sensor",         default=""): str,
+            vol.Optional("ev_charger_entity",    default=""): str,
+            vol.Optional("peak_shaving_limit_w", default=6000.0): vol.Coerce(float),
+            vol.Optional("peak_shaving_enabled", default=True): bool,
+            vol.Optional("nilm_device_hints",    default=[]): [str],
+        }))
 
     # v4.5.126: dump probe diagnostieklog naar bestand + notificatie
     async def dump_probe_log(call):
@@ -2595,7 +2668,7 @@ _CLOUDEMS_SERVICES = [
     "download_energy_report", "generate_blueprints", "upload_diagnostic_report",
     "boiler_override", "reset_drift_baseline", "mute_alert", "cleanup_nilm",
     "export_learning_data", "import_learning_data", "register_isolation_investment",
-    "health_check", "reset_delivery_learning",
+    "health_check", "reset_delivery_learning", "wizard_save_config",
     "lamp_circulation_test", "lamp_circulation_stop_test", "lamp_circulation_set_enabled",
     "simulator_set", "simulator_clear", "simulator_zone_temp", "simulator_stove_temp",
     "clear_drift_profiles",
