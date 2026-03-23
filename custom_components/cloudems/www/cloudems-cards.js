@@ -4618,9 +4618,9 @@ window.CloudEMSTooltip = {
     ['cloudems-flow-card',      CloudemsFlowCard],
     ['cloudems-stack-card',     CloudemsStackCard],
     ['cloudems-entity-list',    CloudemsEntityList],
-    ['cloudems-nilm-card',      CloudemsNilmCard],
+    // cloudems-nilm-card → cloudems-nilm-card.js (nieuw v2.0, los bestand heeft prioriteit)
+    // cloudems-overview-card → cloudems-overview-card.js (vervangen, niet meer in gebruik)
     ['cloudems-topology-card',  CloudemsTopologyCard],
-    ['cloudems-overview-card',  CloudemsOverviewCard],
   ];
 
   CARDS.forEach(([name, cls]) => {

@@ -55,16 +55,16 @@ class CloudemsSankeyCard extends HTMLElement {
     const sh = this.shadowRoot;
 
     // Read power values
-    const solar_w   = this._w('sensor.cloudems_solar_power') || this._w('sensor.cloudems_pv_power');
-    const grid_imp  = Math.max(0, parseFloat(h.states['sensor.cloudems_grid_net_power']?.state || 0));
-    const grid_exp  = Math.max(0, -(parseFloat(h.states['sensor.cloudems_grid_net_power']?.state || 0)));
+    const solar_w   = this._w('sensor.cloudems_zon_vermogen') || this._w('sensor.cloudems_solar_power');
+    const grid_imp  = Math.max(0, parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0));
+    const grid_exp  = Math.max(0, -(parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0)));
     const bat_w     = parseFloat(h.states['sensor.cloudems_battery_power']?.state || 0);
     const bat_chg   = Math.max(0,  bat_w);
     const bat_dis   = Math.max(0, -bat_w);
 
     // House breakdown from coordinator
-    const house_w   = this._w('sensor.cloudems_house_power') || this._w('sensor.cloudems_verbruik_totaal');
-    const boiler_w  = this._w('sensor.cloudems_boiler_power') || this._w('sensor.cloudems_boiler_vermogen');
+    const house_w   = this._w('sensor.cloudems_home_rest') || this._w('sensor.cloudems_house_power');
+    const boiler_w  = this._w('sensor.cloudems_boiler_efficiency') || this._w('sensor.cloudems_boiler_power');
     const ev_w      = this._w('sensor.cloudems_ev_session');
     const other_w   = Math.max(0, house_w - boiler_w - ev_w);
 

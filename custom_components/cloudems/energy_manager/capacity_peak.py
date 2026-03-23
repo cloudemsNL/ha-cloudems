@@ -305,6 +305,16 @@ class CapacityPeakMonitor:
 
         return actions
 
+    def get_status(self) -> dict:
+        """Geeft de laatste bekende piekstatus terug (zonder nieuwe meting)."""
+        from datetime import datetime, timezone
+        return self._status(
+            avg_w=sum(s[1] for s in self._samples) / len(self._samples) if self._samples else 0.0,
+            projected_w=self._month_peak_w,
+            sheddable_w=0.0,
+            now=datetime.now(timezone.utc),
+        )
+
     def get_monthly_summary(self) -> list:
         """Geeft piekhistoriek van de laatste 12 maanden inclusief lopende maand."""
         result = []

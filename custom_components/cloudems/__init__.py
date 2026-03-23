@@ -43,7 +43,6 @@ LOVELACE_BATTERY_URL        = f"/local/cloudems/cloudems-battery-card.js?v={VERS
 LOVELACE_SHUTTER_URL        = f"/local/cloudems/cloudems-shutter-card.js?v={VERSION}"
 LOVELACE_SOLAR_URL          = f"/local/cloudems/cloudems-solar-card.js?v={VERSION}"
 LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={VERSION}"
-LOVELACE_OVERVIEW_URL       = f"/local/cloudems/cloudems-overview-card.js?v={VERSION}"
 LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VERSION}"
 LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
@@ -58,8 +57,13 @@ LOVELACE_DEMAND_URL         = f"/local/cloudems/cloudems-demand-card.js?v={VERSI
 LOVELACE_DIAGNOSE_URL        = f"/local/cloudems/cloudems-diagnose-card.js?v={VERSION}"
 LOVELACE_VERSION_URL         = f"/local/cloudems/cloudems-version-card.js?v={VERSION}"
 LOVELACE_KLIMAAT_URL        = f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}"
+LOVELACE_LAMP_AUTO_URL      = f"/local/cloudems/cloudems-lamp-auto-card.js?v={VERSION}"
 LOVELACE_APPLIANCE_URL      = f"/local/cloudems/cloudems-appliance-card.js?v={VERSION}"
 LOVELACE_P1_URL             = f"/local/cloudems/cloudems-p1-card.js?v={VERSION}"
+LOVELACE_V2H_URL            = f"/local/cloudems/cloudems-v2h-card.js?v={VERSION}"
+LOVELACE_EGAUGE_URL         = f"/local/cloudems/cloudems-egauge-card.js?v={VERSION}"
+LOVELACE_EV_TRIP_URL        = f"/local/cloudems/cloudems-ev-trip-card.js?v={VERSION}"
+LOVELACE_PHASE_OUTLET_URL   = f"/local/cloudems/cloudems-phase-outlet-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -102,15 +106,19 @@ LOVELACE_RESOURCE_TYPE = "module"
 
 _ALL_JS_RESOURCES = [
     (LOVELACE_CARDS_URL,        "cloudems-cards.js"),
+    (f"/local/cloudems/cloudems-overview-card.js?v={VERSION}", "cloudems-overview-card.js"),  # bevat cloudems-beheer-card
     (LOVELACE_CARDMOD_URL,      "cloudems-card-mod.js"),
     (LOVELACE_BOILER_URL,       "cloudems-boiler-card.js"),
     (LOVELACE_BATTERY_URL,      "cloudems-battery-card.js"),
     (LOVELACE_SHUTTER_URL,      "cloudems-shutter-card.js"),
     (LOVELACE_APPLIANCE_URL,    "cloudems-appliance-card.js"),
     (LOVELACE_P1_URL,           "cloudems-p1-card.js"),
+    (LOVELACE_V2H_URL,          "cloudems-v2h-card.js"),
+    (LOVELACE_EGAUGE_URL,       "cloudems-egauge-card.js"),
+    (LOVELACE_EV_TRIP_URL,      "cloudems-ev-trip-card.js"),
+    (LOVELACE_PHASE_OUTLET_URL, "cloudems-phase-outlet-card.js"),
     (LOVELACE_SOLAR_URL,        "cloudems-solar-card.js"),
     (LOVELACE_PV_FORECAST_URL,  "cloudems-pv-forecast-card.js"),
-    (LOVELACE_OVERVIEW_URL,     "cloudems-overview-card.js"),
     (LOVELACE_SWITCHES_URL,     "cloudems-switches-card.js"),
     (LOVELACE_ZELFCONS_URL,     "cloudems-zelfconsumptie-card.js"),
     (LOVELACE_DECISIONS_URL,    "cloudems-decisions-card.js"),
@@ -124,12 +132,18 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}",   "cloudems-lamp-card.js"),
     (LOVELACE_DEMAND_URL,       "cloudems-demand-card.js"),
     (LOVELACE_DIAGNOSE_URL,      "cloudems-diagnose-card.js"),
+    (LOVELACE_KLIMAAT_URL,       "cloudems-klimaat-card.js"),
+    (LOVELACE_LAMP_URL,          "cloudems-lamp-card.js"),
+    (LOVELACE_LAMP_AUTO_URL,     "cloudems-lamp-auto-card.js"),
     (LOVELACE_VERSION_URL,       "cloudems-version-card.js"),
     (f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}", "cloudems-klimaat-card.js"),
     (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
     (LOVELACE_MINI_PRICE_URL,   "cloudems-mini-price-card.js"),
-    (f"/local/cloudems/cloudems-lamp-auto-card.js?v={VERSION}", "cloudems-lamp-auto-card.js"),
     (f"/local/cloudems/cloudems-decisions-learner-card.js?v={VERSION}", "cloudems-decisions-learner-card.js"),  # v4.6.500
+    (f"/local/cloudems/cloudems-alerts-card.js?v={VERSION}",  "cloudems-alerts-card.js"),   # v4.6.601
+    (f"/local/cloudems/cloudems-sankey-card.js?v={VERSION}",   "cloudems-sankey-card.js"),    # Energie stromen
+    (f"/local/cloudems/cloudems-pool-card.js?v={VERSION}",     "cloudems-pool-card.js"),      # v4.6.603
+    (f"/local/cloudems/cloudems-learning-card.js?v={VERSION}", "cloudems-learning-card.js"),  # v4.6.603
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -1489,6 +1503,16 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
         if data.get("nilm_device_hints"):
             new_opts["nilm_device_hints"] = list(data["nilm_device_hints"])
 
+        # Gas
+        for _gas_key in ("gas_sensor", "gas_price_sensor", "gas_ttf_sensor",
+                          "gas_supplier", "gas_netbeheerder"):
+            if data.get(_gas_key):
+                new_opts[_gas_key] = data[_gas_key]
+        if data.get("gas_use_ttf") is not None:
+            new_opts["gas_use_ttf"] = bool(data["gas_use_ttf"])
+        if data.get("gas_price_fixed") is not None:
+            new_opts["gas_price_fixed"] = float(data["gas_price_fixed"])
+
         # Pas opties toe op de config entry
         hass.config_entries.async_update_entry(entry, options=new_opts)
         await coordinator.async_request_refresh()
@@ -1512,6 +1536,13 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             vol.Optional("peak_shaving_limit_w", default=6000.0): vol.Coerce(float),
             vol.Optional("peak_shaving_enabled", default=True): bool,
             vol.Optional("nilm_device_hints",    default=[]): [str],
+            vol.Optional("gas_sensor",            default=""): str,
+            vol.Optional("gas_price_sensor",      default=""): str,
+            vol.Optional("gas_ttf_sensor",        default=""): str,
+            vol.Optional("gas_use_ttf",           default=True): bool,
+            vol.Optional("gas_price_fixed",       default=1.25): vol.Coerce(float),
+            vol.Optional("gas_supplier",          default="none"): str,
+            vol.Optional("gas_netbeheerder",      default="default"): str,
         }))
 
     # v4.5.126: dump probe diagnostieklog naar bestand + notificatie
@@ -2286,6 +2317,110 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
     hass.services.async_register(DOMAIN, "lamp_circulation_stop_test",   lamp_circulation_stop_test)
     hass.services.async_register(DOMAIN, "lamp_circulation_set_enabled", lamp_circulation_set_enabled)
 
+    async def lamp_scan(call: ServiceCall) -> None:
+        """Scan HA areas en entiteiten en bouw lamp-automatisering opnieuw op.
+
+        Kan worden opgeroepen vanuit de kaart via de [Scan HA]-knop.
+        Slaat het resultaat op in de config zodat het herstart-bestendig is.
+        """
+        la = coordinator._lamp_auto
+        if la is None:
+            _LOGGER.warning("CloudEMS lamp_scan: LampAutomationEngine niet geïnitialiseerd")
+            return
+        try:
+            await coordinator._async_configure_lamp_automation()
+            # Persisteer de nieuwe lampenlijst
+            new_options = dict(coordinator._entry.options)
+            lamp_auto_cfg = dict(new_options.get("lamp_automation", {}) or {})
+            lamp_auto_cfg["lamps"] = [
+                {
+                    "entity_id":       l.entity_id,
+                    "label":           l.label,
+                    "mode":            l.mode,
+                    "area_id":         l.area_id,
+                    "area_name":       l.area_name,
+                    "presence_sensor": l.presence_sensor,
+                    "auto_on":         l.auto_on,
+                    "auto_off":        l.auto_off,
+                    "outdoor":         l.outdoor,
+                    "excluded":        l.excluded,
+                }
+                for l in la._lamps
+            ]
+            new_options["lamp_automation"] = lamp_auto_cfg
+            hass.config_entries.async_update_entry(coordinator._entry, options=new_options)
+            _LOGGER.info("CloudEMS lamp_scan: %d lampen gevonden en opgeslagen", len(la._lamps))
+        except Exception as err:
+            _LOGGER.warning("CloudEMS lamp_scan fout: %s", err)
+
+    async def lamp_set_mode(call: ServiceCall) -> None:
+        """Stel modus in voor één lamp (manual/semi/auto) en sla op.
+
+        Velden: entity_id (str), mode (str: manual|semi|auto)
+        Optioneel: enabled (bool) — zet de hele lamp_auto module aan/uit
+        """
+        la = coordinator._lamp_auto
+        if la is None:
+            return
+        try:
+            eid  = call.data.get("entity_id")
+            mode = call.data.get("mode")
+            enabled = call.data.get("enabled")
+
+            # Module aan/uit
+            if enabled is not None:
+                la._enabled = bool(enabled)
+                la._config["lamp_auto_enabled"] = bool(enabled)
+                new_options = dict(coordinator._entry.options)
+                lamp_auto_cfg = dict(new_options.get("lamp_automation", {}) or {})
+                lamp_auto_cfg["enabled"] = bool(enabled)
+                new_options["lamp_automation"] = lamp_auto_cfg
+                hass.config_entries.async_update_entry(coordinator._entry, options=new_options)
+                _LOGGER.info("CloudEMS lamp_auto: module %s", "ingeschakeld" if enabled else "uitgeschakeld")
+                return
+
+            # Per-lamp modus wijzigen
+            if not eid or not mode:
+                return
+            if mode not in ("manual", "semi", "auto"):
+                _LOGGER.warning("CloudEMS lamp_set_mode: ongeldige modus '%s'", mode)
+                return
+
+            lamp = next((l for l in la._lamps if l.entity_id == eid), None)
+            if lamp is None:
+                _LOGGER.warning("CloudEMS lamp_set_mode: lamp '%s' niet gevonden", eid)
+                return
+
+            lamp.mode = mode
+            _LOGGER.info("CloudEMS lamp_set_mode: %s → %s", eid, mode)
+
+            # Persisteer
+            new_options = dict(coordinator._entry.options)
+            lamp_auto_cfg = dict(new_options.get("lamp_automation", {}) or {})
+            lamp_list = lamp_auto_cfg.get("lamps", [])
+            updated = False
+            for entry in lamp_list:
+                if entry.get("entity_id") == eid:
+                    entry["mode"] = mode
+                    updated = True
+                    break
+            if not updated:
+                lamp_list.append({
+                    "entity_id": eid, "label": lamp.label, "mode": mode,
+                    "area_id": lamp.area_id, "area_name": lamp.area_name,
+                    "presence_sensor": lamp.presence_sensor,
+                    "auto_on": lamp.auto_on, "auto_off": lamp.auto_off,
+                    "outdoor": lamp.outdoor, "excluded": lamp.excluded,
+                })
+            lamp_auto_cfg["lamps"] = lamp_list
+            new_options["lamp_automation"] = lamp_auto_cfg
+            hass.config_entries.async_update_entry(coordinator._entry, options=new_options)
+        except Exception as err:
+            _LOGGER.warning("CloudEMS lamp_set_mode fout: %s", err)
+
+    hass.services.async_register(DOMAIN, "lamp_scan",     lamp_scan)
+    hass.services.async_register(DOMAIN, "lamp_set_mode", lamp_set_mode)
+
     # v3.5.3: Test-mode simulator services
     async def simulator_set(call: ServiceCall):
         """Activeer de testmodus met gesimuleerde sensorwaarden."""
@@ -2669,7 +2804,7 @@ _CLOUDEMS_SERVICES = [
     "boiler_override", "reset_drift_baseline", "mute_alert", "cleanup_nilm",
     "export_learning_data", "import_learning_data", "register_isolation_investment",
     "health_check", "reset_delivery_learning", "wizard_save_config",
-    "lamp_circulation_test", "lamp_circulation_stop_test", "lamp_circulation_set_enabled",
+    "lamp_circulation_test", "lamp_circulation_stop_test", "lamp_circulation_set_enabled", "lamp_scan", "lamp_set_mode",
     "simulator_set", "simulator_clear", "simulator_zone_temp", "simulator_stove_temp",
     "clear_drift_profiles",
     "nilm_device_profile",

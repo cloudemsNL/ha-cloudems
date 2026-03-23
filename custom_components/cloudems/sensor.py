@@ -233,6 +233,8 @@ async def async_setup_entry(
         CloudEMSWatchdogSensor(coordinator, entry),
         # v4.0.5: Zelfconsumptie & zelfvoorzieningsgraad
         CloudEMSSelfConsumptionSensor(coordinator, entry),
+        CloudEMSEVTripPlannerSensor(coordinator, entry),
+        CloudEMSPhaseOutletSensor(coordinator, entry),
         CloudEMSSelfSufficiencySensor(coordinator, entry),
         # v2.2.2: Installatie-kwaliteitsscore
         CloudEMSInstallationScoreSensor(coordinator, entry),
@@ -748,6 +750,11 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
         pool = data.get("pool", {}) or {}
         return float(pool.get("filter_power_w") or 0) + float(pool.get("heat_power_w") or 0)
 
+    @staticmethod
+    def _climate_w(data: dict) -> float:
+        """Airco + warmtepomp vermogen — direct aan hub gekoppeld, hoort niet bij 'thuis rest'."""
+        return float(data.get("climate_epex_power_w") or 0.0)
+
     @property
     def native_value(self):
         d = self.coordinator.data or {}
@@ -757,11 +764,13 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
         house_w = d.get("house_power")
         if house_w is not None:
             # Trek beheerde apparaten eraf zodat "rest" = onbeheerd verbruik
+            # v4.6.593: airco/warmtepomp toegevoegd — ook die zitten direct aan hub
             rest = float(house_w) \
                    - self._boiler_w(d) \
                    - self._ev_w(d) \
                    - self._ebike_w(d) \
-                   - self._pool_w(d)
+                   - self._pool_w(d) \
+                   - self._climate_w(d)
             return round(max(0.0, rest), 1)
         # Fallback als balancer nog niet beschikbaar is (eerste seconden na herstart)
         solar_w = float(d.get("solar_power_w", 0) or 0)
@@ -771,7 +780,8 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
                - self._boiler_w(d) \
                - self._ev_w(d) \
                - self._ebike_w(d) \
-               - self._pool_w(d)
+               - self._pool_w(d) \
+               - self._climate_w(d)
         return round(max(0.0, rest), 1)
 
     @property
@@ -784,15 +794,35 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
         ev      = self._ev_w(d)
         ebike   = self._ebike_w(d)
         pool    = self._pool_w(d)
+        climate = self._climate_w(d)
+        house_w = float(d.get("house_power") or 0)
+        total_hub = boiler + ev + ebike + pool + climate
+        rest = round(max(0.0, house_w - total_hub), 1)
+
+        # v4.6.593: diagnostische log — als rest > 60% van house_power wijst dit op
+        # een hub-node die niet wordt afgetrokken (bijv. nieuwe module zonder aftrek).
+        # Zo is dit zelf te vinden zonder de flow-kaart te inspecteren.
+        if house_w > 200 and total_hub > 50 and rest > house_w * 0.6:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "HomeRest: rest=%.0fW is %.0f%% van house=%.0fW — "
+                "mogelijk een hub-node die niet wordt afgetrokken? "
+                "Afgetrokken: boiler=%.0f ev=%.0f ebike=%.0f pool=%.0f climate=%.0f",
+                rest, rest / house_w * 100, house_w,
+                boiler, ev, ebike, pool, climate,
+            )
+
         return {
-            "solar_w":   round(solar_w, 1),
-            "grid_w":    round(grid_w, 1),
-            "battery_w": round(bat_w, 1),
-            "boiler_w":  round(boiler, 1),
-            "ev_w":      round(ev, 1),
-            "ebike_w":   round(ebike, 1),
-            "pool_w":    round(pool, 1),
-            "total_managed_w": round(boiler + ev + ebike + pool, 1),
+            "solar_w":         round(solar_w, 1),
+            "grid_w":          round(grid_w, 1),
+            "battery_w":       round(bat_w, 1),
+            "boiler_w":        round(boiler, 1),
+            "ev_w":            round(ev, 1),
+            "ebike_w":         round(ebike, 1),
+            "pool_w":          round(pool, 1),
+            "climate_w":       round(climate, 1),
+            "total_managed_w": round(total_hub, 1),
+            "rest_w":          rest,
         }
 
 
@@ -4385,6 +4415,7 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
             "clipping_active":        clipping_any,
             "orientation_progress_pct": avg_orient_pct,
             "phases_detected":        phases_known,
+            "over_setpoint":          (self.coordinator.data or {}).get("inverter_dimmer", {}).get("over_setpoint", {}),
             "inverters": [
                 {
                     "label":                    i.get("label"),
@@ -5373,6 +5404,13 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
             "gas_cv_efficiency_pct":          round(GAS_BOILER_EFFICIENCY * 100),
             "gas_per_kwh_heat":               gas_kwh_heat,
             "gas_price_source":               source,
+            # TTF Gas status
+            "gas_ttf_spot_eur_m3":            getattr(getattr(self.coordinator, "_ttf_gas_fetcher", None), "ttf_spot_eur_m3", None),
+            "gas_ttf_components":             getattr(self.coordinator, "_ttf_gas_fetcher", None).get_status().get("components") if getattr(self.coordinator, "_ttf_gas_fetcher", None) else None,
+            "gas_ttf_source":                 getattr(self.coordinator, "_ttf_gas_fetcher", None).last_source if getattr(self.coordinator, "_ttf_gas_fetcher", None) else None,
+            "gas_ttf_cache_age_min":          getattr(self.coordinator, "_ttf_gas_fetcher", None).get_status().get("cache_age_min") if getattr(self.coordinator, "_ttf_gas_fetcher", None) else None,
+            "gas_supplier":                   self.coordinator._config.get("gas_supplier", "none"),
+            "gas_netbeheerder":               self.coordinator._config.get("gas_netbeheerder", "default"),
             # Vergelijking
             "savings_electric_boiler_vs_gas": savings_boiler,
             "savings_heat_pump_vs_gas":       savings_hp if has_hp else None,
@@ -7234,6 +7272,63 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         circuit_monitor = (self.coordinator.data or {}).get("circuit_monitor", {})
         ups = (self.coordinator.data or {}).get("ups", {})
         return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EV Trip Planner sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSEVTripPlannerSensor(CoordinatorEntity, SensorEntity):
+    """EV charging recommendation based on calendar events."""
+    _attr_name  = "CloudEMS EV · Trip Planner"
+    _attr_icon  = "mdi:calendar-car"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ev_trip_planner"
+        self.entity_id = "sensor.cloudems_ev_trip_planner"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_EV)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("ev_trip_planner", {})
+        rec = d.get("recommendation", {})
+        return "charging_needed" if rec.get("needed") else "ok"
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("ev_trip_planner", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase Outlet Detector sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSPhaseOutletSensor(CoordinatorEntity, SensorEntity):
+    """Auto-detected phase assignments for smart plugs and devices."""
+    _attr_name  = "CloudEMS Grid · Phase Outlet Detection"
+    _attr_icon  = "mdi:power-socket"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_phase_outlet_detector"
+        self.entity_id = "sensor.cloudems_phase_outlet_detector"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("phase_outlet_detector", {})
+        return d.get("locked_devices", 0)
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("phase_outlet_detector", {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

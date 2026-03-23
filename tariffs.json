@@ -1,12 +1,12 @@
 {
-  "_comment": "CloudEMS tarieven \u2014 jaarlijks updaten, excl. BTW",
+  "_comment": "CloudEMS tarieven — jaarlijks updaten, excl. BTW",
   "_formule_eb": "incl_BTW / (1 + BTW_rate) = excl_BTW",
   "_formule_markup": "opslag incl. BTW / BTW_factor = excl. BTW",
   "_bronnen": {
     "NL": "dynamischeprijs.nl, maart 2026",
-    "DE": "flyx.energy + zendure.de, januari 2026 \u2014 Tibber 2.15ct incl. MwSt (bron: flyx.energy)",
+    "DE": "flyx.energy + zendure.de, januari 2026 — Tibber 2.15ct incl. MwSt (bron: flyx.energy)",
     "BE": "daretocompare.be + switchr.be, schattingen o.b.v. marktpositie",
-    "FR": "fournisseurs-electricite.com + engie.fr, schattingen \u2014 FR heeft beperkt EPEX-dynamisch aanbod"
+    "FR": "fournisseurs-electricite.com + engie.fr, schattingen — FR heeft beperkt EPEX-dynamisch aanbod"
   },
   "updated": "2026-03-12",
   "energy_tax": {
@@ -83,6 +83,78 @@
       "totalenergies_fr": 0.01667,
       "none": 0.0,
       "custom": 0.0
+    }
+  },
+  "gas_tax": {
+    "_comment": "Energiebelasting + ODE gas, excl. BTW, per m³, schijf 1 (0-1500 m³/jaar). Bron: Belastingdienst / RVO",
+    "NL": {
+      "2024": {
+        "energiebelasting_eur_m3": 0.33227,
+        "ode_eur_m3": 0.00397,
+        "btw": 0.21
+      },
+      "2025": {
+        "energiebelasting_eur_m3": 0.29338,
+        "ode_eur_m3": 0.00494,
+        "btw": 0.21
+      },
+      "2026": {
+        "energiebelasting_eur_m3": 0.29338,
+        "ode_eur_m3": 0.00494,
+        "btw": 0.21
+      }
+    },
+    "BE": {
+      "_comment": "BE heeft geen EB op gas voor huishoudens, wel accijns",
+      "2025": {
+        "energiebelasting_eur_m3": 0.0,
+        "ode_eur_m3": 0.0,
+        "btw": 0.06
+      },
+      "2026": {
+        "energiebelasting_eur_m3": 0.0,
+        "ode_eur_m3": 0.0,
+        "btw": 0.06
+      }
+    },
+    "DE": {
+      "_comment": "DE Erdgassteuer + Erdgasabgabe",
+      "2025": {
+        "energiebelasting_eur_m3": 0.00553,
+        "ode_eur_m3": 0.0,
+        "btw": 0.19
+      },
+      "2026": {
+        "energiebelasting_eur_m3": 0.00553,
+        "ode_eur_m3": 0.0,
+        "btw": 0.19
+      }
+    }
+  },
+  "gas_netbeheer": {
+    "_comment": "Variabele netwerkkosten gas, excl. BTW, per m³. Bron: ACM tariefbesluiten 2026",
+    "NL": {
+      "liander": 0.1012,
+      "stedin": 0.0987,
+      "enexis": 0.1034,
+      "rendo": 0.0945,
+      "westland": 0.0912,
+      "default": 0.1
+    }
+  },
+  "gas_supplier_markup": {
+    "_comment": "Leveranciersopslag gas, excl. BTW, per m³. Schattingen o.b.v. publieke tarieven",
+    "NL": {
+      "vattenfall": 0.055,
+      "eneco": 0.048,
+      "essent": 0.052,
+      "greenchoice": 0.044,
+      "budget": 0.038,
+      "pure": 0.042,
+      "anwb": 0.046,
+      "none": 0.0,
+      "custom": 0.0,
+      "default": 0.05
     }
   }
 }

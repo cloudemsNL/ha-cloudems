@@ -104,7 +104,7 @@ from .const import (
     DEFAULT_NILM_ACTIVE, DEFAULT_HYBRID_NILM_ACTIVE, DEFAULT_NILM_HMM_ACTIVE,
     DEFAULT_NILM_BAYES_ACTIVE,
     CONF_GRID_SENSOR, CONF_PHASE_SENSORS, CONF_SOLAR_SENSOR,
-    CONF_BATTERY_SENSOR, CONF_EV_CHARGER_ENTITY,
+    CONF_BATTERY_SENSOR, CONF_EV_CHARGER_ENTITY, CONF_EV_CHARGER_CONFIGS, CONF_EV_CHARGER_COUNT,
     CONF_ENERGY_PRICES_COUNTRY, CONF_CLOUD_API_KEY,
     CONF_MAX_CURRENT_PER_PHASE,
     CONF_NEGATIVE_PRICE_THRESHOLD, DEFAULT_NEGATIVE_PRICE_THRESHOLD,
@@ -816,6 +816,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._shutter_enabled:          bool = False
         self._boiler_enabled:           bool = False
         self._ev_charger_enabled:       bool = False
+        self._ev_trip_planner:          Optional[object] = None
+        self._phase_outlet_detector:    Optional[object] = None
         self._battery_sched_enabled:    bool = False
         self._ere_enabled:              bool = False
         self._climate_mgr_override:     bool = False
@@ -1090,6 +1092,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._boiler_enabled          = data["boiler_enabled"]
             if "ev_charger_enabled" in data:
                 self._ev_charger_enabled      = data["ev_charger_enabled"]
+
             if "ere_enabled" in data:
                 self._ere_enabled             = data["ere_enabled"]
             if "weekly_insights_enabled" in data:
@@ -1567,7 +1570,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "solar_learner":  self._solar_learner is not None,
             "pv_forecast":    self._pv_forecast is not None,
             "battery_sched":  self._battery_scheduler is not None,
-            "ev_charger":     self._dynamic_loader is not None or bool(self._config.get("ev_charger_entity")),
+            "ev_charger":     self._dynamic_loader is not None or bool(self._get_ev_charger_configs()),
             "prices":         self._prices is not None,
             "notification":   self._notification_engine is not None,
             "behaviour_coach": self._behaviour_coach is not None,
@@ -2051,6 +2054,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
     # ── Setup ─────────────────────────────────────────────────────────────────
 
+
+    def _get_ev_charger_configs(self) -> list:
+        """Geeft lijst van EV laadpaal configs terug. Backwards compat met oude single entity."""
+        configs = self._config.get(CONF_EV_CHARGER_CONFIGS, [])
+        if configs:
+            return configs
+        # Backwards compat: oude single entity
+        entity = self._config.get(CONF_EV_CHARGER_ENTITY, "")
+        if entity:
+            return [{"entity_id": entity, "label": "EV Laadpaal 1", "switch": ""}]
+        return []
+
     async def async_setup(self):
         self._session = async_get_clientsession(self.hass)
         self._nilm._cloud_ai._session = self._session
@@ -2077,6 +2092,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._config,
         )
         await self._tariff_fetcher.async_setup()
+
+        # TTF Gas Price Fetcher — TTF Day-Ahead → all-in omrekening
+        from .energy_manager.ttf_gas_fetcher import TTFGasFetcher
+        self._ttf_gas_fetcher = TTFGasFetcher(
+            session=async_get_clientsession(self.hass),
+            config=self._config,
+            tariff_fetcher=self._tariff_fetcher,
+        )
         # v4.1: Prijshistorie laden (overleeft HA-herstart)
         _ph_saved = await self._store_price_history.async_load() or {}
         if isinstance(_ph_saved.get("hours"), list):
@@ -2377,6 +2400,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._self_consumption = SelfConsumptionTracker(self.hass)
         await self._self_consumption.async_setup()
 
+        # EV Trip Planner — calendar-based smart charging
+        from .energy_manager.ev_trip_planner import EVTripPlanner
+        self._ev_trip_planner = EVTripPlanner(self.hass, self._config)
+        await self._ev_trip_planner.async_setup()
+
+        # Phase Outlet Detector — auto-detects which phase each device is connected to
+        from .energy_manager.phase_outlet_detector import PhaseOutletDetector
+        self._phase_outlet_detector = PhaseOutletDetector(self.hass)
+
         # v4.6.584: NILM apparaatgroepen tracker
         self._nilm_group_tracker = NilmGroupTracker(self.hass)
         await self._nilm_group_tracker.async_setup()
@@ -2508,6 +2540,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Importeer providers zodat ze zichzelf registreren
         from .energy_manager import zonneplan_bridge as _zp_bridge_mod  # noqa: F401
         from .energy_manager.battery_provider import BatteryProviderRegistry
+        from .energy_manager.victron_provider import VictronProvider          # noqa: F401 — registreert zichzelf
+        from .energy_manager.sma_battery_provider import SMABatteryProvider  # noqa: F401 — registreert zichzelf
+        from .energy_manager.huawei_luna_provider import HuaweiLunaProvider  # noqa: F401 — registreert zichzelf
+        from .energy_manager.egauge_provider import EGaugeProvider
         self._battery_providers = BatteryProviderRegistry(self.hass, cfg)
         await self._battery_providers.async_setup()
         # Backwards-compat alias voor services die nog _zonneplan_bridge verwachten
@@ -2652,9 +2688,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             from .energy_manager.phase_balancer import PhaseBalancer
             self._phase_balancer = PhaseBalancer(self.hass, cfg)
 
-        if cfg.get(CONF_P1_ENABLED, False):
+        # Auto-activeer P1 als DSMR/HomeWizard integratie aanwezig is, ook zonder expliciete config
+        _p1_auto = False
+        if not cfg.get(CONF_P1_ENABLED, False):
+            _dsmr_indicators = [
+                "sensor.dsmr_reading_electricity_currently_delivered",
+                "sensor.homewizard_p1_active_power_w",
+                "sensor.p1_active_power",
+                "sensor.slimmelezer_power_delivered",
+                "sensor.electricity_power_usage",
+            ]
+            _p1_auto = any(self.hass.states.get(e) is not None for e in _dsmr_indicators)
+            if not _p1_auto:
+                # Bredere scan: zoek op platform 'dsmr'
+                from homeassistant.helpers import entity_registry as er
+                _ent_reg = er.async_get(self.hass)
+                _p1_auto = any(
+                    e.platform in ("dsmr", "homewizard", "p1_monitor")
+                    for e in _ent_reg.entities.values()
+                )
+            if _p1_auto:
+                _LOGGER.info("CloudEMS P1: DSMR/HomeWizard integratie gedetecteerd — P1 auto-geactiveerd")
+        if cfg.get(CONF_P1_ENABLED, False) or _p1_auto:
             from .energy_manager.p1_reader import P1Reader
-            self._p1_reader = P1Reader(cfg)
+            self._p1_reader = P1Reader(cfg, hass=self.hass)
             await self._p1_reader.async_start()
             # v4.6.512: realtime fase-stroom updates via P1 callback
             def _on_p1_telegram(t) -> None:
@@ -2874,15 +2931,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     from .energy_manager.phase_prober import ProbeCandidate, CandidateType
 
                     # EV-lader
-                    ev_eid    = cfg.get("ev_charger_entity", "")
-                    ev_switch = cfg.get("ev_charger_switch", "")
-                    if ev_eid and ev_switch:
-                        _prober.register_candidate(ProbeCandidate(
-                            entity_id      = ev_eid,
-                            control_entity = ev_switch,
-                            candidate_type = CandidateType.EV_CHARGER,
-                            label          = "EV-lader",
-                        ))
+                    for _ev_cfg in self._get_ev_charger_configs():
+                        _ev_eid   = _ev_cfg.get("entity_id", "")
+                        _ev_sw    = _ev_cfg.get("switch", "")
+                        _ev_label = _ev_cfg.get("label", "EV-lader")
+                        if _ev_eid and _ev_sw:
+                            _prober.register_candidate(ProbeCandidate(
+                                entity_id      = _ev_eid,
+                                control_entity = _ev_sw,
+                                candidate_type = CandidateType.EV_CHARGER,
+                                label          = _ev_label,
+                            ))
 
                     # Boilers — elk met een schakelaar
                     for _bc in cfg.get("boiler_configs", []):
@@ -3041,6 +3100,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v2.6: multi-zone klimaatbeheer (auto-discovery via HA areas)
         from .energy_manager.zone_climate_manager import ZoneClimateManager
+        from .energy_manager.lg_mitsubishi_climate import LGMitsubishiClimateDetector
         self._zone_climate = ZoneClimateManager(self.hass, self._config)
         if bool(self._config.get("climate_zones_enabled") or self._config.get("climate_mgr_enabled")):
             await self._zone_climate.async_setup()
@@ -4077,6 +4137,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Voeg diagnostics toe: spike-teller voor dashboard en health check
             if self._p1_reader:
                 p1_data["spike_count"] = getattr(self._p1_reader, "spike_count", 0)
+                p1_data["source"]      = getattr(self._p1_reader, "source", "none")
             self._last_p1_data = p1_data
             self._last_p1_update = time.time()
 
@@ -4259,16 +4320,37 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         and self._pv_forecast):
                     _prev_h   = self._pv_hourly_last_hour
                     _prev_kwh = self._pv_today_hourly_kwh[_prev_h]
-                    if _prev_kwh > 0:
-                        for _inv in self._config.get(CONF_INVERTER_CONFIGS, []):
-                            _inv_eid = _inv.get("entity_id", "")
-                            if _inv_eid:
-                                try:
-                                    self._pv_forecast.finalize_hour(
-                                        _inv_eid, _prev_h, _prev_kwh
-                                    )
-                                except Exception as _fh_err:
-                                    _LOGGER.debug("finalize_hour fout: %s", _fh_err)
+                # v4.6.593: finalize_hour per omvormer met pro-rata aandeel van de totale kWh.
+                # Voorheen werd het TOTAAL (_prev_kwh) doorgegeven aan elke omvormer apart,
+                # waardoor kleine omvormers (GoodWe 1837Wp) een actual_frac > 1.0 kregen
+                # → profiel werd structureel te hoog geleerd.
+                if _prev_kwh > 0:
+                    # Bereken totaal peak_wp over alle geconfigureerde omvormers
+                    _inv_configs = self._config.get(CONF_INVERTER_CONFIGS, [])
+                    _total_peak_wp = 0.0
+                    for _inv in _inv_configs:
+                        _eid = _inv.get("entity_id", "")
+                        if _eid and self._pv_forecast:
+                            _prof = self._pv_forecast._profiles.get(_eid)
+                            if _prof and _prof._peak_wp and _prof._peak_wp > 10:
+                                _total_peak_wp += _prof._peak_wp
+                    for _inv in _inv_configs:
+                        _inv_eid = _inv.get("entity_id", "")
+                        if not _inv_eid:
+                            continue
+                        try:
+                            # Aandeel van deze omvormer op basis van peak_wp
+                            _prof = self._pv_forecast._profiles.get(_inv_eid)
+                            if _prof and _prof._peak_wp and _prof._peak_wp > 10 and _total_peak_wp > 10:
+                                _share = _prof._peak_wp / _total_peak_wp
+                            else:
+                                _n = len([i for i in _inv_configs if i.get("entity_id")])
+                                _share = 1.0 / _n if _n > 0 else 1.0
+                            self._pv_forecast.finalize_hour(
+                                _inv_eid, _prev_h, round(_prev_kwh * _share, 4)
+                            )
+                        except Exception as _fh_err:
+                            _LOGGER.debug("finalize_hour fout: %s", _fh_err)
                         _LOGGER.info(
                             "PVForecast: uur %d afgesloten — %.3f kWh werkelijk → fractie bijgesteld",
                             _prev_h, _prev_kwh,
@@ -4662,6 +4744,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "dimmer_enabled":   _mgr_status.get("dimmer_enabled", {}),
                     "controls":         [c.entity_id for c in self._multi_inv_manager._controls],
                     "dimmer_states":    _dimmer_states,
+                    "over_setpoint":    _mgr_status.get("over_setpoint", {}),
                 }
 
             # Peak shaving
@@ -5278,7 +5361,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             ev_session_data: dict = {}
             if self._ev_session:
                 ev_current_a = 0.0
-                ev_eid = self._config.get("ev_charger_entity", "")
+                _ev_cfgs = self._get_ev_charger_configs()
+                ev_eid = _ev_cfgs[0]["entity_id"] if _ev_cfgs else ""
                 if ev_eid:
                     ev_st = self._safe_state(ev_eid)
                     if ev_st and ev_st.state not in ("unavailable", "unknown"):
@@ -5716,7 +5800,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             # Feature 2: Flexible power score
             from .energy_manager.flex_score import calculate_flex_score
-            ev_connected      = bool(self._config.get("ev_charger_entity") and data.get("ev_decision"))
+            ev_connected      = bool(self._get_ev_charger_configs() and data.get("ev_decision"))
             batt_soc          = self._read_state(self._config.get("battery_soc_entity", ""))
             if batt_soc is not None:
                 try:
@@ -7945,7 +8029,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             if len(self._gas_ring) > self._GAS_RING_MAX:
                                 self._gas_ring = self._gas_ring[-self._GAS_RING_MAX:]
                             self.hass.async_create_task(self._store_gas_ring.async_save(self._gas_ring))
-                    _gas_price = self._read_gas_price()
+                    _gas_price = await self.async_refresh_gas_price()
                     self._gas_analysis.update_price(_gas_price)
                     _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price, current_m3=float(_gas_m3_val))
 
@@ -9179,7 +9263,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         return fib
 
     def _read_gas_price(self) -> float:
-        """Lees gasprijs van dynamische sensor of fall back naar vaste config waarde."""
+        """Lees gasprijs — sensor → TTF cached → vaste prijs.
+
+        Synchrone wrapper: gebruikt gecachte TTF prijs als beschikbaar.
+        TTF wordt asynchroon ververst via async_refresh_gas_price().
+        """
+        # 1. Geconfigureerde HA sensor (all-in)
         eid = self._config.get("gas_price_sensor", "")
         if eid:
             st = self.hass.states.get(eid)
@@ -9188,7 +9277,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     return float(st.state)
                 except (ValueError, TypeError):
                     pass
-        return float(self._config.get("gas_price_eur_m3") or 1.25)
+        # 2. Gecachte TTF all-in prijs (gevuld door async_refresh_gas_price)
+        ttf_fetcher = getattr(self, "_ttf_gas_fetcher", None)
+        if ttf_fetcher and ttf_fetcher.ttf_spot_eur_m3 is not None:
+            status = ttf_fetcher.get_status()
+            if status.get("all_in_eur_m3"):
+                return status["all_in_eur_m3"]
+        # 3. Vaste geconfigureerde prijs
+        return float(self._config.get("gas_price_fixed") or
+                     self._config.get("gas_price_eur_m3") or 1.25)
+
+    async def async_refresh_gas_price(self) -> float:
+        """Refresh gasprijs asynchroon via TTFGasFetcher en geef all-in terug."""
+        ttf_fetcher = getattr(self, "_ttf_gas_fetcher", None)
+        if ttf_fetcher is None:
+            return self._read_gas_price()
+        try:
+            return await ttf_fetcher.async_get_gas_price(self.hass)
+        except Exception as exc:
+            _LOGGER.warning("CloudEMS: gas prijs refresh mislukt: %s", exc)
+            return self._read_gas_price()
 
     async def _async_read_gas_at_midnight(self) -> Optional[float]:
         """Lees gasstand op middernacht vandaag uit HA recorder statistics.

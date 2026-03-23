@@ -49,8 +49,12 @@ from .phase_prober import PhaseProber
 _LOGGER = logging.getLogger(__name__)
 
 # PID default parameters voor fase-stroom regeling
-# Setpoint = 90% van max fase-stroom → biedt 10% marge
-PID_SETPOINT_RATIO  = 0.90
+# Setpoint = 97% van max fase-stroom.
+# B-karakteristiek automaten verdragen tijdelijk 1.13×–1.45× de nominale stroom
+# voordat ze uitschakelen. De PID reageert binnen enkele seconden, ruim binnen
+# de thermische tijdconstante van de automaat. 97% geeft voldoende marge terwijl
+# PV-opbrengst maximaal benut wordt.
+PID_SETPOINT_RATIO  = 0.97
 PID_KP              = 3.0    # Snel reageren op overschrijding
 PID_KI              = 0.4    # Langzame opbouw compenseert blijvende afwijking
 PID_KD              = 0.8    # Demping bij snelle stijging
@@ -68,6 +72,13 @@ MIN_DIM_DURATION_S = 60
 # Handmatige dim-override: na deze tijd hervat de automatische sturing
 # 30 minuten — genoeg om handmatig te testen, kort genoeg om nooit surplus te missen
 MANUAL_DIM_RESUME_DELAY_S = 1800  # 30 minuten
+
+# Zekeringshiërarchie voor pre-warning meldingen
+# B-karakteristiek automaten (groepenkast): schakelt uit bij 1.13–1.45× nominaal (thermisch)
+# gG/gL hoofdzekering (aansluitkast): smelt bij 1.45× nominaal gedurende langere tijd
+# De PID reageert binnen 8s — ruim binnen de thermische tijdconstante van beide.
+B_CHAR_FACTOR = 1.13   # B-automaat nadert thermisch gebied (waarschuwing)
+GG_CHAR_FACTOR = 1.45  # gG hoofdzekering nadert smeltgebied (kritisch — mag NOOIT)
 
 
 @dataclass
@@ -163,6 +174,11 @@ class MultiInverterManager:
         }
         # Phase prober — aangemaakt in async_setup
         self._phase_prober: "PhaseProber | None" = None
+        # Over-setpoint tracking per fase — voor pre-warning countdown in dashboard
+        # _over_setpoint_since: timestamp waarop fase voor het eerst boven setpoint ging
+        # _last_warn_level: 0=geen, 1=nominaal, 2=B-kar, 3=gG (alleen loggen bij wijziging)
+        self._over_setpoint_since: dict[str, float | None] = {}
+        self._last_warn_level: dict[str, int] = {}
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -358,18 +374,61 @@ class MultiInverterManager:
           - Dim ALLEEN de omvormer(s) die op de overbelaste fase zitten
           - Als fase onbekend: dim in prioriteitsvolgorde
         """
+        import time as _time
         decisions: list[DimDecision] = []
 
         for phase, pid in self._phase_pids.items():
             current_a = phase_currents.get(phase)
             if current_a is None:
+                # Fase verdwenen → reset tracking
+                self._over_setpoint_since.pop(phase, None)
+                self._last_warn_level.pop(phase, None)
                 continue
+
+            max_a = self._max_phase_a.get(phase, 25.0)
+            setpoint_a = max_a * PID_SETPOINT_RATIO
+
+            # ── Pre-warning: fase boven setpoint maar PID-sample nog niet verstreken ──
+            if current_a > setpoint_a:
+                now = _time.time()
+                if self._over_setpoint_since.get(phase) is None:
+                    self._over_setpoint_since[phase] = now
+
+                elapsed = now - self._over_setpoint_since[phase]
+                remaining = max(0.0, PID_SAMPLE_TIME_S - elapsed)
+
+                # Bepaal waarschuwingsniveau
+                if current_a >= max_a * GG_CHAR_FACTOR:
+                    level = 3  # kritisch
+                elif current_a >= max_a * B_CHAR_FACTOR:
+                    level = 2  # B-kar grens
+                else:
+                    level = 1  # boven setpoint, binnen nominaal
+
+                prev_level = self._last_warn_level.get(phase, 0)
+                if level != prev_level:
+                    self._last_warn_level[phase] = level
+                    b_lim = max_a * B_CHAR_FACTOR
+                    gg_lim = max_a * GG_CHAR_FACTOR
+                    msg = (
+                        f"Fase {phase}: {current_a:.1f}A > setpoint {setpoint_a:.1f}A — "
+                        f"dimmer grijpt in over {remaining:.0f}s "
+                        f"(B-kar veilig tot {b_lim:.1f}A, gG tot {gg_lim:.1f}A)"
+                    )
+                    if level == 3:
+                        _LOGGER.error("⛔ ZonneDimmer KRITISCH: %s", msg)
+                    elif level == 2:
+                        _LOGGER.warning("⚠️ ZonneDimmer: %s", msg)
+                    else:
+                        _LOGGER.info("ℹ️ ZonneDimmer: %s", msg)
+            else:
+                # Fase weer onder setpoint → reset tracking
+                self._over_setpoint_since[phase] = None
+                self._last_warn_level[phase] = 0
 
             pid_output = pid.compute(current_a)
             if pid_output is None:
                 continue  # Sample-time nog niet verstreken
-
-            max_a = self._max_phase_a.get(phase, 25.0)
 
             # Alleen actie bij overschrijding (PID output < 100 betekent: te hoog)
             if pid_output >= 100.0:
@@ -492,6 +551,27 @@ class MultiInverterManager:
     # ── Status ────────────────────────────────────────────────────────────────
 
     def get_status(self) -> dict[str, Any]:
+        import time as _time
+        now = _time.time()
+        # Over-setpoint info per fase voor dashboard pre-warning
+        over_sp: dict[str, dict] = {}
+        for phase, since in self._over_setpoint_since.items():
+            if since is not None:
+                max_a = self._max_phase_a.get(phase, 25.0)
+                elapsed = now - since
+                remaining = max(0.0, PID_SAMPLE_TIME_S - elapsed)
+                level = self._last_warn_level.get(phase, 0)
+                over_sp[phase] = {
+                    "elapsed_s":   round(elapsed, 1),
+                    "remaining_s": round(remaining, 1),
+                    "level":       level,  # 1=nominaal, 2=B-kar, 3=gG
+                    "warn_bchar":  level >= 2,
+                    "warn_gg":     level >= 3,
+                    "max_a":       max_a,
+                    "setpoint_a":  round(max_a * PID_SETPOINT_RATIO, 2),
+                    "bchar_a":     round(max_a * B_CHAR_FACTOR, 2),
+                    "gg_a":        round(max_a * GG_CHAR_FACTOR, 2),
+                }
         return {
             "inverters": [
                 {
@@ -517,6 +597,7 @@ class MultiInverterManager:
                 for eid in self._manual_dim_pct
             },
             "dimmer_enabled": dict(self._dimmer_enabled),
+            "over_setpoint":  over_sp,
         }
 
     # ── Dashboard controls ────────────────────────────────────────────────────

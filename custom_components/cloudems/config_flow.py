@@ -16,7 +16,7 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN, SUPPORT_URL, BUY_ME_COFFEE_URL,
     CONF_GRID_SENSOR, CONF_PHASE_SENSORS, CONF_SOLAR_SENSOR,
-    CONF_BATTERY_SENSOR, CONF_EV_CHARGER_ENTITY, CONF_ENERGY_PRICES_COUNTRY,
+    CONF_BATTERY_SENSOR, CONF_EV_CHARGER_ENTITY, CONF_EV_CHARGER_COUNT, CONF_EV_CHARGER_CONFIGS, CONF_ENERGY_PRICES_COUNTRY,
     CONF_CLOUD_API_KEY, CONF_MAX_CURRENT_PER_PHASE, CONF_ENABLE_SOLAR_DIMMER,
     CONF_NEGATIVE_PRICE_THRESHOLD,
     CONF_PHASE_COUNT, CONF_PHASE_PRESET,
@@ -93,8 +93,8 @@ def _preset_selector():
     return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="list"))
 
 def _inverter_count_selector():
-    opts = [selector.SelectOptionDict(value=str(i), label=str(i)) for i in range(10)]
-    return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="list"))
+    opts = [selector.SelectOptionDict(value=str(i), label=str(i)) for i in range(100)]
+    return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="dropdown"))
 
 def _country_selector():
     opts = [selector.SelectOptionDict(value=k, label=f"{v} ({k})") for k, v in EPEX_COUNTRIES.items()]
@@ -470,21 +470,23 @@ def _detect_sensors(hass, phase_count: int) -> dict:
 
 class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """
-    CloudEMS v1.5.0 wizard.
+    CloudEMS wizard.
 
-    Basic mode  (7 steps):
-      1. welcome        — country + wizard mode
-      2. grid_connection — phase preset (→ phase_custom if custom)
-      3. grid_sensors   — net/import/export sensor + mains voltage
-      4. solar_ev       — solar / battery / EV
-      5. features       — enable features (→ peak_config if peak shaving)
-      6. ai_config      — AI provider + key (→ ollama_config if Ollama)
-      7. → finish
+    Basic mode:
+      welcome → grid_connection → [phase_custom] → dsmr_source → grid_sensors
+      → phase_sensors (altijd bij 3-fase)
+      → solar_ev (overslaan mogelijk)
+      → managed_battery (overslaan mogelijk)
+      → price_provider → [prices / credentials]
+      → _create()
 
-    Advanced adds:
-      After grid_sensors → phase_sensors (current / voltage / power per phase)
-      After solar_ev     → inverter_count (→ inverter_detail loop)
-      After ai_config    → advanced (P1 toggle → p1_config)
+    Advanced voegt toe:
+      Na grid_sensors/phase_sensors → generator
+      Na solar_ev → inverter_count → inverter_detail
+      Na managed_battery → battery_count → battery_detail → shutter_count → shutter_detail
+      Na price_provider/prices → features → [peak_config] → ai_config → [ollama_config]
+        → advanced → [p1_config] → climate → [boiler/epex] → mail → diagnostics
+      → _create()
     """
 
     VERSION = 6
@@ -959,7 +961,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.warning("CloudEMS netsensor '%s' mogelijk geen W/kW — doorgaan op verzoek gebruiker", _eid)
             # Altijd doorgaan — geen harde blokkade op sensor-type
             self._config.update(user_input)
-            return await self.async_step_phase_sensors() if self._advanced() else await self.async_step_solar_ev()
+            if phase_count == 3:
+                return await self.async_step_phase_sensors()
+            return await self.async_step_generator() if self._advanced() else await self.async_step_solar_ev()
 
         if not self._suggestions:
             self._suggestions = _detect_sensors(self.hass, phase_count)
@@ -1014,7 +1018,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 self._config.update(user_input)
-                return await self.async_step_solar_ev()
+                return await self.async_step_generator() if self._advanced() else await self.async_step_solar_ev()
 
         s = self._suggestions
         def _sv(key):
@@ -1175,13 +1179,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Ga door naar handmatige batterij-setup of features
             if self._advanced():
                 return await self.async_step_battery_count()
-            return await self.async_step_features()
+            return await self.async_step_price_provider()
 
         # Geen providers → stap overslaan
         if not unconfigured:
             if self._advanced():
                 return await self.async_step_battery_count()
-            return await self.async_step_features()
+            return await self.async_step_price_provider()
 
         # Bouw schema op basis van wat er gedetecteerd is
         schema: dict = {}
@@ -1547,7 +1551,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_country = user_input.get(CONF_ENERGY_PRICES_COUNTRY)
             if new_country:
                 self._config[CONF_ENERGY_PRICES_COUNTRY] = new_country
-            return await self.async_step_ai_config()
+            return await self.async_step_gas_prices()
         country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
         suppliers = SUPPLIER_MARKUPS.get(country, SUPPLIER_MARKUPS["default"])
         sup_options = [
@@ -1567,6 +1571,67 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
         )
 
+    async def async_step_gas_prices(self, user_input=None):
+        """🔥 Gas — optionele gasprijs configuratie (wizard stap)."""
+        if user_input is not None:
+            self._config.update({k: v for k, v in user_input.items() if v not in (None, vol.UNDEFINED, "")})
+            return await self.async_step_ai_config() if self._advanced() else self._create()
+
+        from .const import (
+            CONF_GAS_SENSOR, CONF_GAS_PRICE_SENSOR, CONF_GAS_TTF_SENSOR,
+            CONF_GAS_PRICE_FIXED, CONF_GAS_USE_TTF,
+            CONF_GAS_SUPPLIER, CONF_GAS_NETBEHEERDER,
+            DEFAULT_GAS_PRICE_EUR_M3, GAS_SUPPLIER_MARKUPS, GAS_NETBEHEERDERS,
+            CONF_ENERGY_PRICES_COUNTRY,
+        )
+        country = self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+        data = self._config
+
+        gas_suppliers = GAS_SUPPLIER_MARKUPS.get(country, GAS_SUPPLIER_MARKUPS["NL"])
+        supplier_options = [
+            selector.SelectOptionDict(value=k, label=v[0])
+            for k, v in gas_suppliers.items()
+        ]
+        netbeheerders = GAS_NETBEHEERDERS.get(country, GAS_NETBEHEERDERS["NL"])
+        netbeheerder_options = [
+            selector.SelectOptionDict(value=k, label=f"{v[0]} ({v[1]:.4f} €/m³)")
+            for k, v in netbeheerders.items()
+        ]
+
+        return self.async_show_form(
+            step_id="gas_prices",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_GAS_SENSOR,
+                    default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_SENSOR,
+                    default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_USE_TTF,
+                    default=bool(data.get(CONF_GAS_USE_TTF, True))): selector.BooleanSelector(),
+                vol.Optional(CONF_GAS_TTF_SENSOR,
+                    default=data.get(CONF_GAS_TTF_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_FIXED,
+                    default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+                vol.Optional(CONF_GAS_SUPPLIER,
+                    default=data.get(CONF_GAS_SUPPLIER, "none")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=supplier_options, mode="dropdown"
+                    )),
+                vol.Optional(CONF_GAS_NETBEHEERDER,
+                    default=data.get(CONF_GAS_NETBEHEERDER, "default")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=netbeheerder_options, mode="dropdown"
+                    )),
+            }),
+            description_placeholders={
+                "info": (
+                    "Alle velden zijn optioneel — sla over als je geen gas hebt.\n\n"
+                    "Gasprijs volgorde: (1) Prijssensor → (2) TTF Day-Ahead spotmarkt → (3) Vaste prijs.\n"
+                    "CloudEMS rekent TTF automatisch om naar all-in consumentenprijs."
+                )
+            },
+        )
+
     # ── 5b. Prijsleverancier koppeling (v4.5.2) ───────────────────────────────
     async def async_step_price_provider(self, user_input=None):
         """Optionele directe koppeling met energieleverancier voor realtime prijzen."""
@@ -1584,7 +1649,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if chosen in EPEX_BASED_PROVIDERS:
                 return await self.async_step_prices()
             # Echte leverancier → prijs komt rechtstreeks van API, sla prijzen-stap over
-            return await self.async_step_ai_config()
+            return await self.async_step_ai_config() if self._advanced() else self._create()
 
         provider_options = [
             selector.SelectOptionDict(value=k, label=v)
@@ -1620,7 +1685,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if pending in EPEX_BASED_PROVIDERS:
                 return await self.async_step_prices()
             # Echte leverancier → prijs komt van API, sla prijzen-stap over
-            return await self.async_step_ai_config()
+            return await self.async_step_ai_config() if self._advanced() else self._create()
 
         label = PRICE_PROVIDER_LABELS.get(pending, pending)
         schema_fields = {}
@@ -2348,7 +2413,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Optionele stap: Generator / ATS configureren."""
         if user_input is not None:
             self._config.update({k: v for k, v in user_input.items() if v not in (None, "", False) or k == "generator_enabled"})
-            return await self.async_step_diagnostics()
+            return await self.async_step_solar_ev()
 
         existing = self._config
         _gen_enabled = existing.get("generator_enabled", False)
@@ -2405,7 +2470,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Optionele stap: GitHub log reporting instellen."""
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_generator()
+            return self._create()
 
         existing = self._config
         return self.async_show_form(
@@ -2923,6 +2988,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="prices_opts",  label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="budget_opts",  label="📊 Energiebudget"),
                         selector.SelectOptionDict(value="advanced_opts", label="📡 P1 & Geavanceerd"),
+                        selector.SelectOptionDict(value="egauge_opts",    label="📊 eGauge Submeter"),
                         selector.SelectOptionDict(value="noodstroom",   label="⚡ Noodstroom & Backup"),
                         selector.SelectOptionDict(value="__terug__",    label="← Terug"),
                     ], mode="list"))
@@ -2987,6 +3053,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value="boiler_groups_opts", label="🚿 Boiler Controller"),
                         selector.SelectOptionDict(value="climate_opts",       label="🌡️ Klimaatbeheer"),
+                        selector.SelectOptionDict(value="multisplit_count_opts", label="❄️ Airco / Multisplit"),
                         selector.SelectOptionDict(value="shutter_count_opts", label="🪟 Rolluiken"),
                         selector.SelectOptionDict(value="pool_opts",          label="🏊 Zwembad Controller"),
                         selector.SelectOptionDict(value="lamp_circ_opts",      label="💡 Lampcirculatie & Beveiliging"),
@@ -3035,8 +3102,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
             data_schema=vol.Schema({
                 vol.Required("section", default="solar_ev_opts"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
-                        selector.SelectOptionDict(value="solar_ev_opts",  label="🚗 EV Laadpaal"),
-                        selector.SelectOptionDict(value="ebike_opts",     label="🚲 E-bike & Micro-mobiliteit"),
+                        selector.SelectOptionDict(value="ev_opts",        label="🚗 EV Laadpalen"),
+                        selector.SelectOptionDict(value="ebike_count",    label="🚲 E-bike & Micro-mobiliteit"),
+                        selector.SelectOptionDict(value="v2h_opts",       label="🔄 Vehicle-to-Home (V2H)"),
+                        selector.SelectOptionDict(value="ev_trip_opts",    label="🗓️ EV Ritplanning (kalender)"),
                         selector.SelectOptionDict(value="__terug__",      label="← Terug"),
                     ], mode="list"))
             }),
@@ -3177,6 +3246,416 @@ class CloudEMSOptionsFlow(_OptionsBase):
             },
         )
 
+    async def async_step_multisplit_count_opts(self, user_input=None):
+        """❄️ Airco / Multisplit — eerst het aantal buitenunits kiezen."""
+        from .const import CONF_MULTISPLIT_GROUPS
+        data = self._data()
+        current_groups = data.get(CONF_MULTISPLIT_GROUPS, [])
+        current_count = len(current_groups)
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            count = int(user_input.get("multisplit_count", current_count))
+            if count == 0:
+                # Verwijder alle groepen
+                self._config[CONF_MULTISPLIT_GROUPS] = []
+                return self._save(user_input)
+            # Sla gewenst aantal op als hint voor multisplit_opts
+            self._multisplit_target_count = count
+            return await self.async_step_multisplit_opts()
+
+        count_opts = [
+            selector.SelectOptionDict(value=str(i), label=str(i) if i > 0 else "0 — Airco uitschakelen")
+            for i in range(6)
+        ]
+        return self.async_show_form(
+            step_id="multisplit_count_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("multisplit_count", default=str(current_count) if current_count else "1"): _inverter_count_selector(),
+            }),
+            description_placeholders={
+                "info": (
+                    f"Huidig geconfigureerd: {current_count} buitenunit(s). "
+                    "Kies het gewenste aantal."
+                )
+            },
+        )
+
+    async def async_step_multisplit_opts(self, user_input=None):
+        """❄️ Airco / Multisplit — buitenunits en binnenunits configureren."""
+        from .const import CONF_MULTISPLIT_GROUPS, MULTISPLIT_BRANDS
+        data = self._data()
+        errors: dict = {}
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+
+            # Bouw groepsconfig op vanuit user_input
+            groups = data.get(CONF_MULTISPLIT_GROUPS, [])
+
+            action = user_input.get("action", "save")
+            if action == "add_group":
+                # Voeg nieuwe lege groep toe
+                new_group = {
+                    "id":           f"airco_{len(groups)+1}",
+                    "label":        user_input.get("new_label", f"Airco {len(groups)+1}"),
+                    "power_sensor": user_input.get("new_power_sensor", ""),
+                    "freq_sensor":  user_input.get("new_freq_sensor", ""),
+                    "brand":        user_input.get("new_brand", "generic"),
+                    "indoor_units": [],
+                }
+                groups = list(groups) + [new_group]
+                data[CONF_MULTISPLIT_GROUPS] = groups
+                self._config[CONF_MULTISPLIT_GROUPS] = groups
+                self._multisplit_indoor_group_idx = len(groups) - 1
+                return await self.async_step_multisplit_indoor_count_opts()
+            elif action == "edit_group":
+                idx = int(user_input.get("edit_idx", 0))
+                self._multisplit_indoor_group_idx = idx
+                return await self.async_step_multisplit_indoor_count_opts()
+            elif action == "delete_group":
+                idx = int(user_input.get("delete_idx", 0))
+                groups = [g for i, g in enumerate(groups) if i != idx]
+                self._config[CONF_MULTISPLIT_GROUPS] = groups
+                return await self.async_step_multisplit_opts()
+            else:
+                return self._save(user_input)
+
+        groups = data.get(CONF_MULTISPLIT_GROUPS, [])
+
+        # Toon overzicht + formulier voor nieuwe groep
+        brand_options = [
+            selector.SelectOptionDict(value=k, label=v)
+            for k, v in MULTISPLIT_BRANDS.items()
+        ]
+        # Bouw action opties
+        action_options = [
+            selector.SelectOptionDict(value="add_group", label="➕ Nieuwe buitenunit toevoegen"),
+            selector.SelectOptionDict(value="save",      label="✅ Opslaan"),
+        ]
+        for i, g in enumerate(groups):
+            action_options.insert(i, selector.SelectOptionDict(
+                value=f"edit_{i}", label=f"✏️ {g.get('label','Airco')} bewerken"
+            ))
+
+        return self.async_show_form(
+            step_id="multisplit_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                # Nieuwe buitenunit
+                vol.Optional("new_label",        default=""): str,
+                vol.Optional("new_brand",        default="generic"):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=brand_options, mode="dropdown"
+                    )),
+                vol.Optional("new_power_sensor", default=vol.UNDEFINED): _ent(),
+                vol.Optional("new_freq_sensor",  default=vol.UNDEFINED): _ent(),
+                vol.Optional("action",           default="add_group"):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=action_options, mode="list"
+                    )),
+            }),
+            description_placeholders={
+                "info": (
+                    f"Geconfigureerde buitenunits: {len(groups)}\n"
+                    + "\n".join(
+                        f"• {g.get('label','?')} — {len(g.get('indoor_units',[]))} binnenunits, "
+                        f"vermogenssensor: {g.get('power_sensor','—')}"
+                        for g in groups
+                    )
+                    if groups else
+                    "Nog geen airco/multisplit geconfigureerd. "
+                    "Voeg een buitenunit toe met de vermogenssensor en de bijbehorende binnenunits."
+                )
+            },
+            errors=errors,
+        )
+
+    async def async_step_multisplit_indoor_count_opts(self, user_input=None):
+        """❄️ Hoeveel binnenunits heeft deze buitenunit?"""
+        from .const import CONF_MULTISPLIT_GROUPS
+        data = self._data()
+        groups = list(data.get(CONF_MULTISPLIT_GROUPS, []))
+        group_idx = getattr(self, "_multisplit_indoor_group_idx", 0)
+        group = groups[group_idx] if group_idx < len(groups) else {}
+        current_units = len(group.get("indoor_units", []))
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            count = int(user_input.get("indoor_count", 1))
+            self._multisplit_indoor_target = count
+            # Ga naar indoor_opts om de units te configureren
+            return await self.async_step_multisplit_indoor_opts(group_idx=group_idx)
+
+        count_opts = [
+            selector.SelectOptionDict(value=str(i), label=str(i) if i > 0 else "0 — Geen binnenunits")
+            for i in range(9)
+        ]
+        group_label = group.get("label", f"Buitenunit {group_idx + 1}")
+        return self.async_show_form(
+            step_id="multisplit_indoor_count_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("indoor_count", default=str(max(current_units, 1))):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=count_opts, mode="list"
+                    )),
+            }),
+            description_placeholders={
+                "info": (
+                    f"Buitenunit: {group_label}\n"
+                    f"Huidig geconfigureerd: {current_units} binnenunit(s).\n"
+                    "Een binnenunit is één ruimte/zone die door deze buitenunit bediend wordt."
+                )
+            },
+        )
+
+    async def async_step_multisplit_indoor_opts(self, user_input=None, group_idx: int = 0):
+        """Binnenunits configureren voor één buitenunit."""
+        from .const import CONF_MULTISPLIT_GROUPS
+        data = self._data()
+        groups = list(data.get(CONF_MULTISPLIT_GROUPS, []))
+        if group_idx >= len(groups):
+            return await self.async_step_multisplit_opts()
+
+        group = groups[group_idx]
+
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+
+            action = user_input.get("action", "save")
+            if action == "add_unit":
+                eid   = user_input.get("unit_entity", "")
+                label = user_input.get("unit_label", eid.split(".")[-1] if eid else "")
+                area  = user_input.get("unit_area", "")
+                freq  = user_input.get("unit_freq_sensor", "")
+                if eid:
+                    units = list(group.get("indoor_units", []))
+                    # Autodetectie energiesensoren op basis van merk + entity basis-naam
+                    brand = group.get("brand", "generic")
+                    unit_dict = {
+                        "entity_id":  eid,
+                        "label":      label,
+                        "area":       area,
+                        "freq_sensor":freq,
+                    }
+                    if brand == "daikin":
+                        # Daikin: zoek cool/heat/total energy sensoren
+                        # entity = climate.daikin_abc → basis = daikin_abc
+                        base = eid.split(".", 1)[-1]
+                        all_states = self.hass.states.async_all("sensor")
+                        for st in all_states:
+                            sid = st.entity_id.lower()
+                            if base.lower() in sid:
+                                if "cool_energy" in sid:
+                                    unit_dict["energy_cool_sensor"] = st.entity_id
+                                elif "heat_energy" in sid:
+                                    unit_dict["energy_heat_sensor"] = st.entity_id
+                                elif "total_energy" in sid:
+                                    unit_dict["energy_total_sensor"] = st.entity_id
+                    units.append(unit_dict)
+                    group["indoor_units"] = units
+                    groups[group_idx] = group
+                    self._config[CONF_MULTISPLIT_GROUPS] = groups
+            elif action.startswith("del_"):
+                unit_idx = int(action[4:])
+                units = [u for i, u in enumerate(group.get("indoor_units", []))
+                         if i != unit_idx]
+                group["indoor_units"] = units
+                groups[group_idx] = group
+                self._config[CONF_MULTISPLIT_GROUPS] = groups
+            else:
+                return await self.async_step_multisplit_opts()
+            return await self.async_step_multisplit_indoor_opts(group_idx=group_idx)
+
+        units = group.get("indoor_units", [])
+        unit_action_opts = [
+            selector.SelectOptionDict(value="add_unit", label="➕ Binnenunit toevoegen"),
+            selector.SelectOptionDict(value="save",     label="✅ Klaar"),
+        ]
+        for i, u in enumerate(units):
+            unit_action_opts.insert(i, selector.SelectOptionDict(
+                value=f"del_{i}",
+                label=f"🗑️ {u.get('label','Unit')} verwijderen"
+            ))
+
+        return self.async_show_form(
+            step_id="multisplit_indoor_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Optional("unit_entity",      default=vol.UNDEFINED):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["climate"])),
+                vol.Optional("unit_label",       default=""): str,
+                vol.Optional("unit_area",        default=""): str,
+                vol.Optional("unit_freq_sensor", default=vol.UNDEFINED): _ent(),
+                vol.Optional("action",           default="add_unit"):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=unit_action_opts, mode="list"
+                    )),
+            }),
+            description_placeholders={
+                "group_label": group.get("label", "Airco"),
+                "info": (
+                    f"Buitenunit: {group.get('label','?')} | "
+                    f"Vermogen: {group.get('power_sensor','—')}\n\n"
+                    + ("Geconfigureerde binnenunits:\n" +
+                       "\n".join(f"• {u.get('label','?')} ({u.get('entity_id','?')}) "
+                                  f"— ruimte: {u.get('area','—')}"
+                                  for u in units)
+                       if units else "Nog geen binnenunits.")
+                )
+            },
+        )
+
+
+    async def async_step_ev_trip_opts(self, user_input=None):
+        """EV Trip Planner — calendar-based charging configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="ev_trip_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("ev_trip_enabled", default=bool(data.get("ev_trip_enabled", False))): bool,
+                vol.Optional("ev_kwh_per_pct", default=float(data.get("ev_kwh_per_pct", 0.77))): vol.Coerce(float),
+                vol.Optional("ev_soc_entity", default=data.get("ev_soc_entity", "") or vol.UNDEFINED): _ent(["sensor"]),
+            }),
+        )
+
+
+    async def async_step_v2h_opts(self, user_input=None):
+        """Vehicle-to-Home (V2H) configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="v2h_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("v2h_enabled", default=bool(data.get("v2h_enabled", False))): bool,
+                vol.Optional("v2h_charger_entity", default=data.get("v2h_charger_entity", "") or vol.UNDEFINED): _ent(["select","sensor","switch","number"]),
+                vol.Optional("v2h_car_soc_entity",  default=data.get("v2h_car_soc_entity",  "") or vol.UNDEFINED): _ent(["sensor"]),
+                vol.Optional("v2h_min_soc_pct",     default=float(data.get("v2h_min_soc_pct",     30.0))): vol.Coerce(float),
+                vol.Optional("v2h_price_threshold", default=float(data.get("v2h_price_threshold", 0.25))): vol.Coerce(float),
+                vol.Optional("v2h_max_discharge_w", default=float(data.get("v2h_max_discharge_w", 3700.0))): vol.Coerce(float),
+            }),
+        )
+
+
+    async def async_step_egauge_opts(self, user_input=None):
+        """eGauge smart meter configuration — auto-detects entities."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+
+        # Auto-detect eGauge entities and pre-fill
+        from .energy_manager.egauge_provider import EGaugeProvider
+        _eg = EGaugeProvider(self.hass)
+        await _eg.async_setup()
+        _info = _eg.get_info()
+
+        def _pre(key):
+            """Return saved value, then auto-detected, then UNDEFINED."""
+            saved = data.get(key, "")
+            if saved:
+                return saved
+            auto = _info.get(key.replace("egauge_", "").replace("_entity", "_entity"), "")
+            # Map info keys to config keys
+            key_map = {
+                "egauge_net_entity":   _info.get("net_entity", ""),
+                "egauge_l1_entity":    (_info.get("phase_entities") or {}).get("L1", ""),
+                "egauge_l2_entity":    (_info.get("phase_entities") or {}).get("L2", ""),
+                "egauge_l3_entity":    (_info.get("phase_entities") or {}).get("L3", ""),
+                "egauge_solar_entity": _info.get("solar_entity", ""),
+            }
+            v = key_map.get(key, "")
+            return v or vol.UNDEFINED
+
+        detected = _eg.is_detected
+        return self.async_show_form(
+            step_id="egauge_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("egauge_enabled", default=bool(data.get("egauge_enabled", detected))): bool,
+                vol.Optional("egauge_net_entity",    default=_pre("egauge_net_entity")   ): _ent(["sensor"]),
+                vol.Optional("egauge_l1_entity",     default=_pre("egauge_l1_entity")    ): _ent(["sensor"]),
+                vol.Optional("egauge_l2_entity",     default=_pre("egauge_l2_entity")    ): _ent(["sensor"]),
+                vol.Optional("egauge_l3_entity",     default=_pre("egauge_l3_entity")    ): _ent(["sensor"]),
+                vol.Optional("egauge_solar_entity",  default=_pre("egauge_solar_entity") ): _ent(["sensor"]),
+            }),
+            description_placeholders={
+                "detected": "✅ eGauge gedetecteerd — entiteiten vooringevuld" if detected
+                            else "⚠️ Geen eGauge gevonden — vul handmatig in als je een eGauge hebt",
+            },
+        )
+
+
+    async def async_step_ebike_count(self, user_input=None):
+        """🚲 E-bike & Micro-mobiliteit — aantal voertuigen."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            self._ebike_count = int(user_input.get("ebike_count_sel", 0))
+            self._existing_ebike_cfgs = [
+                {"entity_id": data.get(f"ebike_entity_{i+1}", ""), "label": data.get(f"ebike_label_{i+1}", f"E-bike {i+1}")}
+                for i in range(10) if data.get(f"ebike_entity_{i+1}")
+            ]
+            self._config["ebike_configs"] = []
+            self._ebike_step = 0
+            if self._ebike_count > 0:
+                return await self.async_step_ebike_detail()
+            return self._save({})
+        existing_count = str(len([i for i in range(10) if data.get(f"ebike_entity_{i+1}")]))
+        return self.async_show_form(
+            step_id="ebike_count",
+            data_schema=vol.Schema({
+                vol.Required("ebike_count_sel", default=existing_count): _inverter_count_selector(),
+            }),
+        )
+
+    async def async_step_ebike_detail(self, user_input=None):
+        """🚲 E-bike detail (herhaalt per voertuig)."""
+        i = self._ebike_step + 1
+        existing_cfgs = getattr(self, "_existing_ebike_cfgs", [])
+        existing = existing_cfgs[self._ebike_step] if self._ebike_step < len(existing_cfgs) else {}
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            cfg = {
+                "entity_id": user_input.get("ebike_entity", ""),
+                "label":     user_input.get("ebike_label", f"E-bike {i}"),
+            }
+            self._config["ebike_configs"].append(cfg)
+            # Backwards compat: ook als ebike_entity_1/label_1 etc opslaan
+            self._config[f"ebike_entity_{self._ebike_step+1}"] = cfg["entity_id"]
+            self._config[f"ebike_label_{self._ebike_step+1}"] = cfg["label"]
+            self._ebike_step += 1
+            if self._ebike_step < self._ebike_count:
+                return await self.async_step_ebike_detail()
+            return self._save({})
+        return self.async_show_form(
+            step_id="ebike_detail",
+            data_schema=vol.Schema({
+                vol.Optional("ebike_entity", default=existing.get("entity_id", "") or vol.UNDEFINED): _ent(["sensor"]),
+                vol.Optional("ebike_label", default=existing.get("label", f"E-bike {i}")): str,
+            }),
+            description_placeholders={"ebike_num": str(i), "total": str(self._ebike_count)},
+        )
+
+
     async def async_step_ebike_opts(self, user_input=None):
         """🚲 E-bike & Micro-mobiliteit instellingen."""
         data = self._data()
@@ -3207,23 +3686,95 @@ class CloudEMSOptionsFlow(_OptionsBase):
             },
         )
 
-    async def async_step_solar_ev_opts(self, user_input=None):
-        """☀️ PV & EV Laden — opties voor PV sensor, laadpaal en zonnebegrenzing."""
+    async def async_step_solar_opts(self, user_input=None):
+        """☀️ PV Zonnepanelen — sensor en instellingen."""
         data = self._data()
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
             return self._save(user_input)
         return self.async_show_form(
-            step_id="solar_ev_opts",
+            step_id="solar_opts",
             data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
                 vol.Optional(CONF_SOLAR_SENSOR, default=data.get(CONF_SOLAR_SENSOR) or vol.UNDEFINED): _ent(),
                 vol.Optional(CONF_BATTERY_SENSOR, default=data.get(CONF_BATTERY_SENSOR) or vol.UNDEFINED): _ent(),
-                vol.Optional(CONF_EV_CHARGER_ENTITY, default=data.get(CONF_EV_CHARGER_ENTITY) or vol.UNDEFINED): _ent(["number","input_number"]),
-                # Note: zonnebegrenzing (solar dimmer) wordt per omvormer ingesteld in de
-                # 🔆 Omvormers sectie — niet meer als globale schakelaar hier.
                 vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
-                # Note: gas & warmtepomp instellingen → 🔥 Gas & Warmte sectie
+            }),
+        )
+
+    async def async_step_ev_opts(self, user_input=None):
+        """🚗 EV Laadpalen — aantal en details."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            ev_count = int(user_input.get("ev_charger_count_sel", 0))
+            self._ev_charger_count = ev_count
+            self._existing_ev_cfgs = list(data.get(CONF_EV_CHARGER_CONFIGS, []))
+            if not self._existing_ev_cfgs and data.get(CONF_EV_CHARGER_ENTITY):
+                self._existing_ev_cfgs = [{"entity_id": data.get(CONF_EV_CHARGER_ENTITY), "label": "EV Laadpaal 1"}]
+            self._config[CONF_EV_CHARGER_COUNT] = ev_count
+            self._config[CONF_EV_CHARGER_CONFIGS] = []
+            self._ev_charger_step = 0
+            if ev_count > 0:
+                return await self.async_step_ev_charger_detail()
+            return self._save({})
+        existing_count = str(len(data.get(CONF_EV_CHARGER_CONFIGS, [])) or (1 if data.get(CONF_EV_CHARGER_ENTITY) else 0))
+        return self.async_show_form(
+            step_id="ev_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("ev_charger_count_sel", default=existing_count): _inverter_count_selector(),
+            }),
+        )
+
+
+    async def async_step_ev_charger_detail(self, user_input=None):
+        """🚗 EV Laadpaal detail (herhaalt per laadpaal)."""
+        i = self._ev_charger_step + 1
+        existing_cfgs = getattr(self, "_existing_ev_cfgs", [])
+        existing = existing_cfgs[self._ev_charger_step] if self._ev_charger_step < len(existing_cfgs) else {}
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            self._config[CONF_EV_CHARGER_CONFIGS].append({
+                "entity_id": user_input.get("ev_charger_entity", ""),
+                "label":     user_input.get("ev_charger_label", f"EV Laadpaal {i}"),
+                "switch":    user_input.get("ev_charger_switch", ""),
+            })
+            # Backwards compat: zet eerste als CONF_EV_CHARGER_ENTITY
+            if self._ev_charger_step == 0:
+                self._config[CONF_EV_CHARGER_ENTITY] = user_input.get("ev_charger_entity", "")
+            self._ev_charger_step += 1
+            if self._ev_charger_step < self._ev_charger_count:
+                return await self.async_step_ev_charger_detail()
+            return self._save({})
+        return self.async_show_form(
+            step_id="ev_charger_detail",
+            data_schema=vol.Schema({
+                vol.Required("ev_charger_entity", description={"suggested_value": existing.get("entity_id")}): _ent(["number", "input_number", "sensor"]),
+                vol.Optional("ev_charger_label", default=existing.get("label", f"EV Laadpaal {i}")): str,
+                vol.Optional("ev_charger_switch", default=existing.get("switch", "") or vol.UNDEFINED): _ent(["switch", "input_boolean"]),
+            }),
+            description_placeholders={"ev_num": str(i), "total": str(self._ev_charger_count)},
+        )
+
+
+    async def async_step_solar_opts(self, user_input=None):
+        """☀️ PV Zonnepanelen — sensor en instellingen."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="solar_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Optional(CONF_SOLAR_SENSOR, default=data.get(CONF_SOLAR_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_BATTERY_SENSOR, default=data.get(CONF_BATTERY_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_NEGATIVE_PRICE_THRESHOLD, default=float(data.get(CONF_NEGATIVE_PRICE_THRESHOLD, 0.0))): vol.Coerce(float),
             }),
         )
 
@@ -3258,25 +3809,75 @@ class CloudEMSOptionsFlow(_OptionsBase):
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
             return self._save(user_input)
-        try:
-            from .const import CONF_GAS_SENSOR, CONF_GAS_PRICE_SENSOR, CONF_GAS_PRICE_FIXED
-            from .const import CONF_BOILER_EFFICIENCY
-            from .const import DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY
-        except ImportError:
-            CONF_GAS_SENSOR = "gas_sensor"; CONF_GAS_PRICE_SENSOR = "gas_price_sensor"
-            CONF_GAS_PRICE_FIXED = "gas_price_fixed"; CONF_BOILER_EFFICIENCY = "boiler_efficiency"
-            DEFAULT_GAS_PRICE_EUR_M3 = 1.05; DEFAULT_BOILER_EFFICIENCY = 0.90
+
+        from .const import (
+            CONF_GAS_SENSOR, CONF_GAS_PRICE_SENSOR, CONF_GAS_TTF_SENSOR,
+            CONF_GAS_PRICE_FIXED, CONF_GAS_USE_TTF,
+            CONF_GAS_SUPPLIER, CONF_GAS_NETBEHEERDER,
+            CONF_BOILER_EFFICIENCY,
+            DEFAULT_GAS_PRICE_EUR_M3, DEFAULT_BOILER_EFFICIENCY,
+            GAS_SUPPLIER_MARKUPS, GAS_NETBEHEERDERS,
+            CONF_ENERGY_PRICES_COUNTRY,
+        )
+
+        country = data.get(CONF_ENERGY_PRICES_COUNTRY, "NL")
+
+        # Leveranciers voor gas opslag
+        gas_suppliers = GAS_SUPPLIER_MARKUPS.get(country, GAS_SUPPLIER_MARKUPS["NL"])
+        supplier_options = [
+            selector.SelectOptionDict(value=k, label=v[0])
+            for k, v in gas_suppliers.items()
+        ]
+
+        # Netbeheerders
+        netbeheerders = GAS_NETBEHEERDERS.get(country, GAS_NETBEHEERDERS["NL"])
+        netbeheerder_options = [
+            selector.SelectOptionDict(value=k, label=f"{v[0]} ({v[1]:.4f} €/m³)")
+            for k, v in netbeheerders.items()
+        ]
+
         return self.async_show_form(
             step_id="gas_meter_opts",
             data_schema=vol.Schema({
                 vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
-                vol.Optional(CONF_GAS_SENSOR,       default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
-                vol.Optional(CONF_GAS_PRICE_SENSOR, default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
-                vol.Optional(CONF_GAS_PRICE_FIXED,  default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))):
+                # ── Gasmeter sensor ──────────────────────────────────────────
+                vol.Optional(CONF_GAS_SENSOR,
+                    default=data.get(CONF_GAS_SENSOR) or vol.UNDEFINED): _ent(),
+                # ── Gasprijs — volgorde: sensor → TTF → vast ────────────────
+                vol.Optional(CONF_GAS_PRICE_SENSOR,
+                    default=data.get(CONF_GAS_PRICE_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_USE_TTF,
+                    default=bool(data.get(CONF_GAS_USE_TTF, True))): selector.BooleanSelector(),
+                vol.Optional(CONF_GAS_TTF_SENSOR,
+                    default=data.get(CONF_GAS_TTF_SENSOR) or vol.UNDEFINED): _ent(),
+                vol.Optional(CONF_GAS_PRICE_FIXED,
+                    default=float(data.get(CONF_GAS_PRICE_FIXED, DEFAULT_GAS_PRICE_EUR_M3))):
                     vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
-                vol.Optional(CONF_BOILER_EFFICIENCY, default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))):
+                # ── Leverancier & netbeheerder voor opslag berekening ────────
+                vol.Optional(CONF_GAS_SUPPLIER,
+                    default=data.get(CONF_GAS_SUPPLIER, "none")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=supplier_options, mode="dropdown"
+                    )),
+                vol.Optional(CONF_GAS_NETBEHEERDER,
+                    default=data.get(CONF_GAS_NETBEHEERDER, "default")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=netbeheerder_options, mode="dropdown"
+                    )),
+                # ── Ketelrendement ───────────────────────────────────────────
+                vol.Optional(CONF_BOILER_EFFICIENCY,
+                    default=float(data.get(CONF_BOILER_EFFICIENCY, DEFAULT_BOILER_EFFICIENCY))):
                     vol.All(vol.Coerce(float), vol.Range(min=0.5, max=1.0)),
             }),
+            description_placeholders={
+                "info": (
+                    "Gasprijs volgorde: (1) Sensor met all-in prijs → "
+                    "(2) TTF Day-Ahead spotmarkt + omrekening naar all-in → "
+                    "(3) Vaste handmatige prijs.\n\n"
+                    "Gasmeter sensor en prijssensor zijn beide optioneel. "
+                    "Zonder sensor gebruikt CloudEMS TTF Day-Ahead (NL) of de vaste prijs als fallback."
+                )
+            },
         )
 
     async def async_step_warmtepomp_opts(self, user_input=None):
@@ -3696,7 +4297,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             self._opts["budget_elec_eur_month"]   = float(user_input.get("budget_elec_eur_month", 120.0))
             self._opts["budget_elec_kwh_month"]   = float(user_input.get("budget_elec_kwh_month", 300.0))
             self._opts["budget_gas_m3_month"]     = float(user_input.get("budget_gas_m3_month", 150.0))
-            return await self.async_step_menu_opts()
+            return await self.async_step_init()
 
         existing = self._opts
         return self.async_show_form(
@@ -3746,7 +4347,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                     deadlines[k.strip().lower()] = v.strip()
             self._opts["nilm_shift_deadlines"]      = deadlines
             self._opts["nilm_shift_deadlines_raw"]  = raw
-            return await self.async_step_menu_opts()
+            return await self.async_step_init()
 
         existing = self._opts
         inc_str = ", ".join(existing.get("nilm_shift_include") or [])

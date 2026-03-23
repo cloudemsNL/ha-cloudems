@@ -1,4 +1,4 @@
-// CloudEMS Zelfconsumptie Card v1.0
+// CloudEMS Zelfconsumptie Card v1.1
 // Leest sensor.cloudems_self_consumption en toont altijd data, ook bij unavailable
 
 class CloudemsZelfconsumptieCard extends HTMLElement {
@@ -8,7 +8,7 @@ class CloudemsZelfconsumptieCard extends HTMLElement {
   set hass(h){
     this._hass=h;
     const s=h.states["sensor.cloudems_self_consumption"];
-    const j=JSON.stringify([s?.state,s?.last_changed]);
+    const j=JSON.stringify([s?.state,s?.attributes?.self_consumed_kwh,s?.attributes?.pv_today_kwh,s?.last_changed]);
     if(j!==this._prev){this._prev=j;this._render();}
   }
 
@@ -20,18 +20,20 @@ class CloudemsZelfconsumptieCard extends HTMLElement {
     const state=s?.state;
     const attr=s?.attributes||{};
 
-    const ratio   = (state && state!=="unavailable" && state!=="unknown") ? parseFloat(state) : null;
+    const ratio   = (state!=null && state!=="unavailable" && state!=="unknown") ? parseFloat(state) : null;
     const bestH   = attr.best_solar_hour ?? null;
     const saving  = attr.monthly_saving_eur ?? null;
     const advice  = attr.advice || null;
     const pvKwh   = attr.pv_today_kwh ?? null;
-    const selfKwh = attr.self_consumed_kwh ?? null;
-    const expKwh  = attr.exported_kwh ?? null;
+    const selfKwh = (attr.self_consumed_kwh != null && attr.self_consumed_kwh !== undefined)
+                  ? attr.self_consumed_kwh : null;
+    const expKwh  = (attr.exported_kwh != null && attr.exported_kwh !== undefined)
+                  ? attr.exported_kwh : null;
 
     const fmt = v => v!=null ? Math.round(v*100)/100 : "—";
     const pct  = v => v!=null ? Math.round(v)+"%" : "—";
     const euro = v => v!=null ? "€"+fmt(v) : "—";
-    const kwh  = v => v!=null ? fmt(v)+" kWh" : "—";
+    const kwh  = v => v!=null ? fmt(v)+" kWh" : (pvKwh > 0 ? "⏳" : "—");
 
     // Colour for ratio
     const col = ratio==null ? "#6b7280"
@@ -64,7 +66,7 @@ class CloudemsZelfconsumptieCard extends HTMLElement {
     <span class="hdr-icon">♻️</span>
     <span class="hdr-title">${c.title||"Zelfconsumptie"}</span>
   </div>
-  ${ratio!=null ? `<div class="big" style="color:${col}">${Math.round(ratio)}%</div>` : `<div class="na">⏳ Nog geen data beschikbaar</div>`}
+  ${ratio!=null ? `<div class="big" style="color:${col}">${Math.round(ratio)}%</div>` : (pvKwh!=null ? `<div class="big" style="color:#6b7280">—%</div>` : `<div class="na">⏳ Nog geen data beschikbaar</div>`)}
   <div class="row"><span class="lbl">PV productie vandaag</span><span class="val">${kwh(pvKwh)}</span></div>
   <div class="row"><span class="lbl">Zelf verbruikt</span><span class="val">${kwh(selfKwh)}</span></div>
   <div class="row"><span class="lbl">Teruggeleverd</span><span class="val">${kwh(expKwh)}</span></div>

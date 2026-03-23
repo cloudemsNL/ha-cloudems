@@ -4,7 +4,7 @@
  *
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
-const HCV = '1.8.7';
+const HCV = '1.8.8';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';
@@ -285,7 +285,7 @@ class CloudEMSHomeCard extends HTMLElement {
 .boil-name{font-size:12px;font-weight:700}
 .boil-sub{font-size:10px;color:rgba(255,255,255,0.4);margin-top:1px}
 .boil-temp{font-size:18px;font-weight:700;margin-top:3px}
-.boil-badge{display:inline-flex;padding:2px 7px;border-radius:7px;font-size:10px;font-weight:700;background:rgba(239,64,64,0.12);color:#f87171;border:1px solid rgba(239,64,64,0.28)}
+.boil-badge{display:inline-flex;padding:2px 7px;border-radius:7px;font-size:10px;font-weight:700}
 .boil-bars{padding:7px 13px;border-bottom:1px solid rgba(255,255,255,0.06)}
 .bbar{margin-bottom:7px}
 .bbar:last-child{margin-bottom:0}
@@ -635,6 +635,23 @@ ${(()=>{const ins=this._a('sensor.cloudems_status','insights')||'';return ins?`<
 <!-- DIMMER STATUS -->
 <div class="dimblock">
   <div class="blbl" style="margin-bottom:5px">Zonnedimmer</div>
+  ${(()=>{
+    const overSp=(this._a('sensor.cloudems_solar_system','over_setpoint')||{});
+    const phases=Object.keys(overSp);
+    if(!phases.length) return '';
+    return phases.map(ph=>{
+      const d=overSp[ph]||{};
+      const lvl=d.level||1;
+      const rem=Math.round(d.remaining_s||0);
+      const cur=d.current_a!=null?d.current_a.toFixed(1):'?';
+      const sp=d.setpoint_a!=null?d.setpoint_a.toFixed(1):'?';
+      const bA=d.bchar_a!=null?d.bchar_a.toFixed(1):'?';
+      const gA=d.gg_a!=null?d.gg_a.toFixed(1):'?';
+      if(lvl>=3) return`<div style="margin-bottom:4px;padding:5px 8px;border-radius:6px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.5);font-size:11px;color:#f87171">⛔ Fase ${ph}: ${cur}A — gG HOOFDZEKERING nadert smeltgebied! Dimmer over ${rem}s</div>`;
+      if(lvl>=2) return`<div style="margin-bottom:4px;padding:5px 8px;border-radius:6px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.5);font-size:11px;color:#fbbf24">⚠️ Fase ${ph}: ${cur}A ≥ ${bA}A — B-automaat in thermisch gebied. Dimmer over ${rem}s</div>`;
+      return`<div style="margin-bottom:4px;padding:5px 8px;border-radius:6px;background:rgba(96,165,250,0.10);border:1px solid rgba(96,165,250,0.3);font-size:11px;color:#93c5fd">ℹ️ Fase ${ph}: ${cur}A > setpoint ${sp}A — dimmer grijpt in over ${rem}s (B-kar veilig tot ${bA}A, gG tot ${gA}A)</div>`;
+    }).join('');
+  })()}
   ${invs.map(inv=>{
     const curW=Math.round(inv.current_w||0);
     const peakW=Math.round(inv.peak_w_7d||inv.peak_w||0);
@@ -998,7 +1015,11 @@ ${(()=>{
     <div class="boil-sub">${b.boiler_type||''} · ${b.entity_id||''}</div>
     <div style="margin-top:4px;display:flex;align-items:center;gap:7px">
       <div class="boil-temp">${temp}°C</div>
-      ${mode?`<div class="boil-badge">${mode}</div>`:''}
+      ${mode?`<div class="boil-badge" style="${
+  mode.includes('BOOST') ? 'background:rgba(239,64,64,0.12);color:#f87171;border:1px solid rgba(239,64,64,0.28)' :
+  mode.includes('GREEN') ? 'background:rgba(74,222,128,0.12);color:#4ade80;border:1px solid rgba(74,222,128,0.28)' :
+  'background:rgba(107,114,128,0.12);color:#9ca3af;border:1px solid rgba(107,114,128,0.28)'
+}">${mode}</div>`:''} 
     </div>
   </div>
   <div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#EF9F27">${this._fmt(pw)}</div><div style="font-size:10px;color:rgba(255,255,255,0.35)">nu</div></div>

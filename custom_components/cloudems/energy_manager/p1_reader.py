@@ -514,30 +514,83 @@ class HAEntityFallbackReader:
     # Bekende entity-ID patronen per netwerk van integraties
     _PATTERNS: Dict[str, List[str]] = {
         "power_import_w": [
-            "sensor.dsmr_reading_electricity_currently_delivered",
+            # DSMR integratie NL (current_electricity_usage)
+            "sensor.electricity_meter_actueel_vermogen",
+            "sensor.electricity_meter_huidig_vermogen",
+            "sensor.electricity_meter_energieverbruik",
+            # DSMR integratie EN
+            "sensor.electricity_meter_current_electricity_usage",
+            "sensor.electricity_meter_power_consumption",
+            # HomeWizard
             "sensor.homewizard_p1_active_power_w",
-            "sensor.p1_active_power",
+            # Slimmelezer / P1ib
             "sensor.slimmelezer_power_delivered",
+            "sensor.p1_active_power",
+            # DSMR Reader (MQTT)
+            "sensor.dsmr_reading_electricity_currently_delivered",
             "sensor.electricity_power_usage",
             "sensor.active_power",
         ],
         "power_export_w": [
+            # DSMR integratie NL
+            "sensor.electricity_meter_actuele_teruglevering",
+            "sensor.electricity_meter_current_electricity_delivery",
+            "sensor.electricity_meter_power_production",
+            # HomeWizard
+            "sensor.homewizard_p1_active_power_export_w",
+            # DSMR Reader
             "sensor.dsmr_reading_electricity_currently_returned",
-            "sensor.homewizard_p1_active_power_l1_w",
             "sensor.p1_active_power_returned",
         ],
+        "energy_import_t1_kwh": [
+            # DSMR integratie NL
+            "sensor.electricity_meter_energieverbruik_tarief_1",
+            "sensor.electricity_meter_electricity_used_tariff_1",
+            # DSMR Reader
+            "sensor.dsmr_day_consumption_electricity1",
+        ],
+        "energy_import_t2_kwh": [
+            # DSMR integratie NL
+            "sensor.electricity_meter_energieverbruik_tarief_2",
+            "sensor.electricity_meter_electricity_used_tariff_2",
+            # DSMR Reader
+            "sensor.dsmr_day_consumption_electricity2",
+        ],
         "energy_import_kwh": [
-            "sensor.dsmr_day_consumption_electricity_merged",
+            # HomeWizard totaal
             "sensor.homewizard_p1_total_power_import_kwh",
+            # DSMR Reader gecombineerd
+            "sensor.dsmr_day_consumption_electricity_merged",
             "sensor.electricity_imported_total",
         ],
+        "energy_export_t1_kwh": [
+            # DSMR integratie NL
+            "sensor.electricity_meter_energieproductie_tarief_1",
+            "sensor.electricity_meter_electricity_delivered_tariff_1",
+            # DSMR Reader
+            "sensor.dsmr_day_consumption_electricity_returned1",
+        ],
+        "energy_export_t2_kwh": [
+            # DSMR integratie NL
+            "sensor.electricity_meter_energieproductie_tarief_2",
+            "sensor.electricity_meter_electricity_delivered_tariff_2",
+            # DSMR Reader
+            "sensor.dsmr_day_consumption_electricity_returned2",
+        ],
         "energy_export_kwh": [
-            "sensor.dsmr_day_consumption_electricity_returned_merged",
+            # HomeWizard totaal
             "sensor.homewizard_p1_total_power_export_kwh",
+            # DSMR Reader gecombineerd
+            "sensor.dsmr_day_consumption_electricity_returned_merged",
         ],
         "gas_m3": [
-            "sensor.dsmr_day_consumption_gas",
+            # DSMR integratie NL
+            "sensor.gas_meter_gasverbruik",
+            "sensor.gas_meter_gas_consumption",
+            # HomeWizard
             "sensor.homewizard_p1_total_gas_m3",
+            # DSMR Reader
+            "sensor.dsmr_day_consumption_gas",
             "sensor.gas_meter_reading",
         ],
     }

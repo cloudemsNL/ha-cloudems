@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Diagnose Card  v1.0.0
+// CloudEMS Diagnose Card  v1.1.0
 
 const DIAGNOSE_VERSION = "2.0.0";
 const _esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -327,14 +327,17 @@ class CloudemsDiagnoseCard extends HTMLElement {
   // ── Tab 4: Fasen ──────────────────────────────────────────────────────────
   _panel4() {
     const h = this._hass;
-    const a = _sa(h,'sensor.cloudems_net_en_fasen') || _sa(h,'sensor.cloudems_status');
-    const phases = a.phases || a.phase_balance || {};
+    const statusA = _sa(h,'sensor.cloudems_status') || {};
+    const balA    = _sa(h,'sensor.cloudems_grid_phase_imbalance') || {};
+    const phases  = statusA.phases || {};
     const L = ['L1','L2','L3'];
-    const curA  = phases.current_a  || {};
-    const voltV = phases.voltage_v  || {};
-    const impW  = phases.import_w   || {};
-    const expW  = phases.export_w   || {};
-    const imbalA = parseFloat(phases.imbalance_a || 0);
+    const curA  = { L1: (phases.L1||{}).current_a,  L2: (phases.L2||{}).current_a,  L3: (phases.L3||{}).current_a  };
+    const voltV = { L1: (phases.L1||{}).voltage_v,  L2: (phases.L2||{}).voltage_v,  L3: (phases.L3||{}).voltage_v  };
+    const impW  = { L1: (phases.L1||{}).power_w > 0 ? (phases.L1||{}).power_w : 0,
+                    L2: (phases.L2||{}).power_w > 0 ? (phases.L2||{}).power_w : 0,
+                    L3: (phases.L3||{}).power_w > 0 ? (phases.L3||{}).power_w : 0 };
+    const expW  = {};
+    const imbalA = parseFloat(balA.imbalance_a || statusA.imbalance_a || 0);
 
     return `
     <div class="section">
@@ -359,16 +362,17 @@ class CloudemsDiagnoseCard extends HTMLElement {
       <div class="section-title">Fase onbalans</div>
       <div class="kv"><span class="kl">Onbalans</span><span class="kv_ ${imbalA>5?'err':imbalA>2?'warn':'ok'}">${_fmt(imbalA,2)} A</span></div>
       <div class="kv"><span class="kl">Status</span><span class="kv_ ${imbalA>5?'err':imbalA>2?'warn':'ok'}">${imbalA<2?'✅ OK':imbalA<5?'⚠️ Licht':'🔴 Hoog'}</span></div>
-      ${phases.limit_a?`<div class="kv"><span class="kl">Piekschavinglimiet</span><span class="kv_">${phases.limit_a} A</span></div>`:''}
+      ${(balA.limit_a||statusA.peak_limit_a)?`<div class="kv"><span class="kl">Piekschavinglimiet</span><span class="kv_">${balA.limit_a||statusA.peak_limit_a} A</span></div>`:''}
     </div>
 
     <div class="section">
       <div class="section-title">Net & Fasen sensor</div>
-      ${['sensor.cloudems_net_en_fasen'].map(eid => {
-        const st = _st(h,eid);
-        return st ? `<div class="kv"><span class="kl">Status</span><span class="kv_ ok">✅ Beschikbaar</span></div>` :
-          `<div class="kv"><span class="kl">Status</span><span class="kv_ err">❌ Niet gevonden</span></div>`;
-      }).join('')}
+      ${(()=>{
+        const ph = _st(h,'sensor.cloudems_grid_phase_imbalance');
+        const gn = _st(h,'sensor.cloudems_grid_net_power');
+        if(ph||gn) return `<div class="kv"><span class="kl">Status</span><span class="kv_ ok">✅ Beschikbaar</span></div>`;
+        return `<div class="kv"><span class="kl">Status</span><span class="kv_ err">❌ Niet gevonden</span></div>`;
+      })()}
     </div>`;
   }
 

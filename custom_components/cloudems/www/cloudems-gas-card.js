@@ -45,6 +45,12 @@ class CloudEMSGasCard extends HTMLElement {
     const jaarEur    = this._a(gs, 'jaar_eur',  0);
     const prijs      = this._a(gs, 'gas_prijs_per_m3', 1.25);
     const kwh        = this._a(gs, 'gas_kwh', null);
+    const ttfSpot    = this._a(gs, 'gas_ttf_spot_eur_m3', null);
+    const ttfSource  = this._a(gs, 'gas_ttf_source', null);
+    const ttfComps   = this._a(gs, 'gas_ttf_components', null);
+    const ttfAge     = this._a(gs, 'gas_ttf_cache_age_min', null);
+    const gasSupp    = this._a(gs, 'gas_supplier', 'none');
+    const gasNb      = this._a(gs, 'gas_netbeheerder', 'default');
     const dayRecords = this._a(gs, 'day_records', []);
 
     const sig = [stand, dagM3, weekM3, maandM3, jaarM3, dayRecords.length, this._drill].join('|');
@@ -163,6 +169,7 @@ class CloudEMSGasCard extends HTMLElement {
         {label:'Kosten',    value:gasActive && p.eur > 0 ? fmtEur(p.eur) : '—'},
         {label:'Gem. per dag', value:gasActive ? fmtM3(p.avg)+'/dag' : '—', dim:true},
         {label:'Gasprijs',  value:prijs ? fmtEur(prijs)+'/m³' : '—', dim:true},
+        ...(ttfSpot != null ? [{label:'TTF spot', value:'€'+ttfSpot.toFixed(4)+'/m³', dim:true}] : []),
       ], {footer: canDrill ? 'Klik om uit te klappen per periode' : '● Gemeten via P1 of gasmeter'}) : {wrap:'',tip:''};
       periodeRows += `
         <div class="prow ${canDrill ? 'clickable' : ''} ${isOpen ? 'open' : ''}" data-id="${p.id}" style="position:relative" ${_ttProw.wrap}>
@@ -328,7 +335,8 @@ class CloudEMSGasCard extends HTMLElement {
 
         <div class="t" style="padding-bottom:2px">Verbruik & Kosten</div>
         <div class="periodes">${periodeRows}</div>
-        <div class="footer">Gasprijs: €${prijs.toFixed(4)}/m³ · Meterstand: ${stand ? stand.toFixed(1) : '—'} m³</div>
+        <div class="footer">Gasprijs: €${prijs.toFixed(4)}/m³${ttfSource ? ` (${ttfSource === 'ttf' || ttfSource === 'ttf_cached' ? '📡 TTF' : ttfSource === 'sensor' ? '🔌 sensor' : '⚙️ vast'})` : ''} · Stand: ${stand ? stand.toFixed(1) : '—'} m³</div>
+        ${ttfSpot != null ? `<div class="footer" style="color:#6b7280;font-size:10px">TTF spot: €${ttfSpot.toFixed(4)}/m³${ttfComps ? ` · EB: €${(ttfComps.eb||0).toFixed(4)} · netbeheer: €${(ttfComps.netbeheer||0).toFixed(4)} · opslag: €${(ttfComps.opslag||0).toFixed(4)}` : ''}${ttfAge != null ? ` · ${ttfAge}min geleden` : ''}</div>` : ''}
 
         <hr>
 

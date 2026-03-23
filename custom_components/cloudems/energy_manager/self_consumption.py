@@ -110,23 +110,17 @@ class SelfConsumptionTracker:
             _pv   = float(saved_today.get("pv_wh", 0.0))
             _exp  = float(saved_today.get("export_wh", 0.0))
             _imp  = float(saved_today.get("import_wh", 0.0))
-            # v4.6.581: sanity check — export=0 terwijl PV>1kWh wijst op corrupte opslag
-            # (was bug vóór v4.6.578: export_w werd altijd 0 doorgegeven aan tick())
-            # In dat geval: gooi today-data weg en begin opnieuw
-            if _pv > 1000 and _exp == 0:
-                _LOGGER.warning(
-                    "SelfConsumptionTracker: opgeslagen dag-data verdacht (pv=%.0fWh, export=0) — reset today",
-                    _pv,
-                )
-            else:
-                self._today_date      = today
-                self._today_pv_wh     = _pv
-                self._today_export_wh = _exp
-                self._today_import_wh = _imp
-                _LOGGER.info(
-                    "SelfConsumptionTracker: dag-data hersteld: PV %.2f kWh, export %.2f kWh",
-                    self._today_pv_wh / 1000, self._today_export_wh / 1000,
-                )
+            # v4.6.593: sanity check verwijderd — export=0 terwijl PV>1kWh is een
+            # geldige situatie als batterij alles absorbeert. De oorspronkelijke bug
+            # (export_w altijd 0) is gefixed in v4.6.578, deze check is niet meer nodig.
+            self._today_date      = today
+            self._today_pv_wh     = _pv
+            self._today_export_wh = _exp
+            self._today_import_wh = _imp
+            _LOGGER.info(
+                "SelfConsumptionTracker: dag-data hersteld: PV %.2f kWh, export %.2f kWh",
+                self._today_pv_wh / 1000, self._today_export_wh / 1000,
+            )
 
     def tick(self, pv_w: float, import_w: float, export_w: float) -> None:
         """

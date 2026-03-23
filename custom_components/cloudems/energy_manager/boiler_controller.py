@@ -2917,7 +2917,12 @@ class BoilerController:
                 # 'operation_mode' als attribuut, niet 'preset_mode'
                 # v4.6.16: case-insensitief vergelijken (Ariston: UPPERCASE enum namen)
                 op = s.attributes.get("operation_mode") or s.attributes.get("current_operation") or s.attributes.get("preset_mode") or s.state
-                return (op or "").lower() == preset_on.lower()
+                op_lower = (op or "").lower()
+                # v4.6.615: generieke preset-check — als de huidige preset niet de
+                # gewenste preset is, geef False terug zodat CloudEMS opnieuw stuurt.
+                # Werkt voor iMemory, eco, auto, of elke andere ongewenste toestand.
+                # Geen specifieke Ariston-modelnamen nodig.
+                return op_lower == preset_on.lower()
             return s.attributes.get("preset_mode", s.state) == preset_on
 
         if ctrl == "acrouter":
@@ -2960,12 +2965,63 @@ class BoilerController:
         Back-off schema: na 3 pogingen → 2 min wachten, na 6 → 5 min, na 10 → 15 min.
         """
         now = time.time()
+
+        # v4.6.614: Als entity unavailable/unknown is → geen back-off tellen.
+        # Unavailability is een HA/integratie probleem, geen communicatiefout CloudEMS→boiler.
+        # Reset de teller en wacht tot entity weer beschikbaar is.
+        _st = self._hass.states.get(b.entity_id)
+        if _st is None or _st.state in ("unavailable", "unknown"):
+            if b._no_response_count > 0:
+                _LOGGER.info(
+                    "BoilerController [%s]: entity '%s' is %s — back-off teller gereset, "
+                    "wacht op herstel",
+                    b.label, b.entity_id, _st.state if _st else "None",
+                )
+                b._no_response_count = 0
+                b._no_response_backoff_until = 0.0
+            return False  # niet aansturen zolang entity unavailable is
+
         if b._no_response_backoff_until > now:
+            # v4.6.615: generieke preset mismatch check — als de huidige preset niet
+            # de gewenste preset is, is dat geen communicatiefout maar een toestandswijziging
+            # door de boiler zelf (iMemory, eco, auto, of toekomstige modes).
+            # Reset back-off en stuur gewenste preset opnieuw.
+            if b.entity_id.split(".")[0] == "water_heater" and b.control_mode == "preset":
+                _wh_s = self._hass.states.get(b.entity_id)
+                if _wh_s and _wh_s.state not in ("unavailable", "unknown"):
+                    _op = (_wh_s.attributes.get("operation_mode") or
+                           _wh_s.attributes.get("current_operation") or
+                           _wh_s.attributes.get("preset_mode") or "").lower()
+                    _want = b.preset_on.lower() if is_on else b.preset_off.lower()
+                    if _op and _op != _want:
+                        _LOGGER.info(
+                            "BoilerController [%s]: preset mismatch ('%s' ipv '%s') "
+                            "— back-off gereset, stuur gewenste preset opnieuw",
+                            b.label, _op, _want,
+                        )
+                        b._no_response_count = 0
+                        b._no_response_backoff_until = 0.0
+                        return True
             return False  # nog in back-off
         if is_on:
             # Boiler is AAN → reset teller
             b._no_response_count = 0
             return True
+        # v4.6.615: generieke preset mismatch — niet tellen als geen respons.
+        # Als de boiler een andere preset heeft dan gewenst (iMemory, eco, auto, enz.)
+        # is dat geen communicatiefout maar een toestandswijziging door de boiler zelf.
+        # CloudEMS stuurt gewenste preset opnieuw — geen back-off optellen.
+        if b.entity_id.split(".")[0] == "water_heater" and b.control_mode == "preset":
+            _wh_st = self._hass.states.get(b.entity_id)
+            if _wh_st and _wh_st.state not in ("unavailable", "unknown"):
+                _op = (_wh_st.attributes.get("operation_mode") or
+                       _wh_st.attributes.get("current_operation") or
+                       _wh_st.attributes.get("preset_mode") or "").lower()
+                _want = b.preset_on.lower() if is_on else b.preset_off.lower()
+                if _op and _op != _want:
+                    # Preset klopt niet — geen back-off, blijf rustig sturen
+                    b._no_response_count = 0
+                    return True
         # Boiler is UIT terwijl we al eerder turn_on stuurden
         if b.last_on_ts > 0 and (now - b.last_on_ts) < 120:
             # Binnen 2 minuten na turn_on: tel als geen respons
@@ -3776,16 +3832,24 @@ class BoilerController:
             # State klopt niet → retry
             b._pending_retries += 1
             delay = ARISTON_RETRY_BACKOFF[min(b._pending_retries - 1, len(ARISTON_RETRY_BACKOFF) - 1)]
-            _LOGGER.warning(
-                "BoilerController [%s]: Ariston verify mismatch (poging %d/%d) — "
-                "preset: verwacht=%s actueel=%s | setpoint: verwacht=%.1f actueel=%.1f | "
-                "max_sp: verwacht=%.1f actueel=%.1f → retry over %ds",
-                b.label, b._pending_retries, ARISTON_MAX_RETRIES,
-                b._pending_preset, actual_preset,
-                b._pending_setpoint, actual_sp,
-                b._pending_max_sp, actual_max_sp,
-                delay,
-            )
+            # v4.6.593: specifiek iMemory log
+            if actual_preset.lower() == "imemory":
+                _LOGGER.warning(
+                    "BoilerController [%s]: Ariston in iMemory — gewenste preset=%s wordt opnieuw gestuurd "
+                    "(poging %d/%d, over %ds)",
+                    b.label, b._pending_preset, b._pending_retries, ARISTON_MAX_RETRIES, delay,
+                )
+            else:
+                _LOGGER.warning(
+                    "BoilerController [%s]: Ariston verify mismatch (poging %d/%d) — "
+                    "preset: verwacht=%s actueel=%s | setpoint: verwacht=%.1f actueel=%.1f | "
+                    "max_sp: verwacht=%.1f actueel=%.1f → retry over %ds",
+                    b.label, b._pending_retries, ARISTON_MAX_RETRIES,
+                    b._pending_preset, actual_preset,
+                    b._pending_setpoint, actual_sp,
+                    b._pending_max_sp, actual_max_sp,
+                    delay,
+                )
             b._next_verify_ts = now + delay
 
             # Stuur opnieuw via de CloudCommandQueue — rate-limiting + backoff
@@ -3881,7 +3945,11 @@ class BoilerController:
              # v4.6.575: power_w = 0 als boiler niet aan staat (is_on=False).
              # Een niet-geïnstalleerde of offline boiler kan via cloud-sensor toch
              # een waarde rapporteren — die negeren we als de boiler niet actief is.
-             "power_w": b.current_power_w if self._is_on(b.entity_id, b) else 0.0,
+             # v4.6.595: als current_power_w nog None is (eerste seconden na herstart),
+             # gebruik het geleerde nominale vermogen als schatting zodat de energy flow
+             # direct een waarde toont ipv 0W te wachten op de eerste meting.
+             "power_w": (b.current_power_w if b.current_power_w is not None else b.power_w)
+                        if self._is_on(b.entity_id, b) else 0.0,
              "current_power_w": b.current_power_w,
              "cycle_kwh": round(b.cycle_kwh, 3),
              "thermal_loss_c_h": b.thermal_loss_c_h, "control_mode": b.control_mode,

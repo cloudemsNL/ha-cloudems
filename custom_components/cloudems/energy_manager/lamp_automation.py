@@ -394,14 +394,18 @@ class LampAutomationEngine:
             lamp._last_auto_action = time.time()
             action_str = "aan" if turn_on else "uit"
             _LOGGER.info("LampAutomation: %s %s — %s", lamp.label, action_str, reason)
-            actions.append({
+            entry = {
                 "entity_id": lamp.entity_id,
                 "label":     lamp.label,
                 "action":    "on" if turn_on else "off",
                 "reason":    reason,
                 "mode":      lamp.mode,
                 "ts":        time.time(),
-            })
+            }
+            actions.append(entry)
+            self._actions_log.append(entry)
+            if len(self._actions_log) > 20:
+                self._actions_log = self._actions_log[-20:]
         except Exception as err:
             _LOGGER.warning("LampAutomation: actie mislukt voor %s: %s", lamp.entity_id, err)
 
@@ -596,18 +600,21 @@ class LampAutomationEngine:
         return {
             "enabled":    self._enabled,
             "lamp_count": len(self._lamps),
-            "auto_count": sum(1 for l in self._lamps if l.mode == "auto" and not l.excluded),
-            "semi_count": sum(1 for l in self._lamps if l.mode == "semi" and not l.excluded),
+            "auto_count": sum(1 for l in self._lamps if l.mode == "auto"  and not l.excluded),
+            "semi_count": sum(1 for l in self._lamps if l.mode == "semi"  and not l.excluded),
+            "manual_count": sum(1 for l in self._lamps if l.mode == "manual" and not l.excluded),
+            "last_actions": list(self._actions_log[-10:]),
             "lamps": [
                 {
-                    "entity_id":   l.entity_id,
-                    "label":       l.label,
-                    "mode":        l.mode,
-                    "area":        l.area_name,
-                    "outdoor":     l.outdoor,
-                    "excluded":    l.excluded,
-                    "has_presence":bool(l.presence_sensor),
+                    "entity_id":    l.entity_id,
+                    "label":        l.label,
+                    "mode":         l.mode,
+                    "area":         l.area_name,
+                    "outdoor":      l.outdoor,
+                    "excluded":     l.excluded,
+                    "has_presence": bool(l.presence_sensor),
+                    "presence_sensor": l.presence_sensor or "",
                 }
-                for l in self._lamps if not l.excluded
+                for l in self._lamps
             ],
         }

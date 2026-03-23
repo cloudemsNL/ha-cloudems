@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "4.6.591"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "5.0.37"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "4.6.591"  # manifest.json ongeldig
+    VERSION = "5.0.37"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -46,6 +46,8 @@ CONF_PHASE_SENSORS           = "phase_sensors"
 CONF_SOLAR_SENSOR            = "solar_sensor"
 CONF_BATTERY_SENSOR          = "battery_sensor"
 CONF_EV_CHARGER_ENTITY       = "ev_charger_entity"
+CONF_EV_CHARGER_COUNT        = "ev_charger_count"
+CONF_EV_CHARGER_CONFIGS      = "ev_charger_configs"
 CONF_ENERGY_PRICES_COUNTRY   = "energy_prices_country"
 CONF_EPEX_COUNTRY            = CONF_ENERGY_PRICES_COUNTRY
 CONF_CLOUD_API_KEY           = "cloud_api_key"
@@ -517,16 +519,93 @@ CONF_ENABLE_MULTI_BATTERY      = "enable_multi_battery"
 CONF_BATTERY_COUNT             = "battery_count"
 
 # ── v1.13.0 — Energy source comparison (electricity vs gas) ──────────────────
-CONF_GAS_PRICE_SENSOR          = "gas_price_sensor"       # HA sensor reporting €/m³
-CONF_GAS_PRICE_FIXED           = "gas_price_fixed"        # fixed €/m³ fallback
-CONF_HAS_GAS_HEATING           = "has_gas_heating"        # CV-ketel voor warm water: null=niet geconfigureerd, "yes"=ja, "no"=nee
+CONF_GAS_PRICE_SENSOR          = "gas_price_sensor"       # HA sensor (all-in €/m³)
+CONF_GAS_TTF_SENSOR            = "gas_ttf_sensor"         # HA sensor TTF spot €/m³ excl. BTW (optioneel)
+CONF_GAS_PRICE_FIXED           = "gas_price_fixed"        # vaste prijs fallback €/m³ all-in
+CONF_HAS_GAS_HEATING           = "has_gas_heating"        # CV-ketel voor warm water
 CONF_BOILER_EFFICIENCY         = "boiler_efficiency"       # electric boiler COP (default 0.95)
 CONF_HEAT_PUMP_COP             = "heat_pump_cop"           # heat pump COP (default 3.5)
+CONF_GAS_SUPPLIER              = "gas_supplier"           # leverancier voor opslag berekening
+CONF_GAS_NETBEHEERDER          = "gas_netbeheerder"       # netbeheerder voor variabele netwerkkosten
+CONF_GAS_USE_TTF               = "gas_use_ttf"            # TTF Day-Ahead als fallback gebruiken
 GAS_KWH_PER_M3                 = 9.769                    # calorific value (Groningen gas)
 GAS_BOILER_EFFICIENCY          = 0.90                     # conventional gas boiler efficiency
 DEFAULT_BOILER_EFFICIENCY      = 0.95                     # electric boiler/immersion heater
 DEFAULT_HEAT_PUMP_COP          = 3.5
-DEFAULT_GAS_PRICE_EUR_M3       = 1.25                     # fallback if no sensor configured
+DEFAULT_GAS_PRICE_EUR_M3       = 1.25                     # fallback als alle bronnen falen
+
+# ── Multisplit / Airco groepen ────────────────────────────────────────────────
+CONF_MULTISPLIT_GROUPS = "multisplit_groups"   # lijst van buitenunit-groepen
+
+MULTISPLIT_FREQ_PATTERNS = {
+    "daikin":      ["compressor_frequency"],
+    "mitsubishi":  ["compressor_frequency", "frequency"],
+    "lg":          ["compressor_frequency"],
+    "samsung":     ["compressor_frequency"],
+    "toshiba":     ["compressor_frequency"],
+    "generic":     ["compressor_frequency", "frequency", "freq"],
+}
+
+MULTISPLIT_POWER_PATTERNS = {
+    "daikin":     ["compressor_estimated_power", "estimated_power_consumption"],
+    "mitsubishi": ["power_consumption", "consumed_power"],
+    "lg":         ["energy_current_consumption", "power"],
+    "samsung":    ["power_consumption"],
+    "generic":    ["power", "vermogen", "watt"],
+}
+
+MULTISPLIT_ENERGY_PATTERNS = {
+    "daikin": {
+        "cool":  ["cool_energy_consumption"],
+        "heat":  ["heat_energy_consumption"],
+        "total": ["total_energy_consumption"],
+    },
+    "generic": {
+        "total": ["energy", "energy_consumption", "kwh"],
+    },
+}
+
+MULTISPLIT_BRANDS = {
+    "daikin":     "Daikin (HA Daikin integratie)",
+    "mitsubishi": "Mitsubishi (MelCloud / MELConnect)",
+    "lg":         "LG (LG ThinQ)",
+    "samsung":    "Samsung (SmartThings)",
+    "toshiba":    "Toshiba (Toshiba AC)",
+    "fujitsu":    "Fujitsu (Waterstage / HA Fujitsu)",
+    "panasonic":  "Panasonic (Comfort Cloud)",
+    "hitachi":    "Hitachi",
+    "midea":      "Midea / Inventor",
+    "generic":    "Ander merk / generiek",
+}
+
+
+# Gas leveranciers NL — (label, opslag €/m³ excl. BTW)
+# Waarden uit tariffs.json; hier als UI-fallback
+GAS_SUPPLIER_MARKUPS = {
+    "NL": {
+        "none":        ("Geen / onbekend",          0.0),
+        "vattenfall":  ("Vattenfall",               0.0550),
+        "eneco":       ("Eneco",                    0.0480),
+        "essent":      ("Essent",                   0.0520),
+        "greenchoice": ("Greenchoice",              0.0440),
+        "budget":      ("Budget Energie",           0.0380),
+        "pure":        ("Pure Energie",             0.0420),
+        "anwb":        ("ANWB Energie",             0.0460),
+        "custom":      ("Aangepaste opslag (zie handmatig)", 0.0),
+    },
+}
+
+# Gas netbeheerders NL — (label, variabele netwerkkosten €/m³ excl. BTW)
+GAS_NETBEHEERDERS = {
+    "NL": {
+        "default":  ("Onbekend / gemiddelde",  0.1000),
+        "liander":  ("Liander",                0.1012),
+        "stedin":   ("Stedin",                 0.0987),
+        "enexis":   ("Enexis",                 0.1034),
+        "rendo":    ("Rendo",                  0.0945),
+        "westland": ("Westland Infra",         0.0912),
+    },
+}
 
 # ── v1.13.0 — Electricity price display: tax + BTW + supplier markup ─────────
 CONF_PRICE_INCLUDE_TAX     = "price_include_tax"     # bool: add energy tax

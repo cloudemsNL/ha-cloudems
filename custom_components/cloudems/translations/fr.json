@@ -502,7 +502,8 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "_skip": "Overslaan"
         },
         "data_description": {
           "p1_host": "IP address of your P1 gateway (e.g. HomeWizard P1, DSMR-reader).",
@@ -588,7 +589,8 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
         }
       },
       "shutter_detail": {
@@ -614,7 +616,11 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "shutter_temp_sensor": "Temperatuursensor ruimte",
+          "shutter_night_close": "Sluit 's nachts automatisch",
+          "shutter_morning_open": "Open 's ochtends automatisch",
+          "shutter_default_setpoint": "Standaard positie (%)"
         }
       },
       "prices": {
@@ -944,9 +950,9 @@
         "title": "Gas & Heat",
         "description": "Gas consumption, boiler and heat pump settings",
         "data": {
-          "gas_sensor": "Gas consumption sensor (m³/h)",
-          "gas_price_sensor": "Gas price sensor (€/m³)",
-          "gas_price_fixed": "Fixed gas price (€/m³)",
+          "gas_sensor": "Capteur de compteur gaz (m³) — optionnel",
+          "gas_price_sensor": "Capteur de prix (all-in €/m³) — optionnel",
+          "gas_price_fixed": "Prix fixe de gaz (€/m³)",
           "boiler_efficiency": "Boiler efficiency (0.5–1.0)",
           "heat_pump_cop": "Heat pump COP (manual, falls back to learned value)",
           "heat_pump_power_entity": "Heat pump electrical power sensor (W)",
@@ -964,7 +970,12 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "gas_use_ttf": "Utiliser TTF Day-Ahead comme secours",
+          "gas_ttf_sensor": "Capteur TTF spot (€/m³ hors TVA) — optionnel",
+          "gas_supplier": "Fournisseur de gaz (pour calcul de marge)",
+          "gas_netbeheerder": "Gestionnaire de réseau (pour coûts réseau)",
+          "section": "Section"
         }
       },
       "boiler_unit_edit": {
@@ -998,7 +1009,10 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "bu_max_setpoint_entity": "Max. setpoint entiteit",
+          "bu_tank_liters": "Tankinhoud (liter)",
+          "bu_cheap_ramp_max": "Max. goedkoop opwarmen (°C)"
         }
       },
       "boiler_brand": {
@@ -1312,7 +1326,11 @@
         }
       },
       "menu_mobiliteit": {
-        "title": "Mobilité & Recharge"
+        "title": "Mobilité & Recharge",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Terug naar menu"
+        }
       },
       "ebike_opts": {
         "title": "Vélo électrique & Micro-mobilité",
@@ -1342,7 +1360,8 @@
       "lamp_automation_detail_opts": {
         "title": "💡 Configurer les lampes par pièce",
         "data": {
-          "back_to_menu": "← Terug"
+          "back_to_menu": "← Terug",
+          "terug_naar_stap1": "← Terug naar stap 1"
         }
       },
       "ups_count_opts": {
@@ -1354,7 +1373,8 @@
           "ups_status_entity": "Entité de statut",
           "ups_battery_entity": "Capteur % batterie",
           "ups_runtime_entity": "Capteur d'autonomie restante",
-          "ups_power_entity": "Capteur de puissance (optionnel)"
+          "ups_power_entity": "Capteur de puissance (optionnel)",
+          "back_to_menu": "← Retour au menu"
         }
       },
       "ups_detail_opts": {
@@ -1366,12 +1386,595 @@
           "ups_status_entity": "Entité de statut",
           "ups_battery_entity": "Capteur % batterie",
           "ups_runtime_entity": "Capteur d'autonomie restante",
-          "ups_power_entity": "Capteur de puissance (optionnel)"
+          "ups_power_entity": "Capteur de puissance (optionnel)",
+          "back_to_menu": "← Retour au menu",
+          "ups_entity": "UPS entiteit"
         }
       },
       "noodstroom": {
         "title": "⚡ Noodstroom & Backup",
+        "data": {
+          "section": "Section",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "gas_prices": {
+        "title": "🔥 Gaz & Prix du gaz",
+        "description": "Tous les champs sont optionnels. Ordre des prix: capteur → TTF Day-Ahead → prix fixe.",
+        "data": {
+          "gas_sensor": "Capteur de compteur gaz (m³) — optionnel",
+          "gas_price_sensor": "Capteur de prix (all-in €/m³) — optionnel",
+          "gas_use_ttf": "Utiliser TTF Day-Ahead comme secours",
+          "gas_ttf_sensor": "Capteur TTF spot (€/m³ hors TVA) — optionnel",
+          "gas_price_fixed": "Prix fixe de gaz (€/m³)",
+          "gas_supplier": "Fournisseur de gaz (pour calcul de marge)",
+          "gas_netbeheerder": "Gestionnaire de réseau (pour coûts réseau)"
+        }
+      },
+      "ev_charger_detail": {
+        "title": "EV Charger",
+        "data": {
+          "ev_charger_entity": "Charger sensor/setpoint",
+          "ev_charger_label": "Label",
+          "ev_charger_switch": "Switch (optional)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "ev_opts": {
+        "title": "EV Laadpalen",
+        "description": "Koppel je EV laadpaal(en) aan CloudEMS voor slim laden op goedkope EPEX-uren en zonnestroom surplus.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ev_charger_count_sel": "Aantal EV laadpalen"
+        },
+        "data_description": {
+          "ev_charger_count_sel": "Hoeveel EV laadpalen wil je configureren? Per laadpaal stel je daarna de entiteit en het label in."
+        }
+      },
+      "ebike_count": {
+        "title": "E-bike & Micro-mobiliteit",
+        "description": "E-bikes en scooters worden automatisch herkend via NILM (40–700W laadpatroon). Voeg optioneel een vermogenssensor toe per voertuig voor nauwkeuriger sessietracking.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ebike_count_sel": "Aantal voertuigen"
+        },
+        "data_description": {
+          "ebike_count_sel": "Hoeveel e-bikes of scooters wil je configureren? Kies 0 als je alleen automatische NILM-detectie wilt."
+        }
+      },
+      "ebike_detail": {
+        "title": "Voertuig {ebike_num} van {total}",
+        "description": "Koppel een vermogenssensor en geef een naam op.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ebike_entity": "Vermogenssensor (optioneel)",
+          "ebike_label": "Label voertuig"
+        }
+      },
+      "multisplit_count_opts": {
+        "title": "Airco / Multisplit",
+        "description": "Een multisplit systeem heeft één buitenunit en meerdere binnenunits. Elke binnenunit is een aparte kamer. CloudEMS verdeelt het totale verbruik van de buitenunit over de actieve binnenunits.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "multisplit_count": "Aantal buitenunits"
+        },
+        "data_description": {
+          "multisplit_count": "Hoeveel aparte multisplit buitenunits heb je? Kies 0 om multisplit uit te schakelen. Per buitenunit stel je daarna de binnenunits in."
+        }
+      },
+      "reconfigure": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Reconfigure"
+      },
+      "menu_back": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Menu Back"
+      },
+      "multisplit_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "new_label": "Label buitenunit",
+          "new_brand": "Merk",
+          "new_power_sensor": "Vermogenssensor buitenunit (optioneel)",
+          "new_freq_sensor": "Compressorfrequentie sensor (optioneel)",
+          "action": "Action"
+        },
+        "title": "Multisplit"
+      },
+      "multisplit_indoor_count_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "indoor_count": "Nombre d'unités intérieures"
+        },
+        "title": "Multisplit Indoor Count"
+      },
+      "multisplit_indoor_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "unit_entity": "Binnenunit entiteit (climate.*)",
+          "unit_label": "Label binnenunit",
+          "unit_area": "Ruimte / kamer",
+          "unit_freq_sensor": "Frequentiesensor (optioneel)",
+          "action": "Action"
+        },
+        "title": "Multisplit Indoor"
+      },
+      "solar_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Solar"
+      },
+      "gas_meter_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Gas Meter"
+      },
+      "warmtepomp_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Warmtepomp"
+      },
+      "features_opts": {
+        "data": {
+          "battery_season_override": "Seizoen overschrijven",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Features"
+      },
+      "cheap_switches_opts": {
+        "data": {
+          "cheap_switch_count": "Aantal schakelschema's",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Cheap Switches"
+      },
+      "cheap_switch_detail_opts": {
+        "data": {
+          "switch_entity": "Schakelaar entiteit",
+          "switch_label": "Label / naam",
+          "window_hours": "Tijdvenster (uur)",
+          "earliest_hour": "Vroegst startuur",
+          "latest_hour": "Uiterlijk startuur",
+          "sd_enabled": "SmartDelay inschakelen",
+          "sd_power_sensor": "Vermogenssensor",
+          "sd_power_threshold_w": "Vermogensdrempel (W)",
+          "sd_price_threshold_eur": "Prijsdrempel (€/kWh)",
+          "sd_grace_s": "Grace periode (seconden)",
+          "sd_notify": "Melding sturen",
+          "sd_wait_mode": "Wachtmodus",
+          "sd_max_wait_h": "Max. wachttijd (uur)",
+          "sd_surplus_threshold_w": "Surplus drempel (W)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Cheap Switch Detail"
+      },
+      "smart_delay_detail_opts": {
+        "data": {
+          "switch_entity": "Schakelaar entiteit",
+          "switch_label": "Label / naam",
+          "power_sensor": "Vermogenssensor",
+          "power_threshold_w": "Vermogensdrempel (W)",
+          "price_threshold_eur": "Prijsdrempel (€/kWh)",
+          "window_hours": "Tijdvenster (uur)",
+          "earliest_hour": "Vroegst startuur",
+          "latest_hour": "Uiterlijk startuur",
+          "grace_s": "Grace periode (seconden)",
+          "notify": "Melding sturen",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Smart Delay Detail"
+      },
+      "budget_opts": {
+        "data": {
+          "budget_enabled": "Activer le budget",
+          "budget_elec_eur_month": "Budget électricité (€/mois)",
+          "budget_elec_kwh_month": "Budget électricité (kWh/mois)",
+          "budget_gas_m3_month": "Budget gaz (m³/mois)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Budget"
+      },
+      "nilm_shift_opts": {
+        "data": {
+          "nilm_load_shifting_enabled": "Load shifting inschakelen",
+          "nilm_shift_price_threshold": "Prijsdrempel verschuiving (€/kWh)",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uur)",
+          "nilm_shift_include": "Apparaten insluten",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Nilm Shift"
+      },
+      "inverter_detail_opts": {
+        "data": {
+          "inv_sensor": "PV vermogenssensor (W of kW)",
+          "inv_control": "Begrenzing schakelaar (optioneel)",
+          "inv_label": "Label omvormer",
+          "inv_min_pct": "Min. begrenzing (%)",
+          "inv_azimuth": "Azimut (graden)",
+          "inv_tilt": "Hellingshoek (graden)",
+          "inv_rated_power": "Nominaal vermogen (Wp)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Inverter Detail"
+      },
+      "battery_type_opts": {
+        "data": {
+          "bat_type": "Type de batterie",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Battery Type"
+      },
+      "battery_detail_opts": {
+        "data": {
+          "bat_power_sensor": "Capteur de puissance batterie (W)",
+          "bat_soc_sensor": "Capteur d'état de charge (%)",
+          "bat_capacity_kwh": "Capacité (kWh)",
+          "bat_max_charge_w": "Puissance de charge max. (W)",
+          "bat_max_discharge_w": "Puissance de décharge max. (W)",
+          "bat_charge_entity": "Laad-entiteit",
+          "bat_discharge_entity": "Ontlaad-entiteit",
+          "bat_label": "Libellé / nom",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Battery Detail"
+      },
+      "climate_opts": {
+        "data": {
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Climate"
+      },
+      "climate_epex_count_opts": {
+        "data": {
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Climate Epex Count"
+      },
+      "climate_epex_device_opts": {
+        "data": {
+          "ce_entity": "Klimaatentiteit (climate.*)",
+          "ce_label": "Naam / label",
+          "ce_type": "Type apparaat",
+          "ce_power": "Vermogenssensor (optioneel)",
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Climate Epex Device"
+      },
+      "shutter_detail_opts": {
+        "data": {
+          "shutter_temp_sensor": "Temperatuursensor ruimte",
+          "shutter_entity": "Rolluik entiteit",
+          "shutter_label": "Label rolluik",
+          "shutter_group": "Groep",
+          "shutter_auto_thermal": "Thermische sturing inschakelen",
+          "shutter_auto_solar_gain": "Zonnewinst blokkeren",
+          "shutter_auto_overheat": "Oververhitting voorkomen",
+          "shutter_night_close": "Sluit 's nachts automatisch",
+          "shutter_morning_open": "Open 's ochtends automatisch",
+          "shutter_default_setpoint": "Standaard positie (%)",
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "shutter_schedule_learning": "Tijdschema leren",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Shutter Detail"
+      },
+      "pool_opts": {
+        "data": {
+          "pool_filter_entity": "Filterpomp entiteit",
+          "pool_filter_power_entity": "Filterpomp vermogen",
+          "pool_heat_entity": "Verwarming entiteit",
+          "pool_heat_power_entity": "Verwarming vermogen",
+          "pool_temp_entity": "Temperatuursensor zwembad",
+          "pool_uv_entity": "UV-lamp entiteit",
+          "pool_robot_entity": "Robotstofzuiger entiteit",
+          "pool_heat_setpoint": "Doeltemperatuur (°C)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Pool"
+      },
+      "lamp_circ_opts": {
+        "data": {
+          "lc_excluded_ids": "Uitgesloten lampen",
+          "lc_enabled": "Lampcirculatie inschakelen",
+          "lc_use_sun_entity": "Zon-entiteit gebruiken",
+          "lc_min_confidence": "Min. betrouwbaarheid (%)",
+          "lc_night_start_h": "Nacht start (uur)",
+          "lc_night_end_h": "Nacht einde (uur)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Lamp Circ"
+      },
+      "tab_visibility_opts": {
+        "data": {
+          "hidden_tabs": "Onglets masqués",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Tab Visibility"
+      },
+      "boiler_groups_opts": {
+        "data": {
+          "bg_action": "Actie",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Boiler Groups"
+      },
+      "boiler_group_add": {
+        "data": {
+          "bg_name": "Naam boilergroep",
+          "bg_mode": "Verwarmingsmodus",
+          "bg_unit_count": "Aantal boilers in groep",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Boiler Group Add"
+      },
+      "boiler_group_edit": {
+        "data": {
+          "bg_name": "Naam boilergroep",
+          "bg_mode": "Verwarmingsmodus",
+          "bge_action": "Actie",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Boiler Group Edit"
+      },
+      "boiler_group_brand": {
+        "data": {
+          "brand": "Merk",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Boiler Group Brand"
+      },
+      "boiler_group_unit": {
+        "data": {
+          "bu_entity": "Boiler entiteit",
+          "bu_temp_sensor": "Temperatuursensor",
+          "bu_energy_sensor": "Energiesensor",
+          "bu_label": "Label / naam",
+          "bu_setpoint": "Doeltemperatuur (°C)",
+          "bu_boiler_type": "Type boiler",
+          "bu_control_mode": "Besturingsmodus",
+          "bu_preset_on": "Preset aan",
+          "bu_preset_off": "Preset uit",
+          "bu_max_setpoint_boost": "Max. setpoint boost (°C)",
+          "bu_dimmer_on_pct": "Dimmer aan (%)",
+          "bu_dimmer_off_pct": "Dimmer uit (%)",
+          "bu_tank_liters": "Tankinhoud (liter)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Boiler Group Unit"
+      },
+      "sensors": {
+        "title": "Grid Sensoren",
+        "data": {
+          "use_separate_import_export": "Aparte import/export sensors",
+          "mains_voltage": "Netspanning (V)",
+          "phase_count": "Aantal fasen",
+          "max_current_l1": "Max stroom per fase (A)",
+          "dsmr_type": "DSMR type slimme meter",
+          "grid_sensor": "Net vermogenssensor (W)",
+          "import_power_sensor": "Import sensor (W)",
+          "export_power_sensor": "Export sensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "phase_sensors_l1": {
+        "title": "Fase L1 sensoren",
+        "data": {
+          "phase_sensors_L1": "L1 Stroomsensor (A)",
+          "voltage_sensor_l1": "L1 Spanningssensor (V)",
+          "power_sensor_l1": "L1 Vermogenssensor (W)",
+          "power_sensor_l1_export": "L1 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "phase_sensors_l2": {
+        "title": "Fase L2 sensoren",
+        "data": {
+          "phase_sensors_L2": "L2 Stroomsensor (A)",
+          "voltage_sensor_l2": "L2 Spanningssensor (V)",
+          "power_sensor_l2": "L2 Vermogenssensor (W)",
+          "power_sensor_l2_export": "L2 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "phase_sensors_l3": {
+        "title": "Fase L3 sensoren",
+        "data": {
+          "phase_sensors_L3": "L3 Stroomsensor (A)",
+          "voltage_sensor_l3": "L3 Spanningssensor (V)",
+          "power_sensor_l3": "L3 Vermogenssensor (W)",
+          "power_sensor_l3_export": "L3 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "prices_opts": {
+        "title": "Prijzen & Belasting",
+        "data": {
+          "price_include_tax": "Energiebelasting toevoegen",
+          "price_include_btw": "BTW toevoegen",
+          "supplier_markup": "Leverancier opslag (€/kWh)",
+          "selected_supplier": "Leverancier",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "prices_provider_opts": {
+        "title": "Prijsaanbieder",
+        "data": {
+          "price_provider": "Prijsaanbieder",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "prices_epex_opts": {
+        "title": "EPEX instellingen",
+        "data": {
+          "epex_area": "EPEX zone",
+          "epex_token": "API token (optioneel)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "price_provider_creds_opts": {
+        "title": "Prijsaanbieder inloggegevens",
+        "data": {
+          "price_provider_username": "Gebruikersnaam",
+          "price_provider_password": "Wachtwoord",
+          "price_provider_api_key": "API sleutel",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "advanced_opts": {
+        "title": "Geavanceerde instellingen",
+        "data": {
+          "mains_voltage": "Netspanning (V)",
+          "max_current_per_phase": "Max stroom per fase (A)",
+          "peak_shaving_enabled": "Piekschaving inschakelen",
+          "dsmr_type": "DSMR type slimme meter",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "inverters_opts": {
+        "title": "Omvormers",
+        "data": {
+          "inverter_count": "Aantal omvormers (0–99)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "batteries_opts": {
+        "title": "Batterijen",
+        "data": {
+          "battery_count": "Aantal batterijen (0–99)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "shutter_count_opts": {
+        "title": "Rolluiken — aantal",
+        "data": {
+          "shutter_count": "Aantal rolluiken (0–99)",
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "ai_opts": {
+        "title": "AI & Leren",
+        "data": {
+          "ai_enabled": "AI leren inschakelen",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "mail_opts": {
+        "title": "E-mail meldingen",
+        "data": {
+          "mail_enabled": "E-mail meldingen inschakelen",
+          "mail_smtp_host": "SMTP server",
+          "mail_smtp_port": "SMTP poort",
+          "mail_username": "Gebruikersnaam",
+          "mail_password": "Wachtwoord",
+          "mail_from": "Afzender",
+          "mail_to": "Ontvanger",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "managed_battery_opts": {
+        "title": "Beheerde batterij",
+        "data": {
+          "managed_battery_entity": "Batterij entiteit",
+          "managed_battery_mode": "Modus entiteit",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "nilm_devices_opts": {
+        "title": "NILM Apparaten",
+        "data": {
+          "nilm_enabled": "NILM inschakelen",
+          "nilm_sensitivity": "Gevoeligheid",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "climate_zones_opts": {
+        "title": "Klimaatzones",
+        "data": {
+          "zone_count": "Aantal zones",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "esphome_sensors": {
+        "title": "ESPHome sensoren",
+        "data": {
+          "esphome_entity": "ESPHome sensor entiteit",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "onboarding_redirect": {
+        "title": "🚀 Interactieve wizard",
+        "description": "Open de interactieve setup wizard in je browser om sensoren en apparaten te koppelen — geen handmatig typen, alles wordt live uit jouw HA-installatie opgehaald.\n\n**Wizard-URL:**\n```\n{onboarding_url}\n```\n\nKlik op **Volgende** om de basisinstallatie alvast af te ronden. Je kunt daarna via de wizard alle details invullen en opslaan.",
         "data": {}
+      },
+      "v2h_opts": {
+        "title": "Vehicle-to-Home (V2H)",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "v2h_enabled": "V2H inschakelen",
+          "v2h_charger_entity": "Bidirectionele laadpaal entiteit",
+          "v2h_car_soc_entity": "Auto batterij SOC sensor",
+          "v2h_min_soc_pct": "Minimum auto SOC bewaren (%)",
+          "v2h_price_threshold": "Prijsdrempel voor ontladen (€/kWh)",
+          "v2h_max_discharge_w": "Max ontlaadvermogen (W)"
+        },
+        "description": "V2H gebruikt je auto als thuisbatterij bij dure EPEX-uren. Vereist een bidirectionele laadpaal zoals de Wallbox Quasar 2.",
+        "data_description": {
+          "v2h_enabled": "Schakel in als je een bidirectionele laadpaal hebt (Wallbox Quasar 2, OCPP V2H).",
+          "v2h_charger_entity": "De entiteit van je laadpaal. CloudEMS zoekt automatisch naar bekende bidirectionele laadpalen.",
+          "v2h_car_soc_entity": "Sensor die de laadstand (%) van je auto aangeeft. Wordt gebruikt om te beslissen of ontladen veilig is.",
+          "v2h_min_soc_pct": "CloudEMS ontlaadt nooit onder dit percentage. Standaard 30% zodat je altijd genoeg hebt voor een rit. (aanbevolen: 20-30%)",
+          "v2h_price_threshold": "EPEX prijs waarboven CloudEMS begint te ontladen. Standaard €0.25/kWh. (aanbevolen: €0.20-0.30)",
+          "v2h_max_discharge_w": "Maximum ontlaadvermogen in Watt. 3700W = 1-fase 16A. 7400W = 2-fase 32A. Controleer de specs van je laadpaal."
+        }
+      },
+      "egauge_opts": {
+        "title": "eGauge Submeter",
+        "description": "eGauge is een nauwkeurige submeter voor elektriciteit. CloudEMS detecteert eGauge sensoren automatisch. De velden worden vooringevuld als eGauge gevonden is. Status: {detected}",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "egauge_enabled": "eGauge inschakelen",
+          "egauge_net_entity": "Net vermogen sensor (W)",
+          "egauge_l1_entity": "Fase L1 sensor (W)",
+          "egauge_l2_entity": "Fase L2 sensor (W)",
+          "egauge_l3_entity": "Fase L3 sensor (W)",
+          "egauge_solar_entity": "Zonnepanelen sensor (W)"
+        },
+        "data_description": {
+          "egauge_enabled": "Schakel in als je een eGauge meter hebt. CloudEMS gebruikt dan eGauge als alternatief voor P1/DSMR.",
+          "egauge_net_entity": "Sensor die het totale netverbruik meet in Watt. Positief = import, negatief = export.",
+          "egauge_l1_entity": "Sensor voor vermogen op fase L1 (Watt). Optioneel — voor fase-gestuurde piekschaving.",
+          "egauge_l2_entity": "Sensor voor vermogen op fase L2 (Watt). Optioneel.",
+          "egauge_l3_entity": "Sensor voor vermogen op fase L3 (Watt). Optioneel.",
+          "egauge_solar_entity": "Sensor voor PV-vermogen (Watt). Optioneel — als eGauge ook solar meet."
+        }
+      },
+      "ev_trip_opts": {
+        "title": "EV Ritplanning",
+        "description": "CloudEMS leest je agenda en laadt de auto precies genoeg voor de volgende rit op het goedkoopste EPEX-moment. Agenda-evenementen met trefwoorden zoals 'werk', 'kantoor', 'afspraak' worden herkend als rit.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ev_trip_enabled": "Ritplanning inschakelen",
+          "ev_kwh_per_pct": "Batterijcapaciteit (kWh per % SOC)",
+          "ev_soc_entity": "Auto SOC sensor"
+        },
+        "data_description": {
+          "ev_trip_enabled": "Schakel in om agenda-gestuurde EV laadplanning te gebruiken. Vereist een HA calendar integratie.",
+          "ev_kwh_per_pct": "Batterijgrootte gedeeld door 100. Voorbeeld: 77 kWh batterij → 0.77. CloudEMS leert dit automatisch over tijd.",
+          "ev_soc_entity": "Sensor die de laadstand (%) van je EV aangeeft. Wordt automatisch gevonden als je EV in HA is."
+        }
       }
     },
     "abort": {
@@ -1494,7 +2097,8 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "ev_charger_count_sel": "Nombre de bornes EV (0 = aucune)"
         },
         "description": "Solar panel sensor, EV charger and solar curtailment."
       },
@@ -1818,9 +2422,9 @@
       "gas_opts": {
         "title": "Gas & Heating Settings",
         "data": {
-          "gas_sensor": "Gas meter sensor",
-          "gas_price_sensor": "Gas price sensor",
-          "gas_price_fixed": "Fixed gas price (€/m³)",
+          "gas_sensor": "Capteur de compteur gaz (m³) — optionnel",
+          "gas_price_sensor": "Capteur de prix (all-in €/m³) — optionnel",
+          "gas_price_fixed": "Prix fixe de gaz (€/m³)",
           "boiler_efficiency": "Boiler efficiency",
           "heat_pump_cop": "Heat pump COP (manual)",
           "heat_pump_power_entity": "Heat pump power sensor (W)",
@@ -1838,7 +2442,11 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "gas_use_ttf": "Utiliser TTF Day-Ahead comme secours",
+          "gas_ttf_sensor": "Capteur TTF spot (€/m³ hors TVA) — optionnel",
+          "gas_supplier": "Fournisseur de gaz (pour calcul de marge)",
+          "gas_netbeheerder": "Gestionnaire de réseau (pour coûts réseau)"
         }
       },
       "nilm_devices_opts": {
@@ -2741,6 +3349,1274 @@
       "noodstroom": {
         "title": "⚡ Noodstroom & Backup",
         "data": {}
+      },
+      "gas_prices": {
+        "title": "🔥 Gaz & Prix du gaz",
+        "description": "Tous les champs sont optionnels. Ordre des prix: capteur → TTF Day-Ahead → prix fixe.",
+        "data": {
+          "gas_sensor": "Capteur de compteur gaz (m³) — optionnel",
+          "gas_price_sensor": "Capteur de prix (all-in €/m³) — optionnel",
+          "gas_use_ttf": "Utiliser TTF Day-Ahead comme secours",
+          "gas_ttf_sensor": "Capteur TTF spot (€/m³ hors TVA) — optionnel",
+          "gas_price_fixed": "Prix fixe de gaz (€/m³)",
+          "gas_supplier": "Fournisseur de gaz (pour calcul de marge)",
+          "gas_netbeheerder": "Gestionnaire de réseau (pour coûts réseau)"
+        }
+      },
+      "ev_charger_detail": {
+        "title": "EV Charger",
+        "data": {
+          "ev_charger_entity": "Charger sensor/setpoint",
+          "ev_charger_label": "Label",
+          "ev_charger_switch": "Switch (optional)"
+        }
+      },
+      "user": {
+        "title": "⚡ Bienvenue dans CloudEMS v1.5",
+        "description": "**CloudEMS** optimises your energy usage fully locally — no cloud, no subscription.\n\n**What CloudEMS does for you:**\n- ⚡ Charge your EV and boiler at the cheapest time of day\n- ☀️ Maximise self-consumption of solar power\n- 📊 Monitor your quarter-hour peak for capacity tariffs\n- 🔌 Automatically detect appliances via NILM\n- 🚨 Warn about grid congestion in your area\n\nThis wizard takes about 5 minutes. You can rerun it via Settings → Integrations → CloudEMS → Reconfigure.\n\n![]({diagram_url})\n\n📖 [Documentation]({support_url}) · ☕ [Support CloudEMS]({buy_me_coffee_url}) · 🌐 [cloudems.eu]({website})",
+        "data": {
+          "energy_prices_country": "Pays (prix dynamiques EPEX)",
+          "wizard_mode": "Setup mode",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "energy_prices_country": "Select your country to fetch the correct EPEX day-ahead electricity prices.",
+          "wizard_mode": "Basic: quick setup with essential sensors. Advanced: full control over all sensors, inverters and P1.",
+          "battery_sensor": "⚠️ Cloud batteries (e.g. Zonneplan) may have 30–300s delay. CloudEMS applies EMA smoothing automatically.",
+          "grid_sensor": "Must be in Watts (W), not kWh or kW. P1 sensors typically report in W.",
+          "solar_sensor": "Must be in Watts (W). Some inverters report in kW — use a template to multiply by 1000."
+        },
+        "placeholders": {
+          "buy_me_coffee_url": {
+            "description": "URL van de donatiepagina",
+            "example": "buy_me_coffee_url"
+          },
+          "diagram_url": {
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          },
+          "support_url": {
+            "description": "URL van de documentatie",
+            "example": "support_url"
+          },
+          "website": {
+            "description": "URL van de website",
+            "example": "website"
+          }
+        }
+      },
+      "grid_connection": {
+        "title": "⚡ Grid connection",
+        "description": "Select the fuse size that matches your installation. This sets the maximum current per phase that CloudEMS will enforce.",
+        "data": {
+          "phase_preset": "Grid connection & fuse size",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "phase_preset": "E.g. 3×25A = 3-phase with 25 A per phase. Select 'Custom' to enter values manually."
+        },
+        "placeholders": {
+          "diagram_url": {
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          }
+        }
+      },
+      "phase_custom": {
+        "title": "⚡ Custom current limits",
+        "description": "Enter the maximum current allowed per phase. CloudEMS will never exceed these values.",
+        "data": {
+          "phase_count": "Nombre de phases",
+          "max_current_l1": "Max current L1 (A)",
+          "max_current_l2": "Max current L2 (A)",
+          "max_current_l3": "Max current L3 (A)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "max_current_l1": "Maximum grid current on phase L1 — typically your fuse rating (e.g. 25 A).",
+          "max_current_l2": "Maximum grid current on phase L2. Only relevant for 3-phase installations.",
+          "max_current_l3": "Maximum grid current on phase L3. Only relevant for 3-phase installations."
+        }
+      },
+      "grid_sensors": {
+        "title": "🔌 Grid sensors",
+        "description": "CloudEMS automatically found **{detected}** sensor(s) in your HA installation.\n\n**Grid sensor (required):** One sensor measuring total grid power in W or kW. Positive = importing power, negative = exporting.\n\n**Separate import/export:** Some integrations deliver import and export as two separate positive sensors. Choose this if your meter doesn't show negative values during export.\n\n💡 **Tip:** Using a P1 reader (P1 Dongle, Homewizard, SLIMMELEZER)? Look for a sensor named something like `sensor.p1_power` or `sensor.net_power`.\n\n![]({diagram_url})",
+        "data": {
+          "use_separate_import_export": "Utiliser des capteurs import/export séparés",
+          "grid_sensor": "Capteur de puissance nette (W ou kW)",
+          "import_power_sensor": "Capteur import / consommation (W ou kW)",
+          "export_power_sensor": "Capteur export / injection (W ou kW)",
+          "mains_voltage": "Fallback mains voltage (V)",
+          "power_sensor_l1_export": "L1 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l2_export": "L2 Einspeisung Sensor (W) — DSMR5",
+          "power_sensor_l3_export": "L3 Einspeisung Sensor (W) — DSMR5",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "use_separate_import_export": "⚙️ Use separate sensors if your meter measures import and export separately (e.g. DSMR5)",
+          "grid_sensor": "🔌 Single bidirectional sensor (positive = import, negative = export)",
+          "import_power_sensor": "🔌 Sensor for grid import power",
+          "export_power_sensor": "Sensor for grid export / feed-in power",
+          "mains_voltage": "─────────── Grid voltage ───────────",
+          "power_sensor_l1_export": "Einspeisung pro Phase L1 (nur DSMR5 / bidirektionaler Zähler). Leer lassen wenn nicht separat gemessen.",
+          "power_sensor_l2_export": "Einspeisung pro Phase L2.",
+          "power_sensor_l3_export": "Einspeisung pro Phase L3."
+        },
+        "placeholders": {
+          "detected": {
+            "description": "Aantal automatisch gevonden sensoren",
+            "example": "detected"
+          },
+          "diagram_url": {
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          },
+          "mains_voltage": {
+            "example": "mains_voltage"
+          }
+        }
+      },
+      "solar_ev": {
+        "title": "🌞 Solar & EV",
+        "description": "Connect your solar inverter, battery and EV charger. All fields are optional.",
+        "data": {
+          "solar_sensor": "Solar inverter power sensor (W or kW)",
+          "battery_sensor": "Capteur de puissance batterie/stockage (W ou kW)",
+          "ev_charger_entity": "EV charger setpoint entity (number)",
+          "negative_price_threshold": "Negative price threshold (EUR/kWh)",
+          "gas_sensor": "Capteur compteur de gaz (optionnel)",
+          "gas_price_fixed": "Prix du gaz par m³ (valeur de secours)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "solar_sensor": "☀️ Total PV power sensor (use sum sensor if you have multiple inverters)",
+          "battery_sensor": "─────────── Storage ───────────",
+          "ev_charger_entity": "─────────── EV Charging ───────────",
+          "negative_price_threshold": "Price level below which solar curtailment activates. Default: 0.00 EUR/kWh.",
+          "gas_sensor": "Link a gas meter for gas consumption analysis and heat pump COP.",
+          "gas_price_fixed": "Fixed gas price in €/m³ if no live price sensor is available."
+        }
+      },
+      "inverter_count": {
+        "title": "☀️ Combien d'onduleurs ?",
+        "description": "Select the number of PV inverters in your installation. Select **0** to skip inverter management.\n\nCloudEMS will self-learn azimuth, tilt and peak power from your production history.\n\n📖 [Multi-inverter docs]({docs_url})",
+        "data": {
+          "inverter_count": "Nombre d'onduleurs (0–9)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "placeholders": {
+          "docs_url": {
+            "description": "URL van de documentatie",
+            "example": "docs_url"
+          }
+        }
+      },
+      "inverter_detail": {
+        "title": "☀️ Inverter {inverter_num} of {total}",
+        "description": "Configure inverter **{inverter_num}**.\n\n**Power sensor:** The sensor measuring instantaneous PV output in W or kW. Usually found in your inverter integration (SolarEdge, Enphase, Solis, Huawei, etc.).\n\n**Azimuth and tilt (optional but recommended):**\n- Azimuth: panel direction. 0° = North, 90° = East, **180° = South**, 270° = West\n- Tilt: angle from horizontal. 0° = flat roof, **30–35°** = typical pitched roof, 90° = vertical\n\n💡 **{azimuth_tip}** — **{tilt_tip}**\n\nLeave azimuth and tilt empty if unknown — CloudEMS will learn them automatically.\n\n![]({diagram_url})",
+        "data": {
+          "inv_sensor": "Power sensor (W or kW)",
+          "inv_control": "Entité de contrôle — interrupteur ou variateur (optionnel)",
+          "inv_label": "Name (e.g. 'Roof South')",
+          "inv_min_pct": "Puissance minimale lors de l'écrêtage (%)",
+          "inv_azimuth": "Azimuth (°) — optional, leave blank to self-learn",
+          "inv_tilt": "Tilt angle (°) — optional, leave blank to self-learn",
+          "inv_rated_power": "Rated inverter power (W) — optional, for accurate clipping detection",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "inv_sensor": "🔌 Connect the power sensor of this inverter (W or kW)",
+          "inv_label": "─────────── Identification ───────────",
+          "inv_rated_power": "Peak rated power in Wp — leave 0 to let CloudEMS learn this automatically",
+          "inv_azimuth": "─────────── Orientation (leave blank to self-learn) ───────────",
+          "inv_tilt": "Tilt angle: 0 = flat roof · 30 = typical pitch · 90 = vertical",
+          "inv_min_pct": "─────────── Curtailment ───────────",
+          "inv_control": "Connect a switch or number entity to limit inverter output power"
+        },
+        "placeholders": {
+          "azimuth_tip": {
+            "description": "Tip voor azimut-instelling",
+            "example": "azimuth_tip"
+          },
+          "diagram_url": {
+            "description": "URL van het diagram",
+            "example": "diagram_url"
+          },
+          "inverter_num": {
+            "description": "Omvormer volgnummer",
+            "example": "inverter_num"
+          },
+          "tilt_tip": {
+            "description": "Tip voor hellingshoek-instelling",
+            "example": "tilt_tip"
+          }
+        }
+      },
+      "features": {
+        "title": "🚀 Fonctionnalités",
+        "description": "Enable the features you need. You can change these at any time via Settings → Integrations → CloudEMS → Configure.",
+        "data": {
+          "dynamic_loading": "Chargement dynamique — charger le VE pendant les heures EPEX les moins chères",
+          "dynamic_load_price_threshold": "Seuil de prix bas (EUR/kWh)",
+          "cost_tracking_enabled": "Suivi des coûts d'énergie",
+          "phase_balance_enabled": "Équilibrage de phase (3 phases uniquement)",
+          "phase_balance_threshold_a": "Max phase imbalance (A)",
+          "peak_shaving_enabled": "Peak shaving — stay under monthly peak demand limit",
+          "battery_scheduler_enabled": "Activer la planification batterie selon les prix",
+          "congestion_enabled": "Activer la gestion de congestion réseau",
+          "battery_degradation_enabled": "Suivre la dégradation de la batterie",
+          "price_alert_high_eur_kwh": "Price alert high tariff (€/kWh)",
+          "nilm_min_confidence": "Confiance minimale NILM (%)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "dynamic_loading": "Increase EV charging current during the cheapest EPEX hours and reduce it during expensive hours.",
+          "dynamic_load_price_threshold": "Price at or below which an hour is considered 'cheap' for EV charging.",
+          "cost_tracking_enabled": "Track daily, monthly and yearly energy costs using live EPEX prices.",
+          "phase_balance_enabled": "Automatically redistribute loads to keep phase imbalance within the threshold.",
+          "phase_balance_threshold_a": "Maximum allowed current difference between phases before rebalancing is triggered (A).",
+          "peak_shaving_enabled": "Limit the monthly peak demand by switching off sheddable loads when demand exceeds the limit. Relevant for capacity-tariff countries (BE, FR).",
+          "price_alert_high_eur_kwh": "Send an alert when the EPEX price exceeds this value. Default 0.30 €/kWh.",
+          "nilm_min_confidence": "Devices with lower confidence are hidden in the dashboard. Default 0.65."
+        }
+      },
+      "peak_config": {
+        "title": "📊 Peak shaving settings",
+        "description": "Configure the peak demand limit and which loads CloudEMS may switch off to stay under it.",
+        "data": {
+          "peak_shaving_limit_w": "Peak demand limit (W)",
+          "peak_shaving_assets": "Sheddable loads (entities to switch off during peak)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "peak_shaving_limit_w": "Maximum allowed grid import power in Watt. When exceeded, CloudEMS will switch off sheddable loads.",
+          "peak_shaving_assets": "Select switches, lights, or other controllable entities that may be turned off to reduce peak demand."
+        }
+      },
+      "ai_config": {
+        "title": "🤖 IA & NILM",
+        "description": "CloudEMS can identify appliances from your power data (NILM — Non-Intrusive Load Monitoring).\n\n**Priority:** Built-in pattern matching → Ollama (local) → Cloud AI\n\n**None:** Pattern matching only, no external calls.\n**Ollama:** Local LLM on your own hardware — privacy-first.\n**CloudEMS / OpenAI / Anthropic:** Cloud AI for highest accuracy.\n\n🔑 [Get a CloudEMS API key]({premium_url})",
+        "data": {
+          "ai_provider": "AI provider for NILM",
+          "cloud_api_key": "API key (required for CloudEMS, OpenAI and Anthropic)",
+          "nilm_min_confidence": "Minimum confidence to accept a device detection (0.30–0.99)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "ai_provider": "Select which AI backend CloudEMS uses to identify appliances. Ollama and built-in are local; cloud options require an API key.",
+          "cloud_api_key": "Enter your API key for the selected cloud provider. Leave blank when using None or Ollama.",
+          "nilm_min_confidence": "Detections below this confidence are ignored. Lower = more results but more false positives. Default: 0.65."
+        },
+        "placeholders": {
+          "premium_url": {
+            "description": "URL van de premium pagina",
+            "example": "premium_url"
+          }
+        }
+      },
+      "ollama_config": {
+        "title": "🤖 Paramètres Ollama",
+        "description": "Configure the Ollama server that CloudEMS will use for local AI inference.",
+        "data": {
+          "ollama_host": "Ollama host (e.g. localhost or 192.168.1.x)",
+          "ollama_port": "Ollama port (default 11434)",
+          "ollama_model": "Ollama model (e.g. llama3, mistral, phi3)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "ollama_host": "Hostname or IP address of your Ollama instance.",
+          "ollama_port": "TCP port Ollama listens on. Default is 11434.",
+          "ollama_model": "Name of the Ollama model to use. Recommended: llama3, mistral or phi3 (smallest)."
+        }
+      },
+      "advanced": {
+        "title": "📡 P1 smart meter",
+        "description": "Optionally connect a P1/DSMR smart meter directly via TCP. Most users already have P1 data via the DSMR integration — only enable this if you want a direct TCP connection.",
+        "data": {
+          "p1_enabled": "Enable direct P1 TCP connection",
+          "influxdb_url": "URL InfluxDB (optionnel)",
+          "influxdb_token": "Token API InfluxDB",
+          "influxdb_org": "Organisation InfluxDB",
+          "influxdb_bucket": "Bucket InfluxDB (défaut: cloudems)",
+          "cloud_cover_sensor": "Capteur couverture nuageuse (%, optionnel)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "p1_config": {
+        "title": "📡 P1 connection settings",
+        "data": {
+          "p1_host": "P1 gateway IP address",
+          "p1_port": "P1 gateway TCP port",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "_skip": "Overslaan"
+        },
+        "data_description": {
+          "p1_host": "IP address of your P1 gateway (e.g. HomeWizard P1, DSMR-reader).",
+          "p1_port": "TCP port of the P1 gateway. Default is 8088."
+        },
+        "description": "\n\n![]({diagram_url})",
+        "placeholders": {
+          "diagram_url": {
+            "description": "URL van het diagram"
+          }
+        }
+      },
+      "battery_count": {
+        "title": "🔋 Batteries — Nombre",
+        "description": "How many battery systems do you want to configure?\n\nEach battery is configured individually with a power sensor, SoC and capacity.",
+        "data": {
+          "battery_count": "Number of batteries",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "battery_detail": {
+        "title": "🔋 Battery {battery_num} of {total}",
+        "description": "Configure battery {battery_num}.",
+        "data": {
+          "bat_power_sensor": "Power sensor (W, + = charging, - = discharging)",
+          "bat_soc_sensor": "State of Charge sensor (%) — optional",
+          "bat_capacity_kwh": "Capacity (kWh)",
+          "bat_max_charge_w": "Max charge power (W)",
+          "bat_max_discharge_w": "Max discharge power (W)",
+          "bat_charge_entity": "Charge setpoint entity — optional",
+          "bat_discharge_entity": "Discharge setpoint entity — optional",
+          "bat_label": "Name (e.g. Home Battery)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "placeholders": {
+          "battery_num": {
+            "description": "Batterij volgnummer",
+            "example": "battery_num"
+          }
+        }
+      },
+      "shutter_count": {
+        "title": "🪟 Volets roulants — Nombre",
+        "description": "Combien de volets voulez-vous connecter?\n\n{overkiz_found}",
+        "data": {
+          "shutter_count": "Nombre de volets",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
+        }
+      },
+      "shutter_detail": {
+        "title": "🪟 Volet {shutter_num} sur {total}",
+        "description": "Configurer le volet {shutter_num} sur {total}.{area_hint}",
+        "data": {
+          "shutter_entity": "Entité cover (cover.xxx) *",
+          "shutter_label": "Nom (ex. 'Salon gauche')",
+          "shutter_group": "Nom du groupe (optionnel, ex. 'Salon')",
+          "shutter_auto_thermal": "Fermer automatiquement en cas de surchauffe",
+          "shutter_auto_solar_gain": "Ouvrir automatiquement pour le gain solaire",
+          "shutter_auto_overheat": "Prévenir la surchauffe (priorité)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "shutter_temp_sensor": "Temperatuursensor ruimte",
+          "shutter_night_close": "Sluit 's nachts automatisch",
+          "shutter_morning_open": "Open 's ochtends automatisch",
+          "shutter_default_setpoint": "Standaard positie (%)"
+        }
+      },
+      "prices": {
+        "description": "Configure energy tax and supplier markup for accurate cost calculations.",
+        "data": {
+          "price_include_tax": "Inclure la taxe sur l'énergie",
+          "price_include_btw": "Inclure la TVA (21%)",
+          "selected_supplier": "Supplier (for default markup)",
+          "supplier_markup": "Marge manuelle (€/kWh)",
+          "energy_prices_country": "Pays (pour les options fournisseur)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "title": "💶 Prices & Tax"
+      },
+      "mail": {
+        "title": "📧 E-mail reports (optional)",
+        "description": "Configure e-mail to automatically receive monthly or weekly energy reports as PDF.\n\nLeave empty to skip.",
+        "data": {
+          "mail_enabled": "Enable e-mail reports",
+          "mail_host": "SMTP server (e.g. smtp.gmail.com)",
+          "mail_port": "Port (usually 587)",
+          "mail_use_tls": "Use STARTTLS",
+          "mail_username": "Username / e-mail address",
+          "mail_password": "Password or app password",
+          "mail_from": "Sender (leave empty = username)",
+          "mail_to": "Recipient(s) — comma-separated",
+          "mail_monthly_report": "Send monthly PDF report",
+          "mail_weekly_report": "Send weekly summary",
+          "mail_weekly_summary": "Wekelijkse samenvatting versturen",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "climate": {
+        "title": "🌡️ Klimaat & EPEX-sturing",
+        "description": "{info}",
+        "data": {
+          "climate_mode": "Klimaatmodus",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "climate_boiler": {
+        "title": "🏠 Zone Control — CV-ketel",
+        "description": "Configureer de CV-ketel en zone-instellingen.",
+        "data": {
+          "cv_boiler_entity": "CV-ketel schakelaar / thermostaat",
+          "cv_min_zones": "Min. actieve zones voor CV aan",
+          "cv_min_on_min": "Min. aan-tijd (min)",
+          "cv_min_off_min": "Min. uit-tijd (min)",
+          "cv_summer_cutoff_c": "Zomerstop buitentemperatuur (°C)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "climate_zones": {
+        "title": "🏠 Zone Control — Ruimtes",
+        "description": "{discovery}",
+        "data": {
+          "climate_zones_enabled": "Actieve ruimtes",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "boiler_groups": {
+        "title": "🚿 Warm Water Cascade",
+        "description": "**Avez-vous un chauffe-eau, un boiler électrique ou un ballon tampon?**\n\nActivez ceci pour que CloudEMS le contrôle en fonction du surplus PV, des heures EPEX bon marché et de la congestion réseau.\n\n**Pas de chauffe-eau?** ➜ Laissez le commutateur **DÉSACTIVÉ** et cliquez sur Suivant — cette étape est complètement ignorée.\n\nVous connectez des entités HA existantes: switch, climate ou water_heater.",
+        "data": {
+          "boiler_groups_enabled": "Warm water cascade activeren",
+          "boiler_group_name": "Naam van de groep",
+          "boiler_group_mode": "Cascade modus",
+          "boiler_group_count": "Aantal boilers in deze groep",
+          "group_name": "Group name",
+          "group_mode": "Operating mode",
+          "unit_count": "Number of boilers in group",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "boiler_unit": {
+        "title": "🚿 Boiler {boiler_num} van {total}",
+        "description": "Configureer de entiteit en instellingen voor deze boiler.",
+        "data": {
+          "unit_entity": "Boiler entiteit (switch / climate / water_heater / number)",
+          "unit_temp_sensor": "Temperatuursensor (optioneel)",
+          "unit_label": "Naam van deze boiler",
+          "unit_setpoint": "Doeltemperatuur (°C)",
+          "unit_power_w": "Vermogen (W)",
+          "unit_priority": "Prioriteit (laag getal = eerst)",
+          "entity_id": "Switch entity (switch.*)",
+          "temp_sensor": "Temperature sensor",
+          "label": "Label (display name)",
+          "setpoint_c": "Setpoint (°C)",
+          "min_temp_c": "Minimum temperature (°C)",
+          "comfort_floor_c": "Comfort threshold (°C)",
+          "power_w": "Power (W)",
+          "priority": "Priority (1=high)",
+          "min_on_minutes": "Min. on-time (min)",
+          "min_off_minutes": "Min. off-time (min)",
+          "control_mode": "Control mode",
+          "preset_on": "Preset when ACTIVE (e.g. boost)",
+          "preset_off": "Preset when INACTIVE (e.g. green)",
+          "dimmer_on_pct": "Dimmer level ON (%)",
+          "dimmer_off_pct": "Dimmer level OFF (%)",
+          "energy_sensor": "Power sensor (optional — CloudEMS learns wattage from this)",
+          "bu_entity": "Entité chauffe-eau (water_heater / switch / climate)",
+          "bu_temp_sensor": "Capteur de température (optionnel)",
+          "bu_energy_sensor": "Capteur de puissance (optionnel)",
+          "bu_label": "Nom de ce chauffe-eau",
+          "bu_brand": "Marque / modèle",
+          "bu_boiler_type": "Type de chauffe-eau",
+          "boiler_type": "Type de chauffe-eau",
+          "bu_control_mode": "Mode de commande",
+          "bu_setpoint": "Température cible — usage normal (°C)",
+          "bu_surplus_setpoint": "Consigne lors du surplus PV / batterie pleine (°C)",
+          "bu_max_setpoint_boost": "Limite supérieure absolue de la consigne (°C)",
+          "bu_preset_on": "Nom du preset MARCHE (ex. BOOST)",
+          "bu_preset_off": "Nom du preset ARRÊT (ex. GREEN)",
+          "bu_dimmer_on_pct": "Variateur marche (%)",
+          "bu_dimmer_off_pct": "Variateur arrêt (%)",
+          "max_setpoint_entity": "Entité consigne maximale (ex. number.ariston_max_setpoint_temperature)",
+          "max_setpoint_boost_c": "Consigne max. lors du surplus PV / batterie pleine (°C)",
+          "tank_liters": "Volume du ballon (L) — 0 = apprentissage auto",
+          "cheap_ramp_max_c": "Consigne max. lors d'électricité bon marché / rampe (°C)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "setpoint_c": "Normal setpoint. During PV surplus, the maximum setpoint is used automatically to store as much solar energy as possible.",
+          "energy_sensor": "CloudEMS learns the wattage automatically from this sensor. Without a sensor, 2500 W is assumed as default.",
+          "max_setpoint_entity": "Optionnel: entité number qui définit le maximum matériel avant chaque changement de température (requis pour Ariston Lydos Hybrid)."
+        }
+      },
+      "diagnostics": {
+        "title": "Diagnostics et notifications",
+        "description": "Configure e-mail to automatically receive monthly or weekly energy reports as PDF.\n\nLeave empty to skip.",
+        "data": {
+          "github_log_token": "Jeton d'accès personnel GitHub (optionnel)",
+          "notification_service": "Nom du service de notification HA (ex. mobile_app_nom)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "github_log_token": "Token for automatic upload of anonymized diagnostic reports to GitHub. Create at github.com/settings/tokens with public_repo scope.",
+          "notification_service": "Name of your HA mobile notify service for Guardian push notifications."
+        }
+      },
+      "ha_energy_import": {
+        "title": "Capteurs trouvés dans le tableau de bord Énergie",
+        "description": "CloudEMS found **{count}** sensor(s) in your HA Energy dashboard and pre-filled them:\n\n{found}\n\nCheck whether the sensors are correct and adjust where needed. Click **Next** to continue — empty fields will be skipped, found values will be kept.",
+        "data": {
+          "grid_sensor": "Capteur de puissance réseau (W)",
+          "import_power_sensor": "Capteur d'import (W consommation)",
+          "export_power_sensor": "Capteur d'export (W production)",
+          "solar_sensor": "Capteur de puissance PV (W)",
+          "battery_sensor": "Capteur de puissance batterie (W)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "grid_sensor": "Single net power sensor: positive = import, negative = export.",
+          "import_power_sensor": "Power consumed from the grid (always positive).",
+          "export_power_sensor": "Power exported to the grid (always positive).",
+          "solar_sensor": "Instantaneous PV power from your inverter.",
+          "battery_sensor": "Positive = charging, negative = discharging."
+        },
+        "placeholders": {
+          "count": {
+            "description": "Aantal gevonden sensoren"
+          },
+          "found": {
+            "description": "Lijst van gevonden sensoren"
+          }
+        }
+      },
+      "managed_battery": {
+        "title": "Batterie gérée détectée",
+        "description": "CloudEMS a trouvé {provider_count} intégration(s) de batterie gérée par fournisseur : **{detected_providers}**.\n\nCes batteries sont déjà contrôlées par le fournisseur. CloudEMS peut compléter le contrôle — opt-in uniquement.",
+        "data": {
+          "zonneplan_enabled": "Activer le contrôle Zonneplan Nexus",
+          "zonneplan_min_soc": "SoC min. décharge (%)",
+          "zonneplan_max_soc": "SoC max. charge (%)",
+          "zonneplan_charge_w": "Puissance de charge par défaut (W)",
+          "zonneplan_discharge_w": "Puissance de décharge par défaut (W)",
+          "zonneplan_ev_sensor": "Capteur borne EV (bloqueur EV)",
+          "zonneplan_ev_block_w": "Seuil bloqueur EV (W, 0 = désactivé)",
+          "zonneplan_house_sensor": "Capteur consommation maison (anti-pompage)",
+          "zonneplan_min_house_load_w": "Consommation min. maison pour décharge (W)",
+          "zonneplan_soc_reserve_high": "Réserve SoC lors de plusieurs heures HIGH (%)",
+          "zonneplan_auto_forecast": "Piloter automatiquement par groupe tarifaire",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "zonneplan_enabled": "⚠️ {zonneplan_warning}\n\n{zonneplan_description}",
+          "zonneplan_ev_sensor": "Capteur pour la puissance de la borne EV. Laisser vide pour désactiver le bloqueur EV.",
+          "zonneplan_ev_block_w": "Si la borne EV consomme plus que cette valeur, la décharge est bloquée. 0 = bloqueur EV désactivé.",
+          "zonneplan_house_sensor": "Capteur pour la consommation totale de la maison. Laisser vide pour désactiver l'anti-pompage.",
+          "zonneplan_min_house_load_w": "La décharge est bloquée si la consommation de la maison est inférieure à cette valeur. Évite le pompage circulaire (charge → décharge sans utilisation réelle).",
+          "zonneplan_min_soc": "La décharge s'arrête quand le SoC atteint ce pourcentage. Protège la durée de vie de la batterie.",
+          "zonneplan_max_soc": "La charge s'arrête quand le SoC atteint ce pourcentage.",
+          "zonneplan_soc_reserve_high": "SoC minimal conservé lorsque plusieurs heures HIGH sont encore dans la prévision. Évite que la batterie se décharge trop tôt."
+        }
+      },
+      "boiler_brand": {
+        "title": "🏷️ Marque / type chauffe-eau {idx} sur {total}",
+        "description": "Sélectionnez la marque du chauffe-eau. CloudEMS remplit automatiquement le mode de commande, les points de consigne et les limites de sécurité.",
+        "data": {
+          "brand": "Marque / type",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "dsmr_source": {
+        "title": "📡 Source compteur",
+        "description": "Comment CloudEMS doit-il lire les données du compteur intelligent?",
+        "data": {
+          "dsmr_source": "Source compteur",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        },
+        "data_description": {
+          "dsmr_source": "Choisissez comment CloudEMS récupère les données du compteur réseau. Utilisez l'intégration DSMR/HomeWizard si vous l'avez déjà configurée."
+        }
+      },
+      "price_provider": {
+        "title": "⚡ Source de prix — connexion directe fournisseur",
+        "description": "{info}",
+        "data": {
+          "price_provider": "Source de prix",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "price_provider_credentials": {
+        "title": "🔑 Identifiants — {provider_label}",
+        "description": "Saisissez vos identifiants pour {provider_label}. CloudEMS les stocke en toute sécurité et ne les utilise que pour récupérer les prix.",
+        "data": {
+          "username": "Adresse e-mail",
+          "password": "Mot de passe",
+          "api_key": "Clé API",
+          "access_token": "Jeton API",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "climate_epex_count": {
+        "title": "❄️ Airco / WP EPEX — Aantal apparaten",
+        "description": "Huidige apparaten: {current}\n\nHoeveel airco's of warmtepompen wil je configureren?",
+        "data": {
+          "ce_count": "Aantal apparaten",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "climate_epex_device": {
+        "title": "❄️ Airco / WP EPEX — Apparaat {device_num} van {total}",
+        "description": "💡 {tip}",
+        "data": {
+          "ce_entity": "Klimaatentiteit (climate.*)",
+          "ce_label": "Naam / label",
+          "ce_type": "Type apparaat",
+          "ce_power": "Vermogens­sensor (optioneel)",
+          "ce_offset": "Max. temperatuuroffset (°C)",
+          "back_to_menu": "← Retour au menu",
+          "budget_elec_eur_month": "Budget mensuel électricité (€)",
+          "budget_elec_kwh_month": "Budget mensuel électricité (kWh)",
+          "budget_enabled": "Activer le budget énergétique",
+          "budget_gas_m3_month": "Budget mensuel gaz (m³)",
+          "nilm_load_shifting_enabled": "Activer le délestage de charge",
+          "nilm_shift_deadlines_raw": "Échéances (JSON)",
+          "nilm_shift_exclude": "Exclure des appareils",
+          "nilm_shift_include": "Inclure des appareils",
+          "nilm_shift_max_defer_hours": "Report max. (heures)",
+          "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
+          "pool_filter_power_entity": "Capteur de puissance pompe filtre",
+          "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+        }
+      },
+      "ev_opts": {
+        "title": "EV Laadpalen",
+        "description": "Koppel je EV laadpaal(en) aan CloudEMS voor slim laden op goedkope EPEX-uren en zonnestroom surplus.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ev_charger_count_sel": "Aantal EV laadpalen"
+        },
+        "data_description": {
+          "ev_charger_count_sel": "Hoeveel EV laadpalen wil je configureren? Per laadpaal stel je daarna de entiteit en het label in."
+        }
+      },
+      "ebike_count": {
+        "title": "E-bike & Micro-mobiliteit",
+        "description": "E-bikes en scooters worden automatisch herkend via NILM (40–700W laadpatroon). Voeg optioneel een vermogenssensor toe per voertuig voor nauwkeuriger sessietracking.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ebike_count_sel": "Aantal voertuigen"
+        },
+        "data_description": {
+          "ebike_count_sel": "Hoeveel e-bikes of scooters wil je configureren? Kies 0 als je alleen automatische NILM-detectie wilt."
+        }
+      },
+      "ebike_detail": {
+        "title": "Voertuig {ebike_num} van {total}",
+        "description": "Koppel een vermogenssensor en geef een naam op.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ebike_entity": "Vermogenssensor (optioneel)",
+          "ebike_label": "Label voertuig"
+        }
+      },
+      "multisplit_count_opts": {
+        "title": "Airco / Multisplit",
+        "description": "Een multisplit systeem heeft één buitenunit en meerdere binnenunits. Elke binnenunit is een aparte kamer. CloudEMS verdeelt het totale verbruik van de buitenunit over de actieve binnenunits.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "multisplit_count": "Aantal buitenunits"
+        },
+        "data_description": {
+          "multisplit_count": "Hoeveel aparte multisplit buitenunits heb je? Kies 0 om multisplit uit te schakelen. Per buitenunit stel je daarna de binnenunits in."
+        }
+      },
+      "reconfigure": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Reconfigure"
+      },
+      "menu_back": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Menu Back"
+      },
+      "multisplit_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "new_label": "Label buitenunit",
+          "new_brand": "Merk",
+          "new_power_sensor": "Vermogenssensor buitenunit (optioneel)",
+          "new_freq_sensor": "Compressorfrequentie sensor (optioneel)",
+          "action": "Action"
+        },
+        "title": "Multisplit"
+      },
+      "multisplit_indoor_count_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "indoor_count": "Nombre d'unités intérieures"
+        },
+        "title": "Multisplit Indoor Count"
+      },
+      "multisplit_indoor_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu",
+          "unit_entity": "Binnenunit entiteit (climate.*)",
+          "unit_label": "Label binnenunit",
+          "unit_area": "Ruimte / kamer",
+          "unit_freq_sensor": "Frequentiesensor (optioneel)",
+          "action": "Action"
+        },
+        "title": "Multisplit Indoor"
+      },
+      "solar_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Solar"
+      },
+      "gas_meter_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Gas Meter"
+      },
+      "warmtepomp_opts": {
+        "data": {
+          "back_to_menu": "← Retour au menu"
+        },
+        "title": "Warmtepomp"
+      },
+      "budget_opts": {
+        "data": {
+          "budget_enabled": "Activer le budget",
+          "budget_elec_eur_month": "Budget électricité (€/mois)",
+          "budget_elec_kwh_month": "Budget électricité (kWh/mois)",
+          "budget_gas_m3_month": "Budget gaz (m³/mois)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Budget"
+      },
+      "nilm_shift_opts": {
+        "data": {
+          "nilm_load_shifting_enabled": "Load shifting inschakelen",
+          "nilm_shift_price_threshold": "Prijsdrempel verschuiving (€/kWh)",
+          "nilm_shift_max_defer_hours": "Max. uitstel (uur)",
+          "nilm_shift_include": "Apparaten insluten",
+          "nilm_shift_exclude": "Apparaten uitsluiten",
+          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
+          "back_to_menu": "← Terug naar menu"
+        },
+        "title": "Nilm Shift"
+      },
+      "phase_sensors_l1": {
+        "title": "Fase L1 sensoren",
+        "data": {
+          "phase_sensors_L1": "L1 Stroomsensor (A)",
+          "voltage_sensor_l1": "L1 Spanningssensor (V)",
+          "power_sensor_l1": "L1 Vermogenssensor (W)",
+          "power_sensor_l1_export": "L1 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "phase_sensors_l2": {
+        "title": "Fase L2 sensoren",
+        "data": {
+          "phase_sensors_L2": "L2 Stroomsensor (A)",
+          "voltage_sensor_l2": "L2 Spanningssensor (V)",
+          "power_sensor_l2": "L2 Vermogenssensor (W)",
+          "power_sensor_l2_export": "L2 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "phase_sensors_l3": {
+        "title": "Fase L3 sensoren",
+        "data": {
+          "phase_sensors_L3": "L3 Stroomsensor (A)",
+          "voltage_sensor_l3": "L3 Spanningssensor (V)",
+          "power_sensor_l3": "L3 Vermogenssensor (W)",
+          "power_sensor_l3_export": "L3 Export vermogenssensor (W)",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "esphome_sensors": {
+        "title": "ESPHome sensoren",
+        "data": {
+          "esphome_entity": "ESPHome sensor entiteit",
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "onboarding_redirect": {
+        "title": "🚀 Interactieve wizard",
+        "description": "Open de interactieve setup wizard in je browser om sensoren en apparaten te koppelen — geen handmatig typen, alles wordt live uit jouw HA-installatie opgehaald.\n\n**Wizard-URL:**\n```\n{onboarding_url}\n```\n\nKlik op **Volgende** om de basisinstallatie alvast af te ronden. Je kunt daarna via de wizard alle details invullen en opslaan.",
+        "data": {}
+      },
+      "v2h_opts": {
+        "title": "Vehicle-to-Home (V2H)",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "v2h_enabled": "V2H inschakelen",
+          "v2h_charger_entity": "Bidirectionele laadpaal entiteit",
+          "v2h_car_soc_entity": "Auto batterij SOC sensor",
+          "v2h_min_soc_pct": "Minimum auto SOC bewaren (%)",
+          "v2h_price_threshold": "Prijsdrempel voor ontladen (€/kWh)",
+          "v2h_max_discharge_w": "Max ontlaadvermogen (W)"
+        },
+        "description": "V2H gebruikt je auto als thuisbatterij bij dure EPEX-uren. Vereist een bidirectionele laadpaal zoals de Wallbox Quasar 2.",
+        "data_description": {
+          "v2h_enabled": "Schakel in als je een bidirectionele laadpaal hebt (Wallbox Quasar 2, OCPP V2H).",
+          "v2h_charger_entity": "De entiteit van je laadpaal. CloudEMS zoekt automatisch naar bekende bidirectionele laadpalen.",
+          "v2h_car_soc_entity": "Sensor die de laadstand (%) van je auto aangeeft. Wordt gebruikt om te beslissen of ontladen veilig is.",
+          "v2h_min_soc_pct": "CloudEMS ontlaadt nooit onder dit percentage. Standaard 30% zodat je altijd genoeg hebt voor een rit. (aanbevolen: 20-30%)",
+          "v2h_price_threshold": "EPEX prijs waarboven CloudEMS begint te ontladen. Standaard €0.25/kWh. (aanbevolen: €0.20-0.30)",
+          "v2h_max_discharge_w": "Maximum ontlaadvermogen in Watt. 3700W = 1-fase 16A. 7400W = 2-fase 32A. Controleer de specs van je laadpaal."
+        }
+      },
+      "egauge_opts": {
+        "title": "eGauge Submeter",
+        "description": "eGauge is een nauwkeurige submeter voor elektriciteit. CloudEMS detecteert eGauge sensoren automatisch. De velden worden vooringevuld als eGauge gevonden is. Status: {detected}",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "egauge_enabled": "eGauge inschakelen",
+          "egauge_net_entity": "Net vermogen sensor (W)",
+          "egauge_l1_entity": "Fase L1 sensor (W)",
+          "egauge_l2_entity": "Fase L2 sensor (W)",
+          "egauge_l3_entity": "Fase L3 sensor (W)",
+          "egauge_solar_entity": "Zonnepanelen sensor (W)"
+        },
+        "data_description": {
+          "egauge_enabled": "Schakel in als je een eGauge meter hebt. CloudEMS gebruikt dan eGauge als alternatief voor P1/DSMR.",
+          "egauge_net_entity": "Sensor die het totale netverbruik meet in Watt. Positief = import, negatief = export.",
+          "egauge_l1_entity": "Sensor voor vermogen op fase L1 (Watt). Optioneel — voor fase-gestuurde piekschaving.",
+          "egauge_l2_entity": "Sensor voor vermogen op fase L2 (Watt). Optioneel.",
+          "egauge_l3_entity": "Sensor voor vermogen op fase L3 (Watt). Optioneel.",
+          "egauge_solar_entity": "Sensor voor PV-vermogen (Watt). Optioneel — als eGauge ook solar meet."
+        }
+      },
+      "ev_trip_opts": {
+        "title": "EV Ritplanning",
+        "description": "CloudEMS leest je agenda en laadt de auto precies genoeg voor de volgende rit op het goedkoopste EPEX-moment. Agenda-evenementen met trefwoorden zoals 'werk', 'kantoor', 'afspraak' worden herkend als rit.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "ev_trip_enabled": "Ritplanning inschakelen",
+          "ev_kwh_per_pct": "Batterijcapaciteit (kWh per % SOC)",
+          "ev_soc_entity": "Auto SOC sensor"
+        },
+        "data_description": {
+          "ev_trip_enabled": "Schakel in om agenda-gestuurde EV laadplanning te gebruiken. Vereist een HA calendar integratie.",
+          "ev_kwh_per_pct": "Batterijgrootte gedeeld door 100. Voorbeeld: 77 kWh batterij → 0.77. CloudEMS leert dit automatisch over tijd.",
+          "ev_soc_entity": "Sensor die de laadstand (%) van je EV aangeeft. Wordt automatisch gevonden als je EV in HA is."
+        }
       }
     },
     "abort": {

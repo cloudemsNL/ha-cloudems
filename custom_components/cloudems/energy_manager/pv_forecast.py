@@ -783,7 +783,11 @@ class PVForecast:
                     pp._peak_wp for pp in self._profiles.values() if pp._peak_wp and pp._peak_wp > 10
                 )
                 share = (p._peak_wp / total_peak_wp) if total_peak_wp > 10 else 1.0
-                forecast_w = round(max(0.0, fs_total_w * share), 1)
+                # v4.6.595: calib_factor OOK toepassen op Forecast.Solar layer 3.
+                # Forecast.Solar kent geen schaduw/horizon/systeemverliezen — de calib_factor
+                # corrigeert daarvoor op basis van historische werkelijke productie.
+                # Zonder deze correctie geeft morgen ~2.5x te hoge waarde (calib ~0.40).
+                forecast_w = round(max(0.0, fs_total_w * share * _calib), 1)
                 conf = 0.93  # Forecast.Solar: hoge betrouwbaarheid
 
             # Cloud cover correctie voor het huidige uur (live data van weather sensor/Ecowitt)
@@ -894,33 +898,28 @@ class PVForecast:
         """Sum forecast for all inverters for today in kWh.
 
         v4.6.493: dagtotaal = geproduceerde uren (0 t/m nowH-1) + forecast resterende uren
-        (nowH t/m 23). get_forecast() start al bij het huidige uur, dus produced_kwh mag
-        alleen de volledig afgesloten uren bevatten om double-counting te voorkomen.
+        (nowH t/m 23). get_forecast() start al bij het huidige uur, maar geeft 24 uur terug
+        die na middernacht morgen in lopen — alleen de uren t/m 23 meenemen.
         """
+        from homeassistant.util import dt as _dt_util
+        _now = _dt_util.now()
+        _now_h = _now.hour
+        _now_min = _now.minute
+        # Aantal resterende uren vandaag (inclusief huidig uur)
+        hours_left_today = 24 - _now_h
         remaining = 0.0
         for eid in self._profiles:
-            for hf in self.get_forecast(eid):
+            for i, hf in enumerate(self.get_forecast(eid)):
+                if i >= hours_left_today:
+                    break
                 remaining += hf.forecast_w / 1000.0
-        # produced_kwh bevat het huidige uur deels — trek de lopende uurforecast eraf
-        # zodat het huidige uur precies één keer meetelt (via forecast).
-        # Resultaat: dagtotaal = afgeronde uren werkelijk + prognose huidig+rest.
-        from homeassistant.util import dt as _dt_util
-        _now_min = _dt_util.now().minute
-        _hour_frac_done = _now_min / 60.0
-        # Huidig uur al deels geproduceerd — dat zit in produced_kwh maar ook in remaining
-        # We willen: produced_kwh (exclusief lopend uur) + remaining (inclusief lopend uur)
-        # Schatting geproduceerd in lopend uur = produced_kwh * hour_frac_done / 1.0
-        # Maar we weten niet welk deel van produced_kwh van het lopende uur is.
-        # Eenvoudigste correcte fix: current hour forecast aftrekken van produced_kwh
-        # zodat we niet dubbel tellen. We nemen het minimum om negatief te voorkomen.
+        # Huidig uur al deels geproduceerd — trek overlap af om dubbeltelling te voorkomen
         current_hour_forecast = 0.0
         for eid in self._profiles:
             fc_list = self.get_forecast(eid)
             if fc_list:
                 current_hour_forecast += fc_list[0].forecast_w / 1000.0
-        # Deel van het lopend uur al verstreken = _hour_frac_done
-        # produced_kwh bevat ~_hour_frac_done * current_hour_forecast van het lopende uur
-        # Trek dat af om dubbeltelling te voorkomen
+        _hour_frac_done = _now_min / 60.0
         overlap = min(produced_kwh, current_hour_forecast * _hour_frac_done)
         return round(max(0.0, produced_kwh - overlap) + remaining, 2)
 

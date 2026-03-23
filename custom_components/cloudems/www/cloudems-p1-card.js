@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS P1 Card  v1.0.0
+// CloudEMS P1 Card  v1.1.0
 
 const P1_VERSION = "1.0.0";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -92,7 +92,7 @@ class CloudemsP1Card extends HTMLElement {
 
   set hass(h) {
     this._hass = h;
-    const st  = h.states["sensor.cloudems_status"];
+    const st  = h.states["sensor.cloudems_p1_power"];
     const pr  = h.states["sensor.cloudems_price_current_hour"];
     const key = JSON.stringify([
       st?.attributes?.p1_data,
@@ -107,14 +107,20 @@ class CloudemsP1Card extends HTMLElement {
     const h = this._hass, c = this._cfg ?? {};
     if (!h) { sh.innerHTML=`<style>${CSS}</style><div class="card"><div class="empty">Laden…</div></div>`; return; }
 
-    const st    = h.states["sensor.cloudems_status"];
-    const p1    = st?.attributes?.p1_data ?? {};
-    const bal   = st?.attributes?.phase_balance ?? {};
+    const st    = h.states["sensor.cloudems_p1_power"];
+    const p1    = st?.attributes ?? {};
+    const bal   = h.states["sensor.cloudems_grid_phase_imbalance"]?.attributes ?? {};
     const pr    = h.states["sensor.cloudems_price_current_hour"];
     const price = pr ? parseFloat(pr.state) : null;
 
     if (!st || !p1.net_power_w) {
-      sh.innerHTML = `<style>${CSS}</style><div class="card"><div class="empty">Geen P1 data beschikbaar.<br>Koppel een P1/DSMR slimme meter via CloudEMS configuratie.</div></div>`;
+      const src = p1.source || '';
+      const msg = src === 'ha_entity'
+        ? 'P1 data actief via DSMR/HomeWizard integratie. Direct TCP niet geconfigureerd — dat is geen probleem.'
+        : src && src !== 'none'
+          ? `P1 bron: ${src} — data wordt geladen...`
+          : 'Geen P1 data beschikbaar.<br>Koppel een P1/DSMR slimme meter via CloudEMS configuratie.';
+      sh.innerHTML = `<style>${CSS}</style><div class="card"><div class="empty">${msg}</div></div>`;
       return;
     }
 

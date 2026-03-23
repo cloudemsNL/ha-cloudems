@@ -1,671 +1,522 @@
 /**
- * CloudEMS NILM Card — cloudems-nilm-card
- * Version: 1.0.0
- * Tabs: Actief nu | Beoordelen | Alle apparaten | Topologie | Diagnostiek
+ * CloudEMS NILM Card  v2.0.0
+ * Één overzicht — per kamer, per categorie, snelfilter, inline beoordelen
  */
+
+// ── Categorie → icoon + kleur ────────────────────────────────────────────────
+const CAT = {
+  verlichting:    { i:'💡', c:'#fde047' },
+  entertainment:  { i:'📺', c:'#a78bfa' },
+  koeling:        { i:'❄️', c:'#67e8f9' },
+  wasgoed:        { i:'🧺', c:'#38bdf8' },
+  koken:          { i:'🍳', c:'#fb923c' },
+  verwarming:     { i:'🔥', c:'#f87171' },
+  transport:      { i:'🚗', c:'#4ade80' },
+  computer:       { i:'💻', c:'#818cf8' },
+  gereedschap:    { i:'🔧', c:'#94a3b8' },
+  smart_plug:     { i:'🔌', c:'#34d399' },
+  boiler:         { i:'🛁', c:'#fb923c' },
+  overig:         { i:'⚡', c:'#6b7280' },
+};
+
+// Normaliseer device_type → categorie
+function devCat(type) {
+  const t = (type || '').toLowerCase();
+  if (/light|lamp|verlichting|led/.test(t))                  return 'verlichting';
+  if (/tv|television|media|audio|speaker|entertain/.test(t)) return 'entertainment';
+  if (/fridge|freezer|koeling|koel|vriezer/.test(t))         return 'koeling';
+  if (/washer|wash|dryer|wasmach|was|droog/.test(t))         return 'wasgoed';
+  if (/oven|micro|cook|kook|keuken|stove|grill/.test(t))     return 'koken';
+  if (/heat|verwar|boiler|cv|water_heat/.test(t))            return 'boiler';
+  if (/ev|car|vehicle|charge|laad|transport/.test(t))        return 'transport';
+  if (/pc|computer|laptop|monitor|printer|server/.test(t))   return 'computer';
+  if (/drill|zaag|tool|gereed/.test(t))                      return 'gereedschap';
+  if (/smart_plug|plug|stopcontact/.test(t))                 return 'smart_plug';
+  return 'overig';
+}
+
+// Confidence balk — 10 blokjes
+function confBar(pct, size = 10) {
+  const filled = Math.round((pct / 100) * size);
+  const col = pct >= 70 ? '#4ade80' : pct >= 45 ? '#fb923c' : '#f87171';
+  return `<span class="cbar">${Array.from({length: size}, (_, i) =>
+    `<span class="cb${i < filled ? ' on' : ''}" style="${i < filled ? `background:${col}` : ''}"></span>`
+  ).join('')}</span><span class="cpct" style="color:${col}">${Math.round(pct)}%</span>`;
+}
+
+const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── CSS ──────────────────────────────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+  :host{display:block}
+  *{box-sizing:border-box;margin:0;padding:0}
+  .card{background:#0e1520;border-radius:16px;border:1px solid rgba(255,255,255,0.06);font-family:'Syne',sans-serif;overflow:hidden}
+
+  /* ── Header ── */
+  .hdr{display:flex;align-items:center;gap:10px;padding:14px 18px 10px;border-bottom:1px solid rgba(255,255,255,0.06)}
+  .hdr-icon{font-size:20px}
+  .hdr-title{font-size:13px;font-weight:700;color:#f1f5f9;letter-spacing:.04em;text-transform:uppercase}
+  .hdr-sub{font-size:11px;color:#6b7280;margin-top:2px}
+  .hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+  .total-pill{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#fde047;background:rgba(253,224,71,0.08);border:1px solid rgba(253,224,71,0.2);border-radius:10px;padding:3px 10px}
+
+  /* ── Zoekbalk ── */
+  .search-row{display:flex;align-items:center;gap:8px;padding:8px 18px;border-bottom:1px solid rgba(255,255,255,0.05)}
+  .search-inp{flex:1;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:6px 10px;color:#fff;font-size:12px;outline:none;font-family:'Syne',sans-serif}
+  .search-inp:focus{border-color:rgba(96,165,250,0.4);background:rgba(96,165,250,0.06)}
+  .search-clr{font-size:14px;cursor:pointer;color:#4b5563;padding:2px 4px}
+  .search-count{font-size:10px;color:#374151;white-space:nowrap}
+
+  /* ── Filter tabs ── */
+  .filters{display:flex;gap:0;overflow-x:auto;padding:0 18px;border-bottom:1px solid rgba(255,255,255,0.05);scrollbar-width:none}
+  .filters::-webkit-scrollbar{display:none}
+  .ftab{padding:8px 12px;font-size:11px;font-weight:700;color:#4b5563;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;letter-spacing:.03em}
+  .ftab.active{color:#7dd3fc;border-bottom-color:#7dd3fc}
+  .ftab .badge{display:inline-block;background:rgba(248,113,113,0.2);color:#f87171;border-radius:8px;padding:0 5px;font-size:9px;margin-left:4px}
+
+  /* ── Beoordelen banner ── */
+  .review-banner{margin:12px 18px 0;border-radius:12px;overflow:hidden;background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.2)}
+  .rev-hdr{display:flex;align-items:center;gap:8px;padding:10px 14px 0}
+  .rev-hdr-title{font-size:12px;font-weight:700;color:#7dd3fc;flex:1}
+  .rev-count{font-size:10px;color:#4b5563}
+  .rev-device{padding:8px 14px 4px}
+  .rev-name{font-size:15px;font-weight:700;color:#f1f5f9;margin-bottom:4px}
+  .rev-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+  .rev-btns{display:flex;gap:8px;padding:0 0 12px;flex-wrap:wrap}
+  .rbtn{flex:1;min-width:90px;padding:8px 10px;border-radius:10px;border:1px solid;font-size:12px;font-weight:700;cursor:pointer;font-family:'Syne',sans-serif;letter-spacing:.02em;transition:opacity .15s}
+  .rbtn:active{opacity:.7}
+  .rbtn-yes{background:rgba(74,222,128,0.12);border-color:rgba(74,222,128,0.35);color:#4ade80}
+  .rbtn-no{background:rgba(248,113,113,0.10);border-color:rgba(248,113,113,0.3);color:#f87171}
+  .rbtn-skip{background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:#6b7280}
+  .rev-queue{padding:0 14px 10px;display:flex;gap:5px;flex-wrap:wrap}
+  .rev-q-chip{font-size:10px;padding:2px 8px;border-radius:8px;background:rgba(255,255,255,0.05);color:#4b5563;cursor:pointer}
+  .rev-q-chip.cur{background:rgba(96,165,250,0.15);color:#7dd3fc;border:1px solid rgba(96,165,250,0.25)}
+
+  /* ── Kamer sectie ── */
+  .room-sec{margin:10px 0 0}
+  .room-hdr{display:flex;align-items:center;gap:8px;padding:8px 18px 5px;cursor:pointer;user-select:none}
+  .room-hdr:hover .room-name{color:#e2e8f0}
+  .room-chevron{font-size:10px;color:#374151;transition:transform .2s;flex-shrink:0}
+  .room-chevron.open{transform:rotate(90deg)}
+  .room-name{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#4b5563;flex:1}
+  .room-stats{display:flex;gap:8px;align-items:center}
+  .room-pwr{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#fde047}
+  .room-cnt{font-size:10px;color:#374151}
+  .room-body{padding:0 18px 6px}
+
+  /* ── Apparaatrij ── */
+  .dev-row{display:grid;grid-template-columns:18px 1fr auto auto;gap:0 8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.03);align-items:center;cursor:default}
+  .dev-row:last-child{border-bottom:none}
+  .dev-dot{width:8px;height:8px;border-radius:50%;justify-self:center}
+  .dev-main{min-width:0}
+  .dev-name{font-size:12px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .dev-name:hover{color:#7dd3fc}
+  .dev-name.editing{outline:none;background:rgba(96,165,250,0.1);border:1px solid rgba(96,165,250,0.4);border-radius:4px;color:#fff;padding:1px 5px;font-family:'Syne',sans-serif;font-size:12px;font-weight:600;min-width:80px}
+  .dev-sub{display:flex;align-items:center;gap:5px;margin-top:2px;flex-wrap:wrap}
+  .dev-type{font-size:10px;color:#374151}
+  .dev-phase{font-size:9px;padding:1px 5px;border-radius:5px;font-weight:700;letter-spacing:.04em}
+  .dev-src{font-size:9px;color:#374151}
+  .tag-new{font-size:9px;padding:1px 6px;border-radius:5px;background:rgba(167,139,250,0.15);color:#a78bfa;border:1px solid rgba(167,139,250,0.3);font-weight:700}
+  .tag-plug{font-size:9px;padding:1px 6px;border-radius:5px;background:rgba(52,211,153,0.12);color:#34d399;font-weight:700}
+  .tag-pend{font-size:9px;padding:1px 6px;border-radius:5px;background:rgba(96,165,250,0.12);color:#60a5fa;font-weight:700}
+  .dev-conf{text-align:right;min-width:90px}
+  .dev-pwr{text-align:right;min-width:50px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700}
+
+  /* ── Confidence balk ── */
+  .cbar{display:inline-flex;gap:2px;vertical-align:middle}
+  .cb{width:5px;height:8px;border-radius:2px;background:rgba(255,255,255,0.07)}
+  .cb.on{opacity:1}
+  .cpct{font-size:10px;margin-left:5px;vertical-align:middle;font-family:'JetBrains Mono',monospace}
+
+  /* ── Onverklaard vermogen ── */
+  .unknown-row{display:flex;align-items:center;gap:8px;padding:8px 18px;margin:8px 18px;border-radius:8px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2)}
+  .unknown-icon{font-size:16px}
+  .unknown-text{flex:1;font-size:11px;color:#fbbf24}
+  .unknown-w{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#f59e0b}
+
+  /* ── Diagnostiek paneel ── */
+  .diag-toggle{display:flex;align-items:center;gap:6px;padding:10px 18px;cursor:pointer;border-top:1px solid rgba(255,255,255,0.05);font-size:11px;color:#374151}
+  .diag-toggle:hover{color:#6b7280}
+  .diag-body{padding:10px 18px 14px;border-top:1px solid rgba(255,255,255,0.04)}
+  .diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+  .diag-tile{background:rgba(255,255,255,0.03);border-radius:8px;padding:8px 10px}
+  .diag-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#374151;margin-bottom:3px}
+  .diag-val{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;color:#9ca3af}
+
+  /* ── Leeg ── */
+  .empty{padding:28px 18px;text-align:center;color:#374151;font-size:12px}
+
+  /* ── Stat strip ── */
+  .stat-strip{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid rgba(255,255,255,0.05)}
+  .stat-tile{padding:8px 4px;display:flex;flex-direction:column;align-items:center;gap:2px;border-right:1px solid rgba(255,255,255,0.05)}
+  .stat-tile:last-child{border-right:none}
+  .stat-lbl{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#374151;text-align:center}
+  .stat-val{font-size:14px;font-weight:800;font-family:'JetBrains Mono',monospace}
+  .c-green{color:#4ade80}.c-amber{color:#fb923c}.c-muted{color:#4b5563}.c-yellow{color:#fde047}.c-red{color:#f87171}.c-blue{color:#7dd3fc}
+`;
+
+// ── Hoofdkaart ────────────────────────────────────────────────────────────────
 class CloudEMSNilmCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass = null;
-    this._tab = 'actief';
-    this._search = '';
-    this._prev = '';
+    this._filter   = 'all';   // all | active | pending | cat:X | room:X
+    this._search   = '';
+    this._diagOpen = false;
+    this._openRooms= new Set(['']);   // alle kamers standaard open
+    this._revIdx   = 0;               // welke pending-device actief in review
+    this._prev     = '';
   }
 
-  setConfig(c) { this._config = c || {}; }
+  setConfig(c) { this._cfg = { title: 'NILM Apparaten', ...c }; }
 
   set hass(h) {
     this._hass = h;
-    const j = JSON.stringify([
+    const sig = [
       h.states['sensor.cloudems_nilm_devices']?.last_changed,
-      h.states['sensor.cloudems_nilm_running_devices']?.last_changed,
       h.states['sensor.cloudems_nilm_review_current']?.last_changed,
-      h.states['sensor.cloudems_nilm_topology']?.last_changed,
-      h.states['sensor.cloudems_nilm_groups']?.last_changed,
-    ]);
-    if (j !== this._prev) { this._prev = j; this._render(); }
+      this._filter, this._search, this._diagOpen,
+      JSON.stringify([...this._openRooms]),
+      this._revIdx,
+    ].join('|');
+    if (sig !== this._prev) { this._prev = sig; this._render(); }
   }
 
-  _s(e) { return this._hass?.states?.[e] || null; }
-  _a(e, k, d = null) { return this._s(e)?.attributes?.[k] ?? d; }
-  _v(e, d = 0) {
-    const s = this._s(e);
-    if (!s || s.state === 'unavailable' || s.state === 'unknown') return d;
-    return parseFloat(s.state) || d;
-  }
-
-  _callService(domain, service, data) {
-    this._hass.callService(domain, service, data);
-  }
+  _a(e, k, d = null) { return this._hass?.states?.[e]?.attributes?.[k] ?? d; }
+  _s(e)              { return this._hass?.states?.[e] || null; }
+  _svc(d, s, data)   { this._hass?.callService(d, s, data); }
 
   _render() {
-    if (!this._hass) return;
+    const sh = this.shadowRoot; if (!sh || !this._hass) return;
 
-    const running = this._a('sensor.cloudems_nilm_running_devices', 'device_list') || [];
-    const allDevs = this._a('sensor.cloudems_nilm_devices', 'device_list') || [];
-    const review = this._s('sensor.cloudems_nilm_review_current');
-    const reviewPending = this._a('sensor.cloudems_nilm_review_current', 'pending_count') || 0;
-    const totalDevs = allDevs.length;
-    const activeCount = running.length;
-    const totalPower = running.reduce((s, d) => s + (d.power_w || 0), 0);
+    // ── Data ────────────────────────────────────────────────────────────────
+    const allDevs    = this._a('sensor.cloudems_nilm_devices', 'device_list') || [];
+    const totalPowerW= this._a('sensor.cloudems_nilm_devices', 'total_power_w') || 0;
+    const unknownW   = this._a('sensor.cloudems_nilm_devices', 'undefined_power_w') || 0;
+    const pending    = allDevs.filter(d => !d.confirmed && !d.dismissed && d.device_id && !d.device_id.startsWith('__'));
+    const active     = allDevs.filter(d => d.is_on || d.running);
+    const confirmed  = allDevs.filter(d => d.confirmed);
 
-    const sig = [this._tab, this._search, this._v('sensor.cloudems_nilm_running_devices'), reviewPending, totalDevs].join('|');
-    if (sig === this._prev) return;
-    this._prev = sig;
+    // Diagnostics
+    const diagThr    = this._a('sensor.cloudems_nilm_diagnostics', 'power_threshold_w') || 0;
+    const diagRamp   = this._a('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_active') || false;
+    const diagEvTot  = this._a('sensor.cloudems_nilm_diagnostics', 'events_total') || 0;
+    const diagEvCls  = this._a('sensor.cloudems_nilm_diagnostics', 'events_classified') || 0;
+    const diagRate   = diagEvTot > 0 ? Math.round(diagEvCls / diagEvTot * 100) : 0;
 
-    const TABS = [
-      { id: 'actief',   label: 'Actief nu' },
-      { id: 'groepen',  label: 'Groepen' },
-      { id: 'review',   label: `Beoordelen${reviewPending > 0 ? ` (${reviewPending})` : ''}` },
-      { id: 'alle',     label: 'Alle apparaten' },
-      { id: 'topo',     label: 'Topologie' },
-      { id: 'diag',     label: 'Diagnostiek' },
-    ];
+    // ── Zoek + filter ────────────────────────────────────────────────────────
+    const q = this._search.toLowerCase();
+    let shown = allDevs.filter(d => !d.dismissed);
+    if (q) shown = shown.filter(d => (d.name || d.type || '').toLowerCase().includes(q));
+    if (this._filter === 'active')  shown = shown.filter(d => d.is_on || d.running);
+    if (this._filter === 'pending') shown = shown.filter(d => !d.confirmed);
+    if (this._filter.startsWith('cat:')) {
+      const cat = this._filter.slice(4);
+      shown = shown.filter(d => devCat(d.type || d.device_type) === cat);
+    }
+    if (this._filter.startsWith('room:')) {
+      const room = this._filter.slice(5);
+      shown = shown.filter(d => (d.room || '') === room);
+    }
 
-    const tabBar = TABS.map(t => `
-      <button class="tab${this._tab === t.id ? ' active' : ''}" data-tab="${t.id}">${t.label}</button>
-    `).join('');
+    // ── Groepeer per kamer ───────────────────────────────────────────────────
+    const roomMap = {};
+    for (const d of shown) {
+      const r = d.room || '— Onbekend';
+      if (!roomMap[r]) roomMap[r] = [];
+      roomMap[r].push(d);
+    }
+    // Sorteer: kamer met meest actieve apparaten eerst
+    const rooms = Object.entries(roomMap).sort(([, a], [, b]) => {
+      const aOn = a.filter(d => d.is_on).length;
+      const bOn = b.filter(d => d.is_on).length;
+      return bOn - aOn || b.length - a.length;
+    });
 
-    // Phase balance
-    const l1w = running.filter(d => d.phase === 'L1').reduce((s, d) => s + (d.power_w || 0), 0);
-    const l2w = running.filter(d => d.phase === 'L2').reduce((s, d) => s + (d.power_w || 0), 0);
-    const l3w = running.filter(d => d.phase === 'L3').reduce((s, d) => s + (d.power_w || 0), 0);
-    const maxPhase = Math.max(l1w, l2w, l3w, 1);
-
-    const phaseBar = (label, w, color) => `
-      <div class="pb-row">
-        <span class="pb-lbl">${label}</span>
-        <div class="pb-track"><div class="pb-fill" style="width:${Math.round(w/maxPhase*100)}%;background:${color}"></div></div>
-        <span class="pb-val">${Math.round(w)} W</span>
-      </div>`;
-
-    const phaseSection = `<div class="phase-bar">
-      ${phaseBar('L1', l1w, '#06b6d4')}
-      ${phaseBar('L2', l2w, '#f59e0b')}
-      ${phaseBar('L3', l3w, '#34d399')}
+    // ── Stat strip ───────────────────────────────────────────────────────────
+    const statHtml = `<div class="stat-strip">
+      <div class="stat-tile"><span class="stat-lbl">Totaal</span><span class="stat-val c-blue">${allDevs.length}</span></div>
+      <div class="stat-tile"><span class="stat-lbl">Actief</span><span class="stat-val c-yellow">${active.length}</span></div>
+      <div class="stat-tile"><span class="stat-lbl">Bevestigd</span><span class="stat-val c-green">${confirmed.length}</span></div>
+      <div class="stat-tile"><span class="stat-lbl">Te beoord.</span><span class="stat-val ${pending.length > 0 ? 'c-red' : 'c-muted'}">${pending.length}</span></div>
     </div>`;
 
-    // ── Tab content ──────────────────────────────────────────────────────────
-    let content = '';
-
-    if (this._tab === 'actief') {
-      const rows = running.sort((a, b) => (b.power_w || 0) - (a.power_w || 0)).map(d => {
-        const conf = d.confidence || 0;
-        const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#f59e0b' : '#ef4444';
-        const phaseColor = d.phase === 'L1' ? '#06b6d4' : d.phase === 'L2' ? '#f59e0b' : '#34d399';
-        const src = (d.source_type === 'smart_plug' || d.source_type === 'injected') ? 'plug' : 'nilm';
-        const _TTN = window.CloudEMSTooltip;
-        const _ttD = _TTN ? _TTN.html(`nilm-${(d.device_id||d.name||'?').replace(/[^a-z0-9]/gi,'_')}`, d.name||d.type||'?',[
-          {label:'Bron',        value:src==='plug'?'🔌 Smart plug':'🔍 NILM detectie'},
-          {label:'Zekerheid',   value:src==='plug'?'100% (directe meting)':(conf+'%')},
-          {label:'Fase',        value:d.phase||'—'},
-          {label:'Vermogen',    value:Math.round(d.power_w||0)+' W'},
-          {label:'Bevestigd',   value:d.confirmed?'✅ Ja':'⏳ Nee'},
-          {label:'Kamer',       value:d.room||'—',dim:true},
-        ],{trusted:src==='plug'}) : {wrap:'',tip:''};
-        return `<div class="dev-row" style="position:relative;cursor:default" ${_ttD.wrap}>
-          <div class="dev-dot" style="background:${d.confirmed ? '#34d399' : '#f59e0b'}"></div>
-          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}">${d.name || d.type || '?'}</span>
-          <span class="dev-w">${Math.round(d.power_w || 0)} W</span>
-          <span class="badge" style="background:${phaseColor}22;color:${phaseColor}">${d.phase_label || d.phase || '?'}</span>
-          <span class="src-lbl">${src}</span>
-          <div class="conf-wrap">
-            <div class="conf-bar"><div class="conf-fill" style="width:${Math.min(100,conf)}%;background:${confColor}"></div></div>
-            <span class="conf-val" style="color:${confColor}">${src === 'plug' ? '100%' : conf + '%'}</span>
+    // ── Review banner ────────────────────────────────────────────────────────
+    let reviewHtml = '';
+    if (pending.length > 0) {
+      const idx = Math.min(this._revIdx, pending.length - 1);
+      const cur = pending[idx];
+      const cat = devCat(cur.type || cur.device_type);
+      const ci  = CAT[cat] || CAT.overig;
+      const phCol = cur.phase === 'L1' ? '#06b6d4' : cur.phase === 'L2' ? '#f59e0b' : '#34d399';
+      const conf  = Math.round(cur.confidence || 0);
+      reviewHtml = `<div class="review-banner">
+        <div class="rev-hdr">
+          <span style="font-size:16px">${ci.i}</span>
+          <span class="rev-hdr-title">Nieuw apparaat gevonden</span>
+          <span class="rev-count">${idx + 1} / ${pending.length}</span>
+        </div>
+        <div class="rev-device">
+          <div class="rev-name">${esc(cur.name || cur.type || '?')}</div>
+          <div class="rev-meta">
+            <span style="font-size:11px;color:#9ca3af">${Math.round(cur.power_w || 0)} W</span>
+            <span class="dev-phase" style="background:${phCol}22;color:${phCol}">${cur.phase || '?'}</span>
+            ${confBar(conf, 8)}
+            ${cur.room ? `<span style="font-size:10px;color:#4b5563">📍 ${esc(cur.room)}</span>` : ''}
           </div>
-          ${_ttD.tip}
-        </div>`;
-      }).join('');
-
-      const unknownW = this._a('sensor.cloudems_nilm_devices', 'undefined_power_w') || 0;
-      content = `
-        ${phaseSection}
-        <div class="list-header">
-          <span class="lh-name">Apparaat</span>
-          <span class="lh-w">Vermogen</span>
-          <span class="lh-phase">Fase</span>
-          <span class="lh-src">Bron</span>
-          <span class="lh-conf">Conf.</span>
-        </div>
-        <div class="dev-list">${rows || '<div class="empty">Geen actieve apparaten</div>'}</div>
-        ${unknownW > 50 ? `<div class="unknown-row">Onverklaard vermogen: ${Math.round(unknownW)} W</div>` : ''}`;
-    }
-
-    else if (this._tab === 'review') {
-      const state = review?.state;
-      if (!state || state === 'none') {
-        content = `<div class="empty-big">✓ Alle apparaten beoordeeld</div>`;
-      } else {
-        // Get all pending devices from allDevs
-        const pending = allDevs.filter(d => !d.confirmed && d.device_id && !d.device_id.startsWith('__'));
-        const curName = this._a('sensor.cloudems_nilm_review_current', 'name') || state;
-        // Current device highlighted
-        const curId = state;
-        const rows = pending.map(d => {
-          const isCur = (d.name === curName || d.device_id === curId);
-          const conf = Math.round((d.confidence || 0) * 100);
-          const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#f59e0b' : '#ef4444';
-          const phaseColor = d.phase === 'L1' ? '#06b6d4' : d.phase === 'L2' ? '#f59e0b' : '#34d399';
-          return `<div class="rev-row${isCur ? ' rev-cur' : ''}" data-rid="${d.device_id||''}">
-            <div class="dev-dot" style="background:${isCur?'#06b6d4':'rgba(255,255,255,0.15)'}"></div>
-            <span class="dev-name">${d.name || d.type || '?'}</span>
-            <span class="dev-w">${Math.round(d.power_w || 0)} W</span>
-            <span class="badge" style="background:${phaseColor}22;color:${phaseColor}">${d.phase||'?'}</span>
-            <span class="conf-val" style="color:${confColor}">${conf}%</span>
-            <div class="rev-acts">
-              <button class="ra-btn ra-y" title="Bevestigen" data-svc="button/cloudems_nilm_review_confirm" data-cur="${isCur}">✓</button>
-              <button class="ra-btn ra-n" title="Afwijzen"  data-svc="button/cloudems_nilm_review_dismiss" data-cur="${isCur}">✗</button>
-              <button class="ra-btn ra-m" title="Weet ik niet" data-svc="button/cloudems_nilm_review_maybe" data-cur="${isCur}">?</button>
-            </div>
-          </div>`;
-        }).join('');
-        content = `
-          <div class="rev-hint">Klik op een rij om die als actief in te stellen, dan de actieknop.</div>
-          <div class="list-header" style="grid-template-columns:12px 1fr 60px 44px 44px 90px">
-            <span></span><span class="lh-name">Apparaat</span><span class="lh-w">W</span>
-            <span class="lh-phase">Fase</span><span class="lh-conf">Conf</span><span style="text-align:right">Actie</span>
+          <div class="rev-btns">
+            <button class="rbtn rbtn-yes" data-ra="confirm">✅ Bevestigen</button>
+            <button class="rbtn rbtn-no"  data-ra="dismiss">❌ Afwijzen</button>
+            <button class="rbtn rbtn-skip" data-ra="skip">⏭ Overslaan</button>
           </div>
-          <div class="dev-list">${rows || '<div class="empty">Geen apparaten te beoordelen</div>'}</div>`;
-      }
-    }
-
-    else if (this._tab === 'groepen') {
-      const ngSensor = this._hass.states['sensor.cloudems_nilm_groups'];
-      const ngAttr   = ngSensor?.attributes || {};
-      const groups   = ngAttr.groups || [];
-      const hints    = ngAttr.onboarding_hints || [];
-      const monthHist = ngAttr.month_history || {};
-
-      // Kleur per groep
-      const GRP_COLOR = {
-        verlichting: '#fde047', koken: '#fb923c', wasgoed: '#38bdf8',
-        koeling: '#67e8f9', entertainment: '#a78bfa', verwarming: '#f87171',
-        transport: '#4ade80', gereedschap: '#94a3b8', overig: '#64748b',
-      };
-
-      // Max vermogen voor balk-schaling
-      const maxPwr = Math.max(...groups.map(g => g.power_w || 0), 1);
-
-      // Groepen renderen
-      const grpHtml = groups.length ? groups.map(g => {
-        const color = GRP_COLOR[g.id] || '#94a3b8';
-        const barW  = Math.min(100, Math.round((g.power_w || 0) / maxPwr * 100));
-        const devRows = (g.devices || []).map(d => {
-          const isOn = d.is_on;
-          const dotColor = isOn ? color : 'rgba(255,255,255,0.2)';
-          const kwh = d.today_kwh > 0 ? d.today_kwh.toFixed(2)+' kWh' : '';
-          return `<div class="grp-dev-row">
-            <div class="grp-dev-dot" style="background:${dotColor}"></div>
-            <span class="grp-dev-name">${d.name || d.device_type || '?'}</span>
-            ${isOn ? `<span class="grp-dev-w">${Math.round(d.power_w||0)} W</span>` : '<span class="grp-dev-w" style="opacity:.4">—</span>'}
-            ${kwh ? `<span class="grp-dev-kwh">${kwh}</span>` : ''}
-          </div>`;
-        }).join('');
-
-        const monthKwh = g.month_kwh > 0 ? g.month_kwh.toFixed(1)+' kWh deze maand' : '';
-        const monthCost = g.month_cost_eur > 0 ? '€'+g.month_cost_eur.toFixed(2) : '';
-
-        const openClass = (this._openGroup === g.id) ? ' open' : '';
-        return `<div class="grp-card${openClass}" data-grp="${g.id}">
-          <div class="grp-header">
-            <span class="grp-icon">${g.icon}</span>
-            <span class="grp-name">${g.label}</span>
-            ${g.power_w > 0
-              ? `<span class="grp-pwr">${Math.round(g.power_w)} W</span>`
-              : `<span class="grp-pwr" style="color:rgba(255,255,255,0.25)">0 W</span>`}
-            ${g.cost_today_eur > 0
-              ? `<span class="grp-cost">€${g.cost_today_eur.toFixed(2)}/dag</span>`
-              : ''}
-          </div>
-          <div class="grp-bar-wrap">
-            <div class="grp-bar-fill" style="width:${barW}%;background:${color};opacity:0.6"></div>
-          </div>
-          <div class="grp-stats">
-            <span class="grp-stat-pill">${g.device_count} apparaat${g.device_count!==1?'en':''}</span>
-            ${g.active_count > 0 ? `<span class="grp-stat-pill" style="color:${color}">${g.active_count} actief</span>` : ''}
-            ${g.today_kwh > 0.001 ? `<span class="grp-stat-pill">${g.today_kwh.toFixed(2)} kWh vandaag</span>` : ''}
-            ${monthKwh ? `<span class="grp-stat-pill">${monthKwh}${monthCost?' · '+monthCost:''}</span>` : ''}
-          </div>
-          <div class="grp-devs">${devRows}</div>
-        </div>`;
-      }).join('') : '<div class="empty">Geen apparaten herkend — bevestig apparaten in de Beoordelen-tab.</div>';
-
-      // Onboarding hints
-      const hintsHtml = hints.length ? `<div class="hint-banner">
-        ${hints.map(h => `<div class="hint-row">
-          <span class="hint-icon">${h.icon}</span>
-          <div><div class="hint-label">${h.label} niet gevonden</div>
-          <div class="hint-text">${h.hint}</div></div>
-        </div>`).join('')}
-      </div>` : '';
-
-      // Maandhistorie staafdiagram (laatste 3 maanden, top-5 groepen)
-      const months = Object.keys(monthHist).sort();
-      const allGrpIds = [...new Set(months.flatMap(m => Object.keys(monthHist[m] || {})))];
-      const topGrps = allGrpIds
-        .map(gid => ({ gid, total: months.reduce((s,m) => s+(monthHist[m]?.[gid]||0),0) }))
-        .sort((a,b) => b.total-a.total).slice(0,5).map(x=>x.gid);
-      const maxMonthKwh = Math.max(...months.flatMap(m => topGrps.map(gid => monthHist[m]?.[gid]||0)), 0.01);
-
-      const monthHistHtml = months.length > 0 && topGrps.length > 0 ? `
-        <div class="month-hist">
-          <div class="month-hist-title">📅 Verbruik per maand (kWh)</div>
-          ${months.map(m => {
-            const bars = topGrps.map(gid => {
-              const kwh = monthHist[m]?.[gid] || 0;
-              const h2  = Math.max(2, Math.round(kwh / maxMonthKwh * 32));
-              const col = GRP_COLOR[gid] || '#94a3b8';
-              return `<div class="month-bar-item">
-                <div class="month-bar-track"><div class="month-bar-fill" style="height:${h2}px;background:${col}"></div></div>
-                <div class="month-bar-lbl" style="color:${col}">${(GRP_COLOR[gid]?gid:gid).slice(0,3)}</div>
-              </div>`;
-            }).join('');
-            const totKwh = topGrps.reduce((s,gid)=>s+(monthHist[m]?.[gid]||0),0);
-            return `<div class="month-row">
-              <span class="month-lbl">${m.slice(5)}</span>
-              <div class="month-bars">${bars}</div>
-              <span style="font-size:10px;color:rgba(255,255,255,0.3);margin-left:6px">${totKwh.toFixed(1)} kWh</span>
-            </div>`;
-          }).join('')}
-        </div>` : '';
-
-      content = `${hintsHtml}<div class="grp-list">${grpHtml}</div>${monthHistHtml}`;
-    }
-
-    else if (this._tab === 'alle') {
-      const q = this._search.toLowerCase();
-      const filtered = allDevs.filter(d =>
-        !q || (d.name || d.type || '').toLowerCase().includes(q)
-      );
-      const rows = filtered.map(d => {
-        const isOn = d.is_on || d.running || d.state === 'on';
-        const conf = Math.round((d.confidence || 0) * 100);
-        const confColor = conf >= 70 ? '#34d399' : conf >= 50 ? '#f59e0b' : '#ef4444';
-        const src2 = (d.source_type === 'smart_plug' || d.source_type === 'injected') ? 'plug' : 'nilm';
-        const _TTAN = window.CloudEMSTooltip;
-        const _ttAll = _TTAN ? _TTAN.html('nilm-all-'+(d.device_id||d.name||'?').replace(/[^a-z0-9]/gi,'_'), d.name||d.type||'?', [
-          {label:'Status',     value:isOn?'● Actief':'○ Inactief'},
-          {label:'Vermogen',   value:isOn?Math.round(d.power_w||d.current_power||0)+' W':'—'},
-          {label:'Fase',       value:d.phase||'—'},
-          {label:'Zekerheid',  value:src2==='plug'?'100% (directe meting)':conf+'%'},
-          {label:'Bron',       value:src2==='plug'?'🔌 Smart plug':'🔍 NILM detectie'},
-          {label:'Bevestigd',  value:d.confirmed?'✅ Ja':'⏳ Nee'},
-          {label:'Kamer',      value:d.room||'—',dim:true},
-        ], {trusted:src2==='plug'}) : {wrap:'',tip:''};
-        return `<div class="dev-row ${isOn ? 'dev-on' : 'dev-off'}" style="position:relative;cursor:default" ${_ttAll.wrap}>
-          <div class="dev-dot" style="background:${isOn ? '#34d399' : 'rgba(255,255,255,0.15)'}"></div>
-          <span class="dev-name" data-did="${d.device_id||''}" data-dname="${(d.name||d.type||'?').replace(/"/g,'')}">${d.name || d.type || '?'}</span>
-          <span class="dev-w" style="color:${isOn ? '#fff' : 'rgba(255,255,255,0.4)'}">${isOn ? Math.round(d.power_w || d.current_power || 0) + ' W' : '—'}</span>
-          <span class="badge" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5)">${d.phase || '?'}</span>
-          <span class="src-lbl">${d.confirmed ? '✓' : '~'}</span>
-          <span class="conf-val" style="color:${confColor}">${conf}%</span>
-          ${_ttAll.tip}
-        </div>`;
-      }).join('');
-      content = `
-        <div class="search-wrap">
-          <input class="search-input" type="text" placeholder="Zoek apparaat…" value="${this._search}">
-          <span class="search-count">${filtered.length}/${totalDevs}</span>
         </div>
-        <div class="list-header">
-          <span class="lh-name">Apparaat</span>
-          <span class="lh-w">Vermogen</span>
-          <span class="lh-phase">Fase</span>
-          <span class="lh-src">Conf.</span>
-          <span class="lh-conf">%</span>
-        </div>
-        <div class="dev-list">${rows || '<div class="empty">Geen apparaten gevonden</div>'}</div>`;
-    }
-
-    else if (this._tab === 'topo') {
-      const tree = this._a('sensor.cloudems_meter_topology', 'tree') || [];
-      const stats = this._a('sensor.cloudems_meter_topology', 'stats') || {};
-      const suggestions = this._a('sensor.cloudems_meter_topology', 'suggestions') || [];
-
-      const renderNode = (node, depth = 0) => {
-        if (!node) return '';
-        const indent = depth * 16;
-        const children = (node.children || []).map(c => renderNode(c, depth + 1)).join('');
-        const color = node.status === 'approved' ? '#34d399' : node.status === 'tentative' ? '#f59e0b' : 'rgba(255,255,255,0.3)';
-        return `<div class="topo-node" style="margin-left:${indent}px">
-          <div class="topo-dot" style="background:${color}"></div>
-          <span class="topo-name">${node.name || node.entity_id || '?'}</span>
-          <span class="topo-status" style="color:${color}">${node.status || ''}</span>
-        </div>${children}`;
-      };
-
-      const treeHtml = Array.isArray(tree) ? tree.map(n => renderNode(n)).join('') : renderNode(tree);
-      const suggestHtml = suggestions.slice(0, 5).map(s =>
-        `<div class="sugg-row">? ${s.child_name || s.child || '?'} → ${s.parent_name || s.parent || '?'} <span style="color:#f59e0b">${Math.round((s.confidence || 0) * 100)}%</span></div>`
-      ).join('');
-
-      // Manual add form
-      const manualHtml = `
-        <div class="section-lbl">Handmatig koppelen</div>
-        <div class="topo-manual">
-          <input class="topo-inp" id="topo-up" placeholder="Upstream entity_id (bijv. sensor.p1_power)" />
-          <span style="color:rgba(255,255,255,0.4);font-size:12px">→</span>
-          <input class="topo-inp" id="topo-dn" placeholder="Downstream entity_id (bijv. sensor.wcd_garage_1)" />
-          <button class="topo-add-btn" id="topo-add-btn">Bevestig koppeling</button>
-        </div>`;
-
-      content = `
-        <div class="topo-stats">
-          <div class="stat-pill">Bevestigd: ${stats.approved || 0}</div>
-          <div class="stat-pill">Tentatief: ${stats.tentative || 0}</div>
-          <div class="stat-pill">Kandidaat: ${stats.candidate || 0}</div>
-        </div>
-        <div class="section-lbl">Topologie boom</div>
-        <div class="topo-tree">${treeHtml || '<div class="empty">Nog geen data — CloudEMS leert automatisch na 8+ co-bewegingen (MIN_DELTA=50W)</div>'}</div>
-        ${suggestHtml ? `<div class="section-lbl">Suggesties</div><div class="sugg-list">${suggestHtml}</div>` : ''}
-        ${manualHtml}`;
-    }
-
-    else if (this._tab === 'diag') {
-      const threshold = this._a('sensor.cloudems_nilm_diagnostics', 'power_threshold_w') || 0;
-      const ramp = this._a('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_active') || false;
-      const rampS = this._a('sensor.cloudems_nilm_diagnostics', 'batt_ramp_mask_remaining_s') || 0;
-      const inputs = this._a('sensor.cloudems_nilm_diagnostics', 'sensor_inputs') || {};
-      const evTotal = this._a('sensor.cloudems_nilm_diagnostics', 'events_total') || 0;
-      const evClass = this._a('sensor.cloudems_nilm_diagnostics', 'events_classified') || 0;
-      const classRate = evTotal > 0 ? Math.round(evClass / evTotal * 100) : 0;
-
-      const schedules = this._a('sensor.cloudems_nilm_apparaat_schemas', 'schedules') || [];
-      const schRows = schedules.slice(0, 10).map(s =>
-        `<div class="sch-row">
-          <span class="dev-name">${s.label || s.device_type || '?'}</span>
-          <span class="sch-day">${['Ma','Di','Wo','Do','Vr','Za','Zo'][s.peak_weekday] || '?'}</span>
-          <span class="sch-hr">${s.peak_hour !== undefined ? s.peak_hour + ':00' : '?'}</span>
-        </div>`
-      ).join('');
-
-      content = `
-        <div class="diag-grid">
-          <div class="diag-item"><div class="diag-lbl">Detectiedrempel</div><div class="diag-val">${Math.round(threshold)} W</div></div>
-          <div class="diag-item"><div class="diag-lbl">Batterij masker</div><div class="diag-val" style="color:${ramp ? '#ef4444' : '#34d399'}">${ramp ? `Actief ${Math.round(rampS)}s` : 'Inactief'}</div></div>
-          <div class="diag-item"><div class="diag-lbl">Events totaal</div><div class="diag-val">${evTotal}</div></div>
-          <div class="diag-item"><div class="diag-lbl">Classificatiegraad</div><div class="diag-val" style="color:${classRate > 70 ? '#34d399' : '#f59e0b'}">${classRate}%</div></div>
-          <div class="diag-item"><div class="diag-lbl">Sensor L1</div><div class="diag-val">${inputs.L1 || '—'}</div></div>
-          <div class="diag-item"><div class="diag-lbl">Sensor L2</div><div class="diag-val">${inputs.L2 || '—'}</div></div>
-          <div class="diag-item"><div class="diag-lbl">Sensor L3</div><div class="diag-val">${inputs.L3 || '—'}</div></div>
-        </div>
-        ${schRows ? `<div class="section-lbl">Geleerde schema's</div>
-        <div class="list-header" style="grid-template-columns:1fr 60px 60px">
-          <span class="lh-name">Apparaat</span><span class="lh-w">Dag</span><span class="lh-w">Uur</span>
-        </div>
-        <div class="dev-list">${schRows}</div>` : ''}`;
-    }
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display:block; font-family:var(--primary-font-family,sans-serif); height:100%; }
-        .card { background:rgb(24,24,24); border-radius:16px; overflow:hidden; display:flex; flex-direction:column; min-height:600px; }
-        /* Header */
-        .header { padding:12px 16px 0; border-bottom:1px solid rgba(255,255,255,0.07); }
-        .header-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-        .title { font-size:12px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:rgba(255,255,255,0.5); }
-        .badges { display:flex; gap:6px; }
-        .badge { font-size:10px; padding:2px 7px; border-radius:99px; }
-        .badge-g { background:rgba(52,211,153,0.15); color:#34d399; }
-        .badge-b { background:rgba(6,182,212,0.15); color:#06b6d4; }
-        .badge-o { background:rgba(245,158,11,0.15); color:#f59e0b; }
-        .total-w { font-size:11px; color:rgba(255,255,255,0.35); }
-        /* Tabs */
-        .tabs { display:flex; gap:0; overflow-x:auto; }
-        .tab { padding:8px 14px; font-size:12px; font-weight:500; color:rgba(255,255,255,0.45); border:none; background:none; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
-        .tab.active { color:#06b6d4; border-bottom-color:#06b6d4; }
-        .tab:hover:not(.active) { color:rgba(255,255,255,0.7); }
-        /* Phase bar */
-        .phase-bar { padding:8px 16px; background:rgba(255,255,255,0.03); border-bottom:1px solid rgba(255,255,255,0.05); display:flex; flex-direction:column; gap:4px; }
-        .pb-row { display:flex; align-items:center; gap:8px; }
-        .pb-lbl { font-size:10px; color:rgba(255,255,255,0.35); min-width:16px; }
-        .pb-track { flex:1; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
-        .pb-fill { height:100%; border-radius:2px; transition:width .3s; }
-        .pb-val { font-size:11px; color:rgba(255,255,255,0.55); min-width:50px; text-align:right; }
-        /* Content */
-        .content { flex:1; overflow-y:auto; }
-        /* List header */
-        .list-header { display:grid; grid-template-columns:1fr 70px 48px 40px 70px; gap:0; padding:6px 16px 4px; font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:rgba(255,255,255,0.25); border-bottom:1px solid rgba(255,255,255,0.05); }
-        .lh-name {}
-        .lh-w { text-align:right; }
-        .lh-phase { text-align:center; }
-        .lh-src { text-align:center; }
-        .lh-conf { text-align:right; }
-        /* Device rows */
-        .dev-list { }
-        .dev-row { display:grid; grid-template-columns:12px 1fr 70px 48px 40px 70px; gap:0 6px; padding:8px 16px; align-items:center; border-bottom:1px solid rgba(255,255,255,0.04); transition:background .1s; }
-        .dev-row:hover { background:rgba(255,255,255,0.03); }
-        .dev-off { opacity:.45; }
-        .dev-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-        .dev-name { font-size:13px; color:rgba(255,255,255,0.85); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .dev-w { font-size:12px; font-weight:600; color:#fff; text-align:right; }
-        .badge { font-size:10px; padding:2px 5px; border-radius:4px; text-align:center; }
-        .src-lbl { font-size:10px; color:rgba(255,255,255,0.3); text-align:center; }
-        .conf-wrap { display:flex; align-items:center; gap:4px; justify-content:flex-end; }
-        .conf-bar { width:28px; height:4px; background:rgba(255,255,255,0.08); border-radius:2px; overflow:hidden; }
-        .conf-fill { height:100%; border-radius:2px; }
-        .conf-val { font-size:10px; min-width:30px; text-align:right; }
-        /* Review */
-        .review-card { margin:16px; padding:20px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:12px; }
-        .review-name { font-size:18px; font-weight:600; color:#fff; margin-bottom:10px; }
-        .review-meta { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
-        .review-meta span { font-size:12px; color:rgba(255,255,255,0.55); background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:99px; }
-        .review-pending { color:#f59e0b !important; background:rgba(245,158,11,0.1) !important; }
-        .review-btns { display:flex; gap:8px; flex-wrap:wrap; }
-        .rbtn { flex:1; min-width:80px; padding:8px 12px; border-radius:8px; border:none; font-size:12px; font-weight:600; cursor:pointer; }
-        .rbtn-yes { background:rgba(52,211,153,0.15); color:#34d399; border:1px solid rgba(52,211,153,0.3); }
-        .rbtn-no { background:rgba(239,68,68,0.12); color:#ef4444; border:1px solid rgba(239,68,68,0.25); }
-        .rbtn-maybe { background:rgba(245,158,11,0.12); color:#f59e0b; border:1px solid rgba(245,158,11,0.25); }
-        .rbtn-nav { background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.5); border:1px solid rgba(255,255,255,0.1); }
-        /* Search */
-        .search-wrap { display:flex; align-items:center; gap:8px; padding:10px 16px; border-bottom:1px solid rgba(255,255,255,0.05); }
-        .search-input { flex:1; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:6px 10px; color:#fff; font-size:13px; outline:none; }
-        .search-count { font-size:11px; color:rgba(255,255,255,0.35); }
-        /* Topology */
-        .topo-stats { display:flex; gap:8px; padding:12px 16px 8px; flex-wrap:wrap; }
-        .stat-pill { font-size:11px; color:rgba(255,255,255,0.6); background:rgba(255,255,255,0.06); padding:3px 10px; border-radius:99px; }
-        .topo-tree { padding:8px 16px; }
-        .topo-node { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.03); }
-        .topo-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .topo-name { font-size:12px; color:rgba(255,255,255,0.8); flex:1; }
-        .topo-status { font-size:10px; }
-        .sugg-list { padding:0 16px 12px; }
-        .sugg-row { font-size:12px; color:rgba(255,255,255,0.5); padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.03); }
-        /* Diagnostics */
-        .diag-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 16px; }
-        .diag-item { background:rgba(255,255,255,0.04); border-radius:8px; padding:10px 12px; }
-        .diag-lbl { font-size:10px; color:rgba(255,255,255,0.4); text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
-        .diag-val { font-size:14px; font-weight:600; color:#fff; }
-        /* Schedule */
-        .sch-row { display:grid; grid-template-columns:1fr 60px 60px; gap:0; padding:7px 16px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; color:rgba(255,255,255,0.7); }
-        .sch-day, .sch-hr { color:rgba(255,255,255,0.45); text-align:right; }
-        /* Misc */
-        .section-lbl { font-size:10px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:rgba(255,255,255,0.3); padding:12px 16px 4px; }
-        .empty { padding:24px 16px; font-size:13px; color:rgba(255,255,255,0.3); text-align:center; }
-        .empty-big { padding:60px 16px; font-size:16px; color:rgba(255,255,255,0.3); text-align:center; }
-        .rev-row { display:grid; grid-template-columns:12px 1fr 60px 44px 44px 90px; gap:0 6px; padding:7px 16px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center; cursor:pointer; }
-        .rev-row:hover { background:rgba(255,255,255,0.03); }
-        .rev-cur { background:rgba(6,182,212,0.07) !important; border-left:2px solid #06b6d4; }
-        .rev-acts { display:flex; gap:4px; justify-content:flex-end; }
-        .ra-btn { width:24px; height:24px; border-radius:6px; border:none; font-size:12px; font-weight:700; cursor:pointer; }
-        .ra-y { background:rgba(52,211,153,0.15); color:#34d399; }
-        .ra-n { background:rgba(239,68,68,0.12); color:#ef4444; }
-        .ra-m { background:rgba(245,158,11,0.12); color:#f59e0b; }
-        .rev-hint { font-size:10px; color:rgba(255,255,255,0.3); padding:6px 16px 2px; }
-        .topo-manual { display:flex; gap:6px; align-items:center; padding:8px 16px 12px; flex-wrap:wrap; }
-        .topo-inp { flex:1; min-width:160px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px 8px; color:#fff; font-size:11px; outline:none; }
-        .topo-add-btn { background:rgba(52,211,153,0.15); border:1px solid rgba(52,211,153,0.3); color:#34d399; border-radius:6px; padding:6px 10px; font-size:11px; cursor:pointer; white-space:nowrap; }
-        .unknown-row { font-size:11px; color:rgba(245,158,11,0.8); padding:6px 16px; background:rgba(245,158,11,0.06); }
-        /* Groepen tab */
-        .grp-list { padding:8px 12px; display:flex; flex-direction:column; gap:6px; }
-        .grp-card { background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; overflow:hidden; }
-        .grp-header { display:flex; align-items:center; gap:10px; padding:10px 14px; cursor:pointer; }
-        .grp-icon { font-size:18px; flex-shrink:0; }
-        .grp-name { font-size:13px; font-weight:600; color:rgba(255,255,255,0.85); flex:1; }
-        .grp-pwr { font-family:monospace; font-size:13px; font-weight:700; color:#06b6d4; }
-        .grp-cost { font-size:11px; color:rgba(255,255,255,0.4); margin-left:6px; }
-        .grp-bar-wrap { height:3px; background:rgba(255,255,255,0.06); }
-        .grp-bar-fill { height:100%; border-radius:0 2px 0 0; transition:width .4s; }
-        .grp-devs { border-top:1px solid rgba(255,255,255,0.05); padding:6px 0; display:none; }
-        .grp-card.open .grp-devs { display:block; }
-        .grp-dev-row { display:flex; align-items:center; gap:8px; padding:5px 14px; border-bottom:1px solid rgba(255,255,255,0.03); }
-        .grp-dev-row:last-child { border-bottom:none; }
-        .grp-dev-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .grp-dev-name { font-size:12px; color:rgba(255,255,255,0.7); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .grp-dev-w { font-family:monospace; font-size:11px; color:rgba(255,255,255,0.5); }
-        .grp-dev-kwh { font-size:10px; color:rgba(255,255,255,0.3); margin-left:4px; }
-        .grp-stats { display:flex; gap:6px; padding:0 14px 8px; flex-wrap:wrap; }
-        .grp-stat-pill { font-size:10px; color:rgba(255,255,255,0.4); background:rgba(255,255,255,0.05); padding:2px 8px; border-radius:99px; }
-        /* Onboarding hints */
-        .hint-banner { margin:8px 12px 0; border-radius:10px; overflow:hidden; }
-        .hint-row { display:flex; align-items:flex-start; gap:10px; padding:10px 14px; background:rgba(245,158,11,0.07); border:1px solid rgba(245,158,11,0.18); border-radius:8px; margin-bottom:6px; }
-        .hint-icon { font-size:16px; flex-shrink:0; padding-top:1px; }
-        .hint-text { font-size:12px; color:rgba(255,255,255,0.65); line-height:1.5; flex:1; }
-        .hint-label { font-size:10px; font-weight:700; color:#f59e0b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:2px; }
-        /* Maandhistorie tabel */
-        .month-hist { margin:4px 12px 12px; background:rgba(255,255,255,0.03); border-radius:8px; padding:10px 12px; }
-        .month-hist-title { font-size:10px; font-weight:700; color:rgba(255,255,255,0.3); text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px; }
-        .month-row { display:flex; gap:6px; margin-bottom:4px; align-items:center; }
-        .month-lbl { font-size:11px; color:rgba(255,255,255,0.4); min-width:50px; }
-        .month-bars { flex:1; display:flex; gap:3px; }
-        .month-bar-item { display:flex; flex-direction:column; align-items:center; gap:2px; flex:1; }
-        .month-bar-track { width:100%; height:32px; background:rgba(255,255,255,0.05); border-radius:3px; display:flex; align-items:flex-end; overflow:hidden; }
-        .month-bar-fill { width:100%; border-radius:2px; transition:height .4s; }
-        .month-bar-lbl { font-size:9px; color:rgba(255,255,255,0.3); text-align:center; }
-      </style>
-
-      <div class="card">
-        <div class="header">
-          <div class="header-top">
-            <span class="title">NILM Apparaten</span>
-            <div class="badges">
-              <span class="badge badge-g">${totalDevs} gevonden</span>
-              <span class="badge badge-b">${activeCount} actief</span>
-              ${reviewPending > 0 ? `<span class="badge badge-o">${reviewPending} te beoordelen</span>` : ''}
-            </div>
-            <span class="total-w">${Math.round(totalPower)} W</span>
-          </div>
-          <div class="tabs">${tabBar}</div>
-        </div>
-        <div class="content">${content}</div>
+        ${pending.length > 1 ? `<div class="rev-queue">
+          ${pending.map((d, i) => `<span class="rev-q-chip${i === idx ? ' cur' : ''}" data-ridx="${i}">${esc(d.name || d.type || '?')}</span>`).join('')}
+        </div>` : ''}
       </div>`;
+    }
 
-    // Events
-    // Review row click → navigate to that device (next/prev until match)
-    this.shadowRoot.querySelectorAll('.rev-row').forEach(row => {
-      row.addEventListener('click', e => {
-        if (e.target.classList.contains('ra-btn')) return; // handled below
+    // ── Filter tabs ──────────────────────────────────────────────────────────
+    const cats = [...new Set(allDevs.map(d => devCat(d.type || d.device_type)))].sort();
+    const filterHtml = `<div class="filters">
+      <span class="ftab${this._filter==='all'?' active':''}"    data-f="all">Alle (${allDevs.length})</span>
+      <span class="ftab${this._filter==='active'?' active':''}" data-f="active">⚡ Actief (${active.length})</span>
+      ${pending.length ? `<span class="ftab${this._filter==='pending'?' active':''}" data-f="pending">⏳ Beoordelen <span class="badge">${pending.length}</span></span>` : ''}
+      ${cats.map(cat => {
+        const ci = CAT[cat] || CAT.overig;
+        const n  = allDevs.filter(d => devCat(d.type||d.device_type) === cat).length;
+        return `<span class="ftab${this._filter==='cat:'+cat?' active':''}" data-f="cat:${cat}">${ci.i} ${cat} (${n})</span>`;
+      }).join('')}
+    </div>`;
+
+    // ── Apparaatrij ──────────────────────────────────────────────────────────
+    const devRow = d => {
+      const isOn  = d.is_on || d.running;
+      const conf  = Math.round(d.confidence || 0);
+      const cat   = devCat(d.type || d.device_type);
+      const ci    = CAT[cat] || CAT.overig;
+      const dotCol= isOn ? ci.c : 'rgba(255,255,255,0.12)';
+      const phCol = d.phase === 'L1' ? '#06b6d4' : d.phase === 'L2' ? '#f59e0b' : '#34d399';
+      const isNew = d.last_seen_days != null && d.last_seen_days < 2 && !d.confirmed;
+      const isPlug= d.source_type === 'smart_plug';
+      const isPend= !d.confirmed;
+      const pwrTxt= isOn ? `${Math.round(d.power_w || 0)} W` : `<span style="color:#374151">—</span>`;
+      return `<div class="dev-row">
+        <div class="dev-dot" style="background:${dotCol}"></div>
+        <div class="dev-main">
+          <div class="dev-name" data-rename="${esc(d.device_id||'')}" data-cur="${esc(d.name||d.type||'?')}">${esc(d.name || d.type || '?')}</div>
+          <div class="dev-sub">
+            <span class="dev-type" style="color:${ci.c}88">${ci.i} ${esc(d.type || d.device_type || '')}</span>
+            <span class="dev-phase" style="background:${phCol}22;color:${phCol}">${d.phase_label || d.phase || '?'}</span>
+            ${isPlug ? `<span class="tag-plug">🔌 plug</span>` : ''}
+            ${isNew  ? `<span class="tag-new">NIEUW</span>` : ''}
+            ${isPend && !isNew ? `<span class="tag-pend">? niet bevestigd</span>` : ''}
+            ${d.today_kwh > 0 ? `<span class="dev-src">${d.today_kwh.toFixed(2)} kWh</span>` : ''}
+          </div>
+        </div>
+        <div class="dev-conf">${confBar(isPlug ? 100 : conf)}</div>
+        <div class="dev-pwr" style="color:${isOn ? '#fde047' : '#374151'}">${pwrTxt}</div>
+      </div>`;
+    };
+
+    // ── Kamerlijst ───────────────────────────────────────────────────────────
+    let roomsHtml = '';
+    if (rooms.length === 0) {
+      roomsHtml = `<div class="empty">Geen apparaten gevonden${q ? ` voor "${esc(q)}"` : ''}</div>`;
+    } else {
+      roomsHtml = rooms.map(([room, devs]) => {
+        const isOpen = this._openRooms.has(room) || this._openRooms.has('');
+        const roomPwr= devs.filter(d => d.is_on).reduce((s,d) => s+(d.power_w||0), 0);
+        const roomOn = devs.filter(d => d.is_on).length;
+        const sortedDevs = devs.slice().sort((a,b) => {
+          if ((b.is_on||false) !== (a.is_on||false)) return (b.is_on ? 1 : 0) - (a.is_on ? 1 : 0);
+          return (b.power_w||0) - (a.power_w||0);
+        });
+        return `<div class="room-sec" data-room="${esc(room)}">
+          <div class="room-hdr" data-toggle-room="${esc(room)}">
+            <span class="room-chevron${isOpen?' open':''}">▶</span>
+            <span class="room-name">${esc(room === '— Onbekend' ? '— Onbekend' : room)}</span>
+            <div class="room-stats">
+              ${roomOn > 0 ? `<span class="room-pwr">${Math.round(roomPwr)} W</span>` : ''}
+              <span class="room-cnt">${devs.length} app.</span>
+            </div>
+          </div>
+          ${isOpen ? `<div class="room-body">${sortedDevs.map(devRow).join('')}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    // ── Onverklaard vermogen ─────────────────────────────────────────────────
+    const unknownHtml = unknownW > 50 ? `<div class="unknown-row">
+      <span class="unknown-icon">❓</span>
+      <span class="unknown-text">Onverklaard vermogen — NILM heeft nog geen match gevonden</span>
+      <span class="unknown-w">${Math.round(unknownW)} W</span>
+    </div>` : '';
+
+    // ── Diagnostiek ──────────────────────────────────────────────────────────
+    const diagHtml = `
+      <div class="diag-toggle" data-diag>⚙️ Diagnostiek ${this._diagOpen ? '▲' : '▼'}</div>
+      ${this._diagOpen ? `<div class="diag-body">
+        <div class="diag-grid">
+          <div class="diag-tile"><div class="diag-lbl">Drempel</div><div class="diag-val">${Math.round(diagThr)} W</div></div>
+          <div class="diag-tile"><div class="diag-lbl">Classificatie</div><div class="diag-val" style="color:${diagRate>70?'#4ade80':'#fb923c'}">${diagRate}%</div></div>
+          <div class="diag-tile"><div class="diag-lbl">Events totaal</div><div class="diag-val">${diagEvTot}</div></div>
+          <div class="diag-tile"><div class="diag-lbl">Batterij masker</div><div class="diag-val" style="color:${diagRamp?'#f87171':'#4ade80'}">${diagRamp ? 'Actief' : 'Inactief'}</div></div>
+        </div>
+      </div>` : ''}`;
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    sh.innerHTML = `<style>${CSS}</style>
+    <div class="card">
+      <div class="hdr">
+        <span class="hdr-icon">🔍</span>
+        <div>
+          <div class="hdr-title">${esc(this._cfg?.title || 'NILM Apparaten')}</div>
+          <div class="hdr-sub">${allDevs.length} apparaten · ${Object.keys(roomMap).length} kamers</div>
+        </div>
+        ${totalPowerW > 0 ? `<div class="hdr-right"><div class="total-pill">${Math.round(totalPowerW)} W</div></div>` : ''}
+      </div>
+      ${statHtml}
+      <div class="search-row">
+        <input class="search-inp" type="text" placeholder="Zoek apparaat, type, kamer…" value="${esc(this._search)}">
+        ${this._search ? `<span class="search-clr" data-clr>✕</span>` : ''}
+        <span class="search-count">${shown.length}/${allDevs.length}</span>
+      </div>
+      ${filterHtml}
+      ${reviewHtml}
+      ${unknownHtml}
+      ${roomsHtml}
+      ${diagHtml}
+    </div>`;
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    // Zoeken
+    sh.querySelector('.search-inp')?.addEventListener('input', e => {
+      this._search = e.target.value;
+      this._prev = ''; this._render();
+    });
+    sh.querySelector('[data-clr]')?.addEventListener('click', () => {
+      this._search = ''; this._prev = ''; this._render();
+    });
+
+    // Filter tabs
+    sh.querySelectorAll('[data-f]').forEach(el => {
+      el.addEventListener('click', () => {
+        this._filter = el.dataset.f;
+        this._prev = ''; this._render();
       });
     });
-    // Review action buttons
-    this.shadowRoot.querySelectorAll('.ra-btn').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const [domain, entity] = btn.dataset.svc.split('/');
-        this._hass.callService(domain, 'press', { entity_id: `button.${entity}` });
-        setTimeout(() => { this._prev = ''; this._render(); }, 600);
+
+    // Kamer in-/uitklappen
+    sh.querySelectorAll('[data-toggle-room]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = el.dataset.toggleRoom;
+        // Verwijder de "alles open" marker als eerste klik
+        this._openRooms.delete('');
+        if (this._openRooms.has(r)) this._openRooms.delete(r);
+        else this._openRooms.add(r);
+        this._prev = ''; this._render();
       });
     });
-    // Topology manual add
-    const topoBtn = this.shadowRoot.querySelector('#topo-add-btn');
-    if (topoBtn) {
-      topoBtn.addEventListener('click', () => {
-        const up = this.shadowRoot.querySelector('#topo-up')?.value?.trim();
-        const dn = this.shadowRoot.querySelector('#topo-dn')?.value?.trim();
-        if (up && dn) {
-          this._hass.callService('cloudems', 'topology_approve', { upstream_id: up, downstream_id: dn });
-          this.shadowRoot.querySelector('#topo-up').value = '';
-          this.shadowRoot.querySelector('#topo-dn').value = '';
-          setTimeout(() => { this._prev = ''; this._render(); }, 600);
+
+    // Review knoppen
+    sh.querySelectorAll('[data-ra]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const act = btn.dataset.ra;
+        if (act === 'confirm') {
+          this._svc('button', 'press', { entity_id: 'button.cloudems_nilm_review_confirm' });
+          this._revIdx = 0;
+        } else if (act === 'dismiss') {
+          this._svc('button', 'press', { entity_id: 'button.cloudems_nilm_review_dismiss' });
+          this._revIdx = 0;
+        } else if (act === 'skip') {
+          const idx = Math.min(this._revIdx, pending.length - 1);
+          this._revIdx = (idx + 1) % pending.length;
         }
+        this._prev = ''; setTimeout(() => { this._prev = ''; this._render(); }, 500);
       });
-    }
-    this.shadowRoot.querySelectorAll('[data-did]').forEach(el=>{
-      el.addEventListener('dblclick',e=>{
+    });
+
+    // Review wachtrij chips
+    sh.querySelectorAll('[data-ridx]').forEach(el => {
+      el.addEventListener('click', () => {
+        this._revIdx = parseInt(el.dataset.ridx);
+        this._prev = ''; this._render();
+      });
+    });
+
+    // Apparaat hernoemen (dubbelklik)
+    sh.querySelectorAll('[data-rename]').forEach(el => {
+      el.addEventListener('dblclick', e => {
         e.stopPropagation();
-        const did=el.dataset.did; const cur=el.dataset.dname||el.textContent;
-        if(!did)return;
-        const inp=document.createElement('input');
-        inp.value=cur;
-        inp.style.cssText='background:rgba(255,255,255,0.1);border:1px solid rgba(6,182,212,0.5);border-radius:4px;color:#fff;font-size:13px;padding:2px 6px;width:140px;outline:none';
-        el.replaceWith(inp); inp.focus(); inp.select();
-        const save=()=>{
-          const n=inp.value.trim();
-          if(n&&n!==cur)this._hass.callService('cloudems','rename_nilm_device',{device_id:did,name:n});
-          this._prev=''; setTimeout(()=>this._render(),400);
+        const did = el.dataset.rename;
+        const cur = el.dataset.cur || el.textContent;
+        if (!did) return;
+        el.contentEditable = 'true';
+        el.classList.add('editing');
+        el.focus();
+        // Selecteer alles
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = sh.getSelection?.() || window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+        const save = () => {
+          const n = el.textContent.trim();
+          el.contentEditable = 'false';
+          el.classList.remove('editing');
+          if (n && n !== cur) {
+            this._svc('cloudems', 'rename_nilm_device', { device_id: did, name: n });
+          }
+          this._prev = ''; setTimeout(() => this._render(), 400);
         };
-        inp.addEventListener('keydown',e=>{if(e.key==='Enter')save();if(e.key==='Escape'){this._prev='';this._render();}});
-        inp.addEventListener('blur',save);
-      });
-    });
-    this.shadowRoot.querySelectorAll('.tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        this._tab = btn.dataset.tab;
-        this._prev = '';
-        this._render();
+        el.addEventListener('keydown', ev => {
+          if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+          if (ev.key === 'Escape') { el.textContent = cur; save(); }
+        }, { once: false });
+        el.addEventListener('blur', save, { once: true });
       });
     });
 
-    // Groepen tab: klik op grp-header togglet uitklappen
-    this.shadowRoot.querySelectorAll('.grp-card').forEach(card => {
-      const hdr = card.querySelector('.grp-header');
-      if (hdr) hdr.addEventListener('click', () => {
-        const gid = card.dataset.grp;
-        this._openGroup = (this._openGroup === gid) ? null : gid;
-        this._prev = '';
-        this._render();
-      });
+    // Diagnostiek toggle
+    sh.querySelector('[data-diag]')?.addEventListener('click', () => {
+      this._diagOpen = !this._diagOpen;
+      this._prev = ''; this._render();
     });
-
-    this.shadowRoot.querySelectorAll('.rbtn[data-svc]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const [domain, entity] = btn.dataset.svc.split('/');
-        this._hass.callService(domain, 'press', { entity_id: `button.${entity}` });
-        setTimeout(() => { this._prev = ''; this._render(); }, 500);
-      });
-    });
-
-    const searchInput = this.shadowRoot.querySelector('.search-input');
-    if (searchInput) {
-      searchInput.addEventListener('input', e => {
-        this._search = e.target.value;
-        this._prev = '';
-        this._render();
-      });
-    }
   }
 
-  getCardSize() { return 12; }
+  getCardSize() { return 10; }
   static getConfigElement() { return document.createElement('cloudems-nilm-card-editor'); }
-  static getStubConfig() { return {}; }
+  static getStubConfig() { return { title: 'NILM Apparaten' }; }
 }
 
+// ── Editor ────────────────────────────────────────────────────────────────────
+class CloudEMSNilmCardEditor extends HTMLElement {
+  constructor() { super(); this.attachShadow({ mode: 'open' }); }
+  setConfig(c) { this._cfg = { ...c }; this._render(); }
+  _fire() { this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._cfg }, bubbles: true, composed: true })); }
+  _render() {
+    const cfg = this._cfg || {};
+    this.shadowRoot.innerHTML = `
+      <style>.wrap{padding:8px}.row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}.lbl{font-size:12px;color:var(--secondary-text-color,#aaa);flex:1;margin-right:8px}input{background:var(--card-background-color,#1c1c1c);border:1px solid var(--divider-color,rgba(255,255,255,.15));border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;width:180px}</style>
+      <div class="wrap"><div class="row"><label class="lbl">Titel</label><input type="text" value="${esc(cfg.title||'NILM Apparaten')}"></div></div>`;
+    this.shadowRoot.querySelector('input').addEventListener('change', e => {
+      this._cfg = { ...this._cfg, title: e.target.value }; this._fire();
+    });
+  }
+}
+
+// ── Registratie ───────────────────────────────────────────────────────────────
 if (!customElements.get('cloudems-nilm-card')) {
   customElements.define('cloudems-nilm-card', CloudEMSNilmCard);
 }
+if (!customElements.get('cloudems-nilm-card-editor')) {
+  customElements.define('cloudems-nilm-card-editor', CloudEMSNilmCardEditor);
+}
 window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === 'cloudems-nilm-card')) {
-  window.customCards.push({ type: 'cloudems-nilm-card', name: 'CloudEMS NILM Card', description: 'NILM apparaten, beoordelen, topologie, diagnostiek' });
+  window.customCards.push({ type: 'cloudems-nilm-card', name: 'CloudEMS NILM Card', description: 'NILM apparaten per kamer/categorie — beoordelen, zoeken, hernoemen', preview: true });
 }
-
-if (!customElements.get('cloudems-nilm-card-editor')) {
-  class _cloudems_nilm_card_editor extends HTMLElement {
-    constructor(){super();this.attachShadow({mode:'open'});}
-    setConfig(c){this._cfg=c;this._render();}
-    _fire(key,val){
-      this._cfg={...this._cfg,[key]:val};
-      this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:this._cfg},bubbles:true,composed:true}));
-    }
-    _render(){
-      const cfg=this._cfg||{};
-      this.shadowRoot.innerHTML=`<style>
-        .row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:0.5px solid rgba(255,255,255,0.08)}
-        label{font-size:12px;color:rgba(255,255,255,0.6)}
-        input{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:#fff;padding:4px 8px;font-size:12px;width:180px}
-      </style>
-      <div style="padding:8px"></div>`;
-    }
-  }
-  customElements.define('cloudems-nilm-card-editor', _cloudems_nilm_card_editor);
-}
+console.info('%c CLOUDEMS-NILM-CARD %c v2.0.0 ', 'background:#a78bfa;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px', 'background:#0e1520;color:#a78bfa;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

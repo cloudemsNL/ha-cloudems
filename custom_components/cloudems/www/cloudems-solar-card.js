@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Solar Card  v2.1.1
 
-const SOL_VERSION = "2.1.0";
+const SOL_VERSION = "2.1.1";
 const SOL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -219,7 +219,7 @@ class CloudemsSolarCard extends HTMLElement {
     // Gisteren: gebruik pv_forecast_accuracy hourly_actual_kwh als die beschikbaar is,
     // anders solar_learner actual_kwh_per_hour. hourly_peak_w is GEEN gisteren-data.
     const lrn = h.states['sensor.cloudems_solar_system_intelligence']?.attributes?.inverters || [];
-    const accAttr = h.states['sensor.cloudems_solar_accuracy']?.attributes || {};
+    const accAttr = accS?.attributes || {};
     const yesterdayRef = new Array(24).fill(0);
     // Probeer echte gisteren-uurdata uit accuracy sensor
     const _ystHourly = accAttr.yesterday_hourly_kwh || accAttr.actual_hourly_kwh || null;

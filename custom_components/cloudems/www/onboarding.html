@@ -407,13 +407,19 @@ const wizardData = {
   ev_charger_entity: '',
   peak_shaving_limit_w: 6000,
   peak_shaving_enabled: true,
+  gas_sensor: '',
+  gas_price_sensor: '',
+  gas_use_ttf: true,
+  gas_price_fixed: 1.25,
+  gas_supplier: 'none',
+  gas_netbeheerder: 'default',
   nilm_device_hints: [],
 };
 
 // ── Step definitions ──────────────────────────────────────────────────────────
 const NAV_LABELS = [
   'Welkom', 'Aansluiting', 'Netmeting', 'Fase-sensoren',
-  'Zonnepanelen', 'Apparaten', 'Tarieven & piek', 'NILM apparaten'
+  'Zonnepanelen', 'Apparaten', 'Tarieven & piek', 'Gas', 'NILM apparaten'
 ];
 
 let current = 0;
@@ -848,9 +854,89 @@ function buildSteps() {
     </div>
   `));
 
-  // Step 7: NILM
+  // Step 7: Gas & Gasprijs
   wrap.appendChild(_makeStep(7, `
-    <div class="eyebrow">Stap 7 — NILM apparaten</div>
+    <div class="eyebrow">Stap 7 — Optioneel</div>
+    <h1 class="step-title">Gas & <em>gasprijs</em> koppelen</h1>
+    <p class="step-desc">Heb je geen gas? Sla deze stap gerust over. CloudEMS gebruikt gas alleen voor kostenberekeningen van de CV-ketel en vergelijking met warmtepomp.</p>
+    ${_fieldRow('gas_sensor', 'Gasmeter sensor', true, 'm³-teller van je slimme meter of P1 adapter.')}
+    ${_fieldRow('gas_price_sensor', 'Prijssensor (all-in €/m³)', true, 'Als je leverancier een sensor biedt. Zonder sensor gebruikt CloudEMS TTF Day-Ahead.')}
+    <div class="field-group">
+      <div class="field-label">TTF Day-Ahead gebruiken <span class="badge badge-opt">aanbevolen</span></div>
+      ${_radioRow('gas_ttf_en', [
+        {value:'true',  icon:'✅', label:'Ja — automatisch ophalen'},
+        {value:'false', icon:'⬜', label:'Nee — alleen vaste prijs'},
+      ], 'true', function(v){ wizardData.gas_use_ttf=(v==='true'); })}
+      <div class="field-hint">CloudEMS haalt dagelijks de TTF spotprijs op en rekent om naar all-in (incl. EB, ODE, netbeheer, BTW).</div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Gasleverancier <span class="badge badge-opt">optioneel</span></div>
+      <div class="field-row">
+        <select class="field-select" id="gas_supplier_sel"
+          onchange="wizardData.gas_supplier=this.value">
+          <option value="none">Onbekend / geen</option>
+          <option value="vattenfall">Vattenfall</option>
+          <option value="eneco">Eneco</option>
+          <option value="essent">Essent</option>
+          <option value="greenchoice">Greenchoice</option>
+          <option value="budget">Budget Energie</option>
+          <option value="pure">Pure Energie</option>
+          <option value="anwb">ANWB Energie</option>
+          <option value="custom">Anders (zie instellingen)</option>
+        </select>
+      </div>
+      <div class="field-hint">Bepaalt de leveranciersopslag bij TTF-omrekening.</div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Netbeheerder <span class="badge badge-opt">optioneel</span></div>
+      <div class="field-row">
+        <select class="field-select" id="gas_netbeheerder_sel"
+          onchange="wizardData.gas_netbeheerder=this.value">
+          <option value="default">Onbekend / gemiddelde</option>
+          <option value="liander">Liander</option>
+          <option value="stedin">Stedin</option>
+          <option value="enexis">Enexis</option>
+          <option value="rendo">Rendo</option>
+          <option value="westland">Westland Infra</option>
+        </select>
+      </div>
+      <div class="field-hint">Bepaalt de variabele netkosten bij TTF-omrekening.</div>
+    </div>
+    <div class="tip"><span class="tip-icon">💡</span>
+      <span>Geen gas? Klik gewoon op Volgende. CloudEMS slaat de gasfunctie automatisch over als er geen meter gekoppeld is.</span></div>
+    <div class="actions">
+      <button class="btn btn-secondary" onclick="goTo(6)">← Terug</button>
+      <button class="btn btn-primary" onclick="goTo(8)">Volgende <span class="btn-arrow">→</span></button>
+    </div>
+  `, `
+    <div class="vis-title">Gasprijs opbouw</div>
+    <div style="position:relative;z-index:1;flex:1;padding-top:.5rem;display:flex;flex-direction:column;gap:.6rem">
+      <div style="font-size:.72rem;color:var(--muted);margin-bottom:.2rem">TTF Day-Ahead → all-in consumentenprijs</div>
+      ${[
+        {label:'TTF spot',       color:'#38bdf8', pct:45, example:'~0.35'},
+        {label:'Leverancier opslag', color:'#a78bfa', pct:12, example:'~0.05'},
+        {label:'Netbeheer',      color:'#34d399', pct:15, example:'~0.10'},
+        {label:'Energiebelasting',color:'#f59e0b', pct:22, example:'~0.29'},
+        {label:'BTW 21%',        color:'#fb923c', pct:6,  example:'× 1.21'},
+      ].map(b => \`
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <div style="width:\${b.pct * 1.6}px;height:8px;background:\${b.color};border-radius:4px;flex-shrink:0"></div>
+          <div style="font-size:.68rem;color:var(--muted);flex:1">\${b.label}</div>
+          <div style="font-family:DM Mono;font-size:.68rem;color:var(--text)">\${b.example} €/m³</div>
+        </div>\`).join('')}
+      <div style="border-top:1px solid rgba(255,255,255,.08);margin-top:.4rem;padding-top:.4rem;display:flex;justify-content:space-between">
+        <div style="font-size:.72rem;color:var(--muted)">All-in prijs</div>
+        <div style="font-family:DM Mono;font-size:.78rem;color:#4ade80;font-weight:600">≈ €1.20/m³</div>
+      </div>
+    </div>
+  `, null, async () => {
+    await _fillSelect('gas_sensor', ['gas','meter','m3','dsmr','p1'], [], ['sensor']);
+    await _fillSelect('gas_price_sensor', ['gas','price','prijs','tariff','tarief'], [], ['sensor']);
+  }));
+
+  // Step 7: NILM
+  wrap.appendChild(_makeStep(8, `
+    <div class="eyebrow">Stap 8 — NILM apparaten</div>
     <h1 class="step-title">Welke apparaten <em>heb je?</em></h1>
     <p class="step-desc">CloudEMS detecteert apparaten automatisch via stroompatronen. Als je aangeeft welke apparaten je hebt, leert het NILM-systeem <strong>sneller en nauwkeuriger</strong>.</p>
     <div class="field-group">
@@ -880,7 +966,7 @@ function buildSteps() {
     <div class="tip"><span class="tip-icon">💡</span>
       <span>Selecteer alle apparaten die je hebt — ook als ze niet aan HA gekoppeld zijn. CloudEMS zoekt hier actief naar in je verbruikspatroon.</span></div>
     <div class="actions">
-      <button class="btn btn-secondary" onclick="goTo(6)">← Terug</button>
+      <button class="btn btn-secondary" onclick="goTo(7)">← Terug</button>
       <button class="btn btn-primary" id="save_btn" onclick="_saveAndFinish()">Opslaan & afronden <span class="btn-arrow">→</span></button>
       <span class="save-status" id="save_status"></span>
     </div>
@@ -907,7 +993,7 @@ function buildSteps() {
   // Completion screen
   const done = document.createElement('div');
   done.className = 'step';
-  done.id = `step-8`;
+  done.id = `step-9`;
   done.innerHTML = `
     <div class="complete-wrap">
       <div class="complete-icon">✓</div>
@@ -995,6 +1081,12 @@ async function _saveAndFinish() {
     ev_charger_entity:      wizardData.ev_charger_entity || '',
     peak_shaving_limit_w:   wizardData.peak_shaving_limit_w,
     peak_shaving_enabled:   wizardData.peak_shaving_enabled,
+    gas_sensor:             wizardData.gas_sensor || '',
+    gas_price_sensor:       wizardData.gas_price_sensor || '',
+    gas_use_ttf:            wizardData.gas_use_ttf,
+    gas_price_fixed:        wizardData.gas_price_fixed,
+    gas_supplier:           wizardData.gas_supplier || 'none',
+    gas_netbeheerder:       wizardData.gas_netbeheerder || 'default',
     nilm_device_hints:      wizardData.nilm_device_hints,
   });
 
@@ -1003,7 +1095,7 @@ async function _saveAndFinish() {
   if (ok) {
     status.className = 'save-status ok';
     status.textContent = '✓ Config opgeslagen in CloudEMS';
-    setTimeout(() => goTo(8), 1200);
+    setTimeout(() => goTo(9), 1200);
   } else {
     status.className = 'save-status err';
     status.textContent = '⚠ Opslaan mislukt — check HA logs';
@@ -1013,7 +1105,7 @@ async function _saveAndFinish() {
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 async function goTo(index) {
-  if (index < 0 || index > 8) return;
+  if (index < 0 || index > 9) return;
 
   const prevEl = document.getElementById(`step-${current}`);
   const nextEl = document.getElementById(`step-${index}`);
@@ -1040,13 +1132,13 @@ async function goTo(index) {
   }
 }
 
-function finish() { goTo(8); }
+function finish() { goTo(9); }
 
 function updateProgress() {
   const pct = Math.round((current / 8) * 100);
   document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('progressPct').textContent = current < 8 ? (NAV_LABELS[current] || 'Klaar!') : 'Klaar!';
-  document.getElementById('counter').textContent = current < 8 ? `Stap ${current + 1} van ${NAV_LABELS.length}` : 'Voltooid';
+  document.getElementById('progressPct').textContent = current < 9 ? (NAV_LABELS[current] || 'Klaar!') : 'Klaar!';
+  document.getElementById('counter').textContent = current < 9 ? `Stap ${current + 1} van ${NAV_LABELS.length}` : 'Voltooid';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

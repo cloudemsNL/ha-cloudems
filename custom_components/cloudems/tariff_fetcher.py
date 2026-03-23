@@ -69,6 +69,47 @@ _EB_FALLBACK: dict[str, dict[int, float]] = {
     },
 }
 
+
+# ── Gas fallback tarieven per jaar per land (excl. BTW, per m³) ───────────────
+# Bron: Belastingdienst.nl / RVO / Europese Commissie
+# Wordt ALLEEN gebruikt als tariffs.json (GitHub + lokaal) niet bereikbaar is.
+# Jaarlijks updaten in tariffs.json — dit is de laatste verdedigingslinie.
+_GAS_EB_FALLBACK: dict[str, dict[int, dict[str, float]]] = {
+    "NL": {
+        # Energiebelasting schijf 1 (0–1500 m³/jaar) + ODE gas
+        2024: {"eb": 0.33227, "ode": 0.00397, "btw": 0.21},
+        2025: {"eb": 0.29338, "ode": 0.00494, "btw": 0.21},
+        2026: {"eb": 0.29338, "ode": 0.00494, "btw": 0.21},
+    },
+    "BE": {
+        # BE: geen directe EB op gas voor huishoudens
+        2025: {"eb": 0.0, "ode": 0.0, "btw": 0.06},
+        2026: {"eb": 0.0, "ode": 0.0, "btw": 0.06},
+    },
+    "DE": {
+        # Erdgassteuer (per m³ bij 10 kWh/m³)
+        2025: {"eb": 0.00553, "ode": 0.0, "btw": 0.19},
+        2026: {"eb": 0.00553, "ode": 0.0, "btw": 0.19},
+    },
+}
+
+# Netbeheer variabele kosten gas (€/m³ excl. BTW) — fallback
+_GAS_NETBEHEER_FALLBACK: dict[str, dict[str, float]] = {
+    "NL": {
+        "liander":  0.1012, "stedin":   0.0987, "enexis":   0.1034,
+        "rendo":    0.0945, "westland": 0.0912, "default":  0.1000,
+    },
+}
+
+# Leveranciersopslag gas (€/m³ excl. BTW) — fallback
+_GAS_MARKUP_FALLBACK: dict[str, dict[str, float]] = {
+    "NL": {
+        "vattenfall": 0.0550, "eneco": 0.0480, "essent": 0.0520,
+        "greenchoice": 0.0440, "budget": 0.0380, "pure": 0.0420,
+        "anwb": 0.0460, "none": 0.0, "custom": 0.0, "default": 0.0500,
+    },
+}
+
 # CloudEMS hosted tariff JSON — primaire bron voor automatische updates
 # Jullie hoeven alleen dit bestand op GitHub te updaten elk jaar januari
 CLOUDEMS_TARIFF_URL = (
@@ -142,6 +183,9 @@ class TariffFetcher:
         self._cbs_eb: dict[str, float]  = {}   # country → EB €/kWh
         self._cbs_fetched_at: float     = 0.0
         self._json_markup: dict[str, dict[str, float]] = {}  # uit tariffs.json / GitHub
+        self._json_gas_tax:       dict[str, dict] = {}
+        self._json_gas_netbeheer: dict[str, dict] = {}
+        self._json_gas_markup:    dict[str, dict] = {}
 
         # Leren uit (epex, paid) paren — persistente lijst
         # Structuur: {"NL:zonneplan": {"pairs": [(epex, paid), ...], "result": float|None}}
@@ -159,6 +203,9 @@ class TariffFetcher:
             self._cbs_fetched_at   = float(saved.get("cbs_fetched_at", 0))
             self._learn_data       = saved.get("learn_data", {})
             self._json_markup      = saved.get("json_markup", {})
+            self._json_gas_tax       = saved.get("json_gas_tax", {})
+            self._json_gas_netbeheer = saved.get("json_gas_netbeheer", {})
+            self._json_gas_markup    = saved.get("json_gas_markup", {})
             _LOGGER.debug("TariffFetcher: geladen uit storage (%d leer-keys)", len(self._learn_data))
         except Exception as exc:
             _LOGGER.warning("TariffFetcher: storage laden mislukt: %s", exc)
@@ -174,6 +221,9 @@ class TariffFetcher:
                 "cbs_fetched_at": self._cbs_fetched_at,
                 "learn_data":     self._learn_data,
                 "json_markup":    self._json_markup,
+                "json_gas_tax":       self._json_gas_tax,
+                "json_gas_netbeheer": self._json_gas_netbeheer,
+                "json_gas_markup":    self._json_gas_markup,
             })
         except Exception as exc:
             _LOGGER.warning("TariffFetcher: opslaan mislukt: %s", exc)
@@ -194,6 +244,70 @@ class TariffFetcher:
         vat = _VAT.get(country, 0.21)
         eb, markup, source = self._resolve_eb_and_markup(country, supplier_key, custom_markup)
         return eb, markup, vat, source
+
+    def get_gas_tariffs(
+        self,
+        country: str,
+        supplier_key: str = "default",
+        netbeheerder: str = "default",
+    ) -> dict:
+        """
+        Geef gas belastingcomponenten (excl. BTW, per m³).
+
+        Volgorde:
+          1. tariffs.json geladen via GitHub / lokaal bestand
+          2. Hardcoded _GAS_EB_FALLBACK (laatste verdedigingslinie)
+
+        Retourneert dict met:
+          eb_eur_m3, ode_eur_m3, netbeheer_eur_m3,
+          markup_eur_m3, btw, source
+        """
+        year = datetime.now().year
+        source = "fallback"
+
+        # ── Stap 1: tariffs.json (geladen via _fetch_cloudems_json / _fetch_local_json) ──
+        gas_tax = self._json_gas_tax.get(country, {}) if hasattr(self, '_json_gas_tax') else {}
+        if gas_tax:
+            yr_data = gas_tax.get(str(year)) or gas_tax.get(str(year - 1)) or {}
+            if yr_data:
+                source = "json"
+        else:
+            yr_data = {}
+
+        # ── Stap 2: hardcoded fallback ────────────────────────────────────────
+        if not yr_data:
+            country_fb = _GAS_EB_FALLBACK.get(country, _GAS_EB_FALLBACK.get("NL", {}))
+            candidates = {y: v for y, v in country_fb.items() if y <= year}
+            yr_data = candidates.get(max(candidates)) if candidates else {}
+            if yr_data:
+                source = "fallback"
+
+        eb      = float(yr_data.get("eb",  0.29338))
+        ode     = float(yr_data.get("ode", 0.00494))
+        btw     = float(yr_data.get("btw", 0.21))
+
+        # Netbeheer
+        json_nb = self._json_gas_netbeheer.get(country, {}) if hasattr(self, '_json_gas_netbeheer') else {}
+        nb_map  = json_nb or _GAS_NETBEHEER_FALLBACK.get(country, {})
+        netbeheer = float(nb_map.get(netbeheerder) or nb_map.get("default") or 0.10)
+
+        # Leveranciersopslag
+        json_gm  = self._json_gas_markup.get(country, {}) if hasattr(self, '_json_gas_markup') else {}
+        gm_map   = json_gm or _GAS_MARKUP_FALLBACK.get(country, {})
+        markup   = float(gm_map.get(supplier_key) or gm_map.get("default") or 0.05)
+
+        _LOGGER.debug(
+            "TariffFetcher gas [%s/%s] bron=%s eb=%.5f ode=%.5f nb=%.4f opslag=%.4f btw=%.0f%%",
+            country, year, source, eb, ode, netbeheer, markup, btw * 100,
+        )
+        return {
+            "eb_eur_m3":        eb,
+            "ode_eur_m3":       ode,
+            "netbeheer_eur_m3": netbeheer,
+            "markup_eur_m3":    markup,
+            "btw":              btw,
+            "source":           source,
+        }
 
     def add_price_pair(
         self,
@@ -419,6 +533,21 @@ class TariffFetcher:
                 _LOGGER.debug("TariffFetcher lokaal: markups geladen voor %s", list(markup_data.keys()))
                 updated = True
 
+            # Gas tarieven laden
+            gas_tax = data.get("gas_tax", {})
+            if gas_tax and not self._json_gas_tax:
+                self._json_gas_tax = gas_tax
+                _LOGGER.debug("TariffFetcher lokaal: gas_tax geladen voor %s", list(gas_tax.keys()))
+                updated = True
+            gas_nb = data.get("gas_netbeheer", {})
+            if gas_nb and not self._json_gas_netbeheer:
+                self._json_gas_netbeheer = gas_nb
+                updated = True
+            gas_mk = data.get("gas_supplier_markup", {})
+            if gas_mk and not self._json_gas_markup:
+                self._json_gas_markup = gas_mk
+                updated = True
+
             if updated:
                 self._cbs_fetched_at = time.time()
                 await self.async_save()
@@ -473,6 +602,21 @@ class TariffFetcher:
                     self._json_markup = markup_data
                     updated = True
                     _LOGGER.debug("TariffFetcher CloudEMS JSON: markups geladen voor %s", list(markup_data.keys()))
+
+                # Gas tarieven laden
+                gas_tax = data.get("gas_tax", {})
+                if gas_tax:
+                    self._json_gas_tax = gas_tax
+                    updated = True
+                    _LOGGER.debug("TariffFetcher CloudEMS JSON: gas_tax geladen voor %s", list(gas_tax.keys()))
+                gas_nb = data.get("gas_netbeheer", {})
+                if gas_nb:
+                    self._json_gas_netbeheer = gas_nb
+                    updated = True
+                gas_mk = data.get("gas_supplier_markup", {})
+                if gas_mk:
+                    self._json_gas_markup = gas_mk
+                    updated = True
 
                 if updated:
                     self._cbs_fetched_at = time.time()
