@@ -184,6 +184,12 @@ Optimal daily charge/discharge schedule based on EPEX prices, current SoC and ba
 
 **Daily reset persistence** — battery charged/discharged today counters survive HA restarts and P1 outages. A self-healing date guard in both `BatteryEfficiencyTracker` and `BatterySavingsTracker` resets counters at midnight regardless of whether the coordinator was active at that moment.
 
+**Victron Energy** — full Cerbo GX / Venus OS integration. Detects SOC and power from VE.Bus entities. ESS mode control for charge/discharge.
+
+**Huawei Luna 2000** — EPEX-driven control via Time of Use and Maximize Self Consumption modes. Max charge/discharge power configurable per session.
+
+**SMA Sunny Boy Storage** — SOC and power monitoring. Direct control via SMA Modbus (optional).
+
 ---
 
 ### 🚗 EV charging
@@ -193,6 +199,10 @@ Optimal daily charge/discharge schedule based on EPEX prices, current SoC and ba
 **Session learner** — learns plug-in time, expected kWh and weekday patterns to pre-reserve optimal cheap windows for the next charge.
 
 **ERE certificate tracking** — tracks charged kWh against the Dutch RED3/NEa Emissiereductie-eenheden scheme with quarterly reports suitable for submission to an inboekdienstverlener. Estimated yield: €0.03–€0.10 per kWh charged.
+
+**Vehicle-to-Home (V2H)** — uses your EV as a home battery during expensive EPEX hours. Requires a bidirectional charger (Wallbox Quasar 2). Configurable minimum SOC, price threshold and max discharge power.
+
+**EV Trip Planner** — reads your HA calendar and charges exactly enough for your next trip at the cheapest EPEX window. Learns average km per trip type (work, appointment, trip) over time. No more unnecessary full charges.
 
 ---
 
@@ -276,6 +286,24 @@ Full generator and transfer switch integration — works with both automatic ATS
 **Absence detection** — determines occupancy purely from energy consumption. States: home, away, sleeping, vacation.
 
 **Sleep detector**, **day classifier**, **thermal house model**, **consumption anomaly detection**, **virtual room meters**, **gas analysis** and **weekly energy insights** — all stable and unchanged.
+
+---
+
+### 📊 eGauge smart meter
+
+Full integration with eGauge sub-metering devices (new in HA 2026.1). Auto-detects all eGauge entities on setup. Provides grid power, per-phase (L1/L2/L3) and optional solar power as an alternative to P1/DSMR.
+
+---
+
+### ⚡ Phase outlet auto-detection
+
+Automatically determines which electrical phase (L1/L2/L3) each smart plug or NILM device is connected to — no manual configuration required. Correlates device power-on events with phase current changes. Confidence score per device; locked after 3+ observations. Results feed into NILM and peak shaving.
+
+---
+
+### 🌡️ LG ThinQ, Mitsubishi MelCloud & Toshiba AC
+
+Brand-specific EPEX climate control for LG, Mitsubishi and Toshiba airco systems. Auto-detects brand and power sensors per indoor unit. Real-time power consumption integrated with NILM.
 
 ---
 
