@@ -68,7 +68,7 @@ except ImportError:
     DEFAULT_P1_PORT    = 8088
     DSMR_TELEGRAM_INTERVAL = 10
 
-# ── Baudrates per DSMR versie ─────────────────────────────────────────────────
+# ── Baudrates per DSMR version ─────────────────────────────────────────────────
 DSMR_BAUD = {
     "2.2": 9600,
     "4":   115200,
@@ -150,7 +150,7 @@ _OBIS_NL: Dict[str, str] = {
     "voltage_swells_l1":      r"1-0:32\.36\.0\((\d+)\)",
     "voltage_swells_l2":      r"1-0:52\.36\.0\((\d+)\)",
     "voltage_swells_l3":      r"1-0:72\.36\.0\((\d+)\)",
-    # Gas -- MSN kanaal 0-1 (standaard NL)
+    # Gas -- MSN kanaal 0-1 (default NL)
     "gas_m3":                 r"0-1:24\.2\.1\(\d{12}[SW]\)\((\d+\.\d+)\*m3\)",
     # Water -- MSN kanaal 0-2 (ESMR5, sommige netbeheerders)
     "water_m3":               r"0-2:24\.2\.1\(\d{12}[SW]\)\((\d+\.\d+)\*m3\)",
@@ -312,7 +312,7 @@ class P1Telegram:
 
 def _detect_version(raw: str) -> str:
     """Detecteer DSMR-versie uit telegram-header."""
-    # DSMR5: 0-0:96.1.4 bevat versiestring "50" of "42"
+    # DSMR5: 0-0:96.1.4 bevat versionstring "50" of "42"
     m = re.search(r"0-0:96\.1\.4\((\d+)\)", raw)
     if m:
         v = m.group(1)
@@ -325,7 +325,7 @@ def _detect_version(raw: str) -> str:
     # DSMR2.2: header begint met /XXX\ (backslash)
     if re.search(r"^/[A-Z]{3}\\", raw, re.MULTILINE):
         return "2.2"
-    return "5"   # standaard aannemen
+    return "5"   # default aannemen
 
 
 def _get_obis(raw: str, obis_table: Dict[str, str], key: str) -> Optional[float]:
@@ -511,7 +511,7 @@ class HAEntityFallbackReader:
     maar de DSMR- of HomeWizard-integratie al geinstalleerd is.
     """
 
-    # Bekende entity-ID patronen per netwerk van integraties
+    # Known entity-ID patronen per netwerk van integraties
     _PATTERNS: Dict[str, List[str]] = {
         "power_import_w": [
             # DSMR integratie NL (current_electricity_usage)
@@ -601,18 +601,103 @@ class HAEntityFallbackReader:
         self._last_scan: float = 0.0
 
     def _resolve(self) -> None:
-        """Zoek eenmalig de best passende entities op."""
-        if time.time() - self._last_scan < 300:   # elke 5 min opnieuw scannen
+        """
+        Find P1/DSMR entities in three passes:
+          1. Check if DSMR/HomeWizard integration is loaded via config_entries (like ZonneplanProvider)
+          2. Scan entity_registry for all entities from those integrations
+          3. Match by entity_id keywords to determine which sensor is which
+        """
+        if time.time() - self._last_scan < 30 and self._resolved:
             return
         self._last_scan = time.time()
+
+        # Pass 1: exact hardcoded entity_id match (backwards compat)
         all_states = {s.entity_id for s in self._hass.states.async_all()}
         for key, candidates in self._PATTERNS.items():
+            if key in self._resolved:
+                continue
             for eid in candidates:
                 if eid in all_states:
-                    if key not in self._resolved:
-                        _LOGGER.debug("P1 HAFallback: %s -> %s", key, eid)
+                    _LOGGER.debug("P1 HAFallback pass1: %s -> %s", key, eid)
                     self._resolved[key] = eid
                     break
+
+        # Pass 2: scan config_entries for DSMR/HomeWizard integration (same method as ZonneplanProvider)
+        try:
+            dsmr_domains = {"dsmr", "homewizard", "p1_monitor", "ams_han"}
+            active_domains = {
+                entry.domain
+                for entry in self._hass.config_entries.async_entries()
+                if str(entry.state).lower() in ("configentrystate.loaded", "loaded")
+            }
+            found_domains = dsmr_domains & active_domains
+
+            if not found_domains:
+                _LOGGER.info(
+                    "P1 HAFallback: no DSMR/HomeWizard integration found in config_entries. "
+                    "Active domains: %s (looking for: %s)",
+                    sorted(active_domains)[:10], sorted(dsmr_domains)
+                )
+                return
+
+            _LOGGER.info("P1 HAFallback: found DSMR integrations %s — scanning entity_registry", found_domains)
+
+            # Pass 3: scan entity_registry for all entities from these integrations
+            from homeassistant.helpers import entity_registry as er
+            ent_reg = er.async_get(self._hass)
+
+            keyword_map = {
+                "power_import_w": (
+                    "current_electricity_usage", "power_consumption", "currently_delivered",
+                    "actueel_vermogen", "huidig_vermogen", "active_power_w",
+                    "power_delivered", "energieverbruik", "electricity_usage",
+                ),
+                "power_export_w": (
+                    "current_electricity_delivery", "power_production", "currently_returned",
+                    "actuele_teruglevering", "active_power_export", "power_returned",
+                    "electricity_delivery",
+                ),
+                "energy_import_t1_kwh": (
+                    "electricity_used_tariff_1", "energieverbruik_tarief_1",
+                    "electricity1_currently_delivered", "tariff_1_delivered",
+                ),
+                "energy_import_t2_kwh": (
+                    "electricity_used_tariff_2", "energieverbruik_tarief_2",
+                    "electricity2_currently_delivered", "tariff_2_delivered",
+                ),
+                "energy_export_t1_kwh": (
+                    "electricity_delivered_tariff_1", "energieproductie_tarief_1",
+                    "tariff_1_returned",
+                ),
+                "energy_export_t2_kwh": (
+                    "electricity_delivered_tariff_2", "energieproductie_tarief_2",
+                    "tariff_2_returned",
+                ),
+                "gas_m3": (
+                    "gas_consumption", "gasverbruik", "total_gas", "gas_delivered",
+                    "current_gas_usage",
+                ),
+            }
+
+            for entry in ent_reg.entities.values():
+                if entry.platform not in found_domains:
+                    continue
+                s = self._hass.states.get(entry.entity_id)
+                if not s or s.state in ("unavailable", "unknown", ""):
+                    continue
+                eid_lower = entry.entity_id.lower()
+                for key, keywords in keyword_map.items():
+                    if key in self._resolved:
+                        continue
+                    if any(kw in eid_lower for kw in keywords):
+                        _LOGGER.info(
+                            "P1 HAFallback pass3 (%s): %s -> %s",
+                            entry.platform, key, entry.entity_id,
+                        )
+                        self._resolved[key] = entry.entity_id
+
+        except Exception as exc:
+            _LOGGER.warning("P1 HAFallback scan error: %s", exc)
 
     def read(self) -> Optional[P1Telegram]:
         """Lees een synthetisch telegram vanuit HA entiteiten."""
@@ -634,7 +719,13 @@ class HAEntityFallbackReader:
             if not state or state.state in ("unavailable", "unknown", ""):
                 return 0.0
             try:
-                return float(state.state) * scale
+                val = float(state.state) * scale
+                # Auto-scale: DSMR integration reports in kW, we need W
+                # If unit is kW and value looks like kW (< 100), convert to W
+                unit = (state.attributes.get("unit_of_measurement") or "").lower()
+                if unit == "kw" and "power" in key:
+                    val *= 1000.0
+                return val
             except (ValueError, TypeError):
                 return 0.0
 
@@ -758,7 +849,7 @@ class P1Reader:
         # v4.6.522: interval-meting — bijhouden van timestamps per geldig telegram
         # Gebruikt voor auto-detectie van DSMR4 vs DSMR5 in coordinator
         import time as _time_mod
-        self._telegram_timestamps: list = []   # laatste N timestamps (unix)
+        self._telegram_timestamps: list = []   # last N timestamps (unix)
         self._telegram_ts_maxlen  = 20         # bewaar max 20 samples
         self._telegram_ts_module  = _time_mod  # bewaard voor gebruik in methoden
 
@@ -865,7 +956,7 @@ class P1Reader:
                 self._mqtt_reader._on_telegram_callback = self._on_telegram_callback
             await self._mqtt_reader.async_start()
 
-        # HA entity fallback altijd beschikbaar als hass meegegeven
+        # HA entity fallback always available als hass meegegeven
         if self._hass:
             self._fallback_reader = HAEntityFallbackReader(self._hass)
 
@@ -926,7 +1017,7 @@ class P1Reader:
             )
             return
 
-        # Baudrate op basis van DSMR-versie (2.2 = 9600, rest = 115200)
+        # Baudrate op basis van DSMR-version (2.2 = 9600, rest = 115200)
         baud = 9600 if getattr(self, "_dsmr_version", "5") == "2.2" else 115200
 
         while self._running:

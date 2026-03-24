@@ -26,7 +26,7 @@ BatteryProviderRegistry
 Gebruik in coordinator:
     registry = BatteryProviderRegistry(hass, config)
     await registry.async_setup()
-    primary = registry.primary_provider   # eerste beschikbare
+    primary = registry.primary_provider   # first beschikbare
     if primary and primary.is_available:
         await primary.async_set_charge(power_w=2000)
 
@@ -89,13 +89,13 @@ class ProviderWizardHint:
     """Informatie die de config_flow wizard gebruikt om de gebruiker te begeleiden."""
     provider_id:    str
     provider_label: str
-    detected:       bool     # integratie gevonden in HA
+    detected:       bool     # integratie found in HA
     configured:     bool     # CloudEMS heeft deze provider al ingesteld
     # Wat te tonen in de wizard
     title:          str      = ""
     description:    str      = ""
     icon:           str      = "mdi:battery"
-    warning:        str      = ""   # bijv. "Batterij gevonden maar niet geconfigureerd"
+    warning:        str      = ""   # bijv. "Batterij found maar niet geconfigureerd"
     suggestion:     str      = ""   # bijv. "Wil je dit nu instellen?"
     # Configureerbare opties voor de wizard-stap
     config_fields:  list[dict] = field(default_factory=list)
@@ -197,7 +197,7 @@ class BatteryProvider(ABC):
         """Geeft wizard-informatie voor config_flow."""
         ...
 
-    # ── Optionele methoden (override indien beschikbaar) ─────────────────────
+    # ── Optionele methoden (override indien available) ─────────────────────
 
     async def async_set_mode(self, mode: str, **kwargs) -> bool:
         """Stel een provider-specifieke modus in (optioneel)."""
@@ -330,7 +330,7 @@ class BatteryProviderRegistry:
                 })
             elif p.is_available:
                 # Gebruik gecachede _last_state — voorkomt race condition waarbij
-                # een tijdelijk unavailable entity een valse offline-melding geeft.
+                # een temporary unavailable entity een valse offline-melding geeft.
                 state = getattr(p, "_last_state", None) or p.read_state()
                 if not state.is_online:
                     warnings.append({
@@ -340,7 +340,7 @@ class BatteryProviderRegistry:
                         "message":  f"{p.PROVIDER_LABEL} geconfigureerd maar offline",
                         "action":   "check_integration",
                     })
-            # Provider-specifieke extra waarschuwingen (override in subklasse)
+            # Provider-specifieke extra warningen (override in subklasse)
             if hasattr(p, "get_setup_warnings"):
                 try:
                     warnings.extend(p.get_setup_warnings())

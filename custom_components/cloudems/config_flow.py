@@ -1240,7 +1240,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if self._bat_count > 0:
                 return await self.async_step_battery_detail()
             self._config[CONF_ENABLE_MULTI_BATTERY] = False
-            return await self.async_step_features()
+            # features was already completed earlier in the wizard — go forward to climate
+            return await self.async_step_climate()
         existing_bat_count = str(len(self._config.get(CONF_BATTERY_CONFIGS, [])) or int(self._config.get(CONF_BATTERY_COUNT, 0)))
         return self.async_show_form(
             step_id="battery_count",
@@ -1310,7 +1311,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._config[CONF_SHUTTER_COUNT] = self._shutter_count
             if self._shutter_count > 0:
                 return await self.async_step_shutter_detail()
-            return await self.async_step_features()
+            return await self.async_step_climate()
 
         existing_count = str(self._config.get(CONF_SHUTTER_COUNT, DEFAULT_SHUTTER_COUNT))
         if existing_count == "0" and overkiz_covers:
@@ -1448,7 +1449,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._shutter_step += 1
             if self._shutter_step < self._shutter_count:
                 return await self.async_step_shutter_detail()
-            return await self.async_step_features()
+            return await self.async_step_climate()
 
         existing = {}
         if self._shutter_step < len(existing_cfgs):
@@ -1760,11 +1761,24 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # ── 7. Advanced options (P1) — gaat nu via slimme auto-detectie ───────────
     async def async_step_advanced(self, user_input=None):
-        """Detecteer P1-bron automatisch; sla toggle-stap over."""
+        """Detecteer P1-bron automatisch; sla toggle-stap over.
+
+        Als grid_sensors al gedaan is (CONF_GRID_SENSOR of CONF_IMPORT_SENSOR gezet),
+        sla dan P1-config over om te voorkomen dat de wizard teruglust naar eerder
+        geconfigureerde stappen.
+        """
         if user_input is not None:
             self._config.update(user_input)
-            return await self.async_step_p1_config() if user_input.get(CONF_P1_ENABLED) else await self.async_step_mail()
-        # Direct naar slimme P1-detectie, geen losse toggle nodig
+            return await self.async_step_p1_config() if user_input.get(CONF_P1_ENABLED) else await self.async_step_climate()
+        # Skip P1 config if grid sensors were already configured earlier in this wizard run
+        _grid_done = bool(
+            self._config.get(CONF_GRID_SENSOR)
+            or self._config.get(CONF_IMPORT_SENSOR)
+            or self._config.get(CONF_DSMR_SOURCE)
+        )
+        if _grid_done:
+            return await self.async_step_climate()
+        # First time through: go to P1 config
         return await self.async_step_p1_config()
 
     async def async_step_p1_config(self, user_input=None):
@@ -2368,24 +2382,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors[CONF_MAIL_HOST] = "mail_host_required"
                 if not user_input.get(CONF_MAIL_TO, "").strip():
                     errors[CONF_MAIL_TO] = "mail_to_required"
-                if not errors:
-                    # Doe een snelle verbindingstest
-                    try:
-                        import smtplib, ssl as _ssl
-                        host = user_input[CONF_MAIL_HOST].strip()
-                        port = user_input.get(CONF_MAIL_PORT, DEFAULT_MAIL_PORT)
-                        use_tls = user_input.get(CONF_MAIL_USE_TLS, True)
-                        ctx = _ssl.create_default_context() if use_tls else None
-                        with smtplib.SMTP(host, port, timeout=5) as smtp:
-                            if use_tls:
-                                smtp.starttls(context=ctx)
-                            user = user_input.get(CONF_MAIL_USERNAME, "").strip()
-                            pwd  = user_input.get(CONF_MAIL_PASSWORD, "").strip()
-                            if user and pwd:
-                                smtp.login(user, pwd)
-                    except Exception as _smtp_err:
-                        errors["base"] = "mail_connection_failed"
-                        _LOGGER.warning("CloudEMS mail test mislukt: %s", _smtp_err)
+                # SMTP connection test is skipped in wizard to prevent blocking
+                # User can validate via options flow after setup
             if not errors:
                 self._config.update(user_input)
                 return await self.async_step_diagnostics()
@@ -2948,17 +2946,72 @@ class CloudEMSOptionsFlow(_OptionsBase):
         return None
 
     async def async_step_init(self, user_input=None):
-        """Hoofdmenu — kies een categorie."""
+        """Main menu — with auto-detection summary above."""
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
             cat = user_input.get("category", "energie")
+            if cat == "auto_detect":
+                return await self.async_step_auto_detect()
             return await getattr(self, f"async_step_menu_{cat}")()
+
+        # Build detection summary for description_placeholders
+        summary_lines = []
+        missing_lines = []
+        data = self._data()
+
+        # Grid sensor
+        if data.get("grid_sensor") or data.get("import_power_sensor"):
+            summary_lines.append("✅ Net-sensor geconfigureerd")
+        else:
+            missing_lines.append("⚠️ Geen net-sensor — stel in via Energie & Grid")
+
+        # PV
+        inv_cfgs = data.get("inverter_configs", [])
+        if inv_cfgs:
+            summary_lines.append(f"✅ {len(inv_cfgs)} omvormer(s) geconfigureerd")
+        else:
+            missing_lines.append("💡 Geen omvormers — stel in via Opwekking & Opslag")
+
+        # Battery
+        bat_cfgs = data.get("battery_configs", [])
+        if bat_cfgs:
+            summary_lines.append(f"✅ {len(bat_cfgs)} batterij(en) geconfigureerd")
+
+        # P1 / DSMR — auto detect
+        try:
+            from homeassistant.helpers import entity_registry as er
+            _ent_reg = er.async_get(self.hass)
+            dsmr_found = any(
+                e.platform in ("dsmr", "homewizard", "p1_monitor")
+                for e in _ent_reg.entities.values()
+            )
+            if dsmr_found:
+                summary_lines.append("✅ P1/DSMR integratie gedetecteerd")
+            elif not data.get("p1_enabled"):
+                missing_lines.append("💡 P1/DSMR niet geconfigureerd — stel in via Energie & Grid")
+        except Exception:
+            pass
+
+        # EV
+        ev_cfgs = data.get("ev_charger_configs", [])
+        if ev_cfgs:
+            summary_lines.append(f"✅ {len(ev_cfgs)} EV laadpaal(en) geconfigureerd")
+
+        # Boiler
+        boiler_cfgs = data.get("boiler_configs", [])
+        if boiler_cfgs:
+            summary_lines.append(f"✅ {len(boiler_cfgs)} boiler(s) geconfigureerd")
+
+        found_text  = "\n".join(summary_lines) if summary_lines else "Nog niets geconfigureerd"
+        todo_text   = "\n".join(missing_lines) if missing_lines else "✅ Alles ingesteld"
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
                 vol.Required("category", default="energie"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="auto_detect",   label="🔍 Automatisch detecteren & toepassen"),
                         selector.SelectOptionDict(value="energie",      label="⚡ Energie & Grid"),
                         selector.SelectOptionDict(value="opwekking",    label="☀️ Opwekking & Opslag"),
                         selector.SelectOptionDict(value="verbruik",     label="🏠 Verbruik & Comfort"),
@@ -2967,7 +3020,110 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="systeem",      label="🔧 Systeem & Communicatie"),
                     ], mode="list"))
             }),
+            description_placeholders={
+                "found": found_text,
+                "todo":  todo_text,
+            },
         )
+
+    async def async_step_auto_detect(self, user_input=None):
+        """
+        Scan HA for all detectable sensors and integrations.
+        Only fills empty fields — never overwrites existing configuration.
+        """
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # User confirmed — apply all detected values to empty fields only
+            applied = getattr(self, "_auto_detect_results", {})
+            data = self._data()
+            changed = 0
+            for key, value in applied.items():
+                if value and not data.get(key):
+                    self._opts[key] = value
+                    changed += 1
+            _LOGGER.info("CloudEMS auto-detect: %d fields applied", changed)
+            return self._save(self._opts)
+
+        # Run full detection
+        data = self._data()
+        phase_count = int(data.get("phase_count", 3) or 3)
+        applied: dict = {}
+        skipped: dict = {}
+
+        # 1. Grid sensors via _detect_sensors
+        suggestions = _detect_sensors(self.hass, phase_count)
+        sensor_map = {
+            CONF_GRID_SENSOR:   ("grid_sensor",   "Net vermogen sensor"),
+            CONF_IMPORT_SENSOR: ("import_sensor",  "Import sensor"),
+            CONF_EXPORT_SENSOR: ("export_sensor",  "Export sensor"),
+            CONF_SOLAR_SENSOR:  ("solar_sensor",   "PV sensor"),
+            CONF_BATTERY_SENSOR:("battery_sensor", "Batterij sensor"),
+        }
+        for conf_key, (data_key, label) in sensor_map.items():
+            found = suggestions.get(conf_key)
+            if found:
+                if data.get(data_key):
+                    skipped[label] = f"{data.get(data_key)} (behouden)"
+                else:
+                    applied[data_key] = found
+
+        # 2. DSMR / HomeWizard via _prefill_from_dsmr_integration
+        await self._prefill_from_dsmr_integration()
+        for key in (CONF_IMPORT_SENSOR, CONF_EXPORT_SENSOR, CONF_GRID_SENSOR):
+            val = self._suggestions.get(key)
+            if val and not data.get(key) and key not in applied:
+                applied[key] = val
+
+        # 3. Energy dashboard scan
+        try:
+            from .energy_autodiscover import async_discover_from_energy_dashboard
+            disc = await async_discover_from_energy_dashboard(self.hass)
+            if disc.confidence != "none":
+                prefill = disc.to_config_prefill()
+                for k, v in prefill.items():
+                    if v and not data.get(k) and k not in applied:
+                        applied[k] = v
+        except Exception as exc:
+            _LOGGER.debug("Energy dashboard scan failed: %s", exc)
+
+        # 4. Battery providers
+        try:
+            from .energy_manager.battery_provider import BatteryProviderRegistry
+            from .energy_manager.victron_provider import VictronProvider    # noqa: F401
+            from .energy_manager.sma_battery_provider import SMABatteryProvider  # noqa: F401
+            from .energy_manager.huawei_luna_provider import HuaweiLunaProvider  # noqa: F401
+            tmp_reg = BatteryProviderRegistry(self.hass, data)
+            await tmp_reg.async_setup()
+            for hint in tmp_reg.get_wizard_hints():
+                applied[f"_detected_{hint.provider_id}"] = hint.provider_label
+        except Exception as exc:
+            _LOGGER.debug("Battery provider scan failed: %s", exc)
+
+        self._auto_detect_results = applied
+
+        # Build summary lines
+        applied_lines  = [f"✅ {label}: `{val}`" for label, val in applied.items()
+                          if not label.startswith("_detected_")]
+        provider_lines = [f"🔋 {val} gedetecteerd" for key, val in applied.items()
+                          if key.startswith("_detected_")]
+        skipped_lines  = [f"⏭️ {label}: {val}" for label, val in skipped.items()]
+
+        applied_text  = "\n".join(applied_lines + provider_lines) or "Niets nieuws gevonden"
+        skipped_text  = "\n".join(skipped_lines) or "—"
+
+        return self.async_show_form(
+            step_id="auto_detect",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            }),
+            description_placeholders={
+                "applied":  applied_text,
+                "skipped":  skipped_text,
+                "count":    str(len(applied_lines) + len(provider_lines)),
+            },
+        )
+
 
     async def async_step_menu_energie(self, user_input=None):
         """Submenu: Energie & Grid."""
@@ -2988,7 +3144,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="prices_opts",  label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="budget_opts",  label="📊 Energiebudget"),
                         selector.SelectOptionDict(value="advanced_opts", label="📡 P1 & Geavanceerd"),
-                        selector.SelectOptionDict(value="egauge_opts",    label="📊 eGauge Submeter"),
+                        selector.SelectOptionDict(value="egauge_opts",      label="📊 eGauge Submeter"),
+                        selector.SelectOptionDict(value="neighbourhood_opts", label="🏘️ Buurtenergie (P2P)"),
+                        selector.SelectOptionDict(value="blackout_guard_opts",label="⚡ Blackout Guard"),
+                        selector.SelectOptionDict(value="fcr_opts",           label="📈 FCR/aFRR Virtuele Powerplant"),
                         selector.SelectOptionDict(value="noodstroom",   label="⚡ Noodstroom & Backup"),
                         selector.SelectOptionDict(value="__terug__",    label="← Terug"),
                     ], mode="list"))
@@ -3510,6 +3669,246 @@ class CloudEMSOptionsFlow(_OptionsBase):
                        if units else "Nog geen binnenunits.")
                 )
             },
+        )
+
+
+    async def async_step_geofencing_opts(self, user_input=None):
+        """Geofencing actions configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="geofencing_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("geofencing_enabled", default=bool(data.get("geofencing_enabled", False))): bool,
+                vol.Optional("geofencing_arrival_switches",   default=data.get("geofencing_arrival_switches") or []): selector.EntitySelector(selector.EntitySelectorConfig(domain=["switch","light"], multiple=True)),
+                vol.Optional("geofencing_departure_switches", default=data.get("geofencing_departure_switches") or []): selector.EntitySelector(selector.EntitySelectorConfig(domain=["switch","light"], multiple=True)),
+                vol.Optional("geofencing_arrival_thermostat", default=data.get("geofencing_arrival_thermostat") or vol.UNDEFINED): _ent(["climate"]),
+                vol.Optional("geofencing_arrival_temp",   default=float(data.get("geofencing_arrival_temp",   20.0))): vol.Coerce(float),
+                vol.Optional("geofencing_departure_temp", default=float(data.get("geofencing_departure_temp", 17.0))): vol.Coerce(float),
+                vol.Required("geofencing_notify", default=bool(data.get("geofencing_notify", False))): bool,
+            }),
+        )
+
+    async def async_step_sleep_switch_opts(self, user_input=None):
+        """Sleep group switch configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="sleep_switch_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("sleep_switch_enabled", default=bool(data.get("sleep_switch_enabled", False))): bool,
+                vol.Optional("sleep_switch_entities", default=data.get("sleep_switch_entities") or []): selector.EntitySelector(selector.EntitySelectorConfig(domain=["switch","light"], multiple=True)),
+                vol.Optional("sleep_thermostat_entity", default=data.get("sleep_thermostat_entity") or vol.UNDEFINED): _ent(["climate"]),
+                vol.Optional("sleep_thermostat_setpoint", default=float(data.get("sleep_thermostat_setpoint", 17.0))): vol.Coerce(float),
+                vol.Required("sleep_restore_on_wake", default=bool(data.get("sleep_restore_on_wake", True))): bool,
+            }),
+        )
+
+    async def async_step_fcr_opts(self, user_input=None):
+        """FCR/aFRR virtual power plant configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="fcr_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("fcr_enabled", default=bool(data.get("fcr_enabled", False))): bool,
+            }),
+        )
+
+
+    async def async_step_neighbourhood_opts(self, user_input=None):
+        """Neighbourhood P2P energy sharing configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="neighbourhood_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("neighbourhood_enabled", default=bool(data.get("neighbourhood_enabled", False))): bool,
+                vol.Optional("neighbourhood_mqtt_broker", default=data.get("neighbourhood_mqtt_broker", "") or vol.UNDEFINED): str,
+                vol.Optional("neighbourhood_mqtt_port",   default=int(data.get("neighbourhood_mqtt_port", 1883))): vol.Coerce(int),
+                vol.Optional("neighbourhood_max_share_w", default=float(data.get("neighbourhood_max_share_w", 1000.0))): vol.Coerce(float),
+            }),
+        )
+
+    async def async_step_blackout_guard_opts(self, user_input=None):
+        """Blackout guard configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="blackout_guard_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("blackout_guard_enabled", default=bool(data.get("blackout_guard_enabled", True))): bool,
+                vol.Optional("blackout_freq_entity",    default=data.get("blackout_freq_entity")    or vol.UNDEFINED): _ent(["sensor"]),
+                vol.Optional("blackout_voltage_entity", default=data.get("blackout_voltage_entity") or vol.UNDEFINED): _ent(["sensor"]),
+            }),
+        )
+
+
+    async def async_step_auto_apply(self, user_input=None):
+        """Auto-detect and apply all discoverable settings."""
+        data = self._data()
+        applied = []
+        skipped = []
+
+        # 1. HA Energy dashboard scan
+        try:
+            from .energy_autodiscover import async_discover_from_energy_dashboard
+            disc = await async_discover_from_energy_dashboard(self.hass)
+            if disc.confidence != "none":
+                prefill = disc.to_config_prefill()
+                for k, v in prefill.items():
+                    if v and not data.get(k):
+                        data[k] = v
+                        applied.append(f"✅ {k}: {str(v)[:40]}")
+                    elif data.get(k):
+                        skipped.append(f"⏭ {k}: al geconfigureerd")
+        except Exception as e:
+            skipped.append(f"⚠️ Energy dashboard: {e}")
+
+        # 2. P1/DSMR integration
+        try:
+            from homeassistant.helpers import entity_registry as er
+            ent_reg = er.async_get(self.hass)
+            dsmr_found = any(
+                e.platform in ("dsmr", "homewizard", "p1_monitor")
+                for e in ent_reg.entities.values()
+            )
+            if dsmr_found and not data.get("p1_enabled"):
+                data["p1_enabled"] = True
+                applied.append("✅ P1/DSMR: automatisch geactiveerd")
+        except Exception:
+            pass
+
+        # 3. Battery providers
+        try:
+            from .energy_manager.battery_provider import BatteryProviderRegistry
+            from .energy_manager.victron_provider import VictronProvider      # noqa
+            from .energy_manager.sma_battery_provider import SMABatteryProvider  # noqa
+            from .energy_manager.huawei_luna_provider import HuaweiLunaProvider  # noqa
+            registry = BatteryProviderRegistry(self.hass, data)
+            await registry.async_setup()
+            for p in registry.detected_providers:
+                key = f"{p.PROVIDER_ID}_enabled"
+                if not data.get(key):
+                    data[key] = True
+                    applied.append(f"✅ Batterij provider: {p.PROVIDER_LABEL}")
+        except Exception as e:
+            skipped.append(f"⚠️ Battery providers: {e}")
+
+        # Save applied config
+        if applied:
+            self._opts.update(data)
+
+        if user_input is not None:
+            return self._save(self._opts)
+
+        applied_text = "\n".join(applied) if applied else "Niets nieuws gevonden"
+        skipped_text = "\n".join(skipped[:5]) if skipped else "—"
+
+        return self.async_show_form(
+            step_id="auto_apply",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "applied": applied_text,
+                "skipped": skipped_text,
+                "count":   str(len(applied)),
+            },
+        )
+
+
+    async def async_step_vacation_opts(self, user_input=None):
+        """Vacation mode configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="vacation_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("vacation_enabled", default=bool(data.get("vacation_enabled", False))): bool,
+                vol.Optional("vacation_switch_entities", default=data.get("vacation_switch_entities") or []): selector.EntitySelector(selector.EntitySelectorConfig(domain="switch", multiple=True)),
+                vol.Optional("vacation_boiler_setpoint", default=float(data.get("vacation_boiler_setpoint", 45.0))): vol.Coerce(float),
+                vol.Required("vacation_notify", default=bool(data.get("vacation_notify", True))): bool,
+            }),
+        )
+
+    async def async_step_appliance_done_opts(self, user_input=None):
+        """Appliance done notifier configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="appliance_done_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            }),
+            description_placeholders={
+                "tip": "Configureer apparaten via de CloudEMS YAML configuratie: done_notifier_appliances lijst met label, power_entity, start_threshold_w, idle_threshold_w.",
+            },
+        )
+
+    async def async_step_standby_killer_opts(self, user_input=None):
+        """Standby killer configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="standby_killer_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+            }),
+            description_placeholders={
+                "tip": "Configureer groepen via de CloudEMS YAML configuratie: standby_killer_groups lijst met label, switch_entities, away_delay_min, restore_on_home.",
+            },
+        )
+
+    async def async_step_circadian_nudge_opts(self, user_input=None):
+        """Circadian nudge lighting configuration."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="circadian_nudge_opts",
+            data_schema=vol.Schema({
+                vol.Optional("back_to_menu", default=False): selector.BooleanSelector(),
+                vol.Required("circadian_nudge_enabled", default=bool(data.get("circadian_nudge_enabled", False))): bool,
+                vol.Required("circadian_nudge_mode", default=data.get("circadian_nudge_mode", "nudge")): selector.SelectSelector(selector.SelectSelectorConfig(options=[
+                    selector.SelectOptionDict(value="nudge",     label="💡 Nudge — subtiele aanpassing (5-8%)"),
+                    selector.SelectOptionDict(value="circadian", label="🌅 Circadian — volledige HCL op hernieuwbare energie"),
+                    selector.SelectOptionDict(value="both",      label="✨ Beide — gecombineerd"),
+                ], mode="list")),
+                vol.Optional("circadian_nudge_entities", default=data.get("circadian_nudge_entities") or []): selector.EntitySelector(selector.EntitySelectorConfig(domain="light", multiple=True)),
+                vol.Optional("circadian_nudge_max_shift", default=int(data.get("circadian_nudge_max_shift", 8))): vol.All(vol.Coerce(int), vol.Range(min=2, max=25)),
+                vol.Optional("circadian_nudge_transition", default=int(data.get("circadian_nudge_transition", 30))): vol.All(vol.Coerce(int), vol.Range(min=5, max=120)),
+            }),
         )
 
 

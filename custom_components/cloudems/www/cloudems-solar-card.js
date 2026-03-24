@@ -246,8 +246,8 @@ class CloudemsSolarCard extends HTMLElement {
     const scPct=parseFloat(scS?.state||0)||0;
     const pvTodayKwh = (scA.pv_today_kwh != null && scA.pv_today_kwh !== undefined)
       ? scA.pv_today_kwh : fcKwh;
-    const selfKwh=scA.self_consumed_kwh;
-    const exportKwh=scA.exported_kwh;
+    const selfKwh=scA.self_consumed_kwh ?? null;
+    const exportKwh=scA.exported_kwh ?? null;
     const bestHour=scA.best_solar_hour;
     const monthSaving=scA.monthly_saving_eur;
 
@@ -400,7 +400,7 @@ class CloudemsSolarCard extends HTMLElement {
       {label:'Ratio',         value:scPct.toFixed(1)+'%'},
       {label:'Formule',       value:'(PV − Export) / PV × 100',dim:true},
       {label:'PV vandaag',    value:pvTodayKwh?pvTodayKwh.toFixed(2)+' kWh':'—'},
-      {label:'Zelf verbruikt',value:selfKwh!=null?selfKwh.toFixed(2)+' kWh':'lerende...'},
+      {label:'Zelf verbruikt',value:selfKwh!=null?selfKwh.toFixed(2)+' kWh':'—'},
       {label:'Teruggeleverd', value:exportKwh!=null?exportKwh.toFixed(2)+' kWh':'—',dim:true},
     ],{footer:'Hogere % = meer zonne-energie direct thuis verbruikt'}) : {wrap:'',tip:''};
     const _ttFcSol = _TTS ? _TTS.html('sl-fc','PV Forecast',[

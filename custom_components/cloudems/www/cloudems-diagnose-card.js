@@ -13,10 +13,10 @@ const CSS = `
   :host { --bg: var(--ha-card-background,var(--card-background-color,#1c1c1c)); --s:rgba(255,255,255,.04); --b:rgba(255,255,255,.08); --t:var(--primary-text-color,#e8eaed); --m:var(--secondary-text-color,#9aa0a6); --green:#1D9E75; --amber:#BA7517; --red:#e74c3c; --blue:#378ADD; }
   *{box-sizing:border-box;margin:0;padding:0;}
   .card{background:var(--bg);border-radius:12px;overflow:hidden;font-family:var(--primary-font-family,sans-serif);font-size:13px;}
-  .tabs{display:flex;overflow-x:auto;border-bottom:0.5px solid var(--b);background:var(--s);}
-  .tab{padding:10px 14px;cursor:pointer;white-space:nowrap;font-size:12px;color:var(--m);border-bottom:2px solid transparent;transition:all .2s;}
-  .tab.active{color:var(--t);border-bottom-color:var(--green);}
-  .tab:hover{color:var(--t);}
+  .tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px 0;background:rgba(0,0,0,.3);border-bottom:2px solid rgba(255,255,255,.06);}
+  .tab{flex:0 0 auto;padding:7px 9px 8px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;text-align:center;cursor:pointer;color:rgba(255,255,255,.35);background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-bottom:3px solid transparent;border-radius:7px 7px 0 0;transition:all .15s;white-space:nowrap;}
+  .tab:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.15);}
+  .tab.active{color:#EF9F27;background:rgba(239,159,39,.1);border-color:rgba(239,159,39,.25);border-bottom-color:#EF9F27;font-size:11px;}
   .panel{display:none;padding:14px;}
   .panel.active{display:block;}
   .section{margin-bottom:16px;}
@@ -59,6 +59,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
     this.attachShadow({mode:"open"});
     this._tab = 0;
     this._prev = "";
+    this._swipeX = 0;
   }
 
   setConfig(c) { this._cfg = c || {}; this._render(); }
@@ -98,6 +99,20 @@ class CloudemsDiagnoseCard extends HTMLElement {
         this._render();
       });
     });
+
+    // Swipe support — same as home card
+    const card = sh.querySelector('.card');
+    if (card) {
+      card.addEventListener('touchstart', e => { this._swipeX = e.touches[0].clientX; }, {passive:true});
+      card.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - this._swipeX;
+        if (Math.abs(dx) < 50) return;
+        const maxTab = sh.querySelectorAll('.tab').length - 1;
+        if (dx < 0 && this._tab < maxTab) this._tab++;
+        else if (dx > 0 && this._tab > 0) this._tab--;
+        this._prev = ''; this._render();
+      }, {passive:true});
+    }
   }
 
   // ── Tab 0: Gezondheid ──────────────────────────────────────────────────────

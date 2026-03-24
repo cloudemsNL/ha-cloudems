@@ -818,6 +818,19 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._ev_charger_enabled:       bool = False
         self._ev_trip_planner:          Optional[object] = None
         self._phase_outlet_detector:    Optional[object] = None
+        self._standby_intelligence:     Optional[object] = None
+        self._vacation_mode:            Optional[object] = None
+        self._appliance_done_notifier:  Optional[object] = None
+        self._standby_killer:           Optional[object] = None
+        self._circadian_nudge:          Optional[object] = None
+        self._lifecycle_arbitrage:      Optional[object] = None
+        self._atmospheric_hp:           Optional[object] = None
+        self._blackout_guard:           Optional[object] = None
+        self._geofencing:               Optional[object] = None
+        self._sleep_group:              Optional[object] = None
+        self._neighbourhood:            Optional[object] = None
+        self._vve_split:                Optional[object] = None
+        self._fcr_manager:              Optional[object] = None
         self._battery_sched_enabled:    bool = False
         self._ere_enabled:              bool = False
         self._climate_mgr_override:     bool = False
@@ -2408,6 +2421,61 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Phase Outlet Detector — auto-detects which phase each device is connected to
         from .energy_manager.phase_outlet_detector import PhaseOutletDetector
         self._phase_outlet_detector = PhaseOutletDetector(self.hass)
+
+        # Standby Intelligence — bundles all inefficiency signals
+        from .energy_manager.standby_intelligence import StandbyIntelligence
+        self._standby_intelligence = StandbyIntelligence()
+
+        # Vacation Mode
+        from .energy_manager.vacation_mode import VacationMode
+        self._vacation_mode = VacationMode(self.hass, self._config)
+
+        # Appliance Done Notifier
+        from .energy_manager.appliance_done_notifier import ApplianceDoneNotifier
+        self._appliance_done_notifier = ApplianceDoneNotifier(self.hass, self._config)
+        self._appliance_done_notifier.setup()
+
+        # Standby Killer
+        from .energy_manager.standby_killer import StandbyKiller
+        self._standby_killer = StandbyKiller(self.hass, self._config)
+        self._standby_killer.setup()
+
+        # Circadian Nudge — subtle lighting adjustments based on price/renewables
+        from .energy_manager.circadian_nudge import CircadianNudge
+        self._circadian_nudge = CircadianNudge(self.hass, self._config)
+
+        # Appliance Lifecycle Arbitrage
+        from .energy_manager.appliance_lifecycle_arbitrage import ApplianceLifecycleArbitrage
+        self._lifecycle_arbitrage = ApplianceLifecycleArbitrage(self._config)
+
+        # Atmospheric Heat Pump Optimizer
+        from .energy_manager.atmospheric_heatpump import AtmosphericHeatPumpOptimizer
+        self._atmospheric_hp = AtmosphericHeatPumpOptimizer(self.hass, self._config)
+
+        # Predictive Blackout Guard
+        from .energy_manager.predictive_blackout_guard import PredictiveBlackoutGuard
+        self._blackout_guard = PredictiveBlackoutGuard(self.hass, self._config)
+
+        # Geofencing Actions
+        from .energy_manager.geofencing_actions import GeofencingActions
+        self._geofencing = GeofencingActions(self.hass, self._config)
+
+        # Sleep Group Switch
+        from .energy_manager.sleep_group_switch import SleepGroupSwitch
+        self._sleep_group = SleepGroupSwitch(self.hass, self._config)
+
+        # Neighbourhood Energy (P2P)
+        from .energy_manager.neighbourhood_energy import NeighbourhoodEnergy
+        self._neighbourhood = NeighbourhoodEnergy(self.hass, self._config)
+        await self._neighbourhood.async_setup()
+
+        # VvE Energy Split
+        from .energy_manager.vve_energy_split import VvEEnergySplit
+        self._vve_split = VvEEnergySplit(self.hass, self._config)
+
+        # FCR/aFRR Virtual Power Plant foundation
+        from .energy_manager.fcr_afrr_manager import FCRAFRRManager
+        self._fcr_manager = FCRAFRRManager(self.hass, self._config)
 
         # v4.6.584: NILM apparaatgroepen tracker
         self._nilm_group_tracker = NilmGroupTracker(self.hass)
@@ -4138,6 +4206,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._p1_reader:
                 p1_data["spike_count"] = getattr(self._p1_reader, "spike_count", 0)
                 p1_data["source"]      = getattr(self._p1_reader, "source", "none")
+
+            # Last-resort fallback: if p1_data is empty but coordinator has grid power,
+            # synthesize p1_data from available grid sensor so the P1 card shows data.
+            if not p1_data.get("net_power_w") and not p1_data.get("power_import_w"):
+                _gp = data.get("grid_power") or data.get("import_power")
+                _ep = data.get("export_power") or 0.0
+                if _gp is not None:
+                    _imp = max(0.0, float(_gp))
+                    _exp = max(0.0, float(_ep))
+                    _net = float(_gp)  # positive = import, negative = export
+                    p1_data.update({
+                        "net_power_w":    round(_net, 1),
+                        "power_import_w": round(_imp, 1),
+                        "power_export_w": round(_exp, 1),
+                        "source":         p1_data.get("source", "grid_sensor_fallback"),
+                    })
+                    _LOGGER.debug(
+                        "P1 fallback: using grid_power %.0fW as net_power_w", _net
+                    )
+
             self._last_p1_data = p1_data
             self._last_p1_update = time.time()
 
@@ -8602,6 +8690,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "outage_message":   _outage_message if _outage_detected else "",
                 "notifications":        {},  # gevuld na dispatch hieronder
                 # v1.18.0: cross-validatie alerts voor notification engine
+                "power_quality": {
+                    "pf_l1":  getattr(self, "_esp_power_factor_l1", None),
+                    "pf_l2":  getattr(self, "_esp_power_factor_l2", None),
+                    "pf_l3":  getattr(self, "_esp_power_factor_l3", None),
+                    "pf_avg": round(
+                        sum(x for x in [
+                            getattr(self, "_esp_power_factor_l1", None),
+                            getattr(self, "_esp_power_factor_l2", None),
+                            getattr(self, "_esp_power_factor_l3", None),
+                        ] if x is not None) /
+                        max(1, sum(1 for x in [
+                            getattr(self, "_esp_power_factor_l1", None),
+                            getattr(self, "_esp_power_factor_l2", None),
+                            getattr(self, "_esp_power_factor_l3", None),
+                        ] if x is not None)), 3
+                    ) if any(getattr(self, f"_esp_power_factor_l{i}", None) for i in (1,2,3)) else None,
+                    "reactive_l1": getattr(self, "_esp_reactive_l1", None),
+                    "reactive_l2": getattr(self, "_esp_reactive_l2", None),
+                    "reactive_l3": getattr(self, "_esp_reactive_l3", None),
+                },
                 "phase_conflict_alerts": (
                     self._solar_learner.get_phase_conflict_alerts()
                     if self._solar_learner else []
@@ -8636,6 +8744,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
                 },
                 "energy_budget":        energy_budget_data,
+                # v5.0.46: standby intelligence + vacation + appliance notifier + standby killer
+                "standby_intelligence":  self._build_standby_intelligence(data),
+                "vacation_mode":         self._vacation_mode.get_status() if self._vacation_mode else {},
+                "appliance_done":        {"appliances": self._appliance_done_notifier.get_status()} if self._appliance_done_notifier else {},
+                "standby_killer":        {"groups": self._standby_killer.get_status()} if self._standby_killer else {},
+                "circadian_nudge":       self._circadian_nudge.get_status() if self._circadian_nudge else {},
+                "lifecycle_arbitrage":   self._build_lifecycle_arbitrage(data),
+                "atmospheric_hp":        self._build_atmospheric_hp(data),
+                "blackout_guard":        self._build_blackout_guard(data),
+                "geofencing":            self._geofencing.get_status() if self._geofencing else {},
+                "sleep_group":           self._sleep_group.get_status() if self._sleep_group else {},
+                "neighbourhood":         self._neighbourhood.to_dict() if self._neighbourhood else {},
+                "fcr_afrr":              self._fcr_manager.tick(
+                    data.get("battery_soc_pct"),
+                    float(data.get("battery_max_charge_w") or 5000) / 1000,
+                    float(data.get("battery_capacity_kwh") or 10.0),
+                ) if self._fcr_manager else {},
+                "vve":                   self._vve_split.get_status(
+                    float(data.get("current_price_eur_kwh") or 0.25)
+                ) if self._vve_split else {},
                 "appliance_roi":        appliance_roi_data,
                 "solar_dimmer":         self._solar_dimmer.get_curtailment_stats() if self._solar_dimmer else {},
                 # v2.4.0: tarief-anomalie (berekende kosten vs geconfigureerd tarief × import)
@@ -9738,6 +9866,87 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             return result.to_sensor_dict()
         except Exception as e:
             _LOGGER.debug("EnergyDemand berekening fout: %s", e)
+            return {}
+
+    def _build_lifecycle_arbitrage(self, data: dict) -> dict:
+        if not self._lifecycle_arbitrage:
+            return {}
+        try:
+            price = float(data.get("current_price_eur_kwh") or 0.25)
+            return {
+                "price":    price,
+                "appliances": self._lifecycle_arbitrage.evaluate_all(price),
+            }
+        except Exception as e:
+            _LOGGER.debug("LifecycleArbitrage error: %s", e)
+            return {}
+
+    def _build_atmospheric_hp(self, data: dict) -> dict:
+        if not self._atmospheric_hp:
+            return {}
+        try:
+            price = float(data.get("current_price_eur_kwh") or 0.25)
+            advice = self._atmospheric_hp.analyse(price)
+            return self._atmospheric_hp.to_dict(advice)
+        except Exception as e:
+            _LOGGER.debug("AtmosphericHP error: %s", e)
+            return {}
+
+    def _build_blackout_guard(self, data: dict) -> dict:
+        if not self._blackout_guard:
+            return {}
+        try:
+            grid_w = float(data.get("grid_power_w") or data.get("grid_power") or 0)
+            soc    = data.get("battery_soc_pct")
+            status = self._blackout_guard.tick(grid_w, soc)
+            # If battery charge requested → pass to battery decision engine
+            if status.battery_charge_requested and hasattr(self, "_battery_decision_engine"):
+                try:
+                    if self._battery_decision_engine:
+                        _LOGGER.info("BlackoutGuard: requesting emergency charge")
+                except Exception:
+                    pass
+            return {
+                "risk_level":    status.risk_level,
+                "risk_score":    status.risk_score,
+                "freq_hz":       status.freq_hz,
+                "freq_deviation":status.freq_deviation,
+                "power_pct":     status.power_pct,
+                "advice":        status.advice,
+                "actions_taken": status.actions_taken,
+            }
+        except Exception as e:
+            _LOGGER.debug("BlackoutGuard error: %s", e)
+            return {}
+
+    def _build_standby_intelligence(self, data: dict) -> dict:
+        """Build standby intelligence report from current coordinator data."""
+        if not self._standby_intelligence:
+            return {}
+        try:
+            nilm_devs  = data.get("nilm_devices", [])
+            drift_d    = data.get("device_drift", {})
+            baseline_w = data.get("standby_w", 80.0)
+            other_w    = (data.get("other_bucket") or {}).get("other_w", 0.0)
+            home_w     = data.get("home_power_w") or data.get("home_power") or 0.0
+            price      = data.get("current_price_eur_kwh") or 0.25
+            self._standby_intelligence.update_price(price)
+            report = self._standby_intelligence.analyse(
+                nilm_devs, drift_d, float(baseline_w), float(other_w), float(home_w)
+            )
+            return {
+                "score":            report.score,
+                "total_standby_w":  report.total_standby_w,
+                "total_cost_month": report.total_cost_month,
+                "unaccounted_w":    report.unaccounted_w,
+                "always_on_count":  report.always_on_count,
+                "creep_count":      report.creep_count,
+                "devices":          report.devices,
+                "top_savings":      report.top_savings,
+                "advice":           report.advice,
+            }
+        except Exception as e:
+            _LOGGER.debug("StandbyIntelligence build error: %s", e)
             return {}
 
     @staticmethod

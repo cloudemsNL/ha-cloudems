@@ -76,28 +76,28 @@ OPEN_METEO_URL = OPEN_METEO_URL_BASE  # legacy, unused — URL built dynamically
 # URL: /estimate/:lat/:lon/:dec/:az/:kwp
 # dec = tilt (0-90), az = azimuth Forecast.Solar conventie (-180…+180, 0=S)
 FORECAST_SOLAR_URL = "https://api.forecast.solar/estimate/{lat}/{lon}/{dec}/{az}/{kwp}"
-FORECAST_SOLAR_CACHE_S = 7200  # 2 uur cache (rate limit: ~12 req/uur)
+FORECAST_SOLAR_CACHE_S = 7200  # 2 hour cache (rate limit: ~12 req/uur)
 
 # Minimum samples before orientation is "confident".
 # Each sample = one clear-sky *minute* (sampled once per minute).
 # 60 hours × 60 min = 3600 samples → confirmed after ~10 sunny days.
-# Verhoogd van 1800 naar 3600: mistige/bewolkte dagen verstoren het leren doordat
+# Verhoogd van 1800 naar 3600: mistige/bewolkte days verstoren het leren doordat
 # diffuus licht geen duidelijke azimut-informatie geeft. Meer samples = robuuster.
 MIN_ORIENTATION_SAMPLES = 3600
 
 # Oriëntatie-drift detectie
 # Als de geleerde azimuth consistent >DRIFT_AZ_THRESHOLD° afwijkt van
-# de lopende schatting (over DRIFT_WINDOW_SAMPLES samples), neem dan aan
+# de lopende estimate (over DRIFT_WINDOW_SAMPLES samples), neem dan aan
 # dat de panelen zijn verplaatst/gedraaid en reset het profiel.
 DRIFT_AZ_THRESHOLD   = 25.0   # graden — gevoelig genoeg voor 1 dakvlak verschil
 DRIFT_TILT_THRESHOLD = 15.0   # graden
 DRIFT_WINDOW_SAMPLES = 10     # aantal opeenvolgende afwijkende samples
 
-# Als de azimuth-schatting sterk afwijkt van het huidige profiel,
+# Als de azimuth-estimate sterk afwijkt van het huidige profiel,
 # pas dan een hogere decay toe op het hourly_yield_fraction profiel
 # zodat verkeerde historische data sneller weg-EWMA't.
 FAST_CORRECT_AZ_THRESHOLD = 20.0  # graden — begin versneld corrigeren
-FAST_CORRECT_ALPHA_BOOST  = 3.0   # multiplier op alpha bij grote afwijking
+FAST_CORRECT_ALPHA_BOOST  = 3.0   # multiplier op alpha bij grote deviation
 
 # Minimum yield fraction (power/peak) to count as a learning sample.
 # 0.10 = 10% of peak — filters night/standby but includes overcast mornings.
@@ -133,7 +133,7 @@ class InverterOrientation:
 
     # Per-hour average yield fraction (0-1 relative to peak Wp)
     hourly_yield_fraction: dict = field(default_factory=dict)  # {"8": 0.12, ...}
-    # Drift-detectie: tel samples waarbij nieuwe schatting sterk afwijkt van geleerde waarde
+    # Drift-detectie: tel samples waarbij nieuwe estimate sterk afwijkt van geleerde waarde
     _drift_az_votes:   int = field(default=0, repr=False)
     _drift_tilt_votes: int = field(default=0, repr=False)
 
@@ -330,18 +330,18 @@ class PVForecast:
                 alpha = 0.30 if n_hours < 8 else (0.15 if n_hours < 16 else 0.08)
             prev = float(p.hourly_yield_fraction.get(hour_key, frac))
 
-            # ── Adaptive alpha: versneld corrigeren bij grote afwijking ──────
-            # Als de meting sterk afwijkt van het opgeslagen profiel (bijv. door
+            # ── Adaptive alpha: versneld corrigeren bij grote deviation ──────
+            # Als de measurement sterk afwijkt van het opgeslagen profiel (bijv. door
             # corrupte testdata), verhoog alpha zodat nieuwe data sneller domineert.
             deviation = abs(frac - prev)
             if deviation > 0.25 and n_hours >= 8:
-                # Grote afwijking → boost alpha (max 0.45)
+                # Grote deviation → boost alpha (max 0.45)
                 alpha = min(0.45, alpha * FAST_CORRECT_ALPHA_BOOST)
 
             new_frac = round(prev * (1.0 - alpha) + frac * alpha, 4)
 
-            # v4.6.453: smoothing — voorkom outliers door per uur te begrenzen
-            # op max 1.5x het gemiddelde van de buururen (prevents 0.93 spike bij uur 11)
+            # v4.6.453: smoothing — voorkom outliers door per hour te begrenzen
+            # op max 1.5x het gemiddelde van de buurhours (prevents 0.93 spike bij hour 11)
             if n_hours >= 8:
                 hour_int = int(hour_key)
                 neighbors = []
@@ -389,7 +389,7 @@ class PVForecast:
                 return
 
             # ── Vroege consistentiecheck: profiel-zwaartepunt vs geleerd azimuth ──
-            # Als er ≥6 uren in het profiel zitten en het gewogen zwaartepunt >60°
+            # Als er ≥6 hours in het profiel zitten en het gewogen zwaartepunt >60°
             # afwijkt van het geleerde azimuth, is de leerdata corrupt → directe reset.
             if len(hf) >= 6 and p.learned_azimuth is not None:
                 total_w = sum(hf.values())
@@ -466,7 +466,7 @@ class PVForecast:
             new_tilt = learned_tilt
 
             # ── Oriëntatie-drift detectie ──────────────────────────────────
-            # Als de nieuwe schatting structureel afwijkt van wat geleerd is,
+            # Als de nieuwe estimate structureel afwijkt van wat geleerd is,
             # neem dan aan dat de panelen verplaatst zijn en reset het profiel.
             if p.learned_azimuth is not None and p.orientation_confident:
                 az_dev   = abs(new_az - p.learned_azimuth)
@@ -515,8 +515,8 @@ class PVForecast:
             self._dirty = True
 
             # ── Fast-track azimuth correctie (ook vóór orientation_confident) ──
-            # Als de dagvorm-schatting sterk afwijkt van het huidige geleerde azimuth
-            # (bijv. door te veel testdata), verminder dan het gewicht van het hele
+            # Als de dagvorm-estimate sterk afwijkt van het huidige geleerde azimuth
+            # (bijv. door te veel testdata), verminder dan het weight van het hele
             # hourly profiel zodat nieuwe zonnedata sneller domineert.
             # EXTRA: when still learning (not confident) the threshold is halved so
             # that bad-early-data profiles correct within days instead of weeks.
@@ -532,7 +532,7 @@ class PVForecast:
                 and n_hours >= 8
             ):
                 # Vertraag het profiel: schaal alle waarden met 0.5
-                # → nieuwe dagmetingen hebben 2× zo veel gewicht → snellere correctie
+                # → nieuwe dagmeasurementen hebben 2× zo veel weight → snellere correctie
                 scale = 0.3 if not p.orientation_confident else 0.5
                 p.hourly_yield_fraction = {
                     k: round(v * scale, 4)
@@ -600,7 +600,7 @@ class PVForecast:
         if not profiles_with_data:
             return
 
-        # Combineer alle omvormers: gewogen gemiddeld tilt/azimuth, totaal kWp
+        # Combine alle omvormers: gewogen gemiddeld tilt/azimuth, totaal kWp
         total_kwp = sum(p._peak_wp for p in profiles_with_data) / 1000.0
         if total_kwp < 0.1:
             return
@@ -627,7 +627,7 @@ class PVForecast:
                     data   = await r.json()
                     watts  = data.get("result", {}).get("watts", {})
                     # watts dict: {"2025-03-18 08:00:00": 123, ...}
-                    # Normaliseer keys naar ISO format "YYYY-MM-DDTHH:00"
+                    # Normalize keys naar ISO format "YYYY-MM-DDTHH:00"
                     cache = {}
                     for ts_str, w in watts.items():
                         try:
@@ -778,7 +778,7 @@ class PVForecast:
             weather_key_fs = target.strftime("%Y-%m-%dT%H:00")
             fs_total_w = self._fcsolar_cache.get(weather_key_fs)
             if fs_total_w is not None and fs_total_w >= 0:
-                # Bereken aandeel van deze omvormer in totaal kWp
+                # Calculate aandeel van deze omvormer in totaal kWp
                 total_peak_wp = sum(
                     pp._peak_wp for pp in self._profiles.values() if pp._peak_wp and pp._peak_wp > 10
                 )
@@ -788,9 +788,9 @@ class PVForecast:
                 # corrigeert daarvoor op basis van historische werkelijke productie.
                 # Zonder deze correctie geeft morgen ~2.5x te hoge waarde (calib ~0.40).
                 forecast_w = round(max(0.0, fs_total_w * share * _calib), 1)
-                conf = 0.93  # Forecast.Solar: hoge betrouwbaarheid
+                conf = 0.93  # Forecast.Solar: hoge reliableheid
 
-            # Cloud cover correctie voor het huidige uur (live data van weather sensor/Ecowitt)
+            # Cloud cover correctie voor het huidige hour (live data van weather sensor/Ecowitt)
             # Alleen toepassen als de cloud cover data vers is (huidig uur)
             _cc = self._live_cloud_cover_pct
             _cc_hour = self._live_cloud_cover_hour
@@ -799,7 +799,7 @@ class PVForecast:
                 # Lineaire interpolatie: factor = 1.0 - 0.85 * (cc/100)
                 _cc_factor = max(0.15, 1.0 - 0.85 * (_cc / 100.0))
                 forecast_w = round(forecast_w * _cc_factor, 1)
-                conf = max(0.4, conf * (1.0 - _cc / 200.0))  # confidence daalt bij bewolking
+                conf = max(0.4, conf * (1.0 - _cc / 200.0))  # confidence daalt bij cloud cover
 
             # Confidence interval: spread gebaseerd op confidence en historische spread
             # Lage confidence → bredere band; hoge confidence → smalle band
@@ -864,7 +864,7 @@ class PVForecast:
 
         prev_frac = float(p.hourly_yield_fraction.get(hour_key, actual_frac))
 
-        # Gebruik sterkere alpha dan de 10s-EMA zodat uurwisseling meer gewicht heeft
+        # Use sterkere alpha dan de 10s-EMA zodat uurwisseling meer weight heeft
         alpha = 0.25
 
         new_frac = round(prev_frac * (1.0 - alpha) + actual_frac * alpha, 4)
@@ -905,7 +905,7 @@ class PVForecast:
         _now = _dt_util.now()
         _now_h = _now.hour
         _now_min = _now.minute
-        # Aantal resterende uren vandaag (inclusief huidig uur)
+        # Aantal resterende hours vandaag (inclusief huidig uur)
         hours_left_today = 24 - _now_h
         remaining = 0.0
         for eid in self._profiles:
@@ -913,7 +913,7 @@ class PVForecast:
                 if i >= hours_left_today:
                     break
                 remaining += hf.forecast_w / 1000.0
-        # Huidig uur al deels geproduceerd — trek overlap af om dubbeltelling te voorkomen
+        # Huidig hour al deels geproduceerd — trek overlap af om dubbeltelling te voorkomen
         current_hour_forecast = 0.0
         for eid in self._profiles:
             fc_list = self.get_forecast(eid)

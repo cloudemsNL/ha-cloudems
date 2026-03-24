@@ -409,7 +409,8 @@ ${t==='history'?this._tabHistory():''}
     const bmode=(b.actual_mode||'').toUpperCase();
     const bmodeSince=b.actual_mode_since_s!=null?b.actual_mode_since_s:null;
     const _fmtDur=(s)=>{if(s==null)return'';if(s<60)return`${Math.round(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}u${Math.floor((s%3600)/60)}m`;};
-    const bmodeLbl=bmode+(bmodeSince!=null?` · ${_fmtDur(bmodeSince)}`:'');
+    const _bmodeCln=bmode.includes('IMEMORY')||bmode.includes('MEMORY')?'MEMORY':bmode;
+    const bmodeLbl=_bmodeCln+(bmodeSince!=null?` · ${_fmtDur(bmodeSince)}`:'');
     const imp=gw>50; const exp=gw<-50;
     // Price
     const priceSt=this._s('sensor.cloudems_price_current_hour');
@@ -511,7 +512,16 @@ ${t==='history'?this._tabHistory():''}
     <div class="sc-l">🚿 Boiler</div>
     <div class="sc-v" style="color:#EF9F27">${btemp}°C</div>
     <div class="sc-s">setpoint ${bsp}°C · ${this._fmt(bpow)}</div>
-    ${bmode?`<div class="sc-b" style="color:#f87171;border-color:rgba(239,64,64,0.25);background:rgba(239,64,64,0.1)">${bmodeLbl}</div>`:''}
+    ${bmode?(()=>{
+      const _isBst=bmode.includes('BOOST');
+      const _isGrn=bmode.includes('GREEN')||bmode.includes('ECO')||bmode.includes('COMFORT');
+      const _isMem=bmode.includes('MEMORY');
+      const _sc=_isBst?'color:#f87171;border-color:rgba(239,64,64,0.25);background:rgba(239,64,64,0.1)':
+                _isGrn?'color:#4ade80;border-color:rgba(74,222,128,0.25);background:rgba(74,222,128,0.1)':
+                _isMem?'color:#60a5fa;border-color:rgba(96,165,250,0.25);background:rgba(96,165,250,0.1)':
+                'color:#fbbf24;border-color:rgba(251,191,36,0.25);background:rgba(251,191,36,0.1)';
+      return `<div class="sc-b" style="${_sc}">${bmodeLbl}</div>`;
+    })():''}
   </div>
 </div>
 
@@ -1015,11 +1025,21 @@ ${(()=>{
     <div class="boil-sub">${b.boiler_type||''} · ${b.entity_id||''}</div>
     <div style="margin-top:4px;display:flex;align-items:center;gap:7px">
       <div class="boil-temp">${temp}°C</div>
-      ${mode?`<div class="boil-badge" style="${
-  mode.includes('BOOST') ? 'background:rgba(239,64,64,0.12);color:#f87171;border:1px solid rgba(239,64,64,0.28)' :
-  mode.includes('GREEN') ? 'background:rgba(74,222,128,0.12);color:#4ade80;border:1px solid rgba(74,222,128,0.28)' :
-  'background:rgba(107,114,128,0.12);color:#9ca3af;border:1px solid rgba(107,114,128,0.28)'
-}">${mode}</div>`:''} 
+      ${(()=>{
+        const modeU = mode.toUpperCase();
+        const isBoost = modeU.includes('BOOST');
+        const isGreen = modeU.includes('GREEN') || modeU.includes('ECO') || modeU.includes('COMFORT');
+        const isMemory = modeU.includes('MEMORY') || modeU.includes('IMEMORY');
+        const isOn = modeU === 'ON' || modeU === 'TRUE';
+        const isOff = modeU === 'OFF' || modeU === 'FALSE';
+        const label = isMemory ? 'iMEMORY' : mode;
+        const style = isBoost ? 'background:rgba(239,64,64,0.12);color:#f87171;border:1px solid rgba(239,64,64,0.28)' :
+                      isGreen ? 'background:rgba(74,222,128,0.12);color:#4ade80;border:1px solid rgba(74,222,128,0.28)' :
+                      isMemory ? 'background:rgba(96,165,250,0.12);color:#60a5fa;border:1px solid rgba(96,165,250,0.28)' :
+                      isOff ? 'background:rgba(107,114,128,0.08);color:#6b7280;border:1px solid rgba(107,114,128,0.2)' :
+                      'background:rgba(251,191,36,0.12);color:#fbbf24;border:1px solid rgba(251,191,36,0.28)';
+        return mode ? `<div class="boil-badge" style="${style}">${label}</div>` : '';
+      })()}
     </div>
   </div>
   <div style="text-align:right"><div style="font-size:18px;font-weight:700;color:#EF9F27">${this._fmt(pw)}</div><div style="font-size:10px;color:rgba(255,255,255,0.35)">nu</div></div>

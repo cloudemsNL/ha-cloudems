@@ -1184,23 +1184,19 @@
         }
       },
       "init": {
-        "title": "CloudEMS — Configureren",
+        "title": "CloudEMS Instellingen",
         "data": {
           "category": "Categorie",
-          "back_to_menu": "← Terug naar menu",
-          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
-          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
-          "budget_enabled": "Energiebudget inschakelen",
-          "budget_gas_m3_month": "Maandbudget gas (m³)",
-          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Apparaten uitsluiten",
-          "nilm_shift_include": "Apparaten opnemen",
-          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
-          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
-          "pool_filter_power_entity": "Vermogenssensor filterpomp",
-          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "auto_apply": "🔍 Automatisch detecteren en toepassen"
+        },
+        "description": "**Gedetecteerd:**\n{found}\n\n**Aandachtspunten:**\n{todo}",
+        "placeholders": {
+          "found": {
+            "example": "✅ Net-sensor geconfigureerd"
+          },
+          "todo": {
+            "example": "💡 P1/DSMR niet geconfigureerd"
+          }
         }
       },
       "menu_energie": {
@@ -1953,6 +1949,204 @@
           "ev_kwh_per_pct": "Batterijgrootte gedeeld door 100. Voorbeeld: 77 kWh batterij → 0.77. CloudEMS leert dit automatisch over tijd.",
           "ev_soc_entity": "Sensor die de laadstand (%) van je EV aangeeft. Wordt automatisch gevonden als je EV in HA is."
         }
+      },
+      "auto_detect": {
+        "title": "🔍 Automatisch detecteren",
+        "description": "CloudEMS heeft de volgende sensoren en integraties gevonden:\n\n**Nieuw toe te voegen ({count}):**\n{applied}\n\n**Bestaande instellingen (niet gewijzigd):**\n{skipped}\n\nDruk op Verzenden om de gevonden waarden toe te passen. Bestaande instellingen worden nooit overschreven.",
+        "data": {
+          "back_to_menu": "← Terug zonder toepassen"
+        }
+      },
+      "standby_intelligence_opts": {
+        "title": "Sluimerverbruik Analyse",
+        "description": "CloudEMS bundelt alle inefficiëntiesignalen: altijd-aan apparaten, standby-sluiping en onverklaard verbruik. Score van 0-100, kosten per maand.",
+        "data": {
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "vacation_opts": {
+        "title": "Vakantiemodus",
+        "description": "Schakel alle niet-kritische apparaten uit bij langdurige afwezigheid. CloudEMS bewaakt PV, batterij en boiler op minimum.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "vacation_enabled": "Vakantiemodus inschakelen",
+          "vacation_switch_entities": "Stopcontacten uitschakelen bij vakantie",
+          "vacation_boiler_setpoint": "Boiler setpoint tijdens vakantie (°C)",
+          "vacation_notify": "Wekelijkse samenvatting sturen"
+        },
+        "data_description": {
+          "vacation_enabled": "Activeer om CloudEMS vakantiemodus te laten beheren. Schakel handmatig in/uit via het dashboard.",
+          "vacation_switch_entities": "Welke stopcontacten mag CloudEMS uitschakelen? Nooit kritieke apparaten (NAS, router) selecteren.",
+          "vacation_boiler_setpoint": "Temperatuur om legionella te voorkomen. Minimaal 45°C aanbevolen.",
+          "vacation_notify": "Stuur wekelijks een samenvatting van besparingen tijdens vakantie."
+        }
+      },
+      "appliance_done_opts": {
+        "title": "Apparaat Klaar Melding",
+        "description": "Ontvang een melding zodra de wasmachine, droger of vaatwasser klaar is. Detectie op basis van vermogenspatroon.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "done_notifier_appliances": "Apparaten bewaken"
+        },
+        "data_description": {
+          "done_notifier_appliances": "Voeg apparaten toe die je wilt bewaken. Vereist een vermogenssensor per apparaat (bijv. via smart plug)."
+        }
+      },
+      "standby_killer_opts": {
+        "title": "Standby Killer",
+        "description": "Schakel groepen stopcontacten automatisch uit als niemand thuis is of 's nachts. Bespaart sluimerverbruik zonder dat je er aan hoeft te denken.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "standby_killer_groups": "Groepen configureren"
+        },
+        "data_description": {
+          "standby_killer_groups": "Definieer groepen (bijv. TV-meubel, thuiskantoor). Per groep: welke stopcontacten, hoe lang na vertrek, terugzetten bij thuiskomst."
+        }
+      },
+      "circadian_nudge_opts": {
+        "title": "Slimme Verlichting (Circadian Nudge)",
+        "description": "Verlichting past subtiel aan op de energieprijs en het aandeel hernieuwbare energie. Duur stroom = iets koeler en dimmer. Goedkoop/surplus = warmer en helderder. De bewoner merkt het nauwelijks maar het stuurt gedrag.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "circadian_nudge_enabled": "Slimme verlichting inschakelen",
+          "circadian_nudge_mode": "Modus",
+          "circadian_nudge_entities": "Lampen controleren",
+          "circadian_nudge_max_shift": "Maximale helderheidsaanpassing (%)",
+          "circadian_nudge_transition": "Overgang (seconden)"
+        },
+        "data_description": {
+          "circadian_nudge_enabled": "Schakel in om verlichting te koppelen aan de energiemarkt.",
+          "circadian_nudge_mode": "Nudge: subtiele 5-8% aanpassing. Circadian: volledige HCL op basis van hernieuwbare energie. Beide: gecombineerd.",
+          "circadian_nudge_entities": "Selecteer lampen die kleurtemperatuur en helderheid ondersteunen (bijv. Philips Hue, IKEA Tradfri). Alleen lampen die al aan zijn worden aangepast.",
+          "circadian_nudge_max_shift": "Hoeveel procent mag de helderheid maximaal verschuiven? 5-10% is onopvallend, 15%+ is merkbaar.",
+          "circadian_nudge_transition": "Hoe lang duurt de overgang? 30 seconden is vloeiend en onopvallend."
+        }
+      },
+      "auto_apply": {
+        "title": "Automatisch Toepassen",
+        "description": "CloudEMS heeft **{count}** instellingen automatisch gevonden en toegepast.\n\n**Toegepast:**\n{applied}\n\n**Overgeslagen:**\n{skipped}\n\nDruk op Verzenden om op te slaan.",
+        "data": {},
+        "placeholders": {
+          "count": {
+            "example": "3"
+          },
+          "applied": {
+            "example": "✅ grid_sensor: sensor.power"
+          },
+          "skipped": {
+            "example": "⏭ al geconfigureerd"
+          }
+        }
+      },
+      "geofencing_opts": {
+        "title": "Geofencing Acties",
+        "description": "Automatische acties bij aankomst thuis en vertrek. Gebaseerd op de aanwezigheidsdetectie van CloudEMS.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "geofencing_enabled": "Geofencing inschakelen",
+          "geofencing_arrival_switches": "Inschakelen bij aankomst",
+          "geofencing_departure_switches": "Uitschakelen bij vertrek",
+          "geofencing_arrival_thermostat": "Thermostaat bij aankomst",
+          "geofencing_arrival_temp": "Comfort temperatuur (°C)",
+          "geofencing_departure_temp": "Afwezig temperatuur (°C)",
+          "geofencing_notify": "Welkomstmelding sturen"
+        },
+        "data_description": {
+          "geofencing_arrival_switches": "Welke apparaten moeten aan als je thuiskomt? (bijv. vloerverwarming, welkomstlicht)",
+          "geofencing_departure_switches": "Welke apparaten moeten uit als iedereen weg is?",
+          "geofencing_arrival_temp": "Temperatuur instellen bij thuiskomst. Aanbevolen: 20-21°C.",
+          "geofencing_departure_temp": "Temperatuur bij afwezigheid. Aanbevolen: 16-18°C voor besparing."
+        }
+      },
+      "sleep_switch_opts": {
+        "title": "Slaap Modus Schakelaar",
+        "description": "Schakel apparaten automatisch uit als CloudEMS slaap detecteert. Ideaal voor TV-meubel, lampen en media-apparaten.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "sleep_switch_enabled": "Slaap-schakelaar inschakelen",
+          "sleep_switch_entities": "Uitschakelen bij slaap",
+          "sleep_thermostat_entity": "Thermostaat setback",
+          "sleep_thermostat_setpoint": "Slaap temperatuur (°C)",
+          "sleep_restore_on_wake": "Herstel bij wakker worden"
+        },
+        "data_description": {
+          "sleep_switch_entities": "Welke apparaten mogen uit als iedereen slaapt?",
+          "sleep_thermostat_setpoint": "Temperatuur 's nachts. Aanbevolen: 16-18°C. Warmere slaapkamer = meer energieverbruik.",
+          "sleep_restore_on_wake": "Zet apparaten terug aan bij wakker worden? Schakel uit als je dit liever handmatig doet."
+        }
+      },
+      "neighbourhood_opts": {
+        "title": "Buurtenergie (P2P)",
+        "description": "Deel surplus PV-energie met buren via een lokale MQTT broker. Volledig privé — alleen surplus vermogen wordt gedeeld, geen persoonlijke data.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "neighbourhood_enabled": "Buurtenergie inschakelen",
+          "neighbourhood_mqtt_broker": "MQTT broker IP-adres",
+          "neighbourhood_mqtt_port": "MQTT poort",
+          "neighbourhood_max_share_w": "Maximum te delen vermogen (W)"
+        },
+        "data_description": {
+          "neighbourhood_mqtt_broker": "IP-adres van de lokale MQTT broker (bijv. 192.168.1.10). Leeg laten om HA MQTT te gebruiken.",
+          "neighbourhood_max_share_w": "Hoeveel watt wil je maximaal aanbieden aan buren? 1000W = 1 kW."
+        }
+      },
+      "blackout_guard_opts": {
+        "title": "Blackout Guard",
+        "description": "Monitort netfrequentie en spanningsdips. Bij instabiliteit: batterij opladen naar 100% en urgent melden.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "blackout_guard_enabled": "Blackout guard inschakelen",
+          "blackout_freq_entity": "Netfrequentie sensor (Hz)",
+          "blackout_voltage_entity": "Spanning sensor L1 (V)"
+        },
+        "data_description": {
+          "blackout_freq_entity": "Sensor die de netfrequentie meet (normaal 50.000 Hz). Beschikbaar via ESPHome of sommige omvormers.",
+          "blackout_voltage_entity": "Spanning sensor voor spanning-dip detectie. Beschikbaar via ESPHome fase-meting."
+        }
+      },
+      "vve_opts": {
+        "title": "VvE Energieverdeling",
+        "description": "Verdeel gedeelde zonne-energie en laadkosten eerlijk over appartementen.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "vve_enabled": "VvE verdeling inschakelen",
+          "vve_solar_split_method": "Verdeelmethode zonne-energie",
+          "vve_ev_split_method": "Verdeelmethode EV laadkosten",
+          "vve_total_solar_entity": "Gedeelde solar kWh sensor"
+        },
+        "data_description": {
+          "vve_solar_split_method": "Gelijk: iedereen evenveel. Oppervlak: naar m². Vast %: zelf instellen.",
+          "vve_total_solar_entity": "Sensor die de totale gedeelde PV productie in kWh bijhoudt."
+        }
+      },
+      "lifecycle_opts": {
+        "title": "Slijtage Arbitrage",
+        "description": "CloudEMS berekent of het rendabel is om apparaten in te schakelen na aftrek van slijtagekosten.",
+        "data": {
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "atmospheric_hp_opts": {
+        "title": "WP Atmosfeer Optimizer",
+        "description": "Optimaliseert warmtepomp bediening op basis van luchtvochtigheid, temperatuur en luchtdruk.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "weather_entity": "Weers entiteit"
+        },
+        "data_description": {
+          "weather_entity": "HA weather entiteit voor het ophalen van temperatuur, luchtvochtigheid, windsnelheid en luchtdruk."
+        }
+      },
+      "fcr_opts": {
+        "title": "FCR/aFRR Virtuele Powerplant",
+        "description": "CloudEMS beoordeelt of je batterij geschikt is voor frequentieregulering (FCR/aFRR). Vereist een contract met een aggregator zoals Vandebron of Sympower.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "fcr_enabled": "FCR/aFRR monitoring inschakelen"
+        },
+        "data_description": {
+          "fcr_enabled": "Schakel in om CloudEMS de gereedheid voor FCR/aFRR te laten beoordelen. Geen kosten of verplichtingen — alleen monitoring."
+        }
       }
     },
     "abort": {
@@ -1968,23 +2162,19 @@
   "options": {
     "step": {
       "init": {
-        "title": "CloudEMS — Configureren",
+        "title": "CloudEMS Instellingen",
         "data": {
           "category": "Categorie",
-          "back_to_menu": "← Terug naar menu",
-          "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
-          "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
-          "budget_enabled": "Energiebudget inschakelen",
-          "budget_gas_m3_month": "Maandbudget gas (m³)",
-          "nilm_load_shifting_enabled": "Lastverschuiving inschakelen",
-          "nilm_shift_deadlines_raw": "Deadlines (JSON)",
-          "nilm_shift_exclude": "Apparaten uitsluiten",
-          "nilm_shift_include": "Apparaten opnemen",
-          "nilm_shift_max_defer_hours": "Max. uitstel (uren)",
-          "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
-          "pool_filter_power_entity": "Vermogenssensor filterpomp",
-          "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "auto_apply": "🔍 Automatisch detecteren en toepassen"
+        },
+        "description": "**Gedetecteerd:**\n{found}\n\n**Aandachtspunten:**\n{todo}",
+        "placeholders": {
+          "found": {
+            "example": "✅ Net-sensor geconfigureerd"
+          },
+          "todo": {
+            "example": "💡 P1/DSMR niet geconfigureerd"
+          }
         }
       },
       "sensors": {
@@ -4587,6 +4777,204 @@
           "ev_trip_enabled": "Schakel in om agenda-gestuurde EV laadplanning te gebruiken. Vereist een HA calendar integratie.",
           "ev_kwh_per_pct": "Batterijgrootte gedeeld door 100. Voorbeeld: 77 kWh batterij → 0.77. CloudEMS leert dit automatisch over tijd.",
           "ev_soc_entity": "Sensor die de laadstand (%) van je EV aangeeft. Wordt automatisch gevonden als je EV in HA is."
+        }
+      },
+      "auto_detect": {
+        "title": "🔍 Automatisch detecteren",
+        "description": "CloudEMS heeft de volgende sensoren en integraties gevonden:\n\n**Nieuw toe te voegen ({count}):**\n{applied}\n\n**Bestaande instellingen (niet gewijzigd):**\n{skipped}\n\nDruk op Verzenden om de gevonden waarden toe te passen. Bestaande instellingen worden nooit overschreven.",
+        "data": {
+          "back_to_menu": "← Terug zonder toepassen"
+        }
+      },
+      "standby_intelligence_opts": {
+        "title": "Sluimerverbruik Analyse",
+        "description": "CloudEMS bundelt alle inefficiëntiesignalen: altijd-aan apparaten, standby-sluiping en onverklaard verbruik. Score van 0-100, kosten per maand.",
+        "data": {
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "vacation_opts": {
+        "title": "Vakantiemodus",
+        "description": "Schakel alle niet-kritische apparaten uit bij langdurige afwezigheid. CloudEMS bewaakt PV, batterij en boiler op minimum.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "vacation_enabled": "Vakantiemodus inschakelen",
+          "vacation_switch_entities": "Stopcontacten uitschakelen bij vakantie",
+          "vacation_boiler_setpoint": "Boiler setpoint tijdens vakantie (°C)",
+          "vacation_notify": "Wekelijkse samenvatting sturen"
+        },
+        "data_description": {
+          "vacation_enabled": "Activeer om CloudEMS vakantiemodus te laten beheren. Schakel handmatig in/uit via het dashboard.",
+          "vacation_switch_entities": "Welke stopcontacten mag CloudEMS uitschakelen? Nooit kritieke apparaten (NAS, router) selecteren.",
+          "vacation_boiler_setpoint": "Temperatuur om legionella te voorkomen. Minimaal 45°C aanbevolen.",
+          "vacation_notify": "Stuur wekelijks een samenvatting van besparingen tijdens vakantie."
+        }
+      },
+      "appliance_done_opts": {
+        "title": "Apparaat Klaar Melding",
+        "description": "Ontvang een melding zodra de wasmachine, droger of vaatwasser klaar is. Detectie op basis van vermogenspatroon.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "done_notifier_appliances": "Apparaten bewaken"
+        },
+        "data_description": {
+          "done_notifier_appliances": "Voeg apparaten toe die je wilt bewaken. Vereist een vermogenssensor per apparaat (bijv. via smart plug)."
+        }
+      },
+      "standby_killer_opts": {
+        "title": "Standby Killer",
+        "description": "Schakel groepen stopcontacten automatisch uit als niemand thuis is of 's nachts. Bespaart sluimerverbruik zonder dat je er aan hoeft te denken.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "standby_killer_groups": "Groepen configureren"
+        },
+        "data_description": {
+          "standby_killer_groups": "Definieer groepen (bijv. TV-meubel, thuiskantoor). Per groep: welke stopcontacten, hoe lang na vertrek, terugzetten bij thuiskomst."
+        }
+      },
+      "circadian_nudge_opts": {
+        "title": "Slimme Verlichting (Circadian Nudge)",
+        "description": "Verlichting past subtiel aan op de energieprijs en het aandeel hernieuwbare energie. Duur stroom = iets koeler en dimmer. Goedkoop/surplus = warmer en helderder. De bewoner merkt het nauwelijks maar het stuurt gedrag.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "circadian_nudge_enabled": "Slimme verlichting inschakelen",
+          "circadian_nudge_mode": "Modus",
+          "circadian_nudge_entities": "Lampen controleren",
+          "circadian_nudge_max_shift": "Maximale helderheidsaanpassing (%)",
+          "circadian_nudge_transition": "Overgang (seconden)"
+        },
+        "data_description": {
+          "circadian_nudge_enabled": "Schakel in om verlichting te koppelen aan de energiemarkt.",
+          "circadian_nudge_mode": "Nudge: subtiele 5-8% aanpassing. Circadian: volledige HCL op basis van hernieuwbare energie. Beide: gecombineerd.",
+          "circadian_nudge_entities": "Selecteer lampen die kleurtemperatuur en helderheid ondersteunen (bijv. Philips Hue, IKEA Tradfri). Alleen lampen die al aan zijn worden aangepast.",
+          "circadian_nudge_max_shift": "Hoeveel procent mag de helderheid maximaal verschuiven? 5-10% is onopvallend, 15%+ is merkbaar.",
+          "circadian_nudge_transition": "Hoe lang duurt de overgang? 30 seconden is vloeiend en onopvallend."
+        }
+      },
+      "auto_apply": {
+        "title": "Automatisch Toepassen",
+        "description": "CloudEMS heeft **{count}** instellingen automatisch gevonden en toegepast.\n\n**Toegepast:**\n{applied}\n\n**Overgeslagen:**\n{skipped}\n\nDruk op Verzenden om op te slaan.",
+        "data": {},
+        "placeholders": {
+          "count": {
+            "example": "3"
+          },
+          "applied": {
+            "example": "✅ grid_sensor: sensor.power"
+          },
+          "skipped": {
+            "example": "⏭ al geconfigureerd"
+          }
+        }
+      },
+      "geofencing_opts": {
+        "title": "Geofencing Acties",
+        "description": "Automatische acties bij aankomst thuis en vertrek. Gebaseerd op de aanwezigheidsdetectie van CloudEMS.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "geofencing_enabled": "Geofencing inschakelen",
+          "geofencing_arrival_switches": "Inschakelen bij aankomst",
+          "geofencing_departure_switches": "Uitschakelen bij vertrek",
+          "geofencing_arrival_thermostat": "Thermostaat bij aankomst",
+          "geofencing_arrival_temp": "Comfort temperatuur (°C)",
+          "geofencing_departure_temp": "Afwezig temperatuur (°C)",
+          "geofencing_notify": "Welkomstmelding sturen"
+        },
+        "data_description": {
+          "geofencing_arrival_switches": "Welke apparaten moeten aan als je thuiskomt? (bijv. vloerverwarming, welkomstlicht)",
+          "geofencing_departure_switches": "Welke apparaten moeten uit als iedereen weg is?",
+          "geofencing_arrival_temp": "Temperatuur instellen bij thuiskomst. Aanbevolen: 20-21°C.",
+          "geofencing_departure_temp": "Temperatuur bij afwezigheid. Aanbevolen: 16-18°C voor besparing."
+        }
+      },
+      "sleep_switch_opts": {
+        "title": "Slaap Modus Schakelaar",
+        "description": "Schakel apparaten automatisch uit als CloudEMS slaap detecteert. Ideaal voor TV-meubel, lampen en media-apparaten.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "sleep_switch_enabled": "Slaap-schakelaar inschakelen",
+          "sleep_switch_entities": "Uitschakelen bij slaap",
+          "sleep_thermostat_entity": "Thermostaat setback",
+          "sleep_thermostat_setpoint": "Slaap temperatuur (°C)",
+          "sleep_restore_on_wake": "Herstel bij wakker worden"
+        },
+        "data_description": {
+          "sleep_switch_entities": "Welke apparaten mogen uit als iedereen slaapt?",
+          "sleep_thermostat_setpoint": "Temperatuur 's nachts. Aanbevolen: 16-18°C. Warmere slaapkamer = meer energieverbruik.",
+          "sleep_restore_on_wake": "Zet apparaten terug aan bij wakker worden? Schakel uit als je dit liever handmatig doet."
+        }
+      },
+      "neighbourhood_opts": {
+        "title": "Buurtenergie (P2P)",
+        "description": "Deel surplus PV-energie met buren via een lokale MQTT broker. Volledig privé — alleen surplus vermogen wordt gedeeld, geen persoonlijke data.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "neighbourhood_enabled": "Buurtenergie inschakelen",
+          "neighbourhood_mqtt_broker": "MQTT broker IP-adres",
+          "neighbourhood_mqtt_port": "MQTT poort",
+          "neighbourhood_max_share_w": "Maximum te delen vermogen (W)"
+        },
+        "data_description": {
+          "neighbourhood_mqtt_broker": "IP-adres van de lokale MQTT broker (bijv. 192.168.1.10). Leeg laten om HA MQTT te gebruiken.",
+          "neighbourhood_max_share_w": "Hoeveel watt wil je maximaal aanbieden aan buren? 1000W = 1 kW."
+        }
+      },
+      "blackout_guard_opts": {
+        "title": "Blackout Guard",
+        "description": "Monitort netfrequentie en spanningsdips. Bij instabiliteit: batterij opladen naar 100% en urgent melden.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "blackout_guard_enabled": "Blackout guard inschakelen",
+          "blackout_freq_entity": "Netfrequentie sensor (Hz)",
+          "blackout_voltage_entity": "Spanning sensor L1 (V)"
+        },
+        "data_description": {
+          "blackout_freq_entity": "Sensor die de netfrequentie meet (normaal 50.000 Hz). Beschikbaar via ESPHome of sommige omvormers.",
+          "blackout_voltage_entity": "Spanning sensor voor spanning-dip detectie. Beschikbaar via ESPHome fase-meting."
+        }
+      },
+      "vve_opts": {
+        "title": "VvE Energieverdeling",
+        "description": "Verdeel gedeelde zonne-energie en laadkosten eerlijk over appartementen.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "vve_enabled": "VvE verdeling inschakelen",
+          "vve_solar_split_method": "Verdeelmethode zonne-energie",
+          "vve_ev_split_method": "Verdeelmethode EV laadkosten",
+          "vve_total_solar_entity": "Gedeelde solar kWh sensor"
+        },
+        "data_description": {
+          "vve_solar_split_method": "Gelijk: iedereen evenveel. Oppervlak: naar m². Vast %: zelf instellen.",
+          "vve_total_solar_entity": "Sensor die de totale gedeelde PV productie in kWh bijhoudt."
+        }
+      },
+      "lifecycle_opts": {
+        "title": "Slijtage Arbitrage",
+        "description": "CloudEMS berekent of het rendabel is om apparaten in te schakelen na aftrek van slijtagekosten.",
+        "data": {
+          "back_to_menu": "← Terug naar menu"
+        }
+      },
+      "atmospheric_hp_opts": {
+        "title": "WP Atmosfeer Optimizer",
+        "description": "Optimaliseert warmtepomp bediening op basis van luchtvochtigheid, temperatuur en luchtdruk.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "weather_entity": "Weers entiteit"
+        },
+        "data_description": {
+          "weather_entity": "HA weather entiteit voor het ophalen van temperatuur, luchtvochtigheid, windsnelheid en luchtdruk."
+        }
+      },
+      "fcr_opts": {
+        "title": "FCR/aFRR Virtuele Powerplant",
+        "description": "CloudEMS beoordeelt of je batterij geschikt is voor frequentieregulering (FCR/aFRR). Vereist een contract met een aggregator zoals Vandebron of Sympower.",
+        "data": {
+          "back_to_menu": "← Terug naar menu",
+          "fcr_enabled": "FCR/aFRR monitoring inschakelen"
+        },
+        "data_description": {
+          "fcr_enabled": "Schakel in om CloudEMS de gereedheid voor FCR/aFRR te laten beoordelen. Geen kosten of verplichtingen — alleen monitoring."
         }
       }
     },

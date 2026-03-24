@@ -234,6 +234,20 @@ async def async_setup_entry(
         # v4.0.5: Zelfconsumptie & zelfvoorzieningsgraad
         CloudEMSSelfConsumptionSensor(coordinator, entry),
         CloudEMSEVTripPlannerSensor(coordinator, entry),
+        CloudEMSStandbyIntelligenceSensor(coordinator, entry),
+        CloudEMSVacationModeSensor(coordinator, entry),
+        CloudEMSApplianceDoneSensor(coordinator, entry),
+        CloudEMSStandbyKillerSensor(coordinator, entry),
+        CloudEMSCircadianNudgeSensor(coordinator, entry),
+        CloudEMSGeofencingSensor(coordinator, entry),
+        CloudEMSSleepGroupSensor(coordinator, entry),
+        CloudEMSNeighbourhoodSensor(coordinator, entry),
+        CloudEMSPowerQualitySensor(coordinator, entry),
+        CloudEMSBlackoutGuardSensor(coordinator, entry),
+        CloudEMSLifecycleArbitrageSensor(coordinator, entry),
+        CloudEMSAtmosphericHPSensor(coordinator, entry),
+        CloudEMSVvESensor(coordinator, entry),
+        CloudEMSFCRAFRRSensor(coordinator, entry),
         CloudEMSPhaseOutletSensor(coordinator, entry),
         CloudEMSSelfSufficiencySensor(coordinator, entry),
         # v2.2.2: Installatie-kwaliteitsscore
@@ -7274,6 +7288,107 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups}
 
 
+class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
+    """Standby intelligence — bundled inefficiency report."""
+    _attr_name  = "CloudEMS NILM · Standby Intelligence"
+    _attr_icon  = "mdi:sleep"
+    _attr_native_unit_of_measurement = "points"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._attr_unique_id = f"{entry.entry_id}_standby_intelligence"
+        self.entity_id = "sensor.cloudems_standby_intelligence"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_NILM) if hasattr(self, "_entry") else None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_standby_intelligence"
+        self.entity_id = "sensor.cloudems_standby_intelligence"
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("standby_intelligence", {}).get("score")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("standby_intelligence", {})
+
+
+class CloudEMSVacationModeSensor(CoordinatorEntity, SensorEntity):
+    """Vacation mode status."""
+    _attr_name = "CloudEMS · Vakantiemodus"
+    _attr_icon = "mdi:beach"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_vacation_mode"
+        self.entity_id = "sensor.cloudems_vacation_mode"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        return "active" if (self.coordinator.data or {}).get("vacation_mode", {}).get("active") else "inactive"
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("vacation_mode", {})
+
+
+class CloudEMSApplianceDoneSensor(CoordinatorEntity, SensorEntity):
+    """Appliance done notifier status."""
+    _attr_name = "CloudEMS NILM · Apparaat Klaar"
+    _attr_icon = "mdi:washing-machine"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_appliance_done"
+        self.entity_id = "sensor.cloudems_appliance_done"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_NILM)
+
+    @property
+    def native_value(self):
+        apps = (self.coordinator.data or {}).get("appliance_done", {}).get("appliances", [])
+        running = sum(1 for a in apps if a.get("is_running"))
+        return running
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("appliance_done", {})
+
+
+class CloudEMSStandbyKillerSensor(CoordinatorEntity, SensorEntity):
+    """Standby killer group status."""
+    _attr_name = "CloudEMS · Standby Killer"
+    _attr_icon = "mdi:power-plug-off"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_standby_killer"
+        self.entity_id = "sensor.cloudems_standby_killer"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        groups = (self.coordinator.data or {}).get("standby_killer", {}).get("groups", [])
+        return sum(1 for g in groups if g.get("is_cut"))
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("standby_killer", {})
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # EV Trip Planner sensor
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -8831,3 +8946,241 @@ class CloudEMSDecisionLearnerSensor(CoordinatorEntity, SensorEntity):
         if learner is None:
             return {"status": "niet geladen"}
         return _trim_attrs(learner.get_status())
+
+
+class CloudEMSCircadianNudgeSensor(CoordinatorEntity, SensorEntity):
+    """Circadian nudge — lighting adjustments based on price and renewables."""
+    _attr_name = "CloudEMS · Circadian Nudge"
+    _attr_icon = "mdi:lightbulb-auto"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_circadian_nudge"
+        self.entity_id = "sensor.cloudems_circadian_nudge"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("circadian_nudge", {})
+        return "active" if d.get("enabled") else "inactive"
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("circadian_nudge", {})
+
+
+class CloudEMSGeofencingSensor(CoordinatorEntity, SensorEntity):
+    """Geofencing actions status."""
+    _attr_name = "CloudEMS · Geofencing"
+    _attr_icon = "mdi:map-marker-radius"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_geofencing"
+        self.entity_id = "sensor.cloudems_geofencing"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("geofencing", {}).get("state", "unknown")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("geofencing", {})
+
+
+class CloudEMSSleepGroupSensor(CoordinatorEntity, SensorEntity):
+    """Sleep group switch status."""
+    _attr_name = "CloudEMS · Slaap Groep"
+    _attr_icon = "mdi:sleep"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_sleep_group"
+        self.entity_id = "sensor.cloudems_sleep_group"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("sleep_group", {})
+        return "sleeping" if d.get("is_sleeping") else "awake"
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("sleep_group", {})
+
+
+class CloudEMSNeighbourhoodSensor(CoordinatorEntity, SensorEntity):
+    """Neighbourhood P2P energy sharing status."""
+    _attr_name = "CloudEMS · Buurtenergie"
+    _attr_icon = "mdi:home-group"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_neighbourhood"
+        self.entity_id = "sensor.cloudems_neighbourhood"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("neighbourhood", {})
+        return len(d.get("neighbours", []))
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("neighbourhood", {})
+
+
+class CloudEMSPowerQualitySensor(CoordinatorEntity, SensorEntity):
+    """Power quality: cos phi, reactive power per phase."""
+    _attr_name = "CloudEMS Grid · Vermogenskwaliteit"
+    _attr_icon = "mdi:sine-wave"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_power_quality"
+        self.entity_id = "sensor.cloudems_power_quality"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("power_quality", {})
+        return d.get("pf_avg")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("power_quality", {})
+
+
+class CloudEMSBlackoutGuardSensor(CoordinatorEntity, SensorEntity):
+    """Predictive blackout guard status."""
+    _attr_name = "CloudEMS Grid · Blackout Guard"
+    _attr_icon = "mdi:transmission-tower-off"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_blackout_guard"
+        self.entity_id = "sensor.cloudems_blackout_guard"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("blackout_guard", {}).get("risk_level", "none")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("blackout_guard", {})
+
+
+class CloudEMSLifecycleArbitrageSensor(CoordinatorEntity, SensorEntity):
+    """Appliance lifecycle arbitrage — wear cost vs energy value."""
+    _attr_name = "CloudEMS · Lifecycle Arbitrage"
+    _attr_icon = "mdi:cog-refresh"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_lifecycle_arbitrage"
+        self.entity_id = "sensor.cloudems_lifecycle_arbitrage"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        apps = (self.coordinator.data or {}).get("lifecycle_arbitrage", {}).get("appliances", [])
+        return sum(1 for a in apps if a.get("should_activate"))
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("lifecycle_arbitrage", {})
+
+
+class CloudEMSAtmosphericHPSensor(CoordinatorEntity, SensorEntity):
+    """Atmospheric conditions for heat pump optimization."""
+    _attr_name = "CloudEMS WP · Atmosfeer"
+    _attr_icon = "mdi:thermometer-lines"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_atmospheric_hp"
+        self.entity_id = "sensor.cloudems_atmospheric_hp"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_CLIMATE)
+
+    @property
+    def native_value(self):
+        return (self.coordinator.data or {}).get("atmospheric_hp", {}).get("icing_risk", "none")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("atmospheric_hp", {})
+
+
+class CloudEMSVvESensor(CoordinatorEntity, SensorEntity):
+    """VvE energy split status."""
+    _attr_name = "CloudEMS · VvE Energieverdeling"
+    _attr_icon = "mdi:home-city"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_vve"
+        self.entity_id = "sensor.cloudems_vve"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        return len((self.coordinator.data or {}).get("vve", {}).get("units", []))
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("vve", {})
+
+
+class CloudEMSFCRAFRRSensor(CoordinatorEntity, SensorEntity):
+    """FCR/aFRR virtual power plant readiness."""
+    _attr_name = "CloudEMS Grid · FCR/aFRR Gereedheid"
+    _attr_icon = "mdi:lightning-bolt-circle"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_fcr_afrr"
+        self.entity_id = "sensor.cloudems_fcr_afrr"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("fcr_afrr", {})
+        if d.get("eligible_fcr"): return "fcr_ready"
+        if d.get("eligible_afrr"): return "afrr_ready"
+        return "not_eligible"
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("fcr_afrr", {})

@@ -64,6 +64,15 @@ LOVELACE_V2H_URL            = f"/local/cloudems/cloudems-v2h-card.js?v={VERSION}
 LOVELACE_EGAUGE_URL         = f"/local/cloudems/cloudems-egauge-card.js?v={VERSION}"
 LOVELACE_EV_TRIP_URL        = f"/local/cloudems/cloudems-ev-trip-card.js?v={VERSION}"
 LOVELACE_PHASE_OUTLET_URL   = f"/local/cloudems/cloudems-phase-outlet-card.js?v={VERSION}"
+LOVELACE_STANDBY_URL        = f"/local/cloudems/cloudems-standby-card.js?v={VERSION}"
+LOVELACE_VACATION_URL       = f"/local/cloudems/cloudems-vacation-card.js?v={VERSION}"
+LOVELACE_CIRCADIAN_URL      = f"/local/cloudems/cloudems-circadian-card.js?v={VERSION}"
+LOVELACE_NEIGHBOURHOOD_URL  = f"/local/cloudems/cloudems-neighbourhood-card.js?v={VERSION}"
+LOVELACE_BLACKOUT_URL       = f"/local/cloudems/cloudems-blackout-card.js?v={VERSION}"
+LOVELACE_LIFECYCLE_URL      = f"/local/cloudems/cloudems-lifecycle-card.js?v={VERSION}"
+LOVELACE_ATMOSPHERIC_URL    = f"/local/cloudems/cloudems-atmospheric-card.js?v={VERSION}"
+LOVELACE_VVE_URL            = f"/local/cloudems/cloudems-vve-card.js?v={VERSION}"
+LOVELACE_FCR_URL            = f"/local/cloudems/cloudems-fcr-card.js?v={VERSION}"
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -117,6 +126,15 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_EGAUGE_URL,       "cloudems-egauge-card.js"),
     (LOVELACE_EV_TRIP_URL,      "cloudems-ev-trip-card.js"),
     (LOVELACE_PHASE_OUTLET_URL, "cloudems-phase-outlet-card.js"),
+    (LOVELACE_STANDBY_URL,      "cloudems-standby-card.js"),
+    (LOVELACE_VACATION_URL,     "cloudems-vacation-card.js"),
+    (LOVELACE_CIRCADIAN_URL,    "cloudems-circadian-card.js"),
+    (LOVELACE_NEIGHBOURHOOD_URL,"cloudems-neighbourhood-card.js"),
+    (LOVELACE_BLACKOUT_URL,     "cloudems-blackout-card.js"),
+    (LOVELACE_LIFECYCLE_URL,    "cloudems-lifecycle-card.js"),
+    (LOVELACE_ATMOSPHERIC_URL,  "cloudems-atmospheric-card.js"),
+    (LOVELACE_VVE_URL,          "cloudems-vve-card.js"),
+    (LOVELACE_FCR_URL,          "cloudems-fcr-card.js"),
     (LOVELACE_SOLAR_URL,        "cloudems-solar-card.js"),
     (LOVELACE_PV_FORECAST_URL,  "cloudems-pv-forecast-card.js"),
     (LOVELACE_SWITCHES_URL,     "cloudems-switches-card.js"),

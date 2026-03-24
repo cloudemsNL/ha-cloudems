@@ -752,7 +752,7 @@ class VirtualZone:
             elif "heat" in modes:
                 release_mode = "heat"
             else:
-                continue  # Geen bekende mode — niet aanraken
+                continue  # Geen known mode — niet aanraken
             if st.state != release_mode:
                 try:
                     await self._svc("climate", "set_hvac_mode",
@@ -894,7 +894,7 @@ async def async_discover_zones(hass) -> list:
     areas = {a.id: a.name for a in area_reg.async_list_areas()}
     zones: dict = {}
 
-    # Platforms die virtuele/scheduling climate entities maken — nooit opnemen als fysiek apparaat
+    # Platforms die virtuele/scheduling climate entities maken — never opnemen als fysiek apparaat
     _VIRTUAL_PLATFORMS = frozenset({
         "cloudems",           # eigen entities — voorkomt discovery-loop
         "climate_scheduler",  # Climate Scheduler integratie
@@ -908,10 +908,10 @@ async def async_discover_zones(hass) -> list:
     for entry in entity_reg.entities.values():
         if entry.domain != "climate" or entry.disabled:
             continue
-        # Sla virtuele platforms over
+        # Save virtuele platforms over
         if (entry.platform or "") in _VIRTUAL_PLATFORMS:
             continue
-        # Sla entities over waarvan de entity_id op een scheduler/schedule wijst
+        # Save entities over waarvan de entity_id op een scheduler/schedule wijst
         eid_lower = entry.entity_id.lower()
         if any(pat in eid_lower for pat in _VIRTUAL_PATTERNS):
             _LOGGER.debug("Zone discovery: sla virtual/scheduler entity over: %s", entry.entity_id)
@@ -927,7 +927,7 @@ async def async_discover_zones(hass) -> list:
             continue
 
         if area_id not in zones:
-            # Bewaar de volledige area entry voor floor_id toegang in climate.py
+            # Store de volledige area entry voor floor_id toegang in climate.py
             area_entry = area_reg.async_get_area(area_id)
             zone = VirtualZone(hass, area_id, areas[area_id])
             zone._area_entry = area_entry  # v4.2.1: voor floor_id in entity slug
@@ -986,7 +986,7 @@ class ZoneClimateManager:
         if self._config.get("cv_boiler_entity"):
             self._boiler = CVBoilerCoordinator(self._hass, self._config)
 
-        # Laad persistente data
+        # Load persistente data
         saved = await self._store.async_load() or {}
         for z in self._zones:
             if z._area_id in saved:

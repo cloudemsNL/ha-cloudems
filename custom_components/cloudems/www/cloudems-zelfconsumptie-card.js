@@ -25,10 +25,8 @@ class CloudemsZelfconsumptieCard extends HTMLElement {
     const saving  = attr.monthly_saving_eur ?? null;
     const advice  = attr.advice || null;
     const pvKwh   = attr.pv_today_kwh ?? null;
-    const selfKwh = (attr.self_consumed_kwh != null && attr.self_consumed_kwh !== undefined)
-                  ? attr.self_consumed_kwh : null;
-    const expKwh  = (attr.exported_kwh != null && attr.exported_kwh !== undefined)
-                  ? attr.exported_kwh : null;
+    const selfKwh = attr.self_consumed_kwh ?? null;
+    const expKwh  = attr.exported_kwh ?? null;
 
     const fmt = v => v!=null ? Math.round(v*100)/100 : "—";
     const pct  = v => v!=null ? Math.round(v)+"%" : "—";

@@ -281,16 +281,19 @@ class CloudemsBatteryCard extends HTMLElement {
     const bp=schA.battery_providers||{};
     const providers=bp.providers||[];
     let provHtml='';
-    if(providers.length>0){
-      const provRows=providers.map((p,pi)=>{
+    // Only show detected providers
+    const visibleProviders = providers.filter(p => p.detected === true || p.available === true);
+    if(visibleProviders.length>0){
+      const provRows=visibleProviders.map((p,pi)=>{
         const intSec=parseInt(p.interval_s||p.interval||127);
         const maxSec=300;
         const retries=parseInt(p.retry_count||p.retries||3);
         const retryMax=parseInt(p.retry_max||5);
         const pips=Array.from({length:retryMax},(_, i)=>`<div class="pip ${i<retries-1?'done':i===retries-1?'active':'todo'}"></div>`).join('');
+        const pLabel = p.provider_label || p.label || p.name || p.type || 'Provider';
         return `<tr>
-          <td><span style="color:#d29922;margin-right:4px">⚡</span>${esc(p.name||p.type||'Provider')}</td>
-          <td><span class="status-dot"></span>${p.active?'Actief':'Inactief'}</td>
+          <td><span style="color:#d29922;margin-right:4px">⚡</span>${esc(pLabel)}</td>
+          <td><span class="status-dot"></span>${p.available?'Actief':p.detected?'Gevonden':'Inactief'}</td>
           <td><span style="margin-right:3px">🏠</span>${esc(p.mode||zp.active_mode||'Thuisopt.').slice(0,8)}</td>
           <td>
             <div class="interval-wrap">

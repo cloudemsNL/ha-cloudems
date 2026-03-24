@@ -39,7 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_KEY     = "cloudems_self_consumption_v1"
 STORAGE_VERSION = 1
 
-SAVE_INTERVAL_S = 600
+SAVE_INTERVAL_S = 120  # Save every 2 minutes during active PV production
 MIN_PV_W        = 50     # Minimale PV-productie voor meting
 # Aanname: verschil inkoop vs teruglevering (€/kWh)
 PRICE_SPREAD_EUR_KWH = 0.08   # indicatief voordeel per kWh zelfverbruik
@@ -279,6 +279,24 @@ class SelfConsumptionTracker:
             "hourly":                hourly,
             "has_profile":           any(s.samples > 0 for s in self._hourly),
         }
+
+    async def async_save(self) -> None:
+        """Force save immediately, regardless of dirty flag or interval."""
+        await self._store.async_save({
+            "hourly": [
+                {"pv_wh": s.pv_wh, "export_wh": s.export_wh,
+                 "import_wh": s.import_wh, "samples": s.samples}
+                for s in self._hourly
+            ],
+            "today": {
+                "date":       self._today_date,
+                "pv_wh":      round(self._today_pv_wh, 2),
+                "export_wh":  round(self._today_export_wh, 2),
+                "import_wh":  round(self._today_import_wh, 2),
+            },
+        })
+        self._dirty     = False
+        self._last_save = time.time()
 
     async def async_maybe_save(self) -> None:
         if self._dirty and (time.time() - self._last_save) >= SAVE_INTERVAL_S:
