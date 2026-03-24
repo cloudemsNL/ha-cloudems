@@ -807,10 +807,23 @@ class HAEntityFallbackReader:
         t.power_l1_export_w = _r("power_l1_export", 1000.0)
         t.power_l2_export_w = _r("power_l2_export", 1000.0)
         t.power_l3_export_w = _r("power_l3_export", 1000.0)
-        # Stroom per fase
-        t.current_l1        = _r("current_l1", 1.0)
-        t.current_l2        = _r("current_l2", 1.0)
-        t.current_l3        = _r("current_l3", 1.0)
+        # Stroom per fase — lees direct of bereken uit vermogen/spanning
+        _cur_l1 = _r("current_l1", 1.0)
+        _cur_l2 = _r("current_l2", 1.0)
+        _cur_l3 = _r("current_l3", 1.0)
+        # Als stroom-sensor 0 geeft maar er wel fase-vermogen is: bereken I = P/U
+        # Dit is nauwkeuriger dan een 0-waarde doorgeven die de fusie verstoort
+        _mains_v = 230.0
+        if _cur_l1 == 0.0 and t.power_l1_w > 10:
+            _cur_l1 = (t.power_l1_w - t.power_l1_export_w) / _mains_v
+        if _cur_l2 == 0.0 and t.power_l2_w > 10:
+            _cur_l2 = (t.power_l2_w - t.power_l2_export_w) / _mains_v
+        if _cur_l3 == 0.0 and t.power_l3_w > 10:
+            _cur_l3 = (t.power_l3_w - t.power_l3_export_w) / _mains_v
+        # Als stroom en fase-vermogen beide 0 zijn: None zodat fusie ze negeert
+        t.current_l1 = _cur_l1 if (_cur_l1 != 0.0 or t.power_l1_w > 0) else None
+        t.current_l2 = _cur_l2 if (_cur_l2 != 0.0 or t.power_l2_w > 0) else None
+        t.current_l3 = _cur_l3 if (_cur_l3 != 0.0 or t.power_l3_w > 0) else None
         t.energy_import_kwh = _r("energy_import_kwh")
         t.energy_export_kwh = _r("energy_export_kwh")
         t.gas_m3            = _r("gas_m3")

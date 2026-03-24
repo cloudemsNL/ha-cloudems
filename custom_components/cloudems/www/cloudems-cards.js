@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.590
+ * CloudEMSTooltip — v4.6.591
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -1018,7 +1018,7 @@ window.CloudEMSTooltip = {
       }
       const _isThreePhase = Object.keys(_statusPhases).length >= 2;
       // P1 per-phase import/export power
-      const _p1a = this._hass?.states['sensor.cloudems_p1_data']?.attributes || {};
+      const _p1a = this._hass?.states['sensor.cloudems_p1_power']?.attributes || {};
       // Per-fase netto vermogen: positief = import, negatief = export
       // power_w uit coordinator is al signed (Kirchhoff-gecorrigeerd)
       // p1_data geeft power_l1_w (import) en power_l1_export_w apart — netto = import - export
@@ -1066,7 +1066,7 @@ window.CloudEMSTooltip = {
       // ── Phase detection for source/sink nodes ─────────────────────────────
       // Grid: read from P1 phase data or config
       const _gridPhase = (() => {
-        const p1a = this._hass?.states['sensor.cloudems_p1_data']?.attributes;
+        const p1a = this._hass?.states['sensor.cloudems_p1_power']?.attributes;
         if (p1a?.single_phase) return p1a.single_phase.toUpperCase();
         // Multi-phase: no single phase
         return null;
