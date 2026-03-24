@@ -90,7 +90,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-atmospheric-card", CloudemsAtmosphericCard);
-customElements.define("cloudems-atmospheric-card-editor", CloudemsAtmosphericCardEditor);
+if (!customElements.get('cloudems-atmospheric-card')) customElements.define("cloudems-atmospheric-card", CloudemsAtmosphericCard);
+if (!customElements.get('cloudems-atmospheric-card-editor')) customElements.define("cloudems-atmospheric-card-editor", CloudemsAtmosphericCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-atmospheric-card", name: "CloudEMS WP Atmosfeer" });

@@ -73,7 +73,7 @@ color:#fff;padding:6px 8px;border-radius:6px;font-size:13px}</style>
   }
 }
 
-customElements.define("cloudems-egauge-card", CloudemsEgaugeCard);
-customElements.define("cloudems-egauge-card-editor", CloudemsEgaugeCardEditor);
+if (!customElements.get('cloudems-egauge-card')) customElements.define("cloudems-egauge-card", CloudemsEgaugeCard);
+if (!customElements.get('cloudems-egauge-card-editor')) customElements.define("cloudems-egauge-card-editor", CloudemsEgaugeCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-egauge-card", name: "CloudEMS eGauge", description: "eGauge smart meter data" });

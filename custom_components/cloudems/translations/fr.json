@@ -2169,6 +2169,16 @@
         "data_description": {
           "fcr_enabled": "Schakel in om CloudEMS de gereedheid voor FCR/aFRR te laten beoordelen. Geen kosten of verplichtingen — alleen monitoring."
         }
+      },
+      "presence": {
+        "title": "Détection de présence",
+        "description": "{info}",
+        "data": {
+          "presence_entities": "Capteurs de présence ou de mouvement supplémentaires"
+        },
+        "data_description": {
+          "presence_entities": ""
+        }
       }
     },
     "abort": {
@@ -5004,6 +5014,16 @@
         },
         "data_description": {
           "fcr_enabled": "Schakel in om CloudEMS de gereedheid voor FCR/aFRR te laten beoordelen. Geen kosten of verplichtingen — alleen monitoring."
+        }
+      },
+      "presence": {
+        "title": "Détection de présence",
+        "description": "{info}",
+        "data": {
+          "presence_entities": "Capteurs de présence ou de mouvement supplémentaires"
+        },
+        "data_description": {
+          "presence_entities": ""
         }
       }
     },

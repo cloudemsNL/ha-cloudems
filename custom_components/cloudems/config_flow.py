@@ -40,6 +40,7 @@ from .const import (
     CONF_OLLAMA_ENABLED, CONF_OLLAMA_HOST, CONF_OLLAMA_PORT, CONF_OLLAMA_MODEL,
     DEFAULT_OLLAMA_HOST, DEFAULT_OLLAMA_PORT, DEFAULT_OLLAMA_MODEL,
     CONF_PEAK_SHAVING_ENABLED, CONF_PEAK_SHAVING_LIMIT_W, CONF_PEAK_SHAVING_ASSETS,
+    CONF_PRESENCE_ENTITIES, CONF_PRESENCE_CALENDAR,
     DEFAULT_PEAK_SHAVING_LIMIT_W,
     DEFAULT_MAX_CURRENT, DEFAULT_NEGATIVE_PRICE_THRESHOLD,
     DEFAULT_DYNAMIC_LOAD_THRESHOLD, DEFAULT_PHASE_BALANCE_THRESHOLD,
@@ -599,7 +600,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if disc is None:
             return await self.async_step_grid_connection()
 
-        # Bouw bevestigingsformulier op basis van wat gevonden is
+        # Build bevestigingsformulier op basis van wat gevonden is
         existing = self._config
         schema_dict = {}
 
@@ -621,7 +622,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             schema_dict[vol.Optional("battery_sensor",
                 description={"suggested_value": disc.battery_power_in or disc.battery_power_out or ""})] = str
 
-        # Bouw samenvatting voor description
+        # Build samenvatting voor description
         found_lines = []
         if disc.grid_power_sensor:     found_lines.append(f"⚡ Net-sensor: `{disc.grid_power_sensor}`")
         if disc.import_power_sensor:   found_lines.append(f"⬇️ Import: `{disc.import_power_sensor}`")
@@ -910,7 +911,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     dsmr_sensors.append(entry.entity_id)
 
             if not dsmr_sensors:
-                return  # Geen platform-sensors — suggestions blijven als ze zijn
+                return  # No platform-sensors — suggestions blijven als ze zijn
 
             # Import/export keywords voor DSMR
             import_kws = ["power_delivered", "net_power_import", "power_import", "levering",
@@ -1000,7 +1001,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict = {}
 
         if user_input is not None:
-            # Valideer UOM van fase-power sensoren: alleen W of kW toegestaan
+            # Validate UOM van fase-power sensoren: alleen W of kW toegestaan
             power_keys = [CONF_POWER_L1, CONF_POWER_L2, CONF_POWER_L3,
                           "power_sensor_l1_export", "power_sensor_l2_export", "power_sensor_l3_export"]
             for pk in power_keys:
@@ -1165,7 +1166,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         unconfigured = [h for h in hints if h.detected and not h.configured]
 
         if user_input is not None:
-            # Sla opt-in keuzes op
+            # Savet-in keuzes op
             for h in hints:
                 key_en = f"{h.provider_id}_enabled"
                 if key_en in user_input:
@@ -1181,13 +1182,13 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_battery_count()
             return await self.async_step_price_provider()
 
-        # Geen providers → stap overslaan
+        # No providers → stap overslaan
         if not unconfigured:
             if self._advanced():
                 return await self.async_step_battery_count()
             return await self.async_step_price_provider()
 
-        # Bouw schema op basis van wat er gedetecteerd is
+        # Build schema op basis van wat er gedetecteerd is
         schema: dict = {}
         placeholders: dict = {}
 
@@ -1644,7 +1645,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if needed:
                 self._config["_price_provider_pending"] = chosen
                 return await self.async_step_price_provider_credentials()
-            # Geen credentials nodig → provider meteen registreren
+            # No credentials nodig → provider meteen registreren
             self._register_price_provider(chosen, {})
             # EPEX-gebaseerde providers → toon prijzen-stap (belasting, leverancier markup)
             if chosen in EPEX_BASED_PROVIDERS:
@@ -1803,7 +1804,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             auto = self._config.get("_p1_auto_source", "")
             self._config[CONF_P1_ENABLED] = bool(host or auto)
             self._config.pop("_p1_auto_source", None)
-            # Als we vanuit de wizard DSMR-bron "direct" kwamen, terug naar grid_sensors
+            # If we vanuit de wizard DSMR-bron "direct" kwamen, terug naar grid_sensors
             if self._config.pop("_p1_direct_from_wizard", False):
                 return await self.async_step_grid_sensors()
             return await self.async_step_climate()
@@ -1852,7 +1853,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # ── Schema: alleen IP vragen; poort standaard verborgen ─────────────
         schema_dict: dict = {}
         if not auto_source:
-            # Geen auto-bron → optioneel IP tonen (leeg = overslaan)
+            # No auto-bron → optioneel IP tonen (leeg = overslaan)
             schema_dict[vol.Optional(
                 CONF_P1_HOST,
                 description={"suggested_value": auto_host},
@@ -2115,7 +2116,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # v4.6.271: Als gebruiker geen boiler heeft, direct door naar mail (issue #28 feedback)
             if not user_input.get(CONF_BOILER_GROUPS_ENABLED, False):
                 self._config[CONF_BOILER_GROUPS_ENABLED] = False
-                return await self.async_step_mail()
+                return await self.async_step_presence()
             self._config[CONF_BOILER_GROUPS_ENABLED] = True
             self._boiler_group_index = 0
             self._boiler_groups_tmp  = list(existing_groups)
@@ -2372,12 +2373,62 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+
+    async def async_step_presence(self, user_input=None):
+        """Aanwezigheidsdetectie — extra bewegings-/aanwezigheidssensoren toevoegen.
+
+        CloudEMS detecteert automatisch:
+          - person.* en device_tracker.* entiteiten
+          - binary_sensor met device_class presence/occupancy/motion
+        Hier kun je extra sensoren opgeven die niet auto-gedetecteerd worden.
+        """
+        if user_input is not None:
+            entities = user_input.get(CONF_PRESENCE_ENTITIES, [])
+            self._config[CONF_PRESENCE_ENTITIES] = entities
+            return await self.async_step_mail()
+
+        # Auto-detecteer aanwezige presence sensoren als hint
+        from homeassistant.helpers import entity_registry as er
+        ent_reg = er.async_get(self.hass)
+        auto_found = []
+        for state in self.hass.states.async_all("binary_sensor"):
+            dc = state.attributes.get("device_class", "")
+            if dc in ("presence", "occupancy", "motion"):
+                auto_found.append(state.entity_id)
+        for state in self.hass.states.async_all("person"):
+            auto_found.append(state.entity_id)
+
+        existing = self._config.get(CONF_PRESENCE_ENTITIES, [])
+        auto_str = "\n".join(f"• {e}" for e in auto_found[:10]) if auto_found else "Geen gevonden"
+
+        return self.async_show_form(
+            step_id="presence",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_PRESENCE_ENTITIES, default=existing):
+                    selector.EntitySelector(selector.EntitySelectorConfig(
+                        domain=["binary_sensor", "person", "device_tracker", "input_boolean"],
+                        multiple=True,
+                    )),
+            }),
+            description_placeholders={
+                "auto_found": auto_str,
+                "info": (
+                    "CloudEMS combineert meerdere signalen voor aanwezigheidsdetectie.\n\n"
+                    "**Auto-gedetecteerd:**\n"
+                    f"{auto_str}\n\n"
+                    "**Extra sensoren** (optioneel): voeg hier Hue, Zigbee2MQTT of andere "
+                    "bewegings- of aanwezigheidssensoren toe die niet in de lijst staan. "
+                    "CloudEMS gebruikt ze als extra signaal naast de auto-detectie."
+                ),
+            },
+        )
+
     async def async_step_mail(self, user_input=None):
         errors: dict = {}
         if user_input is not None:
             enabled = user_input.get(CONF_MAIL_ENABLED, False)
             if enabled:
-                # Valideer minimale verplichte velden
+                # Validate minimale verplichte velden
                 if not user_input.get(CONF_MAIL_HOST, "").strip():
                     errors[CONF_MAIL_HOST] = "mail_host_required"
                 if not user_input.get(CONF_MAIL_TO, "").strip():
@@ -2637,7 +2688,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "enabled":           user_input.get("la_enabled", False),
                 "forgotten_minutes": int(user_input.get("la_forgotten_minutes", 30)),
             }
-            # Sla op en ga door naar per-lamp stap
+            # Save en ga door naar per-lamp stap
             # We updaten intern zodat detail-stap de nieuwe waarden ziet
             if hasattr(self, "_options"):
                 self._options = {**self._options, "lamp_automation": new_la}
@@ -2916,7 +2967,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
         of bij stappen die slechts een subset van velden tonen.
         """
         entry = getattr(self, "config_entry", self._entry)
-        # Bouw altijd op vanuit data + options zodat ook keys die nog nooit in
+        # Build altijd op vanuit data + options zodat ook keys die nog nooit in
         # options stonden (alleen in entry.data) correct worden meegenomen.
         # v4.6.136: Filter lege strings uit extra — een leeg veld in een stap
         # mag een bestaande geconfigureerde waarde NIET overschrijven.
@@ -3452,7 +3503,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
 
-            # Bouw groepsconfig op vanuit user_input
+            # Build groepsconfig op vanuit user_input
             groups = data.get(CONF_MULTISPLIT_GROUPS, [])
 
             action = user_input.get("action", "save")
@@ -3490,7 +3541,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
             selector.SelectOptionDict(value=k, label=v)
             for k, v in MULTISPLIT_BRANDS.items()
         ]
-        # Bouw action opties
+        # Build action opties
         action_options = [
             selector.SelectOptionDict(value="add_group", label="➕ Nieuwe buitenunit toevoegen"),
             selector.SelectOptionDict(value="save",      label="✅ Opslaan"),
@@ -4960,7 +5011,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
         if registered_pp:
             current_price_provider = registered_pp
 
-        # Bouw leverancier-opties gefilterd op land:
+        # Build leverancier-opties gefilterd op land:
         # PRICE_PROVIDER_LABELS bevat alle directe API-leveranciers.
         # SUPPLIER_MARKUPS bevat per-land de relevante leveranciers voor EPEX-opslag.
         # We tonen alle API-providers + de EPEX optie altijd, maar filteren de
@@ -4990,7 +5041,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 self._pending_price_provider = chosen_pp
                 return await self.async_step_price_provider_creds_opts()
 
-            # Geen credentials nodig: provider registreren
+            # No credentials nodig: provider registreren
             if chosen_pp != current_price_provider:
                 self._apply_price_provider_opts(chosen_pp, {})
             else:
@@ -5894,14 +5945,14 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 CONF_BOILER_GROUPS: current_groups,
             })
 
-        # Bouw actie-opties (geen "Opslaan" als actie — navigatie-only)
+        # Build actie-opties (geen "Opslaan" als actie — navigatie-only)
         action_options = [selector.SelectOptionDict(value="add_group", label="➕ Nieuwe groep toevoegen")]
         for i, g in enumerate(current_groups):
             name = g.get("name", f"Groep {i+1}")
             action_options.append(selector.SelectOptionDict(value=f"edit_{i}", label=f"✏️ Bewerk: {name}"))
             action_options.append(selector.SelectOptionDict(value=f"delete_{i}", label=f"🗑️ Verwijder: {name}"))
 
-        # Bouw groepen-overzicht tekst
+        # Build groepen-overzicht tekst
         groups_info = ""
         for g in current_groups:
             units = g.get("units", [])
@@ -6019,12 +6070,12 @@ class CloudEMSOptionsFlow(_OptionsBase):
             self._opts[CONF_BOILER_GROUPS] = groups
             return self._save(self._opts)
 
-        # Bouw unit-overzicht
+        # Build unit-overzicht
         units_summary = ""
         for i, u in enumerate(units):
             units_summary += f"**{i+1}.** {u.get('label', u.get('entity_id', '?'))} — {u.get('setpoint_c', 60):.0f}°C\n"
 
-        # Bouw actie-opties
+        # Build actie-opties
         edit_actions = [
             selector.SelectOptionDict(value="save",     label="💾 Opslaan en terug"),
             selector.SelectOptionDict(value="add_unit", label="➕ Extra boiler toevoegen"),

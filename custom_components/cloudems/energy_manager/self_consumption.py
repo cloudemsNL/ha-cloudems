@@ -114,6 +114,15 @@ class SelfConsumptionTracker:
             # geldige situatie als batterij alles absorbeert. De oorspronkelijke bug
             # (export_w altijd 0) is gefixed in v4.6.578, deze check is niet meer nodig.
             self._today_date      = today
+            # Sanity check: export can never exceed PV (physically impossible).
+            # Corrupted storage from a previous bug would cause ratio=0% forever.
+            if _pv > 100 and _exp > _pv:
+                _LOGGER.warning(
+                    "SelfConsumptionTracker: export_wh (%.0f) > pv_wh (%.0f) — "
+                    "corrupt storage detected, resetting today's accumulation",
+                    _exp, _pv,
+                )
+                _exp = 0.0
             self._today_pv_wh     = _pv
             self._today_export_wh = _exp
             self._today_import_wh = _imp
@@ -150,6 +159,9 @@ class SelfConsumptionTracker:
             self._today_pv_wh     += pv_w     * factor
             self._today_export_wh += export_w  * factor
             self._today_import_wh += import_w  * factor
+            # Physical constraint: can never export more than produced
+            if self._today_export_wh > self._today_pv_wh:
+                self._today_export_wh = self._today_pv_wh
             self._dirty = True
 
         # Update uurprofiel (exponentieel voortschrijdend gemiddelde)

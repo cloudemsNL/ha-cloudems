@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "5.0.59"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "5.3.4"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "5.0.59"  # manifest.json ongeldig
+    VERSION = "5.3.4"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -121,6 +121,8 @@ CONF_ENABLE_MULTI_INVERTER   = "enable_multi_inverter"
 STORAGE_KEY_SOLAR_PROFILES   = "cloudems_solar_profiles_v2"
 
 # ── v1.4: Peak shaving ────────────────────────────────────────────────────────
+CONF_PRESENCE_ENTITIES       = "presence_entities"        # extra bewegings-/aanwezigheidssensoren
+CONF_PRESENCE_CALENDAR       = "presence_calendar_entities"  # kalenders voor aanwezigheid
 CONF_PEAK_SHAVING_ENABLED    = "peak_shaving_enabled"
 CONF_PEAK_SHAVING_LIMIT_W    = "peak_shaving_limit_w"
 CONF_PEAK_SHAVING_ASSETS     = "peak_shaving_assets"
@@ -327,6 +329,24 @@ DEFAULT_NILM_THRESHOLD_W      = 25.0     # start value; adapts down to ~8W
 NILM_MIN_THRESHOLD_W          = 8.0      # never go below 8W (avoids noise triggers)
 NILM_MAX_THRESHOLD_W          = 100.0    # never above 100W (would miss most devices)
 NILM_NOISE_WINDOW             = 60       # samples for noise estimation
+
+# ── AI module thresholds (all learnable — these are starting defaults only) ──
+BATTERY_STALE_THRESHOLD_S    = 90.0     # seconds before battery data considered stale
+BATTERY_STALE_MIN_S          = 30.0     # minimum stale threshold (never go below)
+P1_STALE_THRESHOLD_S         = 90.0     # seconds before P1 data considered stale
+AI_MIN_CONFIDENCE            = 0.65     # minimum confidence before AI hint is applied
+AI_BATTERY_MIN_CONFIDENCE    = 0.65     # battery charging/discharging AI hints
+AI_BOILER_MIN_CONFIDENCE     = 0.65     # boiler run AI hints
+AI_SHUTTER_MIN_CONFIDENCE    = 0.60     # shutter position AI hints
+AI_EV_MIN_CONFIDENCE         = 0.50     # EV departure prediction
+NEXUS_MEASURE_WINDOW_S       = 120.0    # how long to wait for Nexus response
+NEXUS_MIN_POWER_DELTA_W      = 200.0    # min power change to count as response
+NEXUS_MAX_MEASUREMENTS       = 500      # max latency measurements to store
+PHASE_IMBALANCE_THRESHOLD_A  = 4.0      # Ampère — already in DEFAULT_PHASE_BALANCE_THRESHOLD
+BOOTSTRAP_STANDALONE_SAMPLES = 200      # k-NN samples before bootstrap is blended
+BOOTSTRAP_BLEND_SAMPLES      = 500      # samples at which bootstrap is fully deprecated
+PRICE_CHEAP_EUR_KWH          = 0.10     # EPEX below this = cheap → charge battery
+PRICE_EXPENSIVE_EUR_KWH      = 0.25     # EPEX above this = expensive → discharge battery
 
 # v1.8.0 — PID defaults
 DEFAULT_PID_PHASE_KP          = 3.0

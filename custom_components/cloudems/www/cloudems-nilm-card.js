@@ -302,7 +302,18 @@ class CloudEMSNilmCard extends HTMLElement {
       const isPlug= d.source_type === 'smart_plug';
       const isPend= !d.confirmed;
       const pwrTxt= isOn ? `${Math.round(d.power_w || 0)} W` : `<span style="color:#374151">—</span>`;
-      return `<div class="dev-row">
+      const _TTN = window.CloudEMSTooltip;
+      const _srcLabel = isPlug ? '🔌 Smart plug (direct gemeten)' : conf >= 80 ? '🤖 NILM (hoge betrouwbaarheid)' : conf >= 50 ? '🤖 NILM (matige betrouwbaarheid)' : '🤖 NILM (lage betrouwbaarheid)';
+      const _ttNilm = _TTN ? _TTN.html('nilm-'+esc(d.device_id||''), esc(d.name||d.type||'?'), [
+        {label:'Betrouwbaarheid', value:(isPlug?'100':conf)+'%'},
+        {label:'Detectiemethode', value:_srcLabel},
+        {label:'Fase',           value:d.phase_label||d.phase||'?'},
+        {label:'Type',           value:d.type||d.device_type||'—', dim:true},
+        {label:'Kamer',          value:d.room||'—', dim:true},
+        {label:'Bevestigd',      value:d.confirmed?'✅ Ja':'❌ Niet bevestigd', dim:true},
+        {label:'Vandaag',        value:d.today_kwh>0?d.today_kwh.toFixed(2)+' kWh':'—', dim:true},
+      ], {footer:isPlug?'● Direct gemeten via smart plug':'○ Afgeleid via NILM detectie'}) : {wrap:'',tip:''};
+      return `<div class="dev-row" style="position:relative;cursor:default" ${_ttNilm.wrap}>
         <div class="dev-dot" style="background:${dotCol}"></div>
         <div class="dev-main">
           <div class="dev-name" data-rename="${esc(d.device_id||'')}" data-cur="${esc(d.name||d.type||'?')}">${esc(d.name || d.type || '?')}</div>
@@ -317,6 +328,7 @@ class CloudEMSNilmCard extends HTMLElement {
         </div>
         <div class="dev-conf">${confBar(isPlug ? 100 : conf)}</div>
         <div class="dev-pwr" style="color:${isOn ? '#fde047' : '#374151'}">${pwrTxt}</div>
+        ${_ttNilm.tip}
       </div>`;
     };
 

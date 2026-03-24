@@ -1284,6 +1284,17 @@ class ShutterController:
                     position=pid_pos,
                     reason=f"PID temp={room_temp:.1f}°C sp={setpoint:.1f}°C → {pid_pos}%", priority=60,
                 )
+        # AI pattern hint — apply when rules have no strong opinion (priority=0)
+        _ai_pos  = getattr(cfg, '_ai_position_hint', None)
+        _ai_conf = getattr(cfg, '_ai_position_conf', 0.0)
+        if _ai_pos is not None and _ai_conf >= 0.60:
+            return ShutterDecision(
+                entity_id=cfg.entity_id,
+                action=SHUTTER_ACTION_POSITION,
+                position=_ai_pos,
+                reason=f"AI patroon ({_ai_conf:.0%} zekerheid) → {_ai_pos}%",
+                priority=10,
+            )
         return ShutterDecision(cfg.entity_id, SHUTTER_ACTION_IDLE,
                                reason="binnen comfort — geen actie", priority=0)
 

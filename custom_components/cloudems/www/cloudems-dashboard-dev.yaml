@@ -417,7 +417,7 @@ sections:
             card:
               type: markdown
               content: >
-                ## ⚠️ Hoge wind — rolluiken omhoog!
+                ## ⚠ Hoge wind — rolluiken omhoog!
                 Windsnelheid: **{{ states('sensor.weather_station_windsnelheid') }} km/h**
                 CloudEMS trekt de rolluiken automatisch omhoog boven de drempel.
           - type: horizontal-stack

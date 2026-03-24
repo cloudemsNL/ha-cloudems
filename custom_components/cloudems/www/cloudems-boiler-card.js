@@ -255,6 +255,19 @@ class CloudemsBoilerCard extends HTMLElement {
     const st=hass.states['sensor.cloudems_boiler_status'];
     const boilers=st?.attributes?.boilers??[];
     const json=JSON.stringify([st?.last_updated,st?.state,boilers.map(b=>[b.temp_c,b.current_power_w,b.is_on,b.active_setpoint_c,b.tank_liters_learned,b.ramp_setpoint_c])]);
+    // Sample power values for in-memory graph fallback (recorder may not store 0W states)
+    if(boilers.length){
+      if(!this._powerSamples) this._powerSamples={};
+      const d=new Date(),tLabel=d.getHours()+':'+String(d.getMinutes()).padStart(2,'0');
+      for(const b of boilers){
+        const pw=parseFloat(b.current_power_w??b.power_w??0);
+        if(!this._powerSamples[b.entity_id]) this._powerSamples[b.entity_id]=[];
+        const samps=this._powerSamples[b.entity_id];
+        const last=samps[samps.length-1];
+        if(!last||last.t!==tLabel) samps.push({t:tLabel,v:pw});
+        if(samps.length>48) samps.splice(0,samps.length-48);
+      }
+    }
     if(json!==this._prevJson){
       this._prevJson=json;this._render();
       const now=Date.now(),thr=this._histLastFetch===0?5000:300000;
@@ -279,7 +292,16 @@ class CloudemsBoilerCard extends HTMLElement {
         const url=e=>`history/period/${start.toISOString()}?filter_entity_id=${e}&minimal_response=true&no_attributes=true&end_time=${end.toISOString()}`;
         const [rt,rp]=await Promise.all([this._hass.callApi('GET',url(tEid)).catch(()=>null),this._hass.callApi('GET',url(pEid)).catch(()=>null)]);
         if(rt?.[0]?.length)this._history[eid]=parse(rt);
-        if(rp?.[0]?.length)this._historyPower[eid]=parse(rp);
+        if(rp?.[0]?.length){
+          this._historyPower[eid]=parse(rp);
+        } else {
+          // Power sensor has no recorder history yet (all zeros = state unchanged = not recorded)
+          // Build synthetic history from in-memory samples collected by the card
+          if(!this._powerSamples) this._powerSamples={};
+          if(!this._powerSamples[eid]) this._powerSamples[eid]=[];
+          // Samples are added in _samplePower() — just use whatever we have
+          if(this._powerSamples[eid].length>1) this._historyPower[eid]=[...this._powerSamples[eid]];
+        }
         this._render();
       }catch(_){}
       this._historyLoading[eid]=false;
@@ -905,8 +927,8 @@ class CloudemsBoilerCardEditor extends HTMLElement {
     }));
   }
 }
-customElements.define('cloudems-boiler-card-editor',CloudemsBoilerCardEditor);
-customElements.define('cloudems-boiler-card',CloudemsBoilerCard);
+if (!customElements.get('cloudems-boiler-card-editor')) customElements.define('cloudems-boiler-card-editor',CloudemsBoilerCardEditor);
+if (!customElements.get('cloudems-boiler-card')) customElements.define('cloudems-boiler-card',CloudemsBoilerCard);
 window.customCards=window.customCards??[];
 window.customCards.push({type:'cloudems-boiler-card',name:'CloudEMS Boiler Card',description:'Warm water — live, leren, gezondheid, log',preview:true});
 console.info('%c CLOUDEMS-BOILER-CARD %c v'+BOILER_CARD_VERSION+' ','background:#ff8040;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#111318;color:#ff8040;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

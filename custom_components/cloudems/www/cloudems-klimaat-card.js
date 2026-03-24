@@ -270,8 +270,8 @@ class CloudEMSKlimaatCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-klimaat-card', CloudEMSKlimaatCard);
-customElements.define('cloudems-klimaat-card-editor', CloudEMSKlimaatCardEditor);
+if (!customElements.get('cloudems-klimaat-card')) customElements.define('cloudems-klimaat-card', CloudEMSKlimaatCard);
+if (!customElements.get('cloudems-klimaat-card-editor')) customElements.define('cloudems-klimaat-card-editor', CloudEMSKlimaatCardEditor);
 window.customCards = window.customCards||[];
 window.customCards.push({type:'cloudems-klimaat-card', name:'CloudEMS Klimaat Card', description:'Zones, CV-ketel, thermostaten en klimaatbeheer', preview:true});
 console.info('%c CLOUDEMS-KLIMAAT-CARD %c v'+KLIM_VERSION+' ','background:#80cbc4;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#80cbc4;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

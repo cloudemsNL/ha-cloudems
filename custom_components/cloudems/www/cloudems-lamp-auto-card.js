@@ -145,14 +145,14 @@ class CloudEMSLampAutoCard extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-lamp-auto-card', CloudEMSLampAutoCard);
+if (!customElements.get('cloudems-lamp-auto-card')) customElements.define('cloudems-lamp-auto-card', CloudEMSLampAutoCard);
 
 // Editor (simpel)
 class CloudEMSLampAutoCardEditor extends HTMLElement {
   setConfig(config) { this._config = config; }
   get _title() { return this._config?.title || ''; }
 }
-customElements.define('cloudems-lamp-auto-card-editor', CloudEMSLampAutoCardEditor);
+if (!customElements.get('cloudems-lamp-auto-card-editor')) customElements.define('cloudems-lamp-auto-card-editor', CloudEMSLampAutoCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

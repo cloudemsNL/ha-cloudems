@@ -608,8 +608,8 @@ class CloudemsSwithcesCardEditor extends HTMLElement {
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
-customElements.define("cloudems-switches-card", CloudemsSwithcesCard);
-customElements.define("cloudems-switches-card-editor", CloudemsSwithcesCardEditor);
+if (!customElements.get('cloudems-switches-card')) customElements.define("cloudems-switches-card", CloudemsSwithcesCard);
+if (!customElements.get('cloudems-switches-card-editor')) customElements.define("cloudems-switches-card-editor", CloudemsSwithcesCardEditor);
 
 window.customCards = window.customCards ?? [];
 window.customCards.push({

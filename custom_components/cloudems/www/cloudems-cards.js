@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.567
+ * CloudEMSTooltip — v4.6.590
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -482,7 +482,25 @@ window.CloudEMSTooltip = {
 
     set hass(hass) {
       this._hass = hass;
-      this._valuesChanged = true;
+      // Debounce: alleen _valuesChanged zetten als relevante waarden echt wijzigen.
+      // Gebruikt .state waarden + fase-attributen (NOOIT last_updated — dat verandert altijd).
+      const st  = hass.states;
+      const ph  = st['sensor.cloudems_status']?.attributes?.phases || {};
+      const e   = this._config.entities || {};
+      const sig = JSON.stringify([
+        st['sensor.cloudems_grid_net_power']?.state,
+        st['sensor.cloudems_solar_system']?.state,
+        st['sensor.cloudems_home_rest']?.state,
+        st['sensor.cloudems_status']?.state,
+        ph['L1']?.power_w, ph['L2']?.power_w, ph['L3']?.power_w,
+        ph['L1']?.current_a, ph['L2']?.current_a, ph['L3']?.current_a,
+        e.battery?.entity ? st[e.battery.entity]?.state : null,
+        e.grid?.entity    ? st[e.grid.entity]?.state    : null,
+      ]);
+      if (sig !== this._hassSig) {
+        this._hassSig = sig;
+        this._valuesChanged = true;
+      }
     }
 
     disconnectedCallback() {
@@ -978,10 +996,46 @@ window.CloudEMSTooltip = {
     // ── Full render ───────────────────────────────────────────────────────────
 
     _renderFull() {
+      // Wacht totdat sensor.cloudems_status geladen is — anders weten we niet of 1- of 3-fase.
+      // Zo voorkom je dat de kaart eerst als 1-fase rendert en daarna flipt naar 3-fase.
+      const _statusSt = this._hass?.states['sensor.cloudems_status'];
+      if (!_statusSt) { this._needsFullRender = true; return; }
+
       const e           = this._config.entities || {};
-      const grid        = this._getVal(e.grid);
+      let   grid        = this._getVal(e.grid);
       const home        = this._getVal(e.home);
       const solarNodes  = this._getSolarNodes();
+      // Read per-phase power from status sensor (for 3-wire rendering)
+      const _statusPhases = _statusSt?.attributes?.phases || {};
+      const _phL1 = _statusPhases['L1'] || {};
+      const _phL2 = _statusPhases['L2'] || {};
+      const _phL3 = _statusPhases['L3'] || {};
+      // Sanity check: als grid > 50000W (50 kW) is de sensor stale/corrupt.
+      // Fallback: bereken grid uit fase-data van sensor.cloudems_status.
+      if (Math.abs(grid) > 50000 && Object.keys(_statusPhases).length >= 1) {
+        const _phaseGrid = (_phL1.power_w || 0) + (_phL2.power_w || 0) + (_phL3.power_w || 0);
+        if (_phaseGrid !== 0) grid = _phaseGrid;
+      }
+      const _isThreePhase = Object.keys(_statusPhases).length >= 2;
+      // P1 per-phase import/export power
+      const _p1a = this._hass?.states['sensor.cloudems_p1_data']?.attributes || {};
+      // Per-fase netto vermogen: positief = import, negatief = export
+      // power_w uit coordinator is al signed (Kirchhoff-gecorrigeerd)
+      // p1_data geeft power_l1_w (import) en power_l1_export_w apart — netto = import - export
+      const _gridL1w = _p1a.power_l1_w != null
+        ? (_p1a.power_l1_w - (_p1a.power_l1_export_w || 0))
+        : (_phL1.power_w || 0);
+      const _gridL2w = _p1a.power_l2_w != null
+        ? (_p1a.power_l2_w - (_p1a.power_l2_export_w || 0))
+        : (_phL2.power_w || 0);
+      const _gridL3w = _p1a.power_l3_w != null
+        ? (_p1a.power_l3_w - (_p1a.power_l3_export_w || 0))
+        : (_phL3.power_w || 0);
+      // Solar per-phase (from inverter data)
+      const _solarInvs = this._hass?.states['sensor.cloudems_solar_system']?.attributes?.inverters || [];
+      const _solarByPhase = {L1:0, L2:0, L3:0};
+      _solarInvs.forEach(inv => { const ph = (inv.phase||'').toUpperCase(); if (_solarByPhase[ph] !== undefined) _solarByPhase[ph] += (inv.power_w||0); });
+      const _hasSolarPhases = _solarInvs.some(inv => inv.phase && inv.phase !== '?');
       const battNodes   = this._getBatteryNodes();
       const boilerNodes = this._getBoilerNodes();
       // P1 uitval detectie — total_split = P1 offline
@@ -1008,6 +1062,48 @@ window.CloudEMSTooltip = {
       const pool        = this._getPoolPower();
       const layer2      = this._getFlowLayer2();
       const subs        = layer2.filter(n => n.isSub && n.children.length > 0);
+
+      // ── Phase detection for source/sink nodes ─────────────────────────────
+      // Grid: read from P1 phase data or config
+      const _gridPhase = (() => {
+        const p1a = this._hass?.states['sensor.cloudems_p1_data']?.attributes;
+        if (p1a?.single_phase) return p1a.single_phase.toUpperCase();
+        // Multi-phase: no single phase
+        return null;
+      })();
+      // Solar inverters: if single inverter with known phase
+      const _solarPhase = (() => {
+        const invs = this._hass?.states['sensor.cloudems_solar_system']?.attributes?.inverters || [];
+        if (invs.length === 1) {
+          const ph = invs[0]?.phase_display || invs[0]?.phase;
+          return ph && ph !== '?' ? ph.toUpperCase() : null;
+        }
+        return null; // multi-inverter: no single phase
+      })();
+      // Battery: read from battery status
+      const _battPhase = (() => {
+        const ba = this._hass?.states['sensor.cloudems_batterij_epex_schema']?.attributes;
+        const ph = ba?.battery_phase || ba?.phase;
+        return ph && ph !== '?' ? ph.toUpperCase() : null;
+      })();
+      // Boiler: read from boiler status
+      const _boilerPhase = (() => {
+        const boilers = this._hass?.states['sensor.cloudems_boiler_status']?.attributes?.boilers || [];
+        const ph = boilers[0]?.phase;
+        return ph && ph !== '?' ? ph.toUpperCase() : null;
+      })();
+      // EV: read from EV status
+      const _evPhase = (() => {
+        const sessions = this._hass?.states['sensor.cloudems_ev']?.attributes?.active_sessions || [];
+        const ph = sessions[0]?.phase;
+        return ph && ph !== '?' ? ph.toUpperCase() : null;
+      })();
+      // Airco: read from climate_epex status
+      const _aircoPhase = (() => {
+        const devs = this._hass?.states['sensor.cloudems_climate_epex_status']?.attributes?.devices || [];
+        const phases = [...new Set(devs.map(d => d.phase).filter(Boolean))];
+        return phases.length === 1 ? phases[0].toUpperCase() : null;
+      })();
 
       const totalSolar  = solarNodes.reduce((s, n) => s + n.w, 0);
       const totalBattPw = battNodes.reduce((s, b) => s + b.power_w, 0);
@@ -1039,9 +1135,10 @@ window.CloudEMSTooltip = {
       const R_EV    = 122, R_HUB   = 172, R_BOI  = 235;
       const R_AIRCO = 298, R_HP    = 361;
       const R_EBIKE = 232, R_POOL  = 302;
-      const R_HOME  = 400, R_L2    = 480, R_L3   = 556;
+      const R_HOME  = 365, R_L2    = 455, R_L3   = 530;
       const hasL3 = subs.some(s => s.children.length > 0);
-      const H = hasL3 ? R_L3 + 46 : layer2.length > 0 ? R_L2 + 46 : R_HOME + 40;
+      const _hasNilm = layer2.length > 0;
+      const H = _hasNilm ? R_HOME + 170 : R_HOME + 40;  // dynamic — extended below if NILM present
 
       const T = 10;
       const gc      = grid > T ? '#e74c3c' : '#2ecc71';
@@ -1059,7 +1156,9 @@ window.CloudEMSTooltip = {
         ev: '#3bba4c', ebike: '#06b6d4', pool: '#38bdf8',
         airco: '#38bdf8', hp: '#a78bfa',
         sub: '#a78bfa', text: '#e2e8f0',
-        gen: '#f97316',   // oranje voor generator
+        gen: '#f97316',
+        // Phase colors
+        L1: '#60a5fa', L2: '#4ade80', L3: '#f87171',   // oranje voor generator
       };
 
       // Single positions for solar/batt/boiler
@@ -1071,7 +1170,7 @@ window.CloudEMSTooltip = {
 
       // Init dots
       const pipeKeys = [
-        'grid', 'solar', 'batt', 'boiler', 'home', 'ev', 'ebike', 'pool', 'airco', 'hp',
+        'grid_l1', 'grid_l2', 'grid_l3', 'solar', 'batt', 'boiler', 'home_l1', 'home_l2', 'home_l3', 'ev', 'ebike', 'pool', 'airco', 'hp',
         ...layer2.map((_, i) => `l2_${i}`),
         ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
       ];
@@ -1081,11 +1180,9 @@ window.CloudEMSTooltip = {
       // Sankey-stijl: lijnbreedte proportioneel aan vermogen (W)
       // power_w=0 → breedte 1.5px (inactief), max 8px bij >5000W
       const pipe = (x1, y1, x2, y2, color, on, power_w=0) => {
-        const pw = Math.abs(power_w||0);
-        const sw = on ? Math.max(1.5, Math.min(8, 1.5 + pw/800)) : 1.5;
-        const op = on ? Math.max(0.5, Math.min(0.95, 0.3 + pw/6000)) : 0.15;
-        return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-          stroke="${color}" stroke-width="${sw.toFixed(1)}" stroke-linecap="round" opacity="${op.toFixed(2)}"/>`;
+        const op = on ? 0.78 : 0.11;
+        return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"
+          stroke="${color}" stroke-width="1.0" stroke-linecap="round" opacity="${op}"/>`;
       };
 
       const arw = (x1, y1, x2, y2, color, on) => {
@@ -1108,6 +1205,30 @@ window.CloudEMSTooltip = {
       };
 
       // Clickable nodeBox — all main nodes get data-nid
+      // Phase color helper: returns color for a given phase string, or null if unknown
+      const phaseCol = (ph) => {
+        if (!ph || ph === '?' || ph === '—' || ph === '') return null;
+        return C[ph.toUpperCase()] || null;
+      };
+
+      // Phase badge SVG: small colored pill in corner of a node
+      const phasePill = (cx, cy, ph) => {
+        const pc = phaseCol(ph);
+        if (!pc) return '';
+        const label = ph.toUpperCase();
+        return `<rect x="${cx-10}" y="${cy-8}" width="20" height="14" rx="7"
+          fill="${pc}30" stroke="${pc}90" stroke-width="0.8"/>
+          <text x="${cx}" y="${cy+3}" text-anchor="middle" font-size="7" font-weight="700"
+            fill="${pc}">${label}</text>`;
+      };
+
+      // Phase stripe: left accent bar on a node rect
+      const phaseStripe = (x, y, h, ph) => {
+        const pc = phaseCol(ph);
+        if (!pc) return '';
+        return `<rect x="${x}" y="${y}" width="3.5" height="${h}" rx="1.75" fill="${pc}80"/>`;
+      };
+
       const nodeBox = (cx, cy, bw, bh, color, on, label, val, sub2, sk, nid) => {
         const x = cx-bw/2, y = cy-bh/2;
         const glow = on ? `filter:drop-shadow(0 0 8px ${color}50)` : '';
@@ -1126,6 +1247,18 @@ window.CloudEMSTooltip = {
             fill="rgba(255,255,255,0.25)">${sub2}</text>`:''}
           ${sp}
         </g>`;
+      };
+      // Phase-aware nodeBox wrapper
+      const nodeBoxP = (cx, cy, bw, bh, color, on, label, val, sub2, sk, nid, phase) => {
+        const pc = phaseCol(phase);
+        const x = cx-bw/2, y = cy-bh/2;
+        let base = nodeBox(cx, cy, bw, bh, pc||color, on, label, val, sub2, sk, nid);
+        if (!pc) return base;
+        // Inject phase stripe + pill into the g element
+        const stripe = phaseStripe(x, y, bh, phase);
+        const pill   = phasePill(cx+bw/2-8, y+8, phase);
+        // Insert before </g>
+        return base.replace('</g>', stripe + pill + '</g>');
       };
 
       // Single battery node (clickable)
@@ -1152,6 +1285,7 @@ window.CloudEMSTooltip = {
             <text x="${battX}" y="${battY+23}" text-anchor="middle" font-size="7.5" fill="rgba(255,255,255,0.28)">${(soc||0).toFixed(0)}% SoC</text>
           `:''}
           ${sp}
+          ${_battPhase?phasePill(battX+bw/2-8, battY-bh/2+8, _battPhase):''}
         </g>`;
       };
 
@@ -1245,19 +1379,147 @@ window.CloudEMSTooltip = {
         </g>`;
       };
 
+      const _nilmSvgIcon = (type, on, color) => {
+        const s = on ? 1 : 0.35;
+        const g = (r,gg,b,a=1) => `rgba(${r},${gg},${b},${a*s})`;
+        const green=g(29,158,117), blue=g(55,138,221), amber=g(239,159,39),
+              red=g(226,75,74), gray=g(120,120,130), dim=g(50,50,60);
+        const c2=(r,gg,b,a=1)=>`rgba(${r},${gg},${b},${a})`;
+        const W=28, H=28;
+        const T2 = {
+          washing_machine: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="4" y="4" width="40" height="40" rx="6" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="6" y="6" width="10" height="4" rx="1" fill="${on?amber:dim}"/>
+            <circle cx="24" cy="28" r="12" fill="none" stroke="${gray}" stroke-width="1.5"/>
+            <circle cx="24" cy="28" r="8" fill="none" stroke="${on?green:dim}" stroke-width="1.5">
+              ${on?`<animateTransform attributeName="transform" type="rotate" from="0 24 28" to="360 24 28" dur="2s" repeatCount="indefinite"/>`:''}
+            </circle>
+            <circle cx="24" cy="20" r="1.5" fill="${on?green:dim}"/>
+          </svg>`,
+          dishwasher: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="4" y="4" width="40" height="40" rx="6" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="8" y="8" width="32" height="8" rx="3" fill="${c2(50,50,60,s)}" stroke="${gray}" stroke-width="1"/>
+            <rect x="10" y="22" width="28" height="2" rx="1" fill="${gray}"/>
+            <rect x="10" y="28" width="28" height="2" rx="1" fill="${gray}"/>
+            <rect cx="24" cy="30" x="10" width="${on?'28':'0'}" height="2" rx="1" fill="${on?green:dim}">
+              ${on?`<animate attributeName="width" values="0;28;0" dur="1.2s" repeatCount="indefinite"/>`:''}
+            </rect>
+          </svg>`,
+          dryer: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="4" y="4" width="40" height="40" rx="6" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="6" y="6" width="12" height="4" rx="1" fill="${on?amber:dim}"/>
+            <circle cx="24" cy="28" r="12" fill="none" stroke="${gray}" stroke-width="1.5"/>
+            <circle cx="24" cy="28" r="8" fill="none" stroke="${on?amber:dim}" stroke-width="1.5">
+              ${on?`<animateTransform attributeName="transform" type="rotate" from="360 24 28" to="0 24 28" dur="2.5s" repeatCount="indefinite"/>`:''}
+            </circle>
+            ${on?`<circle cx="24" cy="28" r="3.5" fill="${red}"><animate attributeName="r" values="2.5;4.5;2.5" dur="1s" repeatCount="indefinite"/></circle>`:`<circle cx="24" cy="28" r="3.5" fill="${dim}"/>`}
+          </svg>`,
+          refrigerator: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="8" y="4" width="32" height="40" rx="6" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="8" y="4" width="32" height="16" rx="6" fill="${c2(30,35,45,s)}" stroke="${gray}" stroke-width="1.5"/>
+            <line x1="8" y1="20" x2="40" y2="20" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="34" y="10" width="3" height="8" rx="1.5" fill="${gray}"/>
+            <rect x="34" y="24" width="3" height="12" rx="1.5" fill="${gray}"/>
+            ${on?`<text x="20" y="15" font-size="9" fill="${blue}" font-family="sans-serif">❄</text>`:''}
+          </svg>`,
+          tv: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="4" y="8" width="40" height="24" rx="4" fill="${c2(20,20,30,s)}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="7" y="11" width="34" height="18" rx="2" fill="${on?c2(15,25,40,s):c2(10,10,15,s)}"/>
+            ${on?`<rect x="7" y="11" width="34" height="3" fill="${c2(56,189,248,0.4)}"><animate attributeName="y" values="11;27;11" dur="2s" repeatCount="indefinite"/></rect>`:''}
+            <rect x="20" y="32" width="8" height="4" rx="1" fill="${gray}"/>
+            <rect x="14" y="36" width="20" height="2" rx="1" fill="${gray}"/>
+          </svg>`,
+          computer: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="8" y="6" width="32" height="26" rx="3" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="11" y="9" width="26" height="20" rx="1" fill="${on?c2(15,25,40,s):c2(10,10,15,s)}"/>
+            ${on?`<circle cx="24" cy="19" r="3" fill="${blue}"><animate attributeName="r" values="2;4;2" dur="1.5s" repeatCount="indefinite"/></circle>`:''}
+            <rect x="16" y="34" width="16" height="3" rx="1" fill="${gray}"/>
+            <rect x="12" y="37" width="24" height="3" rx="1.5" fill="${gray}"/>
+          </svg>`,
+          oven: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="4" y="4" width="40" height="40" rx="6" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="8" y="8" width="32" height="10" rx="2" fill="${c2(40,40,50,s)}"/>
+            <rect x="8" y="22" width="32" height="18" rx="2" fill="${c2(25,25,35,s)}" stroke="${on?red:gray}" stroke-width="1"/>
+            ${on?`<circle cx="24" cy="31" r="6" fill="${c2(234,99,39,0.3)}"><animate attributeName="r" values="4;8;4" dur="1.5s" repeatCount="indefinite"/></circle>`:''}
+          </svg>`,
+          router: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="6" y="20" width="36" height="16" rx="4" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            <rect x="14" y="8" width="3" height="14" rx="1" fill="${gray}"/>
+            <rect x="31" y="8" width="3" height="14" rx="1" fill="${gray}"/>
+            <circle cx="16" cy="30" r="2.5" fill="${on?green:dim}">
+              ${on?`<animate attributeName="opacity" values="1;0.2;1" dur="1.1s" repeatCount="indefinite"/>`:''}
+            </circle>
+            <circle cx="24" cy="30" r="2.5" fill="${on?blue:dim}">
+              ${on?`<animate attributeName="opacity" values="1;0.2;1" dur="1.1s" begin="0.4s" repeatCount="indefinite"/>`:''}
+            </circle>
+            <circle cx="32" cy="30" r="2.5" fill="${on?amber:dim}">
+              ${on?`<animate attributeName="opacity" values="1;0.2;1" dur="1.1s" begin="0.8s" repeatCount="indefinite"/>`:''}
+            </circle>
+          </svg>`,
+          nas: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <rect x="8" y="4" width="32" height="40" rx="4" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            ${[10,18,26,34].map((y,i)=>`<rect x="11" y="${y}" width="22" height="6" rx="2" fill="${c2(40,40,50,s)}" stroke="${gray}" stroke-width="0.5"/>
+            <circle cx="28" cy="${y+3}" r="2" fill="${on?[green,blue,green,amber][i]:dim}">
+              ${on?`<animate attributeName="opacity" values="1;0.3;1" dur="${1.5+i*0.3}s" repeatCount="indefinite"/>`:''}
+            </circle>`).join('')}
+          </svg>`,
+          boiler: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <ellipse cx="24" cy="26" rx="16" ry="18" fill="${dim}" stroke="${gray}" stroke-width="1.5"/>
+            ${on?`<ellipse cx="24" cy="32" rx="12" ry="10" fill="${c2(234,99,39,0.25)}">
+              <animate attributeName="ry" values="8;12;8" dur="2s" repeatCount="indefinite"/>
+            </ellipse>`:''}
+            <circle cx="24" cy="26" r="6" fill="none" stroke="${on?amber:dim}" stroke-width="1.5"/>
+            <circle cx="24" cy="26" r="2" fill="${on?amber:dim}"/>
+          </svg>`,
+          light: ()=>`<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <circle cx="24" cy="20" r="10" fill="${on?c2(251,191,36,0.2):dim}" stroke="${on?amber:gray}" stroke-width="1.5"/>
+            <circle cx="24" cy="20" r="5" fill="${on?amber:dim}"/>
+            ${on?`<circle cx="24" cy="20" r="10" fill="none" stroke="${amber}" stroke-width="2" opacity="0.4"><animate attributeName="r" values="10;16;10" dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite"/></circle>`:''}
+            <rect x="20" y="30" width="8" height="4" rx="1" fill="${gray}"/>
+            <rect x="18" y="34" width="12" height="3" rx="1.5" fill="${gray}"/>
+          </svg>`,
+        };
+        const iconFn = T2[type] || T2[
+          type?.includes('wash')?'washing_machine':
+          type?.includes('dish')?'dishwasher':
+          type?.includes('dry')?'dryer':
+          type?.includes('fridge')||type?.includes('refrig')||type?.includes('freezer')?'refrigerator':
+          type?.includes('tv')||type?.includes('tele')?'tv':
+          type?.includes('computer')||type?.includes('laptop')||type?.includes('server')?'computer':
+          type?.includes('oven')||type?.includes('microwave')?'oven':
+          type?.includes('router')||type?.includes('network')||type?.includes('modem')?'router':
+          type?.includes('nas')||type?.includes('storage')?'nas':
+          type?.includes('boiler')||type?.includes('water')?'boiler':
+          type?.includes('light')||type?.includes('lamp')?'light':
+          ''
+        ];
+        if (!iconFn) {
+          // Generic: powered circle
+          return `<svg width="${W}" height="${H}" viewBox="0 0 48 48">
+            <circle cx="24" cy="24" r="16" fill="${dim}" stroke="${on?color:gray}" stroke-width="1.5"/>
+            <circle cx="24" cy="24" r="6" fill="${on?color:dim}">
+              ${on?`<animate attributeName="r" values="4;8;4" dur="1.8s" repeatCount="indefinite"/>`:''}
+            </circle>
+          </svg>`;
+        }
+        return iconFn();
+      };
+
       const nilmBox = (cx, cy, node) => {
         const on = node.power_w > T;
         const color = node.color || '#94a3b8';
         const short = node.label.length > 9 ? node.label.slice(0,8)+'…' : node.label;
-        const bw = 74, bh = 44, x = cx-bw/2, y = cy-bh/2;
-        const glow = on ? `filter:drop-shadow(0 0 7px ${color}44)` : '';
+        const bw = 74, bh = 58, x = cx-bw/2, y = cy-bh/2;
+        const glow = on ? `filter:drop-shadow(0 0 8px ${color}55)` : '';
         const nid = `nilm_${node.label}`;
+        const iconSvg = _nilmSvgIcon(node.device_type || '', on, color);
         return `<g style="${glow};cursor:pointer" data-nid="${nid}" data-nlabel="${node.label}" data-npw="${node.power_w}" data-ncolor="${color}" data-nphase="${node.phase||''}" data-ntype="${node.device_type||''}" data-nconf="${node.confidence||100}" data-nevents="${node.on_events||0}" data-nroom="${node.room||'—'}">
-          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
+          <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="10"
             fill="#0d1117" stroke="${on?color:'rgba(255,255,255,0.08)'}" stroke-width="${on?1.5:1}"/>
-          <text x="${cx}" y="${cy-4}" text-anchor="middle" font-size="11" font-weight="700"
+          <g transform="translate(${cx-14},${y+4})">${iconSvg}</g>
+          <text x="${cx}" y="${y+40}" text-anchor="middle" font-size="11" font-weight="700"
             fill="${on?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(node.power_w)}</text>
-          <text x="${cx}" y="${cy+10}" text-anchor="middle" font-size="7.5" font-weight="600"
+          <text x="${cx}" y="${y+52}" text-anchor="middle" font-size="7" font-weight="600"
             letter-spacing="0.07em" fill="${on?color:'rgba(255,255,255,0.2)'}">${short.toUpperCase()}</text>
         </g>`;
       };
@@ -1289,42 +1551,179 @@ window.CloudEMSTooltip = {
       };
       const L2_XS = layer2.length > 0 ? spreadXs(layer2.length, W, 50) : [];
 
-      h += pipe(COL_LEFT+44, R_GRID, _heGrid_x, _heGrid_y, gc, gridActive);
+      const _gcWire = phaseCol(_gridPhase) || gc;
+      // ── GRID → HUB: 3 parallelle fase-draden als 3-fase data beschikbaar ──
+      if (_isThreePhase) {
+        const _gPhPows = [_gridL1w, _gridL2w, _gridL3w];
+        const _gPhKeys = ['L1','L2','L3'];
+        [-5,0,5].forEach((off, pi) => {
+          const col = C[_gPhKeys[pi]];
+          const pw  = Math.abs(_gPhPows[pi]);
+          const on  = pw > 10;
+          h += pipe(COL_LEFT+44+off, R_GRID, _heGrid_x+off, _heGrid_y, col, on || gridActive, pw);
+        });
+      } else {
+        h += pipe(COL_LEFT+44, R_GRID, _heGrid_x, _heGrid_y, _gcWire, gridActive, Math.abs(grid));
+      }
       h += pipe(solarX, solarY+46, _heSol_x, _heSol_y, C.solar, solarActive);
-      if (battNodes.length > 0) h += pipe(battX, battY, _heBat_x, _heBat_y, bfc, battActive);
-      h += pipe(_heBol_x, _heBol_y, bolX, bolY, C.boiler, boilerActive);
+      const _bfcWire = phaseCol(_battPhase) || bfc;
+      if (battNodes.length > 0) h += pipe(battX, battY, _heBat_x, _heBat_y, _bfcWire, battActive, Math.abs(totalBattPw));
+      const _boilerWire = phaseCol(_boilerPhase) || C.boiler;
+      h += pipe(_heBol_x, _heBol_y, bolX, bolY, _boilerWire, boilerActive, totalBoiler);
       if (aircoNodes.length > 0) h += pipe(_heAirco_x, _heAirco_y, aircoX, aircoY, C.airco, totalAirco>T);
       if (hpNodes.length > 0)    h += pipe(_heHp_x,    _heHp_y,    hpX,    hpY,    C.hp,    totalHp>T);
-      h += pipe(_heHome_x, _heHome_y, COL_HUB, R_HOME-17, C.home, homeActive);
-      if (evNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ev) h += pipe(COL_LEFT+44, R_EV, _heEv_x, _heEv_y, C.ev, ev>T);
+      // ── HUB → THUIS: 3 parallelle fase-draden ────────────────────────────
+      if (_isThreePhase) {
+        const _offsets = [-5, 0, 5];
+        const _phKeys  = ['L1','L2','L3'];
+        const _phPows  = [_phL1.power_w||0, _phL2.power_w||0, _phL3.power_w||0];
+        _offsets.forEach((off, pi) => {
+          const col = C[_phKeys[pi]];
+          const pw  = _phPows[pi];
+          h += pipe(_heHome_x+off, _heHome_y, COL_HUB+off, R_HOME-17, col, homeActive, pw);
+        });
+      } else {
+        h += pipe(_heHome_x, _heHome_y, COL_HUB, R_HOME-17, C.home, homeActive);
+      }
+      if (evNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ev) h += pipe(COL_LEFT+44, R_EV, _heEv_x, _heEv_y, phaseCol(_evPhase)||C.ev, ev>T, ev);
       if (ebikeNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ebike) h += pipe(COL_LEFT+44, R_EBIKE, _heEbike_x, _heEbike_y, C.ebike, ebike>T);
       if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status']) h += pipe(COL_LEFT+44, R_POOL, _hePool_x, _hePool_y, C.pool, pool>T);
-      layer2.forEach((node, i) =>
-        h += pipe(COL_HUB, R_HOME+17, L2_XS[i], R_L2-22, node.isSub?C.sub:node.color, node.power_w>T));
-      subs.forEach((s, si) => {
-        const sx = L2_XS[layer2.indexOf(s)];
-        const cxs = s.children.length===1 ? [sx] : [sx-40, sx+40];
-        s._cxs = cxs;
-        s.children.forEach((c, ci) => h += pipe(sx, R_L2+22, cxs[ci], R_L3-18, C.sub, c.power_w>T));
+      // ── NILM: 5 fase-ankers (?, L1, L2, L3, Σ) dynamisch verdeeld ─────────────
+      // Max devices that fit = canvas width / device box width
+      const NILM_BOX_W = 74;   // device box + gap
+      const NILM_MAX   = Math.min(5, Math.floor((W - 40) / NILM_BOX_W));
+
+      // Build phase groups — cap total at NILM_MAX, priority: active devices first
+      const _phOrder = ['L1','L2','L3','','MF'];
+      const _phGroups = { L1:[], L2:[], L3:[], '':[], MF:[] };
+      const _allSorted = [...layer2].sort((a,b) => (b.power_w||0)-(a.power_w||0));
+      let _slotsBudget = NILM_MAX;
+      // First pass: active devices
+      _allSorted.forEach(node => {
+        if ((node.power_w||0) <= T) return;
+        const ph = (node.phase||'').toUpperCase();
+        const key = (ph==='L1'||ph==='L2'||ph==='L3') ? ph : (node.isSub ? 'MF' : '');
+        if (_slotsBudget > 0) { _phGroups[key].push(node); _slotsBudget--; }
+      });
+      // Second pass: inactive devices (fill remaining slots)
+      _allSorted.forEach(node => {
+        if ((node.power_w||0) > T) return;
+        const ph = (node.phase||'').toUpperCase();
+        const key = (ph==='L1'||ph==='L2'||ph==='L3') ? ph : (node.isSub ? 'MF' : '');
+        if (_slotsBudget > 0 && !Object.values(_phGroups).flat().includes(node)) {
+          _phGroups[key].push(node); _slotsBudget--;
+        }
       });
 
-      // Arrows
-      h += grid>T ? arw(COL_LEFT+44,R_GRID,_heGrid_x,_heGrid_y,gc,true) : arw(_heGrid_x,_heGrid_y,COL_LEFT+44,R_GRID,gc,gridActive);
-      h += arw(solarX, solarY+46, _heSol_x, _heSol_y, C.solar, solarActive);
-      if (battNodes.length > 0) { h += totalBattPw < -T ? arw(_heBat_x,_heBat_y,battX,battY,bfc,battActive) : arw(battX,battY,_heBat_x,_heBat_y,bfc,battActive); }
-      h += arw(_heBol_x,_heBol_y,bolX,bolY,C.boiler,boilerActive);
-      if (aircoNodes.length > 0) h += arw(_heAirco_x,_heAirco_y,aircoX,aircoY,C.airco,totalAirco>T);
-      if (hpNodes.length > 0)    h += arw(_heHp_x,_heHp_y,hpX,hpY,C.hp,totalHp>T);
-      h += arw(_heHome_x,_heHome_y,COL_HUB,R_HOME-17,C.home,homeActive);
-      if (evNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ev) h += arw(_heEv_x,_heEv_y,COL_LEFT+44,R_EV,C.ev,ev>T);
-      if (ebikeNodes.some(n=>n.power_w>0) || (this._config.entities||{}).ebike) h += arw(_heEbike_x,_heEbike_y,COL_LEFT+44,R_EBIKE,C.ebike,ebike>T);
-      if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status']) h += arw(_hePool_x,_hePool_y,COL_LEFT+44,R_POOL,C.pool,pool>T);
-      layer2.forEach((node, i) =>
-        h += arw(COL_HUB,R_HOME+17,L2_XS[i],R_L2-22,node.isSub?C.sub:node.color,node.power_w>T));
-      subs.forEach(s => {
-        const sx = L2_XS[layer2.indexOf(s)];
-        (s._cxs||[]).forEach((cx, ci) => h += arw(sx,R_L2+22,cx,R_L3-18,C.sub,s.children[ci].power_w>T));
-      });
+      // Active anchor groups (only show anchors that have devices)
+      const _ancGroups = _phOrder
+        .filter(k => _phGroups[k].length > 0)
+        .map(k => ({
+          key: k,
+          label: k === '' ? '?' : (k === 'MF' ? 'Σ' : k),
+          col:   k === '' ? C.sub : (k === 'MF' ? '#fbbf24' : C[k]),
+          devs:  _phGroups[k],
+        }));
+
+      if (_ancGroups.length > 0) {
+        // Dynamic canvas height based on presence of NILM row
+        const _ANCHOR_Y = R_HOME + 82;
+        const _DEV_Y    = _ANCHOR_Y + 70;
+
+        // Anchor X positions — evenly spread across card width
+        const _ANC_PAD = 44;
+        const _ancXs = {};
+        if (_ancGroups.length === 1) {
+          _ancXs[_ancGroups[0].key] = COL_HUB;
+        } else {
+          const _step = (W - _ANC_PAD*2) / (_ancGroups.length - 1);
+          _ancGroups.forEach((g, i) => { _ancXs[g.key] = _ANC_PAD + i * _step; });
+        }
+
+        // Device X positions — spread under anchor, push-apart to prevent overlap
+        const _devXs = {};
+        _ancGroups.forEach(g => {
+          const ax = _ancXs[g.key], n = g.devs.length;
+          g.devs.forEach((d, i) => {
+            _devXs[d._uid || d.label] = ax - (n-1)*NILM_BOX_W/2 + i*NILM_BOX_W;
+          });
+        });
+        // Push-apart (4 passes)
+        const _flatDevs = _ancGroups.flatMap(g => g.devs.map(d => ({...d, _col:g.col})))
+          .sort((a,b) => (_devXs[a._uid||a.label]||0) - (_devXs[b._uid||b.label]||0));
+        for (let pass=0; pass<4; pass++) {
+          for (let i=1; i<_flatDevs.length; i++) {
+            const ka = _flatDevs[i-1]._uid||_flatDevs[i-1].label;
+            const kb = _flatDevs[i]._uid||_flatDevs[i].label;
+            const gap = (_devXs[kb]||0) - (_devXs[ka]||0);
+            if (gap < NILM_BOX_W) {
+              const push = (NILM_BOX_W - gap) / 2;
+              _devXs[kb] = (_devXs[kb]||0) + push;
+              _devXs[ka] = (_devXs[ka]||0) - push;
+            }
+          }
+        }
+        _flatDevs.forEach(d => {
+          const k = d._uid||d.label;
+          _devXs[k] = Math.max(38, Math.min(W-38, _devXs[k]||0));
+        });
+
+        // Store _devXs on nodes for pipeDefs
+        _ancGroups.forEach(g => g.devs.forEach(d => {
+          d._devX = _devXs[d._uid||d.label];
+          d._ancX = _ancXs[g.key];
+          d._ancY = _ANCHOR_Y;
+          d._devY = _DEV_Y;
+          d._phCol = g.col;
+        }));
+
+        // ── Draw THUIS → anchor wires ──────────────────────────────────────
+        _ancGroups.forEach(g => {
+          const ax = _ancXs[g.key];
+          const hasActive = g.devs.some(d => (d.power_w||0) > T);
+          // Always draw THUIS→anchor wire, active or not
+        h += `<line x1="${COL_HUB.toFixed(1)}" y1="${(R_HOME+22).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(_ANCHOR_Y-15).toFixed(1)}"
+          stroke="${g.col}" stroke-width="1.0" opacity="${hasActive?0.75:0.22}" stroke-linecap="round"/>`;
+        });
+
+        // ── Draw anchor → device wires ─────────────────────────────────────
+        _ancGroups.forEach(g => g.devs.forEach(d => {
+          const dkey = d._uid||d.label;
+          const dx = _devXs[dkey];
+          const on = (d.power_w||0) > T;
+          const col = g.key === '' ? `${g.col}` : g.col;
+          if (g.key === '') {
+            // Unknown phase — dashed line
+            h += `<line x1="${_ancXs[g.key].toFixed(1)}" y1="${_ANCHOR_Y+15}" x2="${dx.toFixed(1)}" y2="${_DEV_Y-33}"
+              stroke="${col}" stroke-width="1.0" opacity="${on?0.45:0.15}" stroke-dasharray="4,3" stroke-linecap="round"/>`;
+          } else {
+            h += pipe(_ancXs[g.key], _ANCHOR_Y+15, dx, _DEV_Y-33, col, on);
+          }
+        }));
+
+        // ── Draw anchor pills ─────────────────────────────────────────────
+        _ancGroups.forEach(g => {
+          const ax = _ancXs[g.key], ay = _ANCHOR_Y;
+          const col = g.col;
+          const hasActive = g.devs.some(d => (d.power_w||0) > T);
+          const op = hasActive ? 1 : 0.3;
+          h += `<g opacity="${op}">
+            <rect x="${ax-17}" y="${ay-13}" width="34" height="26" rx="13"
+              fill="${col}35" stroke="${col}" stroke-width="1.5"/>
+            <text x="${ax}" y="${ay+2}" text-anchor="middle" font-size="9" font-weight="700"
+              fill="${col}">${g.label}</text>
+          </g>`;
+        });
+
+        // ── Draw NILM device boxes ─────────────────────────────────────────
+        _ancGroups.forEach(g => g.devs.forEach(d => {
+          const dkey = d._uid||d.label;
+          const dx = _devXs[dkey], dy = _DEV_Y;
+          h += nilmBox(dx, dy, { ...d, color: g.col });
+        }));
+      }
+
+      // Arrows removed — direction shown by animated dots
 
       h += `<g id="dots-layer"></g>`;
 
@@ -1343,7 +1742,21 @@ window.CloudEMSTooltip = {
       h += hubSvg();
       const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
       const gridSub2  = grid > T ? 'import' : 'export';
-      h += nodeBox(COL_LEFT, R_GRID,  88, 38, gc,       gridActive,   gridLabel,    this._fmt(Math.abs(grid)), gridSub2,  'grid',   'grid');
+      h += nodeBoxP(COL_LEFT, R_GRID,  88, 38, gc,       gridActive,   gridLabel,    this._fmt(Math.abs(grid)), gridSub2,  'grid',   'grid',   _gridPhase);
+      // Phase pills on grid node when 3-phase
+      if (_isThreePhase) {
+        const _gPows = [_gridL1w, _gridL2w, _gridL3w];
+        ['L1','L2','L3'].forEach((ph, pi) => {
+          const pc = C[ph];
+          const px = COL_LEFT + 4 + pi * 28;
+          const py = R_GRID + 26;
+          const pw = Math.abs(_gPows[pi]);
+          h += `<rect x="${px}" y="${py}" width="24" height="13" rx="6"
+            fill="${pc}20" stroke="${pc}70" stroke-width="0.8"/>
+            <text x="${px+12}" y="${py+9}" text-anchor="middle" font-size="7" font-weight="700"
+              fill="${pc}">${ph}</text>`;
+        });
+      }
 
       // v4.6.432: Generator node — alleen tonen als geconfigureerd
       if (genEnabled) {
@@ -1384,7 +1797,7 @@ window.CloudEMSTooltip = {
         const nodes = evNodes;
         const total = ev;
         const lbl = nodes.length > 1 ? `${nodes.length}× EV` : (nodes[0]?.label || 'EV Lader');
-        h += nodeBox(COL_LEFT, R_EV, 88, 38, C.ev, total>T, '🚗 ' + lbl.toUpperCase().slice(0,9), this._fmt(total), null, 'ev', 'ev');
+        h += nodeBoxP(COL_LEFT, R_EV, 88, 38, C.ev, total>T, '🚗 ' + lbl.toUpperCase().slice(0,9), this._fmt(total), null, 'ev', 'ev', _evPhase);
         if (nodes.length > 1) {
           const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
           h += `<text x="${COL_LEFT}" y="${R_EV+26}" text-anchor="middle" font-size="7.5"
@@ -1405,7 +1818,7 @@ window.CloudEMSTooltip = {
       })();
       if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status'])
         h += nodeBox(COL_LEFT, R_POOL, 88, 38, C.pool, pool>T, '🏊 ZWEMBAD', this._fmt(pool), null, 'pool', 'pool');
-      h += nodeBox(bolX,     bolY,    76, 38, C.boiler, boilerActive, '🚿 BOILER',   this._fmt(totalBoiler),    null,      'boiler', 'boiler');
+      h += nodeBoxP(bolX,     bolY,    76, 38, C.boiler, boilerActive, '🚿 BOILER',   this._fmt(totalBoiler),    null,      'boiler', 'boiler', _boilerPhase);
       // Airco nodes
       (() => {
         const nodes = aircoNodes; const total = totalAirco; const on = total > T;
@@ -1413,7 +1826,7 @@ window.CloudEMSTooltip = {
         if (nodes.length > 0) {
           const _aircoAction = this._getAircoAction();
           const _aircoIcon = _aircoAction === 'heating' ? '🌡️' : '❄️';
-          h += nodeBox(aircoX, aircoY, 84, 38, C.airco, on, _aircoIcon + ' ' + lbl, this._fmt(total), null, 'airco', 'airco');
+          h += nodeBoxP(aircoX, aircoY, 84, 38, C.airco, on, _aircoIcon + ' ' + lbl, this._fmt(total), null, 'airco', 'airco', _aircoPhase);
           if (nodes.length > 1) {
             const pill = nodes.map(n => this._fmt(n.power_w)).join(' + ');
             h += `<text x="${aircoX}" y="${aircoY+26}" text-anchor="middle" font-size="7.5" fill="rgba(56,189,248,0.55)">${pill}</text>`;
@@ -1435,33 +1848,61 @@ window.CloudEMSTooltip = {
       if (battNodes.length > 0) h += battBox();
       const homeName = (e.home||{}).name || 'Thuis';
       h += nodeBox(COL_HUB, R_HOME, 64, 38, C.home, homeActive, homeName.toUpperCase(), this._fmt(home), null, 'home', 'home');
-      layer2.forEach((node, i) => {
-        if (node.isSub) h += subBox(L2_XS[i], R_L2, node, i);
-        else            h += nilmBox(L2_XS[i], R_L2, node);
-      });
-      subs.forEach(s => (s._cxs||[]).forEach((cx, ci) => h += nilmBox(cx, R_L3, s.children[ci])));
+      // Phase pills above THUIS node when 3-phase
+      if (_isThreePhase) {
+        const _phLabels = ['L1','L2','L3'];
+        const _phOffXs  = [-18, 0, 18];
+        _phLabels.forEach((ph, pi) => {
+          const pc = C[ph];
+          const px = COL_HUB + _phOffXs[pi];
+          const py = R_HOME - 26;
+          h += `<rect x="${px-9}" y="${py-7}" width="18" height="13" rx="6"
+            fill="${pc}25" stroke="${pc}80" stroke-width="0.8"/>
+            <text x="${px}" y="${py+3}" text-anchor="middle" font-size="7" font-weight="700"
+              fill="${pc}">${ph}</text>`;
+        });
+      }
+      // NILM devices rendered in phase-group section above — no duplicate render here
 
       // Pipe defs for animation
       this._pipeDefs = [
-        { key:'grid',   color:gc,      on:gridActive,   pw:Math.abs(grid),
-          x1:grid>T?COL_LEFT+44:_heGrid_x, y1:grid>T?R_GRID:_heGrid_y,
-          x2:grid>T?_heGrid_x:COL_LEFT+44, y2:grid>T?_heGrid_y:R_GRID },
+        ...(_isThreePhase ? [
+            { key:'grid_l1', color:C.L1, on:Math.abs(_gridL1w)>10||gridActive, pw:Math.abs(_gridL1w),
+            // Direction based on L1 own power, not total grid
+            x1:_gridL1w>T?COL_LEFT+39:_heGrid_x-5, y1:_gridL1w>T?R_GRID:_heGrid_y, x2:_gridL1w>T?_heGrid_x-5:COL_LEFT+39, y2:_gridL1w>T?_heGrid_y:R_GRID },
+          { key:'grid_l2', color:C.L2, on:Math.abs(_gridL2w)>10||gridActive, pw:Math.abs(_gridL2w),
+            x1:_gridL2w>T?COL_LEFT+44:_heGrid_x, y1:_gridL2w>T?R_GRID:_heGrid_y, x2:_gridL2w>T?_heGrid_x:COL_LEFT+44, y2:_gridL2w>T?_heGrid_y:R_GRID },
+          { key:'grid_l3', color:C.L3, on:Math.abs(_gridL3w)>10||gridActive, pw:Math.abs(_gridL3w),
+            x1:_gridL3w>T?COL_LEFT+49:_heGrid_x+5, y1:_gridL3w>T?R_GRID:_heGrid_y, x2:_gridL3w>T?_heGrid_x+5:COL_LEFT+49, y2:_gridL3w>T?_heGrid_y:R_GRID },
+        ] : [{ key:'grid_l1', color:phaseCol(_gridPhase)||gc, on:gridActive, pw:Math.abs(grid),
+            x1:grid>T?COL_LEFT+44:_heGrid_x, y1:grid>T?R_GRID:_heGrid_y,
+            x2:grid>T?_heGrid_x:COL_LEFT+44, y2:grid>T?_heGrid_y:R_GRID }]),
         { key:'solar',  color:C.solar, on:solarActive,  pw:totalSolar,   x1:solarX, y1:solarY+46, x2:_heSol_x, y2:_heSol_y },
-        { key:'batt',   color:bfc,     on:battActive,   pw:Math.abs(totalBattPw),
+        { key:'batt',   color:phaseCol(_battPhase)||bfc, on:battActive, pw:Math.abs(totalBattPw),
           x1:totalBattPw<-T?_heBat_x:battX, y1:totalBattPw<-T?_heBat_y:battY,
           x2:totalBattPw<-T?battX:_heBat_x, y2:totalBattPw<-T?battY:_heBat_y },
-        { key:'boiler', color:C.boiler,on:boilerActive,   pw:totalBoiler, x1:_heBol_x,   y1:_heBol_y,   x2:bolX,   y2:bolY },
-        ...(aircoNodes.length > 0 ? [{ key:'airco', color:C.airco, on:totalAirco>T, pw:totalAirco, x1:_heAirco_x, y1:_heAirco_y, x2:aircoX, y2:aircoY }] : []),
+        { key:'boiler', color:phaseCol(_boilerPhase)||C.boiler, on:boilerActive, pw:totalBoiler, x1:_heBol_x, y1:_heBol_y, x2:bolX, y2:bolY },
+        ...(aircoNodes.length > 0 ? [{ key:'airco', color:phaseCol(_aircoPhase)||C.airco, on:totalAirco>T, pw:totalAirco, x1:_heAirco_x, y1:_heAirco_y, x2:aircoX, y2:aircoY }] : []),
         ...(hpNodes.length > 0    ? [{ key:'hp',    color:C.hp,    on:totalHp>T,    pw:totalHp,    x1:_heHp_x,    y1:_heHp_y,    x2:hpX,    y2:hpY    }] : []),
-        { key:'home',   color:C.home,  on:homeActive,   pw:home,
-          x1:_heHome_x, y1:_heHome_y, x2:COL_HUB, y2:R_HOME-17 },
+        ...(_isThreePhase ? [
+          { key:'home_l1', color:C.L1, on:homeActive, pw:(_phL1.power_w||0),
+            x1:_heHome_x-5, y1:_heHome_y, x2:COL_HUB-5, y2:R_HOME-17 },
+          { key:'home_l2', color:C.L2, on:homeActive, pw:(_phL2.power_w||0),
+            x1:_heHome_x,   y1:_heHome_y, x2:COL_HUB,   y2:R_HOME-17 },
+          { key:'home_l3', color:C.L3, on:homeActive, pw:(_phL3.power_w||0),
+            x1:_heHome_x+5, y1:_heHome_y, x2:COL_HUB+5, y2:R_HOME-17 },
+        ] : [{ key:'home_l1', color:C.home, on:homeActive, pw:home,
+            x1:_heHome_x, y1:_heHome_y, x2:COL_HUB, y2:R_HOME-17 }]),
         { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:_heEv_x,    y1:_heEv_y,    x2:COL_LEFT+44, y2:R_EV },
         { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:_heEbike_x, y1:_heEbike_y, x2:COL_LEFT+44, y2:R_EBIKE },
         { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:_hePool_x,  y1:_hePool_y,  x2:COL_LEFT+44, y2:R_POOL },
-        ...layer2.map((node, i) => ({
-          key:`l2_${i}`, color:node.isSub?C.sub:node.color,
-          on:node.power_w>T, pw:node.power_w,
-          x1:COL_HUB, y1:R_HOME+17, x2:L2_XS[i], y2:R_L2-22 })),
+        // NILM device pipes — use stored _devX/_ancX from NILM layout above
+        ...layer2.filter(n => n._devX !== undefined).map((node, i) => {
+          return {
+            key:`l2_${i}`, color: node._phCol || node.color,
+            on:node.power_w>T, pw:node.power_w,
+            x1:node._ancX, y1:(node._ancY||0)+15, x2:node._devX, y2:(node._devY||0)-33 };
+        }),
         ...subs.flatMap((s, si) => {
           const sx = L2_XS[layer2.indexOf(s)];
           return (s._cxs||[]).map((cx, ci) => ({
@@ -1562,7 +2003,7 @@ window.CloudEMSTooltip = {
             text-transform: uppercase; color: rgba(255,255,255,0.35);
             margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
           }
-          .title::before { content: '⚡'; font-size: 11px; }
+          .title::before { content: ''; }
           svg { width: 100%; display: block; overflow: visible; }
           #detail-panel {
             border-top: 1px solid rgba(255,255,255,0.07);
@@ -2609,7 +3050,7 @@ window.CloudEMSTooltip = {
       });
     }
   }
-  customElements.define('cloudems-graph-card-editor', CloudemsGraphCardEditor);
+  if (!customElements.get('cloudems-graph-card-editor')) customElements.define('cloudems-graph-card-editor', CloudemsGraphCardEditor);
 
   // ── Flow Card Editor ──────────────────────────────────────────────────────
   class CloudemsFlowCardEditor extends HTMLElement {
@@ -2725,7 +3166,9 @@ window.CloudEMSTooltip = {
       });
     }
   }
-  customElements.define('cloudems-flow-card-editor', CloudemsFlowCardEditor);
+  if (!customElements.get('cloudems-flow-card')) customElements.define('cloudems-flow-card', CloudemsFlowCard);
+  if (!customElements.get('cloudems-flow-card-editor')) customElements.define('cloudems-flow-card-editor', CloudemsFlowCardEditor);
+
 
   // ─────────────────────────────────────────────────────────────────────────
   // cloudems-nilm-card  ·  v4.5.55 — NILM + Kamer + Topologie superdashboard

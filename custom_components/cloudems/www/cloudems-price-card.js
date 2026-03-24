@@ -528,7 +528,7 @@ class CloudemsPriceCard extends HTMLElement {
   static getStubConfig() { return { title: 'Prijzen & Kosten' }; }
 }
 
-customElements.define('cloudems-price-card', CloudemsPriceCard);
+if (!customElements.get('cloudems-price-card')) customElements.define('cloudems-price-card', CloudemsPriceCard);
 
 if (!customElements.get('cloudems-price-card-editor')) {
   class _cloudems_price_card_editor extends HTMLElement {

@@ -1,561 +1,877 @@
 title: ⚡ CloudEMS
-resources:
-- url: /local/cloudems/cloudems-cards.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-card-mod.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-boiler-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-battery-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-shutter-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-solar-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-pv-forecast-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-switches-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-zelfconsumptie-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-decisions-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-decisions-learner-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-prijsverloop-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-price-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-sankey-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-rooms-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-home-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-config-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-gas-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-nilm-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-appliance-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-alerts-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-pool-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-learning-card.js?v=5.0.27
-  type: module
-- url: /local/cloudems/cloudems-p1-card.js?v=5.0.27
-  type: module
 views:
-- title: Overzicht
-  path: cloudems-overzicht
-  type: sections
-  max_columns: 2
-  icon: "mdi:home-lightning-bolt"
-  background: url(/local/cloudems/images/bg-overzicht.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(0,177,64,0.08) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view {\n  padding: 12px 12px 24px !important;\n}\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: "custom:cloudems-flow-card"
-      title: ⚡ Energiestroom
-      entities:
-        grid:
-          entity: sensor.cloudems_grid_net_power
-          name: Net
-          invert_state: false
-        solar_system:
-          entity: sensor.cloudems_solar_system
-        solar:
-          entity: sensor.cloudems_solar_system_intelligence
-          name: Zonne-energie
-          display_zero_state: true
-        battery:
-          entity: sensor.thuisbatterij_power
-          name: Batterij
-          state_of_charge: sensor.thuisbatterij_percentage
-          display_zero_state: true
-          invert_state: true
-        home:
-          entity: sensor.cloudems_home_rest
-          name: Thuis
-          display_zero_state: true
-      watt_threshold: 1000
-      clickable_entities: true
-      display_zero_lines: true
-      use_new_flow_rate_model: true
-    - type: "custom:cloudems-sankey-card"
-      title: "Energiestromen"
-      max_ampere: 25
-  - type: grid
-    column_span: 1
-    cards:
-    - type: "custom:cloudems-home-card"
-    - type: "custom:cloudems-p1-card"
-      title: "📡 P1 / Slimme Meter"
-    - type: "custom:cloudems-vacation-card"
-      title: "🏖️ Vakantiemodus"
-    - type: "custom:cloudems-rooms-card"
-    - type: "custom:cloudems-version-card" 
-  cards:
-  - &id001
-    type: "custom:cloudems-mini-price-card"
-- title: Solar & PV
-  path: cloudems-zon
-  type: sections
-  max_columns: 1
-  icon: "mdi:solar-power-variant"
-  background: url(/local/cloudems/images/bg-solar.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,204,0,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: switch.cloudems_module_solar_learner
-          state: 'off'
-        card:
-          type: markdown
-          content: "⚠️ **☀️ Solar learner staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om zonnepanelen te monitoren.\n"
-          card_mod:
-            style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-      - *id001
-      - type: "custom:cloudems-solar-card"
-        title: Zonnepanelen
-      - type: "custom:cloudems-pv-forecast-card"
-        title: "☀️ PV Forecast + EPEX"
-        show_tomorrow: true
-        show_epex: true
-        show_confidence: true
-      - type: "custom:cloudems-zelfconsumptie-card"
-        title: "♻️ Zelfconsumptie"
-      - type: conditional
-        conditions:
-        - condition: numeric_state
-          entity: sensor.cloudems_clipping_voorspelling_morgen
-          above: 0.05
-        card:
-          type: markdown
-          title: ⚡ Clipping verwacht morgen
-          content: "{% set forecasts = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'forecasts') or [] %}\n{% set total = state_attr('sensor.cloudems_clipping_voorspelling_morgen', 'total_clipped_kwh')\
-            \ or 0 %}\n**Totaal verwacht geclipte energie morgen: {{ total }} kWh**\n\n{% for f in forecasts if f.predicted_clip_kwh > 0.05 %}\n\U0001F536 **{{ f.advice }}**\n{% endfor %}\n\n\U0001F4A1 *Tip:\
-            \ laad de batterij vóór de clippinguren volledig op om geclipte energie optimaal te benutten.*\n"
-- title: Batterij
-  path: cloudems-batterij
-  type: sections
-  max_columns: 1
-  icon: "mdi:battery-charging"
-  background: url(/local/cloudems/images/bg-batterij.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(96,165,250,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_module_batterij
-        state: 'off'
-      card:
-        type: markdown
-        content: "⚠️ **🔋 Batterij module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-        card_mod:
-          style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-    - *id001
-    - type: "custom:cloudems-battery-card"
-      title: Thuisbatterij
+  - title: Overzicht
+    path: cloudems-overzicht
+    type: sections
+    max_columns: 2
+    icon: mdi:home-lightning-bolt
+    background: >-
+      url(/local/cloudems/images/bg-overzicht.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(0,177,64,0.08) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view {
+          padding: 12px 12px 24px !important;
+        }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-flow-card
+            title: ⚡ Energiestroom
+            entities:
+              grid:
+                entity: sensor.cloudems_grid_net_power
+                name: Net
+                invert_state: false
+              solar_system:
+                entity: sensor.cloudems_solar_system
+              solar:
+                entity: sensor.cloudems_solar_system_intelligence
+                name: Zonne-energie
+                display_zero_state: true
+              battery:
+                entity: sensor.thuisbatterij_power
+                name: Batterij
+                state_of_charge: sensor.thuisbatterij_percentage
+                display_zero_state: true
+                invert_state: true
+              home:
+                entity: sensor.cloudems_home_rest
+                name: Thuis
+                display_zero_state: true
+            watt_threshold: 1000
+            clickable_entities: true
+            display_zero_lines: true
+            use_new_flow_rate_model: true
+          - type: custom:cloudems-sankey-card
+            title: Energiestromen
+            max_ampere: 25
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-dagrapport-card
+            title: 📊 Dagrapport
+          - type: custom:cloudems-home-card
+          - type: custom:cloudems-vacation-card
+            title: 🏖 Vakantiemodus
+          - type: custom:cloudems-rooms-card
+          - type: custom:cloudems-version-card
 
-- title: Warm Water
-  path: cloudems-boiler
-  type: sections
-  max_columns: 1
-  icon: "mdi:water-boiler"
-  background: url(/local/cloudems/images/bg-boiler.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,112,67,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: switch.cloudems_module_ketel
-          state: 'off'
-        card:
-          type: markdown
-          content: "⚠️ **\U0001F6BF Warm Water module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-          card_mod:
-            style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-      - *id001
-      - type: "custom:cloudems-boiler-card"
-        tank_liters: 80
-        cold_water_temp: 10
-        shower_temp: 38
-        shower_liters_per_min: 8
-        shower_duration_min: 8
-        title: Warm water
-- title: EV & Mobiliteit
-  path: cloudems-mobiliteit
-  type: sections
-  max_columns: 1
-  icon: "mdi:car-electric-outline"
-  background: url(/local/cloudems/images/bg-mobiliteit.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(165,214,167,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - *id001
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: switch.cloudems_module_ev_lader
-          state: 'off'
-        card:
-          type: markdown
-          content: "⚠️ **\U0001F697 EV Lader module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-          card_mod:
-            style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-      - type: conditional
-        conditions:
-        - condition: numeric_state
-          entity: sensor.cloudems_micro_mobiliteit
-          attribute: active_session_count
-          above: 0
-        card:
-          type: markdown
-          title: ⚡ Nu aan het laden
-          content: "{% set active = state_attr('sensor.cloudems_micro_mobiliteit', 'active_sessions') or [] %}\n{% for s in active %}\n\U0001F50C **{{ s.label }}** ({{ s.vehicle_type }}) — {{ s.kwh_so_far }}\
-            \ kWh in {{ s.duration_min | int }} min — Fase {{ s.phase }}\n{% endfor %}\n"
-          card_mod:
-            style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-              \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-              }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-              }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n\
-              \  font-weight: 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n\
-              \  background: rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform:\
-              \ uppercase !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom:\
-              \ 1px solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06) !important;\n  color: rgb(255,255,255)\
-              \ !important;\n}\nha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element\
-              \ code {\n  background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\n\
-              ha-markdown-element blockquote {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n  border-radius: 0 8px 8px\
-              \ 0 !important;\n  color: rgb(163,163,163) !important;\n}\n"
-      - type: "custom:cloudems-ev-trip-card"
-        title: "🗓️ EV Ritplanning"
-      - type: "custom:cloudems-v2h-card"
-        title: "🔄 Vehicle-to-Home"
-      - type: entities
-        title: 🚗 EV Sessie Leermodel
-        icon: "mdi:ev-plug-type2"
-        entities:
-        - entity: sensor.cloudems_ev_sessie_leermodel
-          name: Verwacht volgende sessie (kWh)
-        - type: attribute
-          entity: sensor.cloudems_ev_sessie_leermodel
-          attribute: session_active
-          name: Sessie actief
-        - type: attribute
-          entity: sensor.cloudems_ev_sessie_leermodel
-          attribute: session_kwh_so_far
-          name: Geladen tot nu (kWh)
-        - type: attribute
-          entity: sensor.cloudems_ev_sessie_leermodel
-          attribute: predicted_duration_h
-          name: Verwachte duur (uur)
-        - type: attribute
-          entity: sensor.cloudems_ev_sessie_leermodel
-          attribute: typical_weekdays
-          name: Typische weekdagen
-        - type: attribute
-          entity: sensor.cloudems_ev_sessie_leermodel
-          attribute: avg_cost_per_session
-          name: Gem. kosten per sessie (€)
-        card_mod:
-          style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-            \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --state-active-color: rgb(0,177,64);\n  --state-inactive-color: rgb(68,68,68);\n  --state-unavailable-color:\
-            \ rgb(239,68,68);\n  --primary-color: rgb(0,177,64);\n  --accent-color: rgb(0,212,78);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n  --divider-color: rgba(255,255,255,0.06);\n\
-            \  --secondary-background-color: rgba(0,177,64,0.08);\n}\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12)\
-            \ !important;\n  transform: translateY(-1px) !important;\n}\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255)\
-            \ !important;\n  font-size: 12px !important;\n  font-weight: 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-      - type: markdown
-        title: 📋 Geleerde Voertuigprofielen
-        content: "{% set profiles = state_attr('sensor.cloudems_micro_mobiliteit', 'vehicle_profiles') or [] %}\n{% if profiles | length == 0 %}\n*Nog geen voertuigen gedetecteerd. CloudEMS herkent e-bike en\
-          \ scooter laders (50–700W) automatisch via NILM.*\n{% else %}\n| Voertuig | Type | Sessies | Gem. kWh | Gem. duur | Per week |\n|----------|------|---------|----------|-----------|----------|\n{%\
-          \ for p in profiles %}\n| {{ p.get('label') or 'Onbekend' }} | {{ p.get('vehicle_type') or 'ebike' }} | {{ p.get('sessions', 0) | int(0) }} | {{ '%.2f' % (p.get('avg_kwh', 0) | float(0)) }} kWh |\
-          \ {{ p.get('avg_duration_min', 0) | int(0) }} min | {{ '%.1f' % (p.get('sessions_per_week', 0) | float(0)) }}×/week |\n{% endfor %}\n{% endif %}\n"
-        card_mod:
-          style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-            \  --primary-text-color: rgb(163,163,163);\n  --secondary-text-color: rgb(102,102,102);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-            }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-            }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-            \ 600 !important;\n  padding: 14px 16px 12px !important;\n}\nha-markdown-element table { width: 100% !important; border-collapse: collapse !important; }\nha-markdown-element th {\n  background:\
-            \ rgba(0,177,64,0.1) !important;\n  color: rgb(0,212,78) !important;\n  font-size: 10px !important;\n  font-weight: 700 !important;\n  letter-spacing: 0.08em !important;\n  text-transform: uppercase\
-            \ !important;\n  padding: 8px 10px !important;\n  border-bottom: 1px solid rgba(0,177,64,0.2) !important;\n}\nha-markdown-element td {\n  color: rgb(163,163,163) !important;\n  border-bottom: 1px\
-            \ solid rgba(255,255,255,0.05) !important;\n  padding: 7px 10px !important;\n}\nha-markdown-element tr:hover td {\n  background: rgba(0,177,64,0.06) !important;\n  color: rgb(255,255,255) !important;\n\
-            }\nha-markdown-element strong { color: rgb(255,255,255) !important; font-weight: 600 !important; }\nha-markdown-element em { color: rgb(102,102,102) !important; }\nha-markdown-element code {\n \
-            \ background: rgba(0,177,64,0.12) !important;\n  color: rgb(0,212,78) !important;\n  padding: 1px 6px !important;\n  border-radius: 4px !important;\n  font-size: 12px !important;\n}\nha-markdown-element\
-            \ blockquote {\n  border-left: 3px solid rgb(0,177,64) !important;\n  background: rgba(0,177,64,0.07) !important;\n  padding: 8px 14px !important;\n  border-radius: 0 8px 8px 0 !important;\n  color:\
-            \ rgb(163,163,163) !important;\n}\n"
-      - type: markdown
-        title: ⚡ Flexibel Vermogen Score
-        content: "{% set total = states('sensor.cloudems_flexibel_vermogen') | float(0) %}\n{% set bat   = state_attr('sensor.cloudems_flexibel_vermogen', 'battery_kw') | float(0) %}\n{% set ev    = state_attr('sensor.cloudems_flexibel_vermogen',\
-          \ 'ev_kw') | float(0) %}\n{% set boil  = state_attr('sensor.cloudems_flexibel_vermogen', 'boiler_kw') | float(0) %}\n{% set nilm  = state_attr('sensor.cloudems_flexibel_vermogen', 'nilm_kw') | float(0)\
-          \ %}\n{% set parts = state_attr('sensor.cloudems_flexibel_vermogen', 'components') or [] %}\n**Totaal flex beschikbaar: {{ total }} kW**\n\n| Categorie | Flex (kW) |\n|---|---|\n| \U0001F50B Batterij\
-          \ | {{ bat }} |\n| \U0001F697 EV | {{ ev }} |\n| \U0001F6BF Boiler | {{ boil }} |\n| \U0001F50C NILM apparaten | {{ nilm }} |\n\n{% if parts %}\n| Apparaat | Flex (kW) | Toelichting |\n|---|---|---|\n\
-          {% for c in parts -%}\n| {{ c.label }} | {{ c.flex_kw }} | {{ c.reason }} |\n{% endfor %}\n{% endif %}\n"
-        card_mod:
-          style: "ha-card {\n  background: rgb(34,34,34) !important;\n  border: 1px solid rgba(255,255,255,0.06) !important;\n  border-radius: 16px !important;\n  box-shadow: 0 2px 12px rgba(0,0,0,0.4) !important;\n\
-            \  --primary-text-color: rgb(255,255,255);\n  --secondary-text-color: rgb(163,163,163);\n  --primary-color: rgb(0,177,64);\n  --card-background-color: transparent;\n  --ha-card-border-color: transparent;\n\
-            }\nha-card:hover {\n  border-color: rgba(0,177,64,0.5) !important;\n  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 16px rgba(0,177,64,0.12) !important;\n  transform: translateY(-1px) !important;\n\
-            }\n.card-header {\n  background: transparent !important;\n  border-bottom: 1px solid rgba(255,255,255,0.07) !important;\n  color: rgb(255,255,255) !important;\n  font-size: 12px !important;\n  font-weight:\
-            \ 600 !important;\n  letter-spacing: 0.04em !important;\n  padding: 14px 16px 12px !important;\n}\n"
-      - type: markdown
-        content: "<div style=\"display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:4px 2px;\">\n  <div style=\"display:flex;align-items:center;gap:10px;\">\n    <span\
-          \ style=\"font-size:20px;\">⚡</span>\n    <div>\n      <div style=\"color:rgb(255,255,255);font-weight:600;font-size:13px;line-height:1.3;\">CloudEMS v{{ state_attr('sensor.cloudems_status','version')\
-          \ or state_attr('sensor.cloudems_watchdog','cloudems_version') or '?' }}</div>\n      <div style=\"color:rgb(102,102,102);font-size:11px;\">cloudems.eu · Proprietary License</div>\n    </div>\n  </div>\n\
-          \  <div style=\"display:flex;gap:8px;flex-wrap:wrap;\">\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=bug_report.md\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px\
-          \ solid rgba(239,68,68,0.4);color:#f87171;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\">\U0001F41B Bug melden</a>\n    <a href=\"https://github.com/cloudemsNL/ha-cloudems/issues/new?template=feature_request.md\"\
-          \ target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:#1f2937;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:500;text-decoration:none;\"\
-          >\U0001F4A1 Feature verzoek</a>\n    <a href=\"https://buymeacoffee.com/smarthost9m\" target=\"_blank\" style=\"display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,rgb(245,158,11),rgb(217,119,6));color:rgb(26,16,0);padding:6px\
-          \ 14px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;\">☕ Steun CloudEMS</a>\n  </div>\n</div>\n"
-        card_mod:
-          style: "ha-card {\n  background: rgb(22,22,22) !important;\n  border: 1px solid rgba(255,255,255,0.05) !important;\n  border-radius: 14px !important;\n  box-shadow: none !important;\n  --card-background-color:\
-            \ transparent;\n  --ha-card-border-color: transparent;\n}\nha-markdown-element a { text-decoration: none !important; }\nha-markdown-element a:hover { opacity: 0.85 !important; }\n"
-- title: Zwembad
-  path: cloudems-zwembad
-  type: sections
-  max_columns: 1
-  icon: "mdi:pool"
-  background: url(/local/cloudems/images/bg-zwembad.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(41,182,246,0.08) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_module_zwembad
-        state: 'off'
-      card:
-        type: markdown
-        content: "⚠️ **🏊 Zwembad module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren.\n"
-        card_mod:
-          style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-    - *id001
-    - type: custom:cloudems-pool-card
-      title: Zwembad
+  - title: Solar & PV
+    path: cloudems-zon
+    type: sections
+    max_columns: 1
+    icon: mdi:solar-power-variant
+    background: >-
+      url(/local/cloudems/images/bg-solar.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,204,0,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_solar_learner
+                state: 'off'
+            card:
+              type: markdown
+              content: >
+                ⚠ **☀ Solar learner staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om zonnepanelen te
+                monitoren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-solar-card
+            title: Zonnepanelen
+          - type: custom:cloudems-pv-forecast-card
+            title: ☀ PV Forecast + EPEX
+            show_tomorrow: true
+            show_epex: true
+            show_confidence: true
+          - type: custom:cloudems-zelfconsumptie-card
+            title: ♻ Zelfconsumptie
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.cloudems_clipping_voorspelling_morgen
+                above: 0.05
+            card:
+              type: markdown
+              title: ⚡ Clipping verwacht morgen
+              content: >
+                {% set forecasts =
+                state_attr('sensor.cloudems_clipping_voorspelling_morgen',
+                'forecasts') or [] %}
+                {% set total =
+                state_attr('sensor.cloudems_clipping_voorspelling_morgen',
+                'total_clipped_kwh') or 0 %}
+                **Totaal verwacht geclipte energie morgen: {{ total }} kWh**
+                {% for f in forecasts if f.predicted_clip_kwh > 0.05 %}
+                🔶 **{{ f.advice }}**
+                {% endfor %}
+                💡 *Tip: laad de batterij vóór de clippinguren volledig op om
+                geclipte energie optimaal te benutten.*
 
-- title: Klimaat
-  path: cloudems-klimaat
-  type: sections
-  max_columns: 1
-  icon: "mdi:home-thermometer"
-  background: url(/local/cloudems/images/bg-klimaat.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(128,203,196,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - *id001
-    - type: custom:cloudems-klimaat-card
-      title: "🌡️ Klimaatbeheer"
-    - type: custom:cloudems-climate-epex-card
-      title: "❄️ Airco & Warmtepomp EPEX"
-      sensor: sensor.cloudems_climate_epex_status
-      price_sensor: sensor.cloudems_price_current_hour
-- title: Rolluiken
-  path: cloudems-rolluiken
-  type: sections
-  max_columns: 1
-  icon: "mdi:blinds"
-  background: url(/local/cloudems/images/bg-rolluiken.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(144,202,249,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: switch.cloudems_module_rolluiken
-        state: 'off'
-      card:
-        type: markdown
-        content: "⚠️ **🪟 Rolluiken module staat uit.** Schakel hem in via het [Configuratie tabblad](#cloudems-config) om deze functie te activeren."
-        card_mod:
-          style: "ha-card { background: rgba(255,140,0,0.12) !important; border: 1px solid rgba(255,140,0,0.4) !important; border-radius: 12px !important; padding: 4px 12px !important; }\n"
-    - *id001
-    - type: "custom:cloudems-shutter-card"
-      title: 🪟 Rolluiken
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_pv_forecast_today
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-pv-forecast-card
+              title: "☀ PV Voorspelling"
 
-- title: Lampen
-  path: cloudems-lampen
-  type: sections
-  max_columns: 1
-  icon: "mdi:lightbulb-group"
-  background: url(/local/cloudems/images/bg-overzicht.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,238,88,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - *id001
-      - type: custom:cloudems-lamp-card
-        title: "💡 Lampcirculatie"
-      - type: "custom:cloudems-lamp-auto-card"
-        title: "💡 Lamp Automatisering"
+  - title: Batterij
+    path: cloudems-batterij
+    type: sections
+    max_columns: 1
+    icon: mdi:battery-charging
+    background: >-
+      url(/local/cloudems/images/bg-batterij.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(96,165,250,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_batterij
+                state: 'off'
+            card:
+              type: markdown
+              content: >
+                ⚠ **🔋 Batterij module staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om deze functie te
+                activeren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-battery-card
+            title: Thuisbatterij
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_standby_intelligence
+                state_not: unavailable
+            card:
+              type: custom:cloudems-standby-card
+              title: 💤 Sluimerverbruik
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_lifecycle_arbitrage
+                state_not: unavailable
+            card:
+              type: custom:cloudems-lifecycle-card
+              title: ⚙ Slijtage Arbitrage
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_fcr_afrr
+                state_not: not_eligible
+            card:
+              type: custom:cloudems-fcr-card
+              title: 📈 FCR/aFRR
 
-- title: Prijzen & Kosten
-  path: cloudems-prijzen
-  type: sections
-  max_columns: 1
-  icon: "mdi:currency-eur"
-  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(134,239,172,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - type: "custom:cloudems-gas-card"
-        title: Gas
-      - type: "custom:cloudems-prijsverloop-card"
-        title: Stroom prijzen & kosten
-      - type: custom:cloudems-version-card
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_battery_savings
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-batterij-arbitrage-card
+              title: "💰 Batterij Besparingen"
+          - type: custom:cloudems-batterij-levensduur-card
+            title: "🔋 Levensduur"
 
-- title: NILM Apparaten
-  path: cloudems-nilm
-  type: sections
-  max_columns: 1
-  icon: "mdi:chip"
-  background: url(/local/cloudems/images/bg-nilm.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(206,147,216,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: "custom:cloudems-nilm-card"
-- title: Beslissingen
-  path: cloudems-beslissingen
-  type: sections
-  max_columns: 1
-  icon: "mdi:history"
-  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-masonry-view {\n  background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent 60%), rgb(24,24,24) !important;\n}\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-      - *id001
-      - type: "custom:cloudems-decisions-card"
-      - type: "custom:cloudems-switches-card"
-        title: "⏰ Goedkope Uren Schakelaars"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_battery_savings
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-batterij-arbitrage-card
+              title: "💰 Batterij Besparingen"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_battery_savings
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-batterij-levensduur-card
+              title: "🔋 Levensduur"
+              nominal_capacity_kwh: 5.8
+              max_cycles: 6000
 
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: sensor.cloudems_vacation_mode
-          state_not: 'inactive'
-        card:
-          type: "custom:cloudems-vacation-card"
-          title: "🏖️ Vakantiemodus"
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: sensor.cloudems_geofencing
-          state_not: 'unknown'
-        card:
-          type: entity
-          entity: sensor.cloudems_geofencing
-          name: "📍 Geofencing"
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: sensor.cloudems_sleep_group
-          state_not: 'awake'
-        card:
-          type: entity
-          entity: sensor.cloudems_sleep_group
-          name: "😴 Slaap Groep"
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: sensor.cloudems_standby_killer
-          state_not: 'unavailable'
-        card:
-          type: entity
-          entity: sensor.cloudems_standby_killer
-          name: "💤 Standby Killer"
-      - type: conditional
-        conditions:
-        - condition: state
-          entity: sensor.cloudems_appliance_done
-          state_not: 'unavailable'
-        card:
-          type: entity
-          entity: sensor.cloudems_appliance_done
-          name: "✅ Apparaat Klaar"
+  - title: Warm Water
+    path: cloudems-boiler
+    type: sections
+    max_columns: 1
+    icon: mdi:water-boiler
+    background: >-
+      url(/local/cloudems/images/bg-boiler.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,112,67,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_ketel
+                state: 'off'
+            card:
+              type: markdown
+              content: >
+                ⚠ **🚿 Warm Water module staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om deze functie te
+                activeren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-boiler-card
+            tank_liters: 80
+            cold_water_temp: 10
+            shower_temp: 38
+            shower_liters_per_min: 8
+            shower_duration_min: 8
+            title: Warm water
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_goedkoopste_warmtebron
+                state_not: unavailable
+            card:
+              type: custom:cloudems-warmtebron-card
+              title: 🔥 Verwarmingskosten
 
-- title: "💡 Advies"
-  path: cloudems-advies
-  type: sections
-  max_columns: 1
-  icon: mdi:lightbulb-on
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - type: custom:cloudems-demand-card
-      entity: sensor.cloudems_energy_demand
-    - type: custom:cloudems-version-card
+  - title: EV & Mobiliteit
+    path: cloudems-mobiliteit
+    type: sections
+    max_columns: 1
+    icon: mdi:car-electric-outline
+    background: >-
+      url(/local/cloudems/images/bg-mobiliteit.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(165,214,167,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_ev_lader
+                state: 'off'
+            card:
+              type: markdown
+              content: >
+                ⚠ **🚗 EV Lader module staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om deze functie te
+                activeren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: conditional
+            conditions:
+              - condition: numeric_state
+                entity: sensor.cloudems_micro_mobiliteit
+                attribute: active_session_count
+                above: 0
+            card:
+              type: markdown
+              title: ⚡ Nu aan het laden
+              content: >
+                {% set active = state_attr('sensor.cloudems_micro_mobiliteit',
+                'active_sessions') or [] %}
+                {% for s in active %}
+                🔌 **{{ s.label }}** ({{ s.vehicle_type }}) — {{ s.kwh_so_far }}
+                kWh in {{ s.duration_min | int }} min — Fase {{ s.phase }}
+                {% endfor %}
+          - type: custom:cloudems-ev-trip-card
+            title: 🗓 EV Ritplanning
+          - type: custom:cloudems-v2h-card
+            title: 🔄 Vehicle-to-Home
+          - type: entities
+            title: 🚗 EV Sessie Leermodel
+            icon: mdi:ev-plug-type2
+            entities:
+              - entity: sensor.cloudems_ev_sessie_leermodel
+                name: Verwacht volgende sessie (kWh)
+              - type: attribute
+                entity: sensor.cloudems_ev_sessie_leermodel
+                attribute: session_active
+                name: Sessie actief
+              - type: attribute
+                entity: sensor.cloudems_ev_sessie_leermodel
+                attribute: predicted_duration_h
+                name: Verwachte duur (uur)
+          - type: markdown
+            title: 📋 Geleerde Voertuigprofielen
+            content: >
+              {% set profiles = state_attr('sensor.cloudems_micro_mobiliteit',
+              'vehicle_profiles') or [] %}
+              {% if profiles | length == 0 %}
+              *Nog geen voertuigen gedetecteerd.*
+              {% else %}
+              | Voertuig | Sessies | Gem. kWh |
+              |----------|---------|----------|
+              {% for p in profiles %}
+              | {{ p.get('label') or 'Onbekend' }} | {{ p.get('sessions', 0) | int(0) }} | {{ '%.2f' % (p.get('avg_kwh', 0) | float(0)) }} |
+              {% endfor %}
+              {% endif %}
+          - type: markdown
+            title: ⚡ Flexibel Vermogen Score
+            content: >
+              {% set total = states('sensor.cloudems_flexibel_vermogen') | float(0) %}
+              {% set bat = state_attr('sensor.cloudems_flexibel_vermogen', 'battery_kw') | float(0) %}
+              {% set ev = state_attr('sensor.cloudems_flexibel_vermogen', 'ev_kw') | float(0) %}
+              **Totaal flex beschikbaar: {{ total }} kW**
+              | Categorie | kW |
+              |---|---|
+              | 🔋 Batterij | {{ bat }} |
+              | 🚗 EV | {{ ev }} |
 
-- title: Zelflerend
-  path: cloudems-intelligence
-  type: sections
-  max_columns: 1
-  icon: "mdi:brain"
-  background: url(/local/cloudems/images/bg-intelligentie.svg) center/cover no-repeat, radial-gradient(ellipse 70% 50% at 50% -10%, rgba(128,222,234,0.07) 0%, transparent 60%), rgb(24,24,24)
-  card_mod:
-    style: "hui-view { padding: 12px 12px 24px !important; }\n"
-  sections:
-  - type: grid
-    column_span: 1
-    cards:
-    - *id001
-    - type: custom:cloudems-decisions-learner-card
-    - type: custom:cloudems-learning-card
-      title: Zelflerend
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_blackout_guard
-        state_not: 'none'
-      card:
-        type: custom:cloudems-blackout-card
-        title: "⚡ Blackout Guard"
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_power_quality
-        state_not: 'unavailable'
-      card:
-        type: entity
-        entity: sensor.cloudems_power_quality
-        name: "📊 Vermogenskwaliteit (cos φ)"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_ev_trip_planner
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-ev-trip-card
+              title: "🗺 EV Trip Planner"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_phase_outlet_detector
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-phase-outlet-card
+              title: "🔌 Fase Outlet"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_egauge
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-egauge-card
+              title: "📊 EV Vermogen"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_neighbourhood
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-neighbourhood-card
+              title: "🏘 Buurt Energie"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_vve
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-vve-card
+              title: "🏢 VvE Splitsing"
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_batterij_epex_schema
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-ev-laadplan-card
+              title: "🚗 EV Laadplan 24u"
+
+  - title: E-bike & Scooter
+    path: cloudems-ebike
+    type: sections
+    max_columns: 1
+    icon: mdi:bicycle-electric
+    sections:
+    - type: grid
+      column_span: 1
+      cards:
+      - type: custom:cloudems-ebike-card
+        title: "🛴 E-bike & Scooter"
+
+  - title: Zwembad
+    path: cloudems-zwembad
+    type: sections
+    max_columns: 1
+    icon: mdi:pool
+    background: >-
+      url(/local/cloudems/images/bg-zwembad.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(41,182,246,0.08) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_zwembad
+                state: 'off'
+            card:
+              type: markdown
+              content: >
+                ⚠ **🏊 Zwembad module staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om deze functie te
+                activeren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-pool-card
+            title: Zwembad
+
+  - title: Klimaat
+    path: cloudems-klimaat
+    type: sections
+    max_columns: 1
+    icon: mdi:home-thermometer
+    background: >-
+      url(/local/cloudems/images/bg-klimaat.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(128,203,196,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-airco-card
+            title: ❄ Multi-Split Airco
+          - type: custom:cloudems-klimaat-card
+            title: 🌡 Klimaatbeheer
+          - type: custom:cloudems-climate-epex-card
+            title: ❄ Airco & Warmtepomp EPEX
+            sensor: sensor.cloudems_climate_epex_status
+            price_sensor: sensor.cloudems_price_current_hour
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_atmospheric_hp
+                state_not: unavailable
+            card:
+              type: custom:cloudems-atmospheric-card
+              title: 🌡 WP Atmosfeer Optimizer
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_climate_epex_status
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-climate-epex-card
+              title: "❄ Airco EPEX"
+
+          - type: custom:cloudems-kamer-heatmap-card
+            title: "🌡 Kamer Temperaturen"
+
+  - title: Rolluiken
+    path: cloudems-rolluiken
+    type: sections
+    max_columns: 1
+    icon: mdi:blinds
+    background: >-
+      url(/local/cloudems/images/bg-rolluiken.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(144,202,249,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: switch.cloudems_module_rolluiken
+                state: 'off'
+            card:
+              type: markdown
+              content: >-
+                ⚠ **🪟 Rolluiken module staat uit.** Schakel hem in via het
+                [Configuratie tabblad](#cloudems-config) om deze functie te
+                activeren.
+              card_mod:
+                style: >
+                  ha-card { background: rgba(255,140,0,0.12) !important; border:
+                  1px solid rgba(255,140,0,0.4) !important; border-radius: 12px
+                  !important; padding: 4px 12px !important; }
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-shutter-card
+            title: 🪟 Rolluiken
+
+  - title: Lampen
+    path: cloudems-lampen
+    type: sections
+    max_columns: 1
+    icon: mdi:lightbulb-group
+    background: >-
+      url(/local/cloudems/images/bg-overzicht.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(255,238,88,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-lamp-card
+            title: 💡 Lampcirculatie
+          - type: custom:cloudems-lamp-auto-card
+            title: 💡 Lamp Automatisering
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_circadian_nudge
+                state_not: inactive
+            card:
+              type: custom:cloudems-circadian-card
+              title: 🌅 Slimme Verlichting
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_lamp_automation
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-lamp-auto-card
+              title: "💡 Lamp Automatisering"
+
+  - title: Prijzen & Kosten
+    path: cloudems-prijzen
+    type: sections
+    max_columns: 1
+    icon: mdi:currency-eur
+    background: >-
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(134,239,172,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-gas-card
+            title: Gas
+          - type: custom:cloudems-prijsverloop-card
+            title: Stroom prijzen & kosten
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_goedkoopste_warmtebron
+                state_not: unavailable
+            card:
+              type: custom:cloudems-warmtebron-card
+              title: 🔥 Warmtebron nu
+          - type: custom:cloudems-version-card
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_energy_epex_today
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-mini-price-card
+              title: "💶 Prijzen vandaag"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_batterij_epex_schema
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-price-card
+              title: "📊 EPEX Schema"
+
+          - type: custom:cloudems-piekdagen-card
+            title: "📅 Piekdagen Kalender"
+
+  - title: NILM Apparaten
+    path: cloudems-nilm
+    type: sections
+    max_columns: 1
+    icon: mdi:chip
+    background: >-
+      url(/local/cloudems/images/bg-nilm.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(206,147,216,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-nilm-visual-card
+            title: 📡 Apparaten Live
+          - type: custom:cloudems-nilm-card
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_nilm_devices
+                state_not: unavailable
+            card:
+              type: custom:cloudems-apparaat-tijdlijn-card
+              title: 📅 Apparaat Tijdlijn
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_nilm_running_devices
+                state_not: unavailable
+            card:
+              type: custom:cloudems-appliance-card
+              title: 🔌 Apparaten EPEX
+
+          - type: custom:cloudems-nilm-visual-card
+            title: "📡 NILM Visueel"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_nilm_devices
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-apparaat-tijdlijn-card
+              title: "📅 Tijdlijn"
+
+  - title: Beslissingen
+    path: cloudems-beslissingen
+    type: sections
+    max_columns: 1
+    icon: mdi:history
+    background: >-
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-masonry-view {
+          background: radial-gradient(ellipse 70% 50% at 50% -10%, rgba(100,100,255,0.08) 0%, transparent 60%), rgb(24,24,24) !important;
+        }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: conditional
+            conditions:
+            - condition: numeric_state
+              entity: sensor.cloudems_actieve_meldingen
+              above: 0
+            card:
+              type: custom:cloudems-alerts-card
+              title: "🔔 Actieve Meldingen"
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_standby_intelligence
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-standby-ranking-card
+              title: "💤 Standby Top 5"
+          - type: custom:cloudems-decisions-card
+          - type: custom:cloudems-switches-card
+            title: ⏰ Goedkope Uren Schakelaars
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_vacation_mode
+                state_not: inactive
+            card:
+              type: custom:cloudems-vacation-card
+              title: 🏖 Vakantiemodus
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_geofencing
+                state_not: unknown
+            card:
+              type: entity
+              entity: sensor.cloudems_geofencing
+              name: 📍 Geofencing
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_sleep_group
+                state_not: awake
+            card:
+              type: entity
+              entity: sensor.cloudems_sleep_group
+              name: 😴 Slaap Groep
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_standby_killer
+                state_not: unavailable
+            card:
+              type: entity
+              entity: sensor.cloudems_standby_killer
+              name: 💤 Standby Killer
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_appliance_done
+                state_not: unavailable
+            card:
+              type: entity
+              entity: sensor.cloudems_appliance_done
+              name: ✅ Apparaat Klaar
+
+  - title: 💡 Advies
+    path: cloudems-advies
+    type: sections
+    max_columns: 1
+    icon: mdi:lightbulb-on
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-demand-card
+            entity: sensor.cloudems_energy_demand
+          - type: custom:cloudems-version-card
+
+  - title: Zelflerend
+    path: cloudems-intelligence
+    type: sections
+    max_columns: 1
+    icon: mdi:brain
+    background: >-
+      url(/local/cloudems/images/bg-intelligentie.svg) center/cover no-repeat,
+      radial-gradient(ellipse 70% 50% at 50% -10%, rgba(128,222,234,0.07) 0%,
+      transparent 60%), rgb(24,24,24)
+    card_mod:
+      style: |
+        hui-view { padding: 12px 12px 24px !important; }
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-ai-card
+            title: 🧠 Lokale AI
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-decisions-learner-card
+          - type: custom:cloudems-learning-card
+            title: Zelflerend
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_blackout_guard
+                state_not: none
+            card:
+              type: custom:cloudems-blackout-card
+              title: ⚡ Blackout Guard
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_power_quality
+                state_not: unavailable
+            card:
+              type: entity
+              entity: sensor.cloudems_power_quality
+              name: 📊 Vermogenskwaliteit (cos φ)
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: sensor.cloudems_grid_phase_imbalance
+                state_not: unavailable
+            card:
+              type: custom:cloudems-fase-balans-card
+              title: ⚡ Fase Balans + cos φ
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_grid_phase_imbalance
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-fase-balans-card
+              title: "⚡ Fase Balans"
+
+          - type: conditional
+            conditions:
+            - condition: state
+              entity: sensor.cloudems_grid_phase_imbalance
+              state_not: 'unavailable'
+            card:
+              type: custom:cloudems-fase-historiek-card
+              title: "⚡ Fase Historiek"
+
+  - title: Diagnose
+    path: cloudems-diagnose
+    type: sections
+    max_columns: 2
+    icon: mdi:stethoscope
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-diagnose-card
+          - type: custom:cloudems-p1-card
+            title: 📡 P1 / Slimme Meter
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-version-card
+
+  - title: Configuratie
+    path: cloudems-config
+    type: sections
+    max_columns: 2
+    icon: mdi:cog
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-config-card
+      - type: grid
+        column_span: 1
+        cards:
+          - type: custom:cloudems-mini-price-card
+          - type: custom:cloudems-beheer-card
+            title: ⚡ CloudEMS

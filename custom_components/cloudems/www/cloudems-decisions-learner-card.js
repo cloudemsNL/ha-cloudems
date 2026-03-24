@@ -254,7 +254,7 @@ class CloudEMSDecisionsLearnerCard extends HTMLElement {
   static getStubConfig(){ return {type:"custom:cloudems-decisions-learner-card"}; }
 }
 
-customElements.define("cloudems-decisions-learner-card", CloudEMSDecisionsLearnerCard);
+if (!customElements.get('cloudems-decisions-learner-card')) customElements.define("cloudems-decisions-learner-card", CloudEMSDecisionsLearnerCard);
 
 class CloudEMSDecisionsLearnerCardEditor extends HTMLElement {
   setConfig(c){ this._cfg={...c}; this._render(); }
@@ -263,7 +263,7 @@ class CloudEMSDecisionsLearnerCardEditor extends HTMLElement {
     this.innerHTML = `<p style="padding:8px;color:#aaa;font-size:12px">Geen configuratie vereist. De kaart laadt automatisch van sensor.cloudems_decision_learner.</p>`;
   }
 }
-customElements.define("cloudems-decisions-learner-card-editor", CloudEMSDecisionsLearnerCardEditor);
+if (!customElements.get('cloudems-decisions-learner-card-editor')) customElements.define("cloudems-decisions-learner-card-editor", CloudEMSDecisionsLearnerCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

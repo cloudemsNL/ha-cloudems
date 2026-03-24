@@ -527,8 +527,8 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--primary-color,#03
     });
   }
 }
-customElements.define("cloudems-pv-forecast-card-editor", CloudemsPvForecastCardEditor);
-customElements.define("cloudems-pv-forecast-card", CloudemsPvForecastCard);
+if (!customElements.get('cloudems-pv-forecast-card-editor')) customElements.define("cloudems-pv-forecast-card-editor", CloudemsPvForecastCardEditor);
+if (!customElements.get('cloudems-pv-forecast-card')) customElements.define("cloudems-pv-forecast-card", CloudemsPvForecastCard);
 window.customCards = window.customCards ?? [];
 window.customCards.push({
   type: "cloudems-pv-forecast-card",

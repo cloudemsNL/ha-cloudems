@@ -194,7 +194,7 @@ class CloudemsSankeyCard extends HTMLElement {
   getCardSize() { return 3; }
 }
 
-customElements.define('cloudems-sankey-card', CloudemsSankeyCard);
+if (!customElements.get('cloudems-sankey-card')) customElements.define('cloudems-sankey-card', CloudemsSankeyCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'cloudems-sankey-card',

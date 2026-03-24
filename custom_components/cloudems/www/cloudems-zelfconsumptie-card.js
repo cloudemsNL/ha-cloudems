@@ -102,7 +102,7 @@ class CloudemsZelfconsumptieCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("cloudems-zelfconsumptie-card", CloudemsZelfconsumptieCard);
-customElements.define("cloudems-zelfconsumptie-card-editor", CloudemsZelfconsumptieCardEditor);
+if (!customElements.get('cloudems-zelfconsumptie-card')) customElements.define("cloudems-zelfconsumptie-card", CloudemsZelfconsumptieCard);
+if (!customElements.get('cloudems-zelfconsumptie-card-editor')) customElements.define("cloudems-zelfconsumptie-card-editor", CloudemsZelfconsumptieCardEditor);
 window.customCards = window.customCards||[];
 window.customCards.push({type:"cloudems-zelfconsumptie-card",name:"CloudEMS Zelfconsumptie",description:"Zelfconsumptiegraad met productie, verbruik en besparingen"});

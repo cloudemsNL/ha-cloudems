@@ -112,6 +112,9 @@ class DecisionOutcomeLearner:
         }
         self._recent_outcomes: list[dict] = []   # laatste 20 uitkomsten voor dashboard
         self._dirty = False
+        # ThresholdLearner callback — set by coordinator after AI registry is ready
+        # Called with (threshold_name, good: bool, reward: float) after each evaluation
+        self._threshold_callback = None
 
     # ── Persistentie ─────────────────────────────────────────────────────────
 
@@ -271,6 +274,22 @@ class DecisionOutcomeLearner:
                 rec.id, rec.component, rec.action, decision_value,
                 actual, counterfactual, rec.context_bucket,
             )
+
+            # Feed result to ThresholdLearner — DOL bias → price threshold adjustment
+            if self._threshold_callback:
+                try:
+                    good   = decision_value > 0
+                    reward = max(-1.0, min(1.0, decision_value / max(0.01, abs(actual) + 0.01)))
+                    # Map component+action → relevant price threshold
+                    if rec.component == "battery" and rec.action == "charge":
+                        self._threshold_callback("PRICE_CHEAP_EUR_KWH", good, reward)
+                    elif rec.component == "battery" and rec.action == "discharge":
+                        self._threshold_callback("PRICE_EXPENSIVE_EUR_KWH", good, reward)
+                    # Universal: any good decision raises confidence
+                    self._threshold_callback("AI_BATTERY_MIN_CONFIDENCE", good, reward * 0.3)
+                except Exception as _cb_err:
+                    _LOGGER.debug("DOL threshold callback fout: %s", _cb_err)
+
             evaluated += 1
             self._dirty = True
 

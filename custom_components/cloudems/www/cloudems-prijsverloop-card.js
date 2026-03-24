@@ -696,7 +696,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
   static getStubConfig() { return {}; }
 }
 
-customElements.define('cloudems-prijsverloop-card', CloudemsPrijsverloopCard);
+if (!customElements.get('cloudems-prijsverloop-card')) customElements.define('cloudems-prijsverloop-card', CloudemsPrijsverloopCard);
 
 // GUI Editor
 class CloudemsPrijsverloopCardEditor extends HTMLElement {
@@ -708,4 +708,4 @@ class CloudemsPrijsverloopCardEditor extends HTMLElement {
     }
   }
 }
-customElements.define('cloudems-prijsverloop-card-editor', CloudemsPrijsverloopCardEditor);
+if (!customElements.get('cloudems-prijsverloop-card-editor')) customElements.define('cloudems-prijsverloop-card-editor', CloudemsPrijsverloopCardEditor);

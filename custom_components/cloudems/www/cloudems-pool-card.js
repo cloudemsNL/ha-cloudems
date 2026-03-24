@@ -215,8 +215,8 @@ class CloudEMSPoolCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-pool-card',CloudEMSPoolCard);
-customElements.define('cloudems-pool-card-editor',CloudEMSPoolCardEditor);
+if (!customElements.get('cloudems-pool-card')) customElements.define('cloudems-pool-card',CloudEMSPoolCard);
+if (!customElements.get('cloudems-pool-card-editor')) customElements.define('cloudems-pool-card-editor',CloudEMSPoolCardEditor);
 window.customCards=window.customCards||[];
 window.customCards.push({type:'cloudems-pool-card',name:'CloudEMS Pool Card',description:'Zwembad — filtreerpomp, warmtepomp, temperatuur, UV, robot',preview:true});
 console.info('%c CLOUDEMS-POOL-CARD %c v'+POOL_VERSION+' ','background:#38bdf8;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#38bdf8;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

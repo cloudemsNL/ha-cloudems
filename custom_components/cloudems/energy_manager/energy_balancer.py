@@ -472,7 +472,25 @@ class EnergyBalancer:
                 s_est = True
 
         # 5. Kirchhoff → house (nooit negatief)
-        house_w = max(0.0, s_val + g_val - b_val)
+        house_w_raw = s_val + g_val - b_val
+
+        # Bug fix: Nexus transitie geeft kortdurend negatief of extreem hoge house_w
+        # Gebruik vorige trend als vangnet bij onrealistische waarden
+        if self._house_trend and self._house_trend > 0:
+            # Negatief = sensor race-condition (bijv. grid nog oud bij batterij-mode wissel)
+            if house_w_raw < 0:
+                house_w = max(0.0, self._house_trend)  # houd vorige waarde
+            # Extreme spike: > 5x trend is onrealistisch (max huis ~15kW)
+            elif house_w_raw > max(15000.0, self._house_trend * 5):
+                house_w = self._house_trend  # negeer spike
+                _LOGGER.debug(
+                    "EnergyBalancer: house_w spike %.0fW genegeerd (trend=%.0fW)",
+                    house_w_raw, self._house_trend
+                )
+            else:
+                house_w = max(0.0, house_w_raw)
+        else:
+            house_w = max(0.0, house_w_raw)
 
         # House trend bijhouden
         self._house_trend = (TREND_ALPHA * house_w +

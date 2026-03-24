@@ -205,7 +205,28 @@ class EVTripPlanner:
         """
         trips = self.get_upcoming_trips(hours_ahead=20)
         if not trips:
-            return ChargeRecommendation(needed=False, reason="No upcoming trips in calendar")
+            # No calendar trips — check if AI pattern learner has a prediction
+            # (passed via ai_departure_h / ai_min_soc attributes on self)
+            _ai_h   = getattr(self, '_ai_departure_h', None)
+            _ai_soc = getattr(self, '_ai_min_soc', None)
+            if _ai_h is not None and _ai_soc is not None:
+                import datetime as _dt_ai
+                _now = _dt_ai.datetime.now()
+                _dep_h = int(_ai_h)
+                _dep_m = int((_ai_h - _dep_h) * 60)
+                _dep_dt = _now.replace(hour=_dep_h, minute=_dep_m, second=0)
+                if _dep_dt > _now:
+                    # Synthesize a trip from AI prediction
+                    fake_trip = TripEvent(
+                        title="AI voorspeld vertrek",
+                        start_dt=_dep_dt,
+                        end_dt=_dep_dt,
+                        required_soc=float(_ai_soc),
+                        source="learned",
+                    )
+                    trips = [fake_trip]
+            if not trips:
+                return ChargeRecommendation(needed=False, reason="No upcoming trips in calendar")
 
         next_trip = trips[0]
 

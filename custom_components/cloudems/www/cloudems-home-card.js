@@ -20,6 +20,8 @@ class CloudEMSHomeCard extends HTMLElement {
     this._peaks={};
   }
   setConfig(c){this._config=c||{};}
+  getCardSize() { return 8; }
+
   set hass(h){this._hass=h;this._render();}
 
   /* ── VU-METER BAR met peak hold ─────────────────────────────────────────────
@@ -349,7 +351,7 @@ class CloudEMSHomeCard extends HTMLElement {
     const TABS=[['status','Status'],['cats','Categorieën'],['rooms','Kamers'],['devs','Apparaten'],
       ['solar','Zonne'],['bat','Batterij'],['boiler','Boiler'],['shutters','Rolluiken'],
       ['ev','EV 🚗'],['ebike','E-bike 🚲'],['pool','Zwembad 🏊'],
-      ['prices','Prijzen 💶'],['history','Historie 📋']];
+      ['prices','Prijzen 💶'],['history','Historie 📋'],['diagnose','Diagnose 🩺']];
     return`<div class="card">
 <div class="hdr">
   <div><div class="hdr-title">⚡ CloudEMS</div><div class="hdr-sub">🏆 ${this._cap(top)} · ${this._fmt(hw)} huis</div></div>
@@ -371,6 +373,7 @@ ${t==='ebike'?this._tabEbike():''}
 ${t==='pool'?this._tabPool():''}
 ${t==='prices'?this._tabPrices():''}
 ${t==='history'?this._tabHistory():''}
+${t==='diagnose'?this._tabDiagnose():''}
 </div>
 <div class="footer"><span>Vandaag: ${parseFloat(kwh).toFixed(2)} kWh excl. batterij</span><span>CloudEMS Home v${HCV}</span></div>
 </div>`;
@@ -409,8 +412,12 @@ ${t==='history'?this._tabHistory():''}
     const bmode=(b.actual_mode||'').toUpperCase();
     const bmodeSince=b.actual_mode_since_s!=null?b.actual_mode_since_s:null;
     const _fmtDur=(s)=>{if(s==null)return'';if(s<60)return`${Math.round(s)}s`;if(s<3600)return`${Math.floor(s/60)}m`;return`${Math.floor(s/3600)}u${Math.floor((s%3600)/60)}m`;};
-    const _bmodeCln=bmode.includes('IMEMORY')||bmode.includes('MEMORY')?'MEMORY':bmode;
-    const bmodeLbl=_bmodeCln+(bmodeSince!=null?` · ${_fmtDur(bmodeSince)}`:'');
+    const _bmodeCln=bmode.includes('IMEMORY')||bmode==='MEMORY'?'iMEMORY':bmode;
+    // Show desired preset when stuck in iMemory
+    const _isStuckMemory=_bmodeCln==='iMEMORY';
+    const _desiredPreset=(b.pending_preset||b.preset_off||'GREEN').toUpperCase();
+    const _desiredSuffix=_isStuckMemory?` → ${_desiredPreset} gewenst`:'';
+    const bmodeLbl=_bmodeCln+(bmodeSince!=null?` · ${_fmtDur(bmodeSince)}`:'')+_desiredSuffix;
     const imp=gw>50; const exp=gw<-50;
     // Price
     const priceSt=this._s('sensor.cloudems_price_current_hour');
@@ -428,13 +435,16 @@ ${t==='history'?this._tabHistory():''}
     const _gridNetW=this._v('sensor.cloudems_grid_net_power')||0;  // negatief=export
     const _signedA=(ph)=>{
       const pd=_phases[ph];
+      // Prioriteit 1: Kirchhoff-gecorrigeerde waarde uit coordinator phases dict
+      // (signed: negatief = export/teruglevering)
       if(pd&&pd.current_a!=null) return pd.current_a;
-      // Fallback: ruwe stroom * teken van per-fase vermogen indien beschikbaar,
-      // anders netto grid-richting (export = negatief)
-      const raw=Math.abs(this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0);
+      // Prioriteit 2: per-fase vermogen → sign afleiden
       const pw=pd?.power_w??this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)??null;
-      const sign=pw!=null?(pw<0?-1:1):(_gridNetW<0?-1:1);
-      return raw*sign;
+      const raw=Math.abs(this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0);
+      if(pw!=null) return raw*(pw<0?-1:1);
+      // Prioriteit 3: als huis exporteert (grid negatief) EN geen per-fase data
+      // → gebruik totaal grid-richting maar log dat het een schatting is
+      return raw*(_gridNetW<0?-1:1);
     };
     // v1.8.1: sanity clamp — waarden >100A zijn opstartartefacten
     const _clampA=(a)=>Math.abs(a)>100?0:a;
@@ -470,8 +480,8 @@ ${t==='history'?this._tabHistory():''}
     const budget=this._a('sensor.cloudems_energie_kosten_verwachting','budget_eur',null);
     const batAction=this._a('sensor.cloudems_batterij_epex_schema','battery_decision',{})||{};
     // Live overzicht extra
-    const importW=parseFloat(this._s('sensor.cloudems_grid_import_power')?.state||0)||0;
-    const exportW=parseFloat(this._s('sensor.cloudems_grid_export_power')?.state||0)||0;
+    const importW=Math.abs(parseFloat(this._s('sensor.cloudems_grid_import_power')?.state||0)||0);
+    const exportW=Math.abs(parseFloat(this._s('sensor.cloudems_grid_export_power')?.state||0)||0);
     const flexW=parseFloat(this._s('sensor.cloudems_flexibel_vermogen')?.state||0)||0;
     const aanwezig=this._s('binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom')?.state==='on';
     const zelfcons=parseFloat(this._s('sensor.cloudems_self_consumption')?.state||0)||0;
@@ -1285,7 +1295,7 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
   /* ── BIND EVENTS ─────────────────────────────────────────────────────────── */
   _bind(){
     const sr=this.shadowRoot;
-    const TABS_ORDER=['status','cats','rooms','devs','solar','bat','boiler','shutters','ev','ebike','pool','prices','history'];
+    const TABS_ORDER=['status','cats','rooms','devs','solar','bat','boiler','shutters','ev','ebike','pool','prices','history','diagnose'];
 
     // Tab clicks
     sr.querySelectorAll('.tab[data-tab]').forEach(el=>{
@@ -1351,6 +1361,43 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
     }
   }
 
+  _tabDiagnose(){
+    const h=this._hass;
+    const wd  = h?.states['sensor.cloudems_watchdog']?.attributes || {};
+    const sys = h?.states['sensor.cloudems_system_health']?.attributes || {};
+    const score = parseFloat(sys.health_score ?? 0);
+    const col = score >= 7 ? '#4ade80' : score >= 4 ? '#fb923c' : '#f87171';
+    const label = score >= 7 ? 'Goed' : score >= 4 ? 'Matig' : 'Kritiek';
+    const uptime = wd.uptime_hours ? `${Math.floor(wd.uptime_hours)}u` : '—';
+    const cycles = wd.update_cycles ?? '—';
+    const errors = wd.total_failures ?? 0;
+    const restarts = wd.total_restarts ?? 0;
+    const lastOk = wd.last_success_s != null ? `${Math.round(wd.last_success_s)}s geleden` : '—';
+    const mode = (sys.load_mode || '—').toUpperCase();
+    const modeCol = mode === 'NORMAL' ? '#4ade80' : mode === 'REDUCED' ? '#fb923c' : '#6b7280';
+    const kv=(l,v,c='#fff')=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)"><span style="font-size:12px;color:rgba(163,163,163,.8)">${l}</span><span style="font-size:12px;font-weight:600;color:${c}">${v}</span></div>`;
+    return `<div style="padding:12px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:rgba(255,255,255,.3);text-transform:uppercase;margin-bottom:8px">Systeemstatus</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="font-size:32px;font-weight:700;color:${col}">${score.toFixed(1)}</div>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:${col}">${label}</div>
+          <div style="height:4px;background:rgba(255,255,255,.1);border-radius:2px;width:120px;margin-top:4px">
+            <div style="height:4px;background:${col};border-radius:2px;width:${Math.min(100,score*10)}%"></div>
+          </div>
+        </div>
+      </div>
+      ${kv('Uptime', uptime)}
+      ${kv('Update cycli', cycles)}
+      ${kv('Fouten (ooit)', errors > 100 ? String(errors) : String(errors), errors > 100 ? '#fb923c' : '#4ade80')}
+      ${kv('Herstarts', restarts > 5 ? String(restarts) : String(restarts), restarts > 5 ? '#fb923c' : '#fff')}
+      ${kv('Laatste succes', lastOk)}
+      ${kv('Belasting', mode, modeCol)}
+      <div style="margin-top:10px;font-size:10px;color:rgba(163,163,163,.4);text-align:center">Meer details: Diagnose tabblad</div>
+    </div>`;
+  }
+
+
   static getConfigElement(){return document.createElement('cloudems-home-card-editor');}
   static getStubConfig(){return {title:'CloudEMS Home', max_ampere:25, phase_count:3};}
 }
@@ -1378,8 +1425,8 @@ class CloudEMSHomeCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-home-card', CloudEMSHomeCard);
-customElements.define('cloudems-home-card-editor', CloudEMSHomeCardEditor);
+if (!customElements.get('cloudems-home-card')) customElements.define('cloudems-home-card', CloudEMSHomeCard);
+if (!customElements.get('cloudems-home-card-editor')) customElements.define('cloudems-home-card-editor', CloudEMSHomeCardEditor);
 window.customCards=window.customCards||[];
 window.customCards.push({type:'cloudems-home-card',name:'CloudEMS Home',description:'Volledig energie overzicht — 11 tabs'});
 console.info('%c CloudEMS Home Card v'+HCV,'color:#EF9F27;font-weight:700');

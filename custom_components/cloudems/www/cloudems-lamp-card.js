@@ -294,8 +294,8 @@ class CloudEMSLampCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-lamp-card',CloudEMSLampCard);
-customElements.define('cloudems-lamp-card-editor',CloudEMSLampCardEditor);
+if (!customElements.get('cloudems-lamp-card')) customElements.define('cloudems-lamp-card',CloudEMSLampCard);
+if (!customElements.get('cloudems-lamp-card-editor')) customElements.define('cloudems-lamp-card-editor',CloudEMSLampCardEditor);
 window.customCards=window.customCards||[];
 window.customCards.push({type:'cloudems-lamp-card',name:'CloudEMS Lamp Card',description:'Slimme Verlichting — automatisering, beveiliging en bediening',preview:true});
 console.info('%c CLOUDEMS-LAMP-CARD %c v'+LAMP_VERSION+' ','background:#fde047;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#fde047;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

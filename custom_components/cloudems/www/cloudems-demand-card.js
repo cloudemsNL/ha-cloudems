@@ -258,8 +258,8 @@ class CloudemsDemandCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-demand-card-editor', CloudemsDemandCardEditor);
-customElements.define('cloudems-demand-card', CloudemsDemandCard);
+if (!customElements.get('cloudems-demand-card-editor')) customElements.define('cloudems-demand-card-editor', CloudemsDemandCardEditor);
+if (!customElements.get('cloudems-demand-card')) customElements.define('cloudems-demand-card', CloudemsDemandCard);
 window.customCards=window.customCards??[];
 window.customCards.push({type:'cloudems-demand-card',name:'CloudEMS Energiebehoefte',description:'Verwacht verbruik vandaag per systeem en apparaat',preview:true});
 console.info('%c CLOUDEMS-DEMAND-CARD %c v'+DEMAND_CARD_VERSION+' ','background:#6366f1;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#111318;color:#a78bfa;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

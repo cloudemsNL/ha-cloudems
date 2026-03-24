@@ -3783,11 +3783,13 @@ class BoilerController:
             if b.control_mode != "preset" or b.entity_id.split(".")[0] != "water_heater":
                 continue
 
-            # iMemory watchdog: als boiler in iMemory zit én CloudEMS wil GREEN/BOOST,
-            # forceer direct een nieuw commando — ook als geen pending preset meer.
+            # iMemory watchdog: als boiler in iMemory zit, stuur ALTIJD preset_off (GREEN)
+            # iMemory is nooit de gewenste staat — ook niet als de boiler niet hoeft te verwarmen.
+            # preset_off = GREEN = veilige standaard. preset_on = BOOST/GREEN verwarmen.
             _actual_now, _, _ = self._read_ariston_state(b)
             if _actual_now and _actual_now.lower() == "imemory":
-                _want = b.preset_on if not b.force_green else b.preset_off
+                # Always send preset_off (usually GREEN) to escape iMemory
+                _want = b.preset_off or b.preset_on or "GREEN"
                 if _want and _actual_now.lower() != _want.lower():
                     if b._imemory_since == 0.0:
                         b._imemory_since = now
@@ -3988,6 +3990,9 @@ class BoilerController:
              # Fallback naar CloudEMS desired state als de entity niet leesbaar is.
              "actual_mode": self._get_actual_preset(b),
              "actual_mode_since_s": round(time.time() - b._actual_mode_since, 0) if b._actual_mode_since > 0 else None,
+             "pending_preset": b._pending_preset or "",
+             "preset_on":      b.preset_on or "BOOST",
+             "preset_off":     b.preset_off or "GREEN",
              "is_heating": (b.current_power_w or 0.0) > 50.0,
              "stall_active": b._stall_active,
              "boost_paused_until": b._boost_paused_until if b._boost_paused_until > time.time() else 0.0,

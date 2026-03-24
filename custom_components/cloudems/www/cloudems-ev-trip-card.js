@@ -108,8 +108,8 @@ color:#fff;padding:6px 8px;border-radius:6px;font-size:13px}</style>
   }
 }
 
-customElements.define("cloudems-ev-trip-card", CloudemsEvTripCard);
-customElements.define("cloudems-ev-trip-card-editor", CloudemsEvTripCardEditor);
+if (!customElements.get('cloudems-ev-trip-card')) customElements.define("cloudems-ev-trip-card", CloudemsEvTripCard);
+if (!customElements.get('cloudems-ev-trip-card-editor')) customElements.define("cloudems-ev-trip-card-editor", CloudemsEvTripCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-ev-trip-card", name: "CloudEMS EV Trip Planner",
   description: "Calendar-based EV charging recommendations" });

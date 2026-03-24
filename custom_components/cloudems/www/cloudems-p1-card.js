@@ -263,8 +263,8 @@ input{background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,
   }
 }
 
-customElements.define("cloudems-p1-card-editor", CloudemsP1CardEditor);
-customElements.define("cloudems-p1-card", CloudemsP1Card);
+if (!customElements.get('cloudems-p1-card-editor')) customElements.define("cloudems-p1-card-editor", CloudemsP1CardEditor);
+if (!customElements.get('cloudems-p1-card')) customElements.define("cloudems-p1-card", CloudemsP1Card);
 window.customCards=window.customCards??[];
 window.customCards.push({type:"cloudems-p1-card",name:"CloudEMS P1 Card",description:"P1 netbalans — fasevermogen, spanning, onbalans",preview:true});
 console.info(`%c CLOUDEMS-P1-CARD %c v${P1_VERSION} `,"background:#1D9E75;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#1D9E75;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

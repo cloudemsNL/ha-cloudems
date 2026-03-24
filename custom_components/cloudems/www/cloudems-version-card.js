@@ -59,8 +59,8 @@ class CloudEMSVersionCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-version-card', CloudEMSVersionCard);
-customElements.define('cloudems-version-card-editor', CloudEMSVersionCardEditor);
+if (!customElements.get('cloudems-version-card')) customElements.define('cloudems-version-card', CloudEMSVersionCard);
+if (!customElements.get('cloudems-version-card-editor')) customElements.define('cloudems-version-card-editor', CloudEMSVersionCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({type:'cloudems-version-card', name:'CloudEMS Versie Card', description:'CloudEMS versie, uptime en systeem statistieken', preview:true});
 console.info('%c CLOUDEMS-VERSION-CARD %c v1.0.1 ','background:#4ade80;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#4ade80;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

@@ -257,7 +257,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
 
     <div class="section">
       <div class="section-title">⚡ P1 / DSMR Updatesnelheid</div>
-      <div class="kv"><span class="kl">DSMR-type ingesteld</span><span class="kv_ ${dsmrCorr?'warn':'ok'}">${dsmrLabel}${dsmrCorr?' (auto-gecorrigeerd)':''}</span></div>
+      ${_kvTT("DSMR-type ingesteld",`${dsmrLabel}${dsmrCorr?' (auto-gecorrigeerd)':''}`,[{label:'Ingesteld',value:dsmrLabel},{label:'Auto-gecorrigeerd',value:dsmrCorr?'✅ Ja':'Nee'},{label:'Normaal',value:'DSMR 4 = ~10s, DSMR 5 = ~1s',dim:true}])}
       ${p1Meas != null
         ? `<div class="kv"><span class="kl">Gemeten P1-interval</span><span class="kv_ ${p1Color}">${p1Meas.toFixed(2)}s <span style="font-size:10px;opacity:.7">(n=${p1Samp})</span></span></div>
            ${p1MismatchWarn ? `<div class="kv"><span class="kl err" style="font-size:11px">⚠ Ingesteld type klopt niet met gemeten snelheid.<br>Pas DSMR-type aan via Instellingen → Netsensoren.</span></div>` : ''}`
@@ -270,11 +270,11 @@ class CloudemsDiagnoseCard extends HTMLElement {
     <div class="section">
       <div class="section-title">🔋 Accu Cloud-Vertraging (EnergyBalancer)</div>
       ${batLag != null
-        ? `<div class="kv"><span class="kl">Geleerde vertraging</span><span class="kv_ ok">${batLag.toFixed(1)}s</span></div>
-           <div class="kv"><span class="kl">Betrouwbaarheid</span><span class="kv_ ${batConf>0.6?'ok':batConf>0.3?'warn':'err'}">${batConf!=null?(batConf*100).toFixed(0)+'%':'—'} <span style="font-size:10px;opacity:.7">(${batSampl} metingen)</span></span></div>`
-        : `<div class="kv"><span class="kl">Geleerde vertraging</span><span class="kv_ warn">Nog aan het leren (${batSampl}/${8} metingen)</span></div>`
+        ? `${_kvTT("Geleerde vertraging",batLag.toFixed(1)+'s',[{label:'Waarde',value:batLag.toFixed(1)+'s'},{label:'Uitleg',value:'Tijd tussen cloud-commando en zichtbare accuwijziging',dim:true},{label:'Normaal',value:'2–15s',dim:true}])}
+           ${_kvTT("Betrouwbaarheid",(batConf!=null?(batConf*100).toFixed(0)+'%':'—')+' ('+batSampl+' metingen)',[{label:'Betrouwbaarheid',value:batConf!=null?(batConf*100).toFixed(0)+'%':'—'},{label:'Metingen',value:batSampl.toString()},{label:'Minimaal voor lag-compensatie',value:'8 metingen',dim:true}])}`
+        : `${_kvTT("Geleerde vertraging","Nog aan het leren ("+batSampl+"/8 metingen)",[{label:'Status',value:'Bezig met leren'},{label:'Voortgang',value:batSampl+'/8 metingen'},{label:'Uitleg',value:'CloudEMS leert automatisch de vertraging tussen commando en meting',dim:true}])}`
       }
-      <div class="kv"><span class="kl">Lag-compensatie actief</span><span class="kv_ ${lagComp?'ok':''}">${lagComp?'✅ Ja':'Nee'}</span></div>
+      ${_kvTT("Lag-compensatie actief",lagComp?'✅ Ja':'Nee',[{label:'Actief',value:lagComp?'Ja':'Nee'},{label:'Uitleg',value:'Corrigeert vertraging tussen cloud-commando en HA meting',dim:true},{label:'Vereist',value:'Min. 8 geleerde metingen',dim:true}])}
       ${fastRamp
         ? `<div class="kv"><span class="kl">⚡ Fast-ramp inferentie</span><span class="kv_ warn">Actief${fastEst!=null?' ('+Math.round(fastEst)+'W)':''}</span></div>`
         : ''
@@ -577,8 +577,8 @@ class CloudemsDiagnoseCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("cloudems-diagnose-card-editor", CloudemsDiagnoseCardEditor);
-customElements.define("cloudems-diagnose-card", CloudemsDiagnoseCard);
+if (!customElements.get('cloudems-diagnose-card-editor')) customElements.define("cloudems-diagnose-card-editor", CloudemsDiagnoseCardEditor);
+if (!customElements.get('cloudems-diagnose-card')) customElements.define("cloudems-diagnose-card", CloudemsDiagnoseCard);
 window.customCards = window.customCards ?? [];
 window.customCards.push({type:"cloudems-diagnose-card", name:"CloudEMS Diagnose Card", description:"Systeemgezondheid, watchdog, sensoren, NILM en prestaties", preview:true});
 console.info(`%c CLOUDEMS-DIAGNOSE-CARD %c v${DIAGNOSE_VERSION} `,"background:#1D9E75;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#1D9E75;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

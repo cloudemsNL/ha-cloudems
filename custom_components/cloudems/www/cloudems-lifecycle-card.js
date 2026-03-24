@@ -80,7 +80,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-lifecycle-card", CloudemsLifecycleCard);
-customElements.define("cloudems-lifecycle-card-editor", CloudemsLifecycleCardEditor);
+if (!customElements.get('cloudems-lifecycle-card')) customElements.define("cloudems-lifecycle-card", CloudemsLifecycleCard);
+if (!customElements.get('cloudems-lifecycle-card-editor')) customElements.define("cloudems-lifecycle-card-editor", CloudemsLifecycleCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-lifecycle-card", name: "CloudEMS Slijtage Arbitrage" });

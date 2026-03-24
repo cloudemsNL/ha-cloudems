@@ -19,7 +19,7 @@ class CloudemsCardblackoutEditor extends HTMLElement {
   _r(){if(!this.shadowRoot)this.attachShadow({mode:"open"});this.shadowRoot.innerHTML=`<label style="font-size:12px;color:#aaa;display:block;margin:8px 0 2px">Title</label><input style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;color:#fff;padding:6px 8px;border-radius:6px;font-size:13px" id="t" value="${this._config?.title||""}" />`;
   this.shadowRoot.getElementById("t").addEventListener("input",e=>this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:{...this._config,title:e.target.value}}})));}
 }
-customElements.define("cloudems-blackout-card",CloudemsCardblackout);
-customElements.define("cloudems-blackout-card-editor",CloudemsCardblackoutEditor);
+if (!customElements.get('cloudems-blackout-card')) customElements.define("cloudems-blackout-card",CloudemsCardblackout);
+if (!customElements.get('cloudems-blackout-card-editor')) customElements.define("cloudems-blackout-card-editor",CloudemsCardblackoutEditor);
 window.customCards=window.customCards||[];
 window.customCards.push({type:"cloudems-blackout-card",name:"CloudEMS blackout"});

@@ -95,7 +95,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-fcr-card", CloudemsFcrCard);
-customElements.define("cloudems-fcr-card-editor", CloudemsFcrCardEditor);
+if (!customElements.get('cloudems-fcr-card')) customElements.define("cloudems-fcr-card", CloudemsFcrCard);
+if (!customElements.get('cloudems-fcr-card-editor')) customElements.define("cloudems-fcr-card-editor", CloudemsFcrCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-fcr-card", name: "CloudEMS FCR/aFRR" });

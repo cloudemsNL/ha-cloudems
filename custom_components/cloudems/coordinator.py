@@ -95,7 +95,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.helpers.storage import Store
 
 from .watchdog import CloudEMSWatchdog
-from .const import (
+from .const import (BATTERY_STALE_THRESHOLD_S, BATTERY_STALE_MIN_S,
     CONF_AI_PROVIDER, AI_PROVIDER_NONE, AI_PROVIDER_OLLAMA, AI_PROVIDERS_NEEDING_KEY,
     CONF_NILM_CONFIDENCE, DEFAULT_NILM_CONFIDENCE,
     DOMAIN, UPDATE_INTERVAL_FAST, DEFAULT_MAX_CURRENT, DEFAULT_MAINS_VOLTAGE_V,
@@ -493,10 +493,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # v4.0.2: BatteryDecisionEngine — één instantie
         from .energy_manager.battery_decision_engine import BatteryDecisionEngine as _BDE
         self._battery_decision_engine = _BDE()
+        # Wire AI threshold learner into BDE (called again each tick via _update_bde_thresholds)
         # v4.6.498: Decision Outcome Learner — na BDE aanmaken zodat set_learner() werkt
         from .energy_manager.decision_outcome_learner import DecisionOutcomeLearner as _DOL
         self._decision_learner = _DOL(self.hass)
         self._battery_decision_engine.set_learner(self._decision_learner)
+        # v5.3.x: OutcomeTracker — AI feedback loop, loopt parallel aan DecisionOutcomeLearner
+        # Stap 1 van uitfasering: beide systemen draaien parallel, OutcomeTracker ontvangt dezelfde data
+        # Stap 2 (volgende sessie): DecisionOutcomeLearner uitfaseren zodra OutcomeTracker stabiel
+        from .ai.outcome_tracker import OutcomeTracker as _OT
+        self._outcome_tracker = _OT()
+        # Wire ThresholdLearner callback into DOL (after AI registry is setup)
+        # This is set again in async_setup once AI registry is ready
         # adaptive thresholds per device_type: {type: {min_events, confidence, fp_count, tp_count}}
         self._adaptive_thresholds: dict = {}
         self._nilm_active:        bool = DEFAULT_NILM_ACTIVE
@@ -1422,7 +1430,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             })
 
         diag_vat = VAT_RATE_PER_COUNTRY.get(country, 0.21)
-        # Totale opslag voor diagnostics: (tax + markup) * (1 + vat)
+        # Total opslag voor diagnostics: (tax + markup) * (1 + vat)
         diag_opslag = round((_tax + _markup) * (1 + _vat), 5) if wants_all_in else 0.0
 
         cur_all_in = _enrich(cur)
@@ -1495,7 +1503,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 continue  # al een suggestie
             if dev.user_name:
                 continue  # gebruiker heeft al een naam gegeven
-            # Alleen voor generic types
+            # Only voor generic types
             if dev.device_type not in ("unknown", "generic_appliance", "generic", ""):
                 continue
 
@@ -1798,7 +1806,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if not dev:
             return None
         self.set_nilm_feedback(dev.device_id, "maybe")
-        # Zet ook in skip-set zodat het niet steeds opnieuw bovenaan staat
+        # Set ook in skip-set zodat het niet steeds opnieuw bovenaan staat
         self._review_skip_set.add(dev.device_id)
         self._review_skip_history.append(dev.device_id)
         return dev.device_id
@@ -1932,6 +1940,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     except Exception:  # noqa: BLE001
                         pass
                     break  # only call the first available save method
+
+        # AI registry shutdown — save model
+        if getattr(self, '_ai_registry', None):
+            try:
+                await self._ai_registry.async_shutdown()
+            except Exception:
+                pass
 
         # Shutter externe detectie listener stoppen
         if getattr(self, "_shutter_ctrl", None):
@@ -2147,7 +2162,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         try:
             _blocked_eids = getattr(self._nilm, "_config_sensor_eids", set())
             if _blocked_eids:
-                # Bouw een set van friendly names van geblokkeerde entiteiten
+                # Build een set van friendly names van geblokkeerde entiteiten
                 # zodat we ook kunnen matchen op apparaatnaam (voor devices zonder source_entity_id)
                 _blocked_names: set = set()
                 for _eid in _blocked_eids:
@@ -2274,7 +2289,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             _LOGGER.warning("CloudEMS: review-history laden mislukt: %s", _re)
         try:
             self._adaptive_thresholds = await self._store_adaptive.async_load() or {}
-            # Stuur direct door naar detector zodat get_devices_for_ha ze direct gebruikt
+            # Send direct door naar detector zodat get_devices_for_ha ze direct gebruikt
             if self._adaptive_thresholds:
                 self._nilm.set_adaptive_overrides(self._adaptive_thresholds)
         except Exception as _ae:
@@ -2412,6 +2427,24 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.self_consumption import SelfConsumptionTracker
         self._self_consumption = SelfConsumptionTracker(self.hass)
         await self._self_consumption.async_setup()
+
+        # AI registry — ONNX k-NN, trains on local data, no external dependencies
+        try:
+            from .ai.registry import AIRegistry
+            self._ai_registry = AIRegistry(self.hass)
+            await self._ai_registry.async_setup()
+            # Wire DOL → ThresholdLearner feedback
+            if getattr(self, '_decision_learner', None):
+                self._decision_learner._threshold_callback = self._ai_registry.report_threshold_outcome
+            # Wire BDEFeedback → ThresholdLearner (hour-aware)
+            if getattr(self, '_bde_feedback', None):
+                self._bde_feedback._threshold_callback = self._ai_registry.report_threshold_outcome_for_hour
+            _LOGGER.info("CloudEMS AI registry initialized")
+        except Exception as _ai_exc:
+            _LOGGER.warning("CloudEMS AI registry init failed (non-fatal): %s", _ai_exc)
+            self._ai_registry    = None
+        from .ai.card_output_watcher import CardOutputWatcher
+        self._card_watcher = CardOutputWatcher()
 
         # EV Trip Planner — calendar-based smart charging
         from .energy_manager.ev_trip_planner import EVTripPlanner
@@ -2697,7 +2730,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 )
             elif _pvh_data.get("day") == _pvh_yesterday_key:
                 # v4.6.560: HA was offline gedurende dagwisseling — storage heeft gisteren's data
-                # Herstel die als yesterday zodat de solar grafiek gisteren correct toont
+                # Restore die als yesterday zodat de solar grafiek gisteren correct toont
                 _yst_restored = _pvh_data.get("today", [0.0] * 24)
                 _yst_sum = sum(_yst_restored)
                 if _yst_sum > 200.0:
@@ -2852,7 +2885,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "LampCirculation: geen lampen geconfigureerd — auto-discovery: %d lampen gevonden",
                     len(_lamp_entities),
                 )
-        # Altijd een LampCirculationController aanmaken — ook als er nu 0 lampen zijn.
+        # Always een LampCirculationController aanmaken — ook als er nu 0 lampen zijn.
         # De lazy re-discovery in de update-loop vult de lampenlijst zodra HA volledig geladen is.
         from .energy_manager.lamp_circulation import LampCirculationController
         self._lamp_circulation = LampCirculationController(self.hass)
@@ -2991,7 +3024,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 await self._multi_inv_manager.async_setup()
 
                 # ── v1.25: Registreer extra probe-kandidaten bij PhaseProber ──
-                # Alleen als de prober beschikbaar is (omvormers met dimmer gevonden).
+                # Only als de prober beschikbaar is (omvormers met dimmer gevonden).
                 # Veilige lasten: EV-lader, boiler, batterij (laden) — de gebruiker
                 # merkt een korte puls nooit bij deze apparaten.
                 _prober = self._multi_inv_manager._phase_prober
@@ -3022,7 +3055,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                 label          = _bc.get("label", "Boiler"),
                             ))
 
-                    # Batterij (laad-entity)
+                    # Battery (laad-entity)
                     for _bat in cfg.get("battery_configs", []):
                         _bat_charge = _bat.get("charge_entity", "")
                         _bat_sensor = _bat.get("sensor_entity", "")
@@ -3132,10 +3165,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._preheat = ClimatePreHeatAdvisor()
         # v3.0: ZonePresenceManager — volledig zelflerend, zero-config
         # Vindt automatisch alle person.*, device_tracker.*, BLE/WiFi, PIR en kalenders
-        # Alleen optionele overrides via config nodig
+        # Only optionele overrides via config nodig
+        # Extra handmatig geconfigureerde presence/bewegingssensoren als overrides
+        _presence_extras = self._config.get("presence_entities", [])
+        _presence_overrides = [
+            {"entity_id": eid, "signaal_type": "binary_home", "platform": "manual", "weight": 0.8}
+            for eid in _presence_extras
+        ] if _presence_extras else []
+        _all_overrides = list(self._config.get("ble_wifi_overrides", [])) + _presence_overrides
         self._zone_presence = ZonePresenceManager(self.hass, {
             "presence_calendar_entities": self._config.get("presence_calendar_entities", []),
-            "ble_wifi_overrides": self._config.get("ble_wifi_overrides", []),
+            "ble_wifi_overrides": _all_overrides,
         })
         await self._zone_presence.async_setup()
         # v1.15.0: PV forecast accuracy tracker
@@ -3483,7 +3523,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._read_feature_toggles()
 
             # ── Lazy re-detect ZonneplanProvider (race condition bij HA start) ──
-            # Als _entities leeg is (entity registry nog niet klaar bij setup),
+            # If _entities leeg is (entity registry nog niet klaar bij setup),
             # probeer elke 5 minuten opnieuw te detecteren.
             _zp = getattr(self, "_zonneplan_bridge", None)
             if _zp is not None and not _zp._entities:
@@ -3530,13 +3570,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # een cyclus vertraging (±10s) wat bij snelle battery-sprongen leidde
             # tot vals huis-verbruik van soms >9 kW.
             if self._energy_balancer is not None:
-                # Lees ruwe batterijwaarde(s) alvast — dezelfde logica als verderop
+                # Read ruwe batterijwaarde(s) alvast — dezelfde logica als verderop
                 # in _process_power_data(), maar puur voor de balancer input.
                 _batt_pre_w: Optional[float] = None
                 try:
                     _batt_pre_total = 0.0
                     _batt_pre_found = False
-                    # Lees multi-battery configs
+                    # Read multi-battery configs
                     for _bpc in self._config.get("battery_configs", []):
                         _bpc_eid = _bpc.get("power_sensor", "")
                         if _bpc_eid:
@@ -3566,7 +3606,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # v4.5.15: spike-filter op ruwe batterijmeting.
                 # Zonneplan Nexus en andere cloud-batterijen kunnen incidenteel een
                 # uitschietende waarde sturen (bijv. +2252W terwijl normaal -590W).
-                # Wanneer de nieuwe meting >3× afwijkt van het voortschrijdend gemiddelde
+                # When de nieuwe meting >3× afwijkt van het voortschrijdend gemiddelde
                 # (EMA, alpha=0.3) én groter is dan 1500W afwijking, gebruiken we de EMA
                 # als proxy en loggen we het als debug. Dit voorkomt absurde house_w.
                 if _batt_pre_w is not None:
@@ -3609,7 +3649,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _batt_age_s = (_dt_util.utcnow() - _b_st2.last_changed).total_seconds()
                 except Exception as _exc_ignored:
                     _LOGGER.debug("CloudEMS: exception genegeerd: %s", _exc_ignored)
-                _batt_is_stale = _batt_age_s > 90
+                # Dynamic stale threshold: use AI-learned Nexus latency if available
+                # Default 90s, but if Nexus typically responds in 45s,
+                # mark stale after 50s so Kirchhoff kicks in faster
+                # Dynamic stale threshold — AI-learned from Nexus latency
+                if getattr(self, '_ai_registry', None):
+                    _stale_thresh = self._ai_registry.threshold("BATTERY_STALE_THRESHOLD_S")
+                else:
+                    _nexus_p90    = float((self._data or {}).get('nexus_latency', {}).get('p90_latency_s', 90) or 90)
+                    _stale_thresh = max(BATTERY_STALE_MIN_S, min(BATTERY_STALE_THRESHOLD_S, _nexus_p90 * 0.8))
+                _batt_is_stale = _batt_age_s > _stale_thresh
+                if _batt_is_stale and _batt_age_s <= 90:
+                    _LOGGER.debug(
+                        "Nexus AI: battery stale na %.0fs (AI drempel=%.0fs, P90=%.0fs)",
+                        _batt_age_s, _stale_thresh, _nexus_p90
+                    )
 
                 _bal = self._energy_balancer.reconcile(
                     grid_w    = data.get("grid_power"),
@@ -3617,13 +3671,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     battery_w = _battery_w_for_reconcile,
                 )
 
-                # Schrijf geschatte waarden terug — ook batterij als die stale is
+                # Write estimated values back — also battery if stale
                 if _bal.solar_estimated:
                     data["solar_power"] = _bal.solar_w
                 if _bal.grid_estimated:
                     data["grid_power"]   = _bal.grid_w
                     data["import_power"] = max(0.0, _bal.grid_w)
                     data["export_power"] = max(0.0, -_bal.grid_w)
+                else:
+                    # Always overwrite import/export from actual grid reading
+                    # (data already has these from _process_power_data but
+                    #  we re-derive here to ensure sign consistency for
+                    #  the self-consumption tracker)
+                    _gw = float(data.get("grid_power") or 0.0)
+                    data["import_power"] = max(0.0,  _gw)
+                    data["export_power"] = max(0.0, -_gw)
 
                 # v4.6.522 fix: schrijf gecorrigeerde battery terug als:
                 #   (a) sensor echt stale is (>90s geen update), OF
@@ -3631,7 +3693,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 #       (cloud sensor stuurt updates maar met vertraagde waarde — niet stale
                 #        maar wel onnauwkeurig; dit was de oorzaak van vals huis-verbruik)
                 # v4.6.543: alleen terugschrijven als grid actief is (P1 online)
-                # Als grid=0 maar battery>0 is de P1 nog niet opgestart —
+                # If grid=0 maar battery>0 is de P1 nog niet opgestart —
                 # de Kirchhoff-schatting is dan onbetrouwbaar.
                 _grid_active = abs(data.get("grid_power") or 0) > 50
                 if _bal.battery_estimated and (_batt_is_stale or _bal.lag_compensated) and _grid_active:
@@ -3910,7 +3972,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _avg_today = round(_mean(_today_prices), 5) if _today_prices else None
                 _cur = float(_pp["current_price"])
 
-                # Goedkoopste uren bepalen op basis van provider-prijzen
+                # Cheapest hours bepalen op basis van provider-prijzen
                 _next_hours_provider = []
                 import datetime as _dt
                 _now_h = _dt.datetime.now().hour
@@ -4029,7 +4091,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _ev_mode = ev_decision.get("mode", "solar")
                             _ev_kwh  = float(ev_decision.get("current_a", 6)) * 230 / 1000  # ~Wh per cyclus
                             _ev_alt  = "wait" if _ev_mode in ("solar", "cheap") else "charge_now"
-                            self._decision_learner.record_decision(
+                            self._record_decision_dual(
                                 component      = "ev",
                                 action         = _ev_mode,
                                 alternative    = _ev_alt,
@@ -4047,7 +4109,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if self._ev_pid and (_ev_fc or self._price_hour_history):
                 try:
                     now_h = datetime.now(timezone.utc).hour
-                    # Bouw score per uur: hogere PV = beter, lagere prijs = beter
+                    # Build score per uur: hogere PV = beter, lagere prijs = beter
                     # Normaliseer beide dimensies naar 0-1 en combineer
                     future_hours_pv: dict[int, float] = {}
                     for h in _ev_fc:
@@ -4114,6 +4176,33 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             )
                 except Exception as _ev_plan_err:
                     _LOGGER.debug("EV EPEX+PV plan fout: %s", _ev_plan_err)
+
+            # AI EV pattern: predict departure and adjust target SOC
+            if getattr(self, '_ai_registry', None):
+                try:
+                    import datetime as _dt_ev
+                    _ev_now  = _dt_ev.datetime.now()
+                    _ev_pred = self._ai_registry.predict_ev_departure(
+                        dow=_ev_now.weekday(),
+                        hour=_ev_now.hour + _ev_now.minute/60.0,
+                    )
+                    _ev_conf_thresh = (self._ai_registry.threshold("AI_EV_MIN_CONFIDENCE")
+                                        if getattr(self, '_ai_registry', None) else 0.50)
+                    if _ev_pred.get("confidence", 0) >= _ev_conf_thresh and _ev_pred.get("departure_hour"):
+                        data["ai_ev_departure_h"]  = _ev_pred["departure_hour"]
+                        data["ai_ev_min_soc"]      = _ev_pred["min_soc"]
+                        data["ai_ev_confidence"]   = _ev_pred["confidence"]
+                        # Feed into trip planner as AI hint
+                        if getattr(self, '_ev_trip_planner', None):
+                            self._ev_trip_planner._ai_departure_h = _ev_pred["departure_hour"]
+                            self._ev_trip_planner._ai_min_soc     = _ev_pred["min_soc"]
+                        _LOGGER.debug(
+                            "CloudEMS AI EV: depart ~%.1f:00, min SOC %.0f%% (conf %.0f%%)",
+                            _ev_pred["departure_hour"], _ev_pred["min_soc"],
+                            _ev_pred["confidence"] * 100
+                        )
+                except Exception as _ev_ai_err:
+                    _LOGGER.debug("CloudEMS AI EV prediction error: %s", _ev_ai_err)
 
             # v1.8: EV PID controller — smooth solar surplus tracking
             ev_pid_state = {}
@@ -4255,7 +4344,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             try:
                 import time as _t_mod
                 _now_ts = _t_mod.time()
-                # Controleer max 1× per 60 seconden om spam te voorkomen
+                # Check max 1× per 60 seconden om spam te voorkomen
                 if self._p1_reader and (_now_ts - self._dsmr_type_last_check_ts) > 60:
                     self._dsmr_type_last_check_ts = _now_ts
                     _measured = getattr(self._p1_reader, "measured_interval_s", None)
@@ -4276,7 +4365,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _detected = None  # twijfelgebied, niets doen
 
                         if _detected and _detected != _cfg_type:
-                            # Stuur één keer een persistent notification
+                            # Send één keer een persistent notification
                             if not self._dsmr_type_notified:
                                 self._dsmr_type_notified = True
                                 _cfg_label  = DSMR_TYPE_LABELS.get(_cfg_type, _cfg_type)
@@ -4354,7 +4443,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     self._nilm.update_battery_uncertainty(b_label, b_real)
                     bw = b_real
                 else:
-                    # Geen verse meting — gebruik balancer Kirchhoff-schatting
+                    # No verse meting — gebruik balancer Kirchhoff-schatting
                     bw = _bal.battery_w if _bal is not None else getattr(self, "_last_battery_w", 0.0)
                     self._nilm._batt_uncertainty.update_estimate(
                         b_label,
@@ -4413,7 +4502,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # waardoor kleine omvormers (GoodWe 1837Wp) een actual_frac > 1.0 kregen
                 # → profiel werd structureel te hoog geleerd.
                 if _prev_kwh > 0:
-                    # Bereken totaal peak_wp over alle geconfigureerde omvormers
+                    # Calculate totaal peak_wp over alle geconfigureerde omvormers
                     _inv_configs = self._config.get(CONF_INVERTER_CONFIGS, [])
                     _total_peak_wp = 0.0
                     for _inv in _inv_configs:
@@ -4902,9 +4991,24 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._outage_active = False
             _outage_detected = getattr(self, '_outage_active', False)
             if self._boiler_ctrl:
+                # AI hint: lower surplus threshold if model suggests running boiler
+                _ai_boiler_hint = data.get("ai_suggestion", {})
+                _boiler_surplus = solar_surplus
+                _boiler_conf_thresh = (self._ai_registry.threshold("AI_BOILER_MIN_CONFIDENCE")
+                                        if getattr(self, '_ai_registry', None) else 0.65)
+                _boiler_nudge_w     = (self._ai_registry.threshold("BOILER_SURPLUS_NUDGE_W")
+                                        if getattr(self, '_ai_registry', None) else 200.0)
+                if (_ai_boiler_hint.get("label") == "run_boiler"
+                        and float(_ai_boiler_hint.get("confidence", 0)) >= _boiler_conf_thresh):
+                    # Lower effective surplus — amount learned by ThresholdLearner
+                    _boiler_surplus = solar_surplus + _boiler_nudge_w
+                    _LOGGER.debug(
+                        "CloudEMS AI: boiler surplus nudge +200W (confidence=%.0f%%)",
+                        _ai_boiler_hint["confidence"] * 100
+                    )
                 boiler_decisions = await self._boiler_ctrl.async_evaluate(
                     price_info         =price_info,
-                    solar_surplus_w    =solar_surplus,
+                    solar_surplus_w    =_boiler_surplus,
                     phase_currents     =self._limiter.phase_currents,
                     phase_max_currents ={
                         ph: self._limiter._phases[ph].max_ampere
@@ -4949,7 +5053,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             # Schat energie: 2kWh per boost-beslissing (conservatief)
                             _b_kwh = 2.0
                             _b_alt = "hold_off" if bd.action in ("hold_on","turn_on","boost") else "boost"
-                            self._decision_learner.record_decision(
+                            self._record_decision_dual(
                                 component      = "boiler",
                                 action         = bd.action,
                                 alternative    = _b_alt,
@@ -5032,7 +5136,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if not self._lamp_circulation._lamps:
                     _discovered = [s.entity_id for s in self.hass.states.async_all("light")]
                     if _discovered:
-                        # Lees altijd de actuele coordinator config — niet de stale lokale lamp_cfg.
+                        # Read altijd de actuele coordinator config — niet de stale lokale lamp_cfg.
                         # Zo blijft een via de UI uitgeschakelde module uitgeschakeld na lazy-discovery.
                         _lamp_cfg_live = self._config.get("lamp_circulation", {}) or {}
                         self._lamp_circulation.configure(
@@ -5150,6 +5254,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     if _shutter_outdoor_t is None:
                         _shutter_outdoor_t = (self._data or {}).get("outdoor_temp_c")
 
+                    # AI shutter pattern predictions — feed as hints to controller
+                    if getattr(self, '_ai_registry', None):
+                        try:
+                            import datetime as _dt_sh
+                            _sh_now = _dt_sh.datetime.now()
+                            _sh_hour = _sh_now.hour + _sh_now.minute / 60.0
+                            _sh_dow  = _sh_now.weekday()
+                            for _sh_cfg_hint in getattr(self._shutter_ctrl, "_configs", []):
+                                _sh_eid_hint = (getattr(_sh_cfg_hint, "entity_id", None)
+                                                or getattr(_sh_cfg_hint, "cover_entity", None))
+                                if not _sh_eid_hint:
+                                    continue
+                                _sh_pred = self._ai_registry.predict_shutter(
+                                    shutter_id = _sh_eid_hint,
+                                    hour       = _sh_hour,
+                                    dow        = _sh_dow,
+                                    solar_w    = solar_surplus,
+                                    temp_out   = _shutter_outdoor_t or 15.0,
+                                    cloud_pct  = float(data.get("cloud_cover_pct", 50) or 50),
+                                )
+                                _sh_conf_thresh = (self._ai_registry.threshold("AI_SHUTTER_MIN_CONFIDENCE")
+                                                    if getattr(self, '_ai_registry', None) else 0.60)
+                                if (_sh_pred.get("confidence", 0) >= _sh_conf_thresh
+                                        and _sh_pred.get("position") is not None):
+                                    # Store hint on config for controller to use
+                                    setattr(_sh_cfg_hint, "_ai_position_hint", _sh_pred["position"])
+                                    setattr(_sh_cfg_hint, "_ai_position_conf", _sh_pred["confidence"])
+                        except Exception as _sh_ai_err:
+                            _LOGGER.debug("CloudEMS AI shutter hint error: %s", _sh_ai_err)
+
                     shutter_decisions = await self._shutter_ctrl.async_evaluate(
                         outdoor_temp_c     = _shutter_outdoor_t,
                         solar_elevation_deg= _sol.get("elevation"),
@@ -5212,7 +5346,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                 # Schatting: 0.1 kWh thermisch voordeel per positie-stap
                                 _sh_kwh  = 0.1
                                 _sh_alt  = "idle"
-                                self._decision_learner.record_decision(
+                                self._record_decision_dual(
                                     component      = "shutter",
                                     action         = _sh_dec.action,
                                     alternative    = _sh_alt,
@@ -5528,7 +5662,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         self._anchor_kwh_today[_did] = round(
                             self._anchor_kwh_today.get(_did, 0.0) + _kwh_inc, 4
                         )
-                # Opslaan elke 60s
+                # Save elke 60s
                 if time.time() - self._anchor_kwh_last_save > 60:
                     self.hass.async_create_task(self._store_anchor_kwh.async_save({
                         "day":       _today_k,
@@ -5563,7 +5697,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # nilm_devices_enriched blijft VOLLEDIG voor het dashboard — gebruiker
             # kan lage-confidence apparaten zien en bevestigen/afwijzen.
 
-            # Bouw SPE HIGH-set op (entity_ids met PowerCalc HIGH confidence)
+            # Build SPE HIGH-set op (entity_ids met PowerCalc HIGH confidence)
             _spe_high_eids: set = set()
             if self._power_estimator:
                 try:
@@ -5974,14 +6108,21 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _grid_w   = float(data.get("grid_power_w") or data.get("grid_power") or 0.0)
                 _import_w = max(0.0, data.get("import_power",  _grid_w if _grid_w > 0 else 0.0))
                 _export_w = max(0.0, data.get("export_power", -_grid_w if _grid_w < 0 else 0.0))
+                _pv_w_sc  = max(0.0, data.get("solar_power", 0.0))
+                # BUG FIX: when battery is discharging, total export includes battery export.
+                # Self-consumption only tracks SOLAR self-consumption, so we must subtract
+                # battery discharge from export. Formula: solar_export = max(0, export - battery_discharge)
+                _batt_w_sc     = float(data.get("battery_power", 0) or 0)
+                _batt_discharge = max(0.0, -_batt_w_sc)  # positive when discharging
+                _solar_export_w = max(0.0, _export_w - _batt_discharge)
                 self._self_consumption.tick(
-                    pv_w     = max(0.0, data.get("solar_power", 0.0)),
+                    pv_w     = _pv_w_sc,
                     import_w = _import_w,
-                    export_w = _export_w,
+                    export_w = _solar_export_w,   # only solar portion of export
                 )
                 sc = self._self_consumption.get_data()
                 self_cons_data = {
-                    "ratio_pct":          sc.ratio_pct,
+                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else _selfcons_pct,
                     "export_pct":         sc.export_pct,
                     "pv_today_kwh":       sc.pv_today_kwh,
                     "self_consumed_kwh":  sc.self_consumed_kwh,
@@ -5992,6 +6133,26 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "monthly_saving_eur": sc.monthly_saving_eur,
                 }
                 await self._self_consumption.async_maybe_save()
+
+            # AI registry: observe + predict every tick
+            if getattr(self, '_ai_registry', None):
+                try:
+                    await self._ai_registry.async_observe(data)
+                    # Get prediction and store as ai_suggestion for modules to use
+                    _ai_pred = await self._ai_registry.async_predict(data)
+                    if _ai_pred:
+                        data['ai_suggestion'] = {
+                            'label':      _ai_pred.label,
+                            'confidence': _ai_pred.confidence,
+                            'value':      _ai_pred.value,
+                            'explanation': _ai_pred.explanation,
+                            'ready':      True,
+                        }
+                    else:
+                        data.setdefault('ai_suggestion', {'ready': False})
+                except Exception as _ai_obs_exc:
+                    _LOGGER.debug("CloudEMS AI error: %s", _ai_obs_exc)
+                    data.setdefault('ai_suggestion', {'ready': False})
 
             # Feature 6: Day-type classification
             day_type_data: dict = {}
@@ -6606,7 +6767,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _bsl_ref  = getattr(self, "_battery_soc_learner", None)
                 if _bsl_ref is not None:
                     try:
-                        # Gebruik de eerste batterij-entity als sleutel
+                        # Use de eerste batterij-entity als sleutel
                         _bat_cfgs = self._config.get("battery_configs") or []
                         _bsl_eid  = (_bat_cfgs[0].get("power_sensor") or "") if _bat_cfgs else (
                             self._config.get("battery_sensor", ""))
@@ -6661,7 +6822,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     system_demand_kwh        = float((self.data or {}).get("energy_demand", {}).get("system_total_kwh", 0.0)),
                     # v4.6.507: saldering — beïnvloedt laad/ontlaad drempels
                     net_metering_pct         = get_net_metering_pct(self._config.get(CONF_ENERGY_PRICES_COUNTRY, "NL")),
+                    # AI hint — local k-NN suggestion (only if ready + confident)
+                    ai_hint_label            = (data.get("ai_suggestion") or {}).get("label"),
+                    ai_hint_confidence       = float((data.get("ai_suggestion") or {}).get("confidence") or 0.0),
                 )
+                # Refresh thresholds from AI registry before each evaluation
+                if getattr(self, '_ai_registry', None):
+                    try:
+                        self._battery_decision_engine.set_ai_thresholds(self._ai_registry.threshold)
+                    except Exception:
+                        pass
                 _bde_result  = self._battery_decision_engine.evaluate(_bde_ctx)
                 _bde_explain = self._battery_decision_engine.explain(_bde_ctx)
 
@@ -6782,7 +6952,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             _dol_alt = "hold"
                         elif _bde_result.action == "hold":
                             _dol_alt = "charge" if _dol_price < _dol_avg else "discharge"
-                        self._decision_learner.record_decision(
+                        self._record_decision_dual(
                             component      = "battery",
                             action         = _bde_result.action,
                             alternative    = _dol_alt,
@@ -6812,14 +6982,27 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # Uitvoering: stuur commando naar Zonneplan als confidence >= 0.75
                 if _bde_result and _bde_result.should_execute and _zp_br:
                     try:
+                        _bat_pw_now = float(data.get("battery_power", 0) or 0)
                         if _bde_result.is_charging:
                             await _zp_br.async_set_mode("self_consumption")
+                            # Record command for Nexus latency learning
+                            if getattr(self, '_ai_registry', None):
+                                _cmd_w = float(_bde_ctx.max_charge_w if _bde_ctx else 2000)
+                                self._ai_registry.record_battery_command(_cmd_w, _bat_pw_now)
                         elif _bde_result.is_discharging:
                             await _zp_br.async_set_mode("home_optimization")
+                            if getattr(self, '_ai_registry', None):
+                                _cmd_w = -float(_bde_ctx.max_discharge_w if _bde_ctx else 2000)
+                                self._ai_registry.record_battery_command(_cmd_w, _bat_pw_now)
                         _LOGGER.debug(
                             "BDE uitvoering: %s via Zonneplan (bron: %s, conf: %.0f%%)",
                             _bde_result.action, _bde_result.source, _bde_result.confidence * 100,
                         )
+                        # Report to threshold learner: AI hint was used → track outcome
+                        if getattr(self, '_ai_registry', None) and _bde_result.source == "ai_hint":
+                            self._ai_registry.report_threshold_outcome(
+                                "AI_BATTERY_MIN_CONFIDENCE", good=True, reward=0.5
+                            )
                     except Exception as _bde_exec_err:
                         _LOGGER.debug("BDE uitvoering mislukt: %s", _bde_exec_err)
 
@@ -6923,7 +7106,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "via": "with_scheduler",
                         }
                     )
-                    # Schrijf human_reason terug naar battery_schedule zodat sensor het toont
+                    # Write human_reason terug naar battery_schedule zodat sensor het toont
                     _hr = getattr(_zp_result, "human_reason", "")
                     if _hr:
                         battery_schedule["human_reason"] = _hr
@@ -6991,7 +7174,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             "via": "standalone",
                         }
                     )
-                    # Schrijf human_reason terug naar battery_schedule zodat sensor het toont
+                    # Write human_reason terug naar battery_schedule zodat sensor het toont
                     _hr = getattr(_zp_result, "human_reason", "")
                     if _hr:
                         battery_schedule["human_reason"] = _hr
@@ -7074,7 +7257,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     import time as _time
                     _ts_now = _time.time()
 
-                    # Bouw current_powers dict: begin met bekende waarden
+                    # Build current_powers dict: begin met bekende waarden
                     _current_powers: dict = {}
 
                     # Grid / P1
@@ -7154,7 +7337,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                             active_nilm_devices = _active_devs,
                         )
 
-                    # Periodiek opslaan (elke ~5 min)
+                    # Periodic opslaan (elke ~5 min)
                     _topo_cycle = getattr(self, "_topo_save_cycle", 0) + 1
                     self._topo_save_cycle = _topo_cycle
                     if _topo_cycle % 30 == 0:
@@ -7303,7 +7486,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 await self._sensor_hints.async_save()
 
             sanity_data: dict = {}
-            # Gebruik de al berekende _last_battery_w (som van alle batterijen + EMA-filter)
+            # Use de al berekende _last_battery_w (som van alle batterijen + EMA-filter)
             battery_total_w: Optional[float] = getattr(self, "_last_battery_w", None)
             if battery_total_w == 0.0 and not self._config.get("battery_configs") and not self._config.get(CONF_BATTERY_SENSOR, ""):
                 battery_total_w = None  # geen batterij geconfigureerd → None voor sanity check
@@ -7364,7 +7547,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "advice":        occ.advice,
                 }
                 # v1.32: cross-module loop — aanwezigheid → NILM gevoeligheid
-                # Als niemand thuis is, verlaag de NILM-gevoeligheid: alleen grote
+                # If niemand thuis is, verlaag de NILM-gevoeligheid: alleen grote
                 # onverwachte verbruikers (> 800W) zijn werkelijk interessant.
                 # Dit voorkomt NILM-detecties van standby-fluctuaties die normaal
                 # zijn als het huis leeg is (koelkast, netwerk, alarm).
@@ -7705,7 +7888,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             try:
                 _tpl = getattr(self._nilm, "_time_pattern_learner", None)
                 if _tpl:
-                    # Opslaan (elke dagstart = acceptabele frequentie)
+                    # Save (elke dagstart = acceptabele frequentie)
                     await _tpl.async_save()
                     # Anomalie-check op actieve apparaten
                     import time as _time_mod
@@ -7735,7 +7918,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             try:
                 from datetime import datetime as _dt_cls, timedelta as _td
                 _yesterday = (_dt_cls.now() - _td(days=1)).date().isoformat()
-                # Gebruik energie-data van P1 / Tibber als beschikbaar,
+                # Use energie-data van P1 / Tibber als beschikbaar,
                 # anders schat op basis van gemiddeld vermogen × 24h
                 _p1 = self._data.get("p1") or {}
                 _tibber = self._data.get("tibber_today") or {}
@@ -7784,7 +7967,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # v2.6 / v3.0: Capaciteits-piekbewaker
             try:
                 _grid_w = float(self._data.get("grid_power", 0) or 0)
-                # Bereken uitschakelbare lasten voor load-shedding advies
+                # Calculate uitschakelbare lasten voor load-shedding advies
                 _boiler_w = float(
                     (self._boiler_ctrl.get_status()[0].get("power_w") if self._boiler_ctrl and self._boiler_ctrl.get_status() else 0) or 0
                 )
@@ -8035,6 +8218,27 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _dol_eval_err:
                     _LOGGER.debug("DOL evaluate fout: %s", _dol_eval_err)
 
+                # v5.3.x: OutcomeTracker tick — parallel aan DOL
+                try:
+                    _ot_state = {
+                        "battery_soc":     data.get("battery_soc_pct", 50.0),
+                        "battery_soc_pct": data.get("battery_soc_pct", 50.0),
+                        "solar_power":     data.get("solar_power", 0.0),
+                        "export_power":    data.get("export_power", 0.0),
+                        "boiler_temp_c":   data.get("boiler_temp_c", 50.0),
+                        "epex_price_now":  float(price_info.get("current") or 0),
+                        "current_price":   float(price_info.get("current") or 0),
+                    }
+                    _ot_completed = self._outcome_tracker.tick(_ot_state)
+                    if _ot_completed:
+                        _LOGGER.debug(
+                            "OutcomeTracker: %d beslissingen afgemeten, gem. reward=%.2f",
+                            len(_ot_completed),
+                            sum(c["reward"] for c in _ot_completed) / len(_ot_completed),
+                        )
+                except Exception as _ot_tick_err:
+                    _LOGGER.debug("OutcomeTracker tick fout: %s", _ot_tick_err)
+
             if price_info and _cur_hour_ts != self._price_history_last_hour:
                 _cur_price = price_info.get("current")
                 if _cur_price is not None:
@@ -8122,7 +8326,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     _gas_result = self._gas_analysis.get_data(gas_price_eur_m3=_gas_price, current_m3=float(_gas_m3_val))
 
                     # Dagrecords voor drill-down in JS kaart (laatste 30 dagen)
-                    # Als leeg: start backfill asynchroon (tijdstip onbekend bij eerste cyclus)
+                    # If leeg: start backfill asynchroon (tijdstip onbekend bij eerste cyclus)
                     if not self._gas_analysis._records:
                         if hasattr(self._gas_analysis, "_backfill_records_from_statistics"):
                             _eid_bf = self._gas_analysis._find_gas_sensor()
@@ -8189,7 +8393,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                                     month=_dt_hp.datetime.now().month,
                                     hour=_dt_hp.datetime.now().hour,
                                 )
-                                self._decision_learner.record_decision(
+                                self._record_decision_dual(
                                     component      = "heatpump",
                                     action         = _hp_action,
                                     alternative    = "hold",
@@ -8451,6 +8655,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # v4.0.9+: huisverbruik berekend door CloudEMS (centrale _calc_house_load helper)
                 # house = solar + grid_netto - battery_netto
                 "house_load_w":         round(_house_w_final, 1),
+                "house_power":          round(_house_w_final, 1),  # alias for sensor.cloudems_home_rest
                 "selfcons_pct":         _selfcons_pct,
                 "selfsuff_pct":         _selfsuff_pct,
                 "phases":               self._limiter.get_phase_summary(),
@@ -8531,6 +8736,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "shutters":             self._shutter_ctrl.get_status() if self._shutter_ctrl else {},  # ← v3.9.0 rolluiken
                 "shutter_thermal_gains": getattr(self, "_shutter_thermal_learner", None).get_status() if getattr(self, "_shutter_thermal_learner", None) else [],
                 "decision_log":         list(self._decision_log),
+                "outcome_tracker":      getattr(self, "_outcome_tracker", None) and self._outcome_tracker.stats or {},
                 "insights":             self._insights,
                 "nilm_diagnostics":     self._nilm.get_diagnostics(),  # ← v1.7
                 # v4.3.6: runtime_warnings — actieve waarschuwingen voor dashboard
@@ -8581,6 +8787,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "target_soc_pct":getattr(_bde_result, "target_soc_pct",  None)     if _bde_result else None,
                     "executed":      bool(_bde_result and _bde_result.should_execute),
                     "explain":       _bde_explain,
+                    # v5.3.x: geleerde drempels voor tooltip
+                    "charge_threshold_eur":    getattr(self._battery_decision_engine, "_last_charge_thr",    None),
+                    "discharge_threshold_eur": getattr(self._battery_decision_engine, "_last_discharge_thr", None),
+                    "net_metering_pct":        getattr(self._battery_decision_engine, "_last_nm_pct",        None),
                 },
                 "congestion":           congestion_data,                # ← v1.10
                 "battery_degradation":  degradation_data,              # ← v1.10
@@ -8605,12 +8815,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "self_consumption":     self_cons_data,
                 "day_type":             day_type_data,
                 "device_drift":         drift_data,
+                "ai_status":            getattr(self, '_ai_registry', None) and self._ai_registry.status or {},
                 "phase_migration":      phase_migration_data,
                 "gas_data":             {
                     "gas_m3":  (self._p1_reader.latest.gas_m3  if self._p1_reader and self._p1_reader.latest else self._read_gas_sensor()),
                     "gas_kwh": (self._p1_reader.latest.gas_kwh if self._p1_reader and self._p1_reader.latest else round((self._read_gas_sensor() or 0.0) * 9.769, 3)),
                     # Dag-verbruik: lees direct van gas_analysis (today_gas_start_m3)
-                    # Als gas_analysis nog geen start heeft, bootstrappen via HA recorder
+                    # If gas_analysis nog geen start heeft, bootstrappen via HA recorder
                     # Dag-verbruik: gas_analysis heeft beste waarde, fallback op coordinator tracking
                     "dag_m3":    float(gas_analysis_data.get("gas_m3_today") or (
                         round(max(0.0, (
@@ -8783,7 +8994,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         extract_inverter_summary, extract_ev_summary,
                         extract_appliance_summary, extract_energy_prices,
                     )
-                    # Gebruik cache als die gevuld is, anders opnieuw pollen
+                    # Use cache als die gevuld is, anders opnieuw pollen
                     _ext = locals().get("_provider_poll_cache") or await self._provider_manager.async_poll_all()
                     self._data["ext_inverters"]  = extract_inverter_summary(_ext)
                     self._data["ext_ev"]         = extract_ev_summary(_ext)
@@ -8900,6 +9111,28 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self.update_interval = timedelta(seconds=_new_interval)
             # Expose performance data in coordinator data
             self._data["performance"] = self._perf.get_status_dict()
+            # Card output health check — every tick
+            if getattr(self, '_card_watcher', None):
+                try:
+                    _card_health = self._card_watcher.check(self._data)
+                    self._data["card_health"] = _card_health
+                except Exception as _cw_err:
+                    _LOGGER.debug("CardOutputWatcher fout: %s", _cw_err)
+
+            # Nexus latency prediction + data sanity anomalies
+            if getattr(self, '_ai_registry', None):
+                try:
+                    import datetime as _dt_nx
+                    self._data["nexus_latency"] = self._ai_registry.predict_battery_latency(
+                        hour=_dt_nx.datetime.now().hour
+                    )
+                    _sanity = self._ai_registry.get_sanity_anomalies()
+                    if _sanity:
+                        self._data["data_anomalies"] = _sanity
+                    elif "data_anomalies" in self._data:
+                        del self._data["data_anomalies"]
+                except Exception:
+                    pass
 
             # Log performance every 10 cycles to normal log
             if self._coordinator_tick % 10 == 0:
@@ -8982,7 +9215,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("CloudEMS AdaptiveHome bridge fire fout: %s", _ah_err)
 
             # ── Long-term statistics (InfluxDB/Grafana compatible) ────────────
-            # Schrijf elk uur key metrics naar HA statistieken zodat
+            # Write elk uur key metrics naar HA statistieken zodat
             # InfluxDB en Grafana ze automatisch oppikken via HA API
             _tick = getattr(self, "_coordinator_tick", 0)
             if _tick % 360 == 1:  # ~elk uur (360 × 10s)
@@ -9023,6 +9256,72 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
     # ── Data gathering ────────────────────────────────────────────────────────
 
+    def _record_decision_dual(
+        self,
+        component: str,
+        action: str,
+        context_bucket: str,
+        price_eur_kwh: float = 0.0,
+        energy_kwh: float = 0.0,
+        eval_after_s: int = 600,
+        **kwargs,
+    ) -> None:
+        """Registreer een beslissing in zowel DecisionOutcomeLearner als OutcomeTracker.
+
+        Stap 1 van uitfasering: beide systemen draaien parallel.
+        DecisionOutcomeLearner blijft actief voor threshold-bias.
+        OutcomeTracker verzamelt data voor toekomstige AI feedback loop.
+        """
+        # Oud systeem
+        try:
+            self._record_decision_dual(
+                component=component,
+                action=action,
+                context_bucket=context_bucket,
+                price_eur_kwh=price_eur_kwh,
+                energy_kwh=energy_kwh,
+                eval_after_s=eval_after_s,
+                **kwargs,
+            )
+        except Exception as _dol_err:
+            _LOGGER.debug("DOL record fout (%s/%s): %s", component, action, _dol_err)
+
+        # Nieuw systeem — parallel
+        try:
+            data = self._data or {}
+            context_snapshot = {
+                "component":     component,
+                "context_bucket": context_bucket,
+                "price_eur_kwh": price_eur_kwh,
+                "energy_kwh":    energy_kwh,
+                "soc_pct":       data.get("battery_soc_pct", 50.0),
+                "solar_power":   data.get("solar_power", 0.0),
+                "grid_power":    data.get("grid_power", 0.0),
+                "boiler_temp_c": data.get("boiler_temp_c", 50.0),
+                "epex_price":    price_eur_kwh,
+            }
+            # Map component/action naar OutcomeTracker label
+            label_map = {
+                ("battery", "charge"):    "charge_battery",
+                ("battery", "discharge"): "discharge_battery",
+                ("boiler",  "boost"):     "run_boiler",
+                ("boiler",  "on"):        "run_boiler",
+                ("ev",      "solar"):     "defer_load",
+                ("ev",      "cheap"):     "defer_load",
+                ("ev",      "charge_now"): "charge_battery",
+            }
+            label = label_map.get((component, action), action)
+            self._outcome_tracker.record(
+                label=label,
+                confidence=0.7,
+                features=[price_eur_kwh, energy_kwh,
+                           context_snapshot["soc_pct"] / 100.0,
+                           context_snapshot["solar_power"] / 5000.0],
+                context=context_snapshot,
+            )
+        except Exception as _ot_err:
+            _LOGGER.debug("OutcomeTracker record fout (%s/%s): %s", component, action, _ot_err)
+
     def _build_runtime_warnings(self) -> list[dict]:
         """
         v4.3.6: Bouw een lijst van actieve runtime-waarschuwingen.
@@ -9052,7 +9351,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # ── P1 data staleness ─────────────────────────────────────────────────
         p1_age = time.time() - getattr(self, "_last_p1_update", 0.0)
-        if self._p1_reader and p1_age > 90:
+        _p1_stale = (self._ai_registry.threshold("P1_STALE_THRESHOLD_S")
+                     if getattr(self, '_ai_registry', None) else 90.0)
+        if self._p1_reader and p1_age > _p1_stale:
             warnings.append({
                 "code":    "p1_stale",
                 "level":   "error",
@@ -9128,6 +9429,33 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 })
         except Exception as _dq_err:
             _LOGGER.debug("DataQualityMonitor fout: %s", _dq_err)
+
+        # ── Aanwezigheidsdetectie hint ────────────────────────────────────────
+        # Hint als er bewegingssensoren beschikbaar zijn maar geen presence_entities
+        # geconfigureerd zijn — gebruiker weet mogelijk niet dat dit kan
+        try:
+            presence_cfg = self._config.get("presence_entities", [])
+            if not presence_cfg:
+                motion_found = [
+                    s.entity_id for s in self.hass.states.async_all("binary_sensor")
+                    if s.attributes.get("device_class") in ("motion", "occupancy", "presence")
+                ]
+                if motion_found:
+                    warnings.append({
+                        "code":    "presence_sensors_not_configured",
+                        "level":   "info",
+                        "message": (
+                            f"Er zijn {len(motion_found)} bewegings-/aanwezigheidssensor(en) gevonden "
+                            f"(bijv. {motion_found[0]}) die CloudEMS kan gebruiken voor aanwezigheidsdetectie."
+                        ),
+                        "detail": (
+                            "Voeg ze toe via Instellingen → CloudEMS → Configuratie → Aanwezigheid "
+                            "om de aanwezigheidsdetectie te verbeteren."
+                        ),
+                        "category": "onboarding",
+                    })
+        except Exception:
+            pass
 
         return warnings
 
@@ -9245,7 +9573,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             from homeassistant.util import dt as dt_util
             import datetime as _dt
 
-            # Gebruik dezelfde gas-sensor detectie als GasAnalyzer
+            # Use dezelfde gas-sensor detectie als GasAnalyzer
             gas_eid = None
             if self._gas_analysis and hasattr(self._gas_analysis, "_find_gas_sensor"):
                 gas_eid = self._gas_analysis._find_gas_sensor()
@@ -9559,7 +9887,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Heeft de installatie überhaupt gas?
             _gas_m3_total = (self._data or {}).get("p1_data", {}).get("gas_m3_total") or 0.0
             if _gas_m3_total <= 0:
-                # Geen P1 gas — probeer standalone gas sensor
+                # No P1 gas — probeer standalone gas sensor
                 _gas_m3_total = self._read_gas_sensor() or 0.0
             if _gas_m3_total <= 0:
                 return  # geen gassensor → kunnen niets detecteren
@@ -9595,7 +9923,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if _score < 1:
                 return
 
-            # Bouw de reden op
+            # Build de reden op
             _redenen = []
             if _is_summer and _gas_today > 0.05:
                 _redenen.append(f"gasverbruik in de zomer ({_gas_today:.2f} m³ vandaag, maand {_month})")
@@ -9671,7 +9999,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             # Persisteert over herstarts via HA Store.
             _bsl_key  = eid or label   # gebruik label als power_sensor leeg is
             _bsl_mode = None
-            # Lees battery_mode van de provider als beschikbaar (provider-onafhankelijk)
+            # Read battery_mode van de provider als beschikbaar (provider-onafhankelijk)
             if getattr(self, "_battery_providers", None):
                 for _bpx2 in self._battery_providers.available_providers:
                     if _bpx2.is_available:
@@ -9703,7 +10031,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # Capaciteit: geconfigureerd heeft voorrang, anders geleerd
                 if not capacity_kwh and _bsl_result.capacity_kwh:
                     capacity_kwh = _bsl_result.capacity_kwh
-                # Vermogen: geconfigureerd heeft voorrang, anders geleerd
+                # Power: geconfigureerd heeft voorrang, anders geleerd
                 if not max_charge_w and _bsl_result.max_charge_w:
                     max_charge_w = _bsl_result.max_charge_w
                 if not max_discharge_w and _bsl_result.max_discharge_w:
@@ -10003,7 +10331,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             name_lower = (entry.original_name or "").lower()
             combined = eid_lower + " " + name_lower
 
-            # Alleen entiteiten met 'voltage' of 'spanning' in naam/id
+            # Only entiteiten met 'voltage' of 'spanning' in naam/id
             if "voltage" not in combined and "spanning" not in combined:
                 continue
 
@@ -10025,7 +10353,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             seen.add(eid)
 
-            # Fase detectie
+            # Phase detectie
             assigned = False
             for ph in active_phases:
                 ph_lower = ph.lower()     # "l1", "l2", "l3"
@@ -10040,7 +10368,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     break
 
             if not assigned:
-                # Geen fase in naam → toevoegen aan alle actieve fasen
+                # No fase in naam → toevoegen aan alle actieve fasen
                 for ph in active_phases:
                     result[ph].append(eid)
 
@@ -10197,7 +10525,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._last_p1_realtime_ts     = now
 
             # v4.6.512: push realtime update naar HA zodat fase-sensoren direct updaten
-            # Gebruik async_set_extra_state_attributes via listeners ipv volledige refresh
+            # Use async_set_extra_state_attributes via listeners ipv volledige refresh
             for listener in list(self._listeners):
                 try:
                     listener()
@@ -10325,7 +10653,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 raw_p = self._calc.to_watts(pwr_key, raw_p)
 
             # ── v4.6.546: Zelflerend fusie model ─────────────────────────────
-            # Bouw alle schattingen op en laat het model een gewogen gemiddelde
+            # Build alle schattingen op en laat het model een gewogen gemiddelde
             # berekenen op basis van historische betrouwbaarheid per methode.
             voltage_for_fusion = float(raw_v) if raw_v else mains_v
             netto_p = raw_p if raw_p is not None else p1_net_w
@@ -10378,7 +10706,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             )
 
             # ── v2.2: ESPHome NILM-meter features uitlezen ───────────────────
-            # Als de gebruiker een DIY ESPHome-meter heeft geconfigureerd,
+            # If de gebruiker een DIY ESPHome-meter heeft geconfigureerd,
             # lees dan power factor en inrush uit als extra NILM-features.
             # v4.4.1: ook reactief vermogen (Q) en THD% — optioneel, None als afwezig.
             if self._config.get(CONF_DSMR_SOURCE) == DSMR_SOURCE_ESPHOME:
@@ -10445,7 +10773,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # ── v4.6.546: Post-loop Kirchhoff-consistentiecheck ──────────────────
         # DSMR4 geeft fase-stromen UNSIGNED (altijd positief, ook bij export).
-        # Als som(Li×Ui) >> grid_total (factor >2): meetinconsistentie.
+        # If som(Li×Ui) >> grid_total (factor >2): meetinconsistentie.
         # → Schaal alle fasestromen proportioneel naar grid_total.
         # Dit vangt gevallen op waarbij de P1 stroomsensor ook interne
         # accu/omvormer stromen meet die niet op de nettometing verschijnen.
@@ -10546,13 +10874,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         if total_wp <= 0:
             return {}
 
-        # Gebruik PV-forecast om correctiefactor te berekenen t.o.v. piekwaarden
+        # Use PV-forecast om correctiefactor te berekenen t.o.v. piekwaarden
         # Aanname: NL gemiddeld ~900 vollasturen per jaar per Wp (conservatief)
         vollasturen = float(self._config.get("pv_vollasturen", 900))
         annual_kwh_est = round(total_wp / 1000.0 * vollasturen, 0)
 
         # Opbrengst per jaar: mix van eigen gebruik (bespaarde inkoop) + terugleving
-        # Gebruik actuele prijs als proxy; terugleverprijs typisch 30% van inkoop
+        # Use actuele prijs als proxy; terugleverprijs typisch 30% van inkoop
         if not price_info:
             return {}
         avg_price = price_info.get("average_today") or current_price or 0.25
@@ -10740,7 +11068,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         import asyncio as _aio_ld
         _p = payload or {}
 
-        # Altijd energie-context meesturen zodat elk beslissingsmoment zichzelf verklaart
+        # Always energie-context meesturen zodat elk beslissingsmoment zichzelf verklaart
         _ctx = {
             "solar_w":              round(float(getattr(self, "_last_solar_w",   0) or 0), 1),
             "grid_w":               round(float(getattr(self, "_last_grid_w",    0) or 0), 1),
@@ -10771,7 +11099,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 reason=_p.get("reason", "")[:50],
             )
 
-        # Schrijf naar DecisionsHistory ring buffer (JSON + sensor attribuut)
+        # Write naar DecisionsHistory ring buffer (JSON + sensor attribuut)
         # Alle categorieën worden opgeslagen — JS card filtert per categorie.
         # Uitgesloten: interne/technische categorieën die geen gebruikerswaarde hebben.
         _HISTORY_EXCLUDE = {"ev_pid", "p1_update"}  # clipping+solar_dim nu wél gelogd
@@ -10792,7 +11120,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 }
             )
 
-        # Schrijf naar cloudems_decisions.log (+ mirror naar high log)
+        # Write naar cloudems_decisions.log (+ mirror naar high log)
         _bk = getattr(self, "_learning_backup", None)
         if _bk is not None:
             _aio_ld.ensure_future(_bk.async_log_decision(f"decision_{category}", entry))

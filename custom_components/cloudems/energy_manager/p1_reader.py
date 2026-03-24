@@ -593,6 +593,62 @@ class HAEntityFallbackReader:
             "sensor.dsmr_day_consumption_gas",
             "sensor.gas_meter_reading",
         ],
+        # Per-fase import vermogen (DSMR5)
+        "power_l1_import": [
+            "sensor.electricity_meter_fase_l1_vermogen",
+            "sensor.electricity_meter_power_consumption_phase_l1",
+            "sensor.dsmr_reading_electricity_currently_delivered_l1",
+            "sensor.homewizard_p1_active_power_l1_w",
+            "sensor.electricity_meter_active_power_l1",
+        ],
+        "power_l2_import": [
+            "sensor.electricity_meter_fase_l2_vermogen",
+            "sensor.electricity_meter_power_consumption_phase_l2",
+            "sensor.dsmr_reading_electricity_currently_delivered_l2",
+            "sensor.homewizard_p1_active_power_l2_w",
+            "sensor.electricity_meter_active_power_l2",
+        ],
+        "power_l3_import": [
+            "sensor.electricity_meter_fase_l3_vermogen",
+            "sensor.electricity_meter_power_consumption_phase_l3",
+            "sensor.dsmr_reading_electricity_currently_delivered_l3",
+            "sensor.homewizard_p1_active_power_l3_w",
+            "sensor.electricity_meter_active_power_l3",
+        ],
+        "power_l1_export": [
+            "sensor.electricity_meter_fase_l1_teruglevering",
+            "sensor.electricity_meter_power_production_phase_l1",
+            "sensor.homewizard_p1_active_power_export_l1_w",
+        ],
+        "power_l2_export": [
+            "sensor.electricity_meter_fase_l2_teruglevering",
+            "sensor.electricity_meter_power_production_phase_l2",
+            "sensor.homewizard_p1_active_power_export_l2_w",
+        ],
+        "power_l3_export": [
+            "sensor.electricity_meter_fase_l3_teruglevering",
+            "sensor.electricity_meter_power_production_phase_l3",
+            "sensor.homewizard_p1_active_power_export_l3_w",
+        ],
+        # Stroom per fase (A)
+        "current_l1": [
+            "sensor.electricity_meter_stroom_fase_l1",
+            "sensor.electricity_meter_current_phase_l1",
+            "sensor.homewizard_p1_current_l1",
+            "sensor.dsmr_reading_current_l1",
+        ],
+        "current_l2": [
+            "sensor.electricity_meter_stroom_fase_l2",
+            "sensor.electricity_meter_current_phase_l2",
+            "sensor.homewizard_p1_current_l2",
+            "sensor.dsmr_reading_current_l2",
+        ],
+        "current_l3": [
+            "sensor.electricity_meter_stroom_fase_l3",
+            "sensor.electricity_meter_current_phase_l3",
+            "sensor.homewizard_p1_current_l3",
+            "sensor.dsmr_reading_current_l3",
+        ],
     }
 
     def __init__(self, hass) -> None:
@@ -677,6 +733,17 @@ class HAEntityFallbackReader:
                     "gas_consumption", "gasverbruik", "total_gas", "gas_delivered",
                     "current_gas_usage",
                 ),
+                # Per-fase vermogen
+                "power_l1_import": ("power_consumption_phase_l1", "active_power_l1", "fase_l1_vermogen", "currently_delivered_l1",),
+                "power_l2_import": ("power_consumption_phase_l2", "active_power_l2", "fase_l2_vermogen", "currently_delivered_l2",),
+                "power_l3_import": ("power_consumption_phase_l3", "active_power_l3", "fase_l3_vermogen", "currently_delivered_l3",),
+                "power_l1_export": ("power_production_phase_l1", "active_power_export_l1", "fase_l1_teruglevering",),
+                "power_l2_export": ("power_production_phase_l2", "active_power_export_l2", "fase_l2_teruglevering",),
+                "power_l3_export": ("power_production_phase_l3", "active_power_export_l3", "fase_l3_teruglevering",),
+                # Stroom per fase
+                "current_l1": ("current_l1", "stroom_fase_l1", "current_phase_l1",),
+                "current_l2": ("current_l2", "stroom_fase_l2", "current_phase_l2",),
+                "current_l3": ("current_l3", "stroom_fase_l3", "current_phase_l3",),
             }
 
             for entry in ent_reg.entities.values():
@@ -719,18 +786,31 @@ class HAEntityFallbackReader:
             if not state or state.state in ("unavailable", "unknown", ""):
                 return 0.0
             try:
-                val = float(state.state) * scale
-                # Auto-scale: DSMR integration reports in kW, we need W
-                # If unit is kW and value looks like kW (< 100), convert to W
+                val = float(state.state)
                 unit = (state.attributes.get("unit_of_measurement") or "").lower()
                 if unit == "kw" and "power" in key:
-                    val *= 1000.0
+                    val *= 1000.0   # kW → W
+                elif unit == "w" and "power" in key:
+                    pass            # al in W, geen conversie nodig
+                else:
+                    val *= scale    # geen unit bekend, gebruik scale als hint
                 return val
             except (ValueError, TypeError):
                 return 0.0
 
-        t.power_import_w   = _r("power_import_w", 1000.0)   # kW -> W
+        t.power_import_w   = _r("power_import_w", 1000.0)
         t.power_export_w   = _r("power_export_w", 1000.0)
+        # Per-fase import/export — DSMR5 entities
+        t.power_l1_w        = _r("power_l1_import", 1000.0)
+        t.power_l2_w        = _r("power_l2_import", 1000.0)
+        t.power_l3_w        = _r("power_l3_import", 1000.0)
+        t.power_l1_export_w = _r("power_l1_export", 1000.0)
+        t.power_l2_export_w = _r("power_l2_export", 1000.0)
+        t.power_l3_export_w = _r("power_l3_export", 1000.0)
+        # Stroom per fase
+        t.current_l1        = _r("current_l1", 1.0)
+        t.current_l2        = _r("current_l2", 1.0)
+        t.current_l3        = _r("current_l3", 1.0)
         t.energy_import_kwh = _r("energy_import_kwh")
         t.energy_export_kwh = _r("energy_export_kwh")
         t.gas_m3            = _r("gas_m3")

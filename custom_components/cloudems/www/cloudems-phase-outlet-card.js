@@ -101,8 +101,8 @@ color:#fff;padding:6px 8px;border-radius:6px;font-size:13px}</style>
   }
 }
 
-customElements.define("cloudems-phase-outlet-card", CloudemsPhaseOutletCard);
-customElements.define("cloudems-phase-outlet-card-editor", CloudemsPhaseOutletCardEditor);
+if (!customElements.get('cloudems-phase-outlet-card')) customElements.define("cloudems-phase-outlet-card", CloudemsPhaseOutletCard);
+if (!customElements.get('cloudems-phase-outlet-card-editor')) customElements.define("cloudems-phase-outlet-card-editor", CloudemsPhaseOutletCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-phase-outlet-card", name: "CloudEMS Phase Detector",
   description: "Auto-detected phase assignments for devices" });

@@ -272,8 +272,8 @@ class CloudEMSAlertsCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-alerts-card', CloudEMSAlertsCard);
-customElements.define('cloudems-alerts-card-editor', CloudEMSAlertsCardEditor);
+if (!customElements.get('cloudems-alerts-card')) customElements.define('cloudems-alerts-card', CloudEMSAlertsCard);
+if (!customElements.get('cloudems-alerts-card-editor')) customElements.define('cloudems-alerts-card-editor', CloudEMSAlertsCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: 'cloudems-alerts-card', name: 'CloudEMS Alerts Card', description: 'Meldingen, prioriteiten, systeem-status, dempen', preview: true });
 console.info('%c CLOUDEMS-ALERTS-CARD %c v' + ALERTS_VERSION + ' ', 'background:#f87171;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px', 'background:#0e1520;color:#f87171;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

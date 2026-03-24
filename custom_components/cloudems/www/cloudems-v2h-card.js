@@ -95,7 +95,7 @@ color:#fff;padding:6px 8px;border-radius:6px;font-size:13px}</style>
   }
 }
 
-customElements.define("cloudems-v2h-card", CloudemsV2hCard);
-customElements.define("cloudems-v2h-card-editor", CloudemsV2hCardEditor);
+if (!customElements.get('cloudems-v2h-card')) customElements.define("cloudems-v2h-card", CloudemsV2hCard);
+if (!customElements.get('cloudems-v2h-card-editor')) customElements.define("cloudems-v2h-card-editor", CloudemsV2hCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-v2h-card", name: "CloudEMS V2H", description: "Vehicle-to-Home status" });

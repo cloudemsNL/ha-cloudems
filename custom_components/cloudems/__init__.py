@@ -73,6 +73,27 @@ LOVELACE_LIFECYCLE_URL      = f"/local/cloudems/cloudems-lifecycle-card.js?v={VE
 LOVELACE_ATMOSPHERIC_URL    = f"/local/cloudems/cloudems-atmospheric-card.js?v={VERSION}"
 LOVELACE_VVE_URL            = f"/local/cloudems/cloudems-vve-card.js?v={VERSION}"
 LOVELACE_FCR_URL            = f"/local/cloudems/cloudems-fcr-card.js?v={VERSION}"
+LOVELACE_AI_URL             = f"/local/cloudems/cloudems-ai-card.js?v={VERSION}"
+LOVELACE_AIRCO_URL          = f"/local/cloudems/cloudems-airco-card.js?v={VERSION}"
+LOVELACE_EBIKE_URL          = f"/local/cloudems/cloudems-ebike-card.js?v={VERSION}"
+LOVELACE_BAT_ARB_URL        = f"/local/cloudems/cloudems-batterij-arbitrage-card.js?v={VERSION}"
+LOVELACE_BAT_LIFE_URL       = f"/local/cloudems/cloudems-batterij-levensduur-card.js?v={VERSION}"
+LOVELACE_STANDBY_RANK_URL   = f"/local/cloudems/cloudems-standby-ranking-card.js?v={VERSION}"
+LOVELACE_KAMER_HM_URL       = f"/local/cloudems/cloudems-kamer-heatmap-card.js?v={VERSION}"
+LOVELACE_EV_LAADPLAN_URL    = f"/local/cloudems/cloudems-ev-laadplan-card.js?v={VERSION}"
+LOVELACE_PIEKDAGEN_URL      = f"/local/cloudems/cloudems-piekdagen-card.js?v={VERSION}"
+LOVELACE_FASE_HIST_URL      = f"/local/cloudems/cloudems-fase-historiek-card.js?v={VERSION}"
+LOVELACE_EV_PLAN_URL        = f"/local/cloudems/cloudems-ev-laadplan-card.js?v={VERSION}"
+LOVELACE_BAT_ARB_URL2       = f"/local/cloudems/cloudems-batterij-arbitrage-card.js?v={VERSION}"
+LOVELACE_BAT_LIFE_URL2      = f"/local/cloudems/cloudems-batterij-levensduur-card.js?v={VERSION}"
+
+LOVELACE_NILM_VISUAL_URL    = f"/local/cloudems/cloudems-nilm-visual-card.js?v={VERSION}"
+LOVELACE_ENERGY_VISUAL_URL  = f"/local/cloudems/cloudems-energy-visual-card.js?v={VERSION}"
+LOVELACE_DAGRAPPORT_URL     = f"/local/cloudems/cloudems-dagrapport-card.js?v={VERSION}"
+LOVELACE_FASE_BALANS_URL    = f"/local/cloudems/cloudems-fase-balans-card.js?v={VERSION}"
+LOVELACE_TIJDLIJN_URL       = f"/local/cloudems/cloudems-apparaat-tijdlijn-card.js?v={VERSION}"
+LOVELACE_WARMTEBRON_URL     = f"/local/cloudems/cloudems-warmtebron-card.js?v={VERSION}"
+
 LOVELACE_RESOURCE_TYPE = "module"
 
 # Alle JS-resources: (url, zoekwoord) tuples — geregistreerd via Lovelace resources API
@@ -114,54 +135,80 @@ LOVELACE_RESOURCE_TYPE = "module"
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _ALL_JS_RESOURCES = [
+    # ── Bundel (eerst laden — definieert flow-card, graph-card, nilm-card, overview-card) ──
     (LOVELACE_CARDS_URL,        "cloudems-cards.js"),
-    (f"/local/cloudems/cloudems-overview-card.js?v={VERSION}", "cloudems-overview-card.js"),  # bevat cloudems-beheer-card
+
+    # ── Stubs / aliassen (lege bestanden die verwijzen naar de bundel) ──
+    (f"/local/cloudems/cloudems-overview-card.js?v={VERSION}", "cloudems-overview-card.js"),
+    (f"/local/cloudems/cloudems-beheer-card.js?v={VERSION}",   "cloudems-beheer-card.js"),
+    # cloudems-flow-card.js is een stub — NIET registreren als resource, definitie zit in cloudems-cards.js
+
+    # ── Infrastructuur ──
     (LOVELACE_CARDMOD_URL,      "cloudems-card-mod.js"),
-    (LOVELACE_BOILER_URL,       "cloudems-boiler-card.js"),
-    (LOVELACE_BATTERY_URL,      "cloudems-battery-card.js"),
-    (LOVELACE_SHUTTER_URL,      "cloudems-shutter-card.js"),
-    (LOVELACE_APPLIANCE_URL,    "cloudems-appliance-card.js"),
-    (LOVELACE_P1_URL,           "cloudems-p1-card.js"),
-    (LOVELACE_V2H_URL,          "cloudems-v2h-card.js"),
-    (LOVELACE_EGAUGE_URL,       "cloudems-egauge-card.js"),
-    (LOVELACE_EV_TRIP_URL,      "cloudems-ev-trip-card.js"),
-    (LOVELACE_PHASE_OUTLET_URL, "cloudems-phase-outlet-card.js"),
-    (LOVELACE_STANDBY_URL,      "cloudems-standby-card.js"),
-    (LOVELACE_VACATION_URL,     "cloudems-vacation-card.js"),
-    (LOVELACE_CIRCADIAN_URL,    "cloudems-circadian-card.js"),
-    (LOVELACE_NEIGHBOURHOOD_URL,"cloudems-neighbourhood-card.js"),
-    (LOVELACE_BLACKOUT_URL,     "cloudems-blackout-card.js"),
-    (LOVELACE_LIFECYCLE_URL,    "cloudems-lifecycle-card.js"),
-    (LOVELACE_ATMOSPHERIC_URL,  "cloudems-atmospheric-card.js"),
-    (LOVELACE_VVE_URL,          "cloudems-vve-card.js"),
-    (LOVELACE_FCR_URL,          "cloudems-fcr-card.js"),
-    (LOVELACE_SOLAR_URL,        "cloudems-solar-card.js"),
-    (LOVELACE_PV_FORECAST_URL,  "cloudems-pv-forecast-card.js"),
-    (LOVELACE_SWITCHES_URL,     "cloudems-switches-card.js"),
-    (LOVELACE_ZELFCONS_URL,     "cloudems-zelfconsumptie-card.js"),
-    (LOVELACE_DECISIONS_URL,    "cloudems-decisions-card.js"),
-    (LOVELACE_PRIJSVERLOOP_URL, "cloudems-prijsverloop-card.js"),
-    (LOVELACE_PRICE_URL,        "cloudems-price-card.js"),
-    (LOVELACE_ROOMS_URL,        "cloudems-rooms-card.js"),
-    (LOVELACE_HOME_URL,         "cloudems-home-card.js"),
-    (LOVELACE_CLIMATE_EPEX_URL, "cloudems-climate-epex-card.js"),
-    (f"/local/cloudems/cloudems-config-card.js?v={VERSION}", "cloudems-config-card.js"),
-    (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",    "cloudems-gas-card.js"),
-    (f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}",   "cloudems-lamp-card.js"),
-    (LOVELACE_DEMAND_URL,       "cloudems-demand-card.js"),
+
+    # ── Losse kaarten (elk bestand één keer) ──
+    (LOVELACE_BOILER_URL,        "cloudems-boiler-card.js"),
+    (LOVELACE_BATTERY_URL,       "cloudems-battery-card.js"),
+    (LOVELACE_SHUTTER_URL,       "cloudems-shutter-card.js"),
+    (LOVELACE_APPLIANCE_URL,     "cloudems-appliance-card.js"),
+    (LOVELACE_P1_URL,            "cloudems-p1-card.js"),
+    (LOVELACE_V2H_URL,           "cloudems-v2h-card.js"),
+    (LOVELACE_EGAUGE_URL,        "cloudems-egauge-card.js"),
+    (LOVELACE_EV_TRIP_URL,       "cloudems-ev-trip-card.js"),
+    (LOVELACE_PHASE_OUTLET_URL,  "cloudems-phase-outlet-card.js"),
+    (LOVELACE_STANDBY_URL,       "cloudems-standby-card.js"),
+    (LOVELACE_VACATION_URL,      "cloudems-vacation-card.js"),
+    (LOVELACE_CIRCADIAN_URL,     "cloudems-circadian-card.js"),
+    (LOVELACE_NEIGHBOURHOOD_URL, "cloudems-neighbourhood-card.js"),
+    (LOVELACE_BLACKOUT_URL,      "cloudems-blackout-card.js"),
+    (LOVELACE_LIFECYCLE_URL,     "cloudems-lifecycle-card.js"),
+    (LOVELACE_ATMOSPHERIC_URL,   "cloudems-atmospheric-card.js"),
+    (LOVELACE_VVE_URL,           "cloudems-vve-card.js"),
+    (LOVELACE_FCR_URL,           "cloudems-fcr-card.js"),
+    (LOVELACE_AI_URL,            "cloudems-ai-card.js"),
+    (LOVELACE_AIRCO_URL,         "cloudems-airco-card.js"),
+    (LOVELACE_EBIKE_URL,         "cloudems-ebike-card.js"),
+    (LOVELACE_BAT_ARB_URL,       "cloudems-batterij-arbitrage-card.js"),
+    (LOVELACE_BAT_LIFE_URL,      "cloudems-batterij-levensduur-card.js"),
+    (LOVELACE_STANDBY_RANK_URL,  "cloudems-standby-ranking-card.js"),
+    (LOVELACE_KAMER_HM_URL,      "cloudems-kamer-heatmap-card.js"),
+    (LOVELACE_EV_LAADPLAN_URL,   "cloudems-ev-laadplan-card.js"),
+    (LOVELACE_EV_PLAN_URL,       "cloudems-ev-laadplan-card.js"),   # alias zelfde bestand
+    (LOVELACE_PIEKDAGEN_URL,     "cloudems-piekdagen-card.js"),
+    (LOVELACE_FASE_HIST_URL,     "cloudems-fase-historiek-card.js"),
+    (LOVELACE_NILM_VISUAL_URL,   "cloudems-nilm-visual-card.js"),
+    (LOVELACE_ENERGY_VISUAL_URL, "cloudems-energy-visual-card.js"),
+    (LOVELACE_DAGRAPPORT_URL,    "cloudems-dagrapport-card.js"),
+    (LOVELACE_FASE_BALANS_URL,   "cloudems-fase-balans-card.js"),
+    (LOVELACE_TIJDLIJN_URL,      "cloudems-apparaat-tijdlijn-card.js"),
+    (LOVELACE_WARMTEBRON_URL,    "cloudems-warmtebron-card.js"),
+    (LOVELACE_SOLAR_URL,         "cloudems-solar-card.js"),
+    (LOVELACE_PV_FORECAST_URL,   "cloudems-pv-forecast-card.js"),
+    (LOVELACE_SWITCHES_URL,      "cloudems-switches-card.js"),
+    (LOVELACE_ZELFCONS_URL,      "cloudems-zelfconsumptie-card.js"),
+    (LOVELACE_DECISIONS_URL,     "cloudems-decisions-card.js"),
+    (LOVELACE_PRIJSVERLOOP_URL,  "cloudems-prijsverloop-card.js"),
+    (LOVELACE_PRICE_URL,         "cloudems-price-card.js"),
+    (LOVELACE_ROOMS_URL,         "cloudems-rooms-card.js"),
+    (LOVELACE_HOME_URL,          "cloudems-home-card.js"),
+    (LOVELACE_CLIMATE_EPEX_URL,  "cloudems-climate-epex-card.js"),
+    (f"/local/cloudems/cloudems-config-card.js?v={VERSION}",            "cloudems-config-card.js"),
+    (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",               "cloudems-gas-card.js"),
+    (f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}",              "cloudems-lamp-card.js"),
+    (LOVELACE_DEMAND_URL,        "cloudems-demand-card.js"),
     (LOVELACE_DIAGNOSE_URL,      "cloudems-diagnose-card.js"),
     (LOVELACE_KLIMAAT_URL,       "cloudems-klimaat-card.js"),
-    (LOVELACE_LAMP_URL,          "cloudems-lamp-card.js"),
     (LOVELACE_LAMP_AUTO_URL,     "cloudems-lamp-auto-card.js"),
     (LOVELACE_VERSION_URL,       "cloudems-version-card.js"),
-    (f"/local/cloudems/cloudems-klimaat-card.js?v={VERSION}", "cloudems-klimaat-card.js"),
-    (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",   "cloudems-nilm-card.js"),
-    (LOVELACE_MINI_PRICE_URL,   "cloudems-mini-price-card.js"),
-    (f"/local/cloudems/cloudems-decisions-learner-card.js?v={VERSION}", "cloudems-decisions-learner-card.js"),  # v4.6.500
-    (f"/local/cloudems/cloudems-alerts-card.js?v={VERSION}",  "cloudems-alerts-card.js"),   # v4.6.601
-    (f"/local/cloudems/cloudems-sankey-card.js?v={VERSION}",   "cloudems-sankey-card.js"),    # Energie stromen
-    (f"/local/cloudems/cloudems-pool-card.js?v={VERSION}",     "cloudems-pool-card.js"),      # v4.6.603
-    (f"/local/cloudems/cloudems-learning-card.js?v={VERSION}", "cloudems-learning-card.js"),  # v4.6.603
+    (f"/local/cloudems/cloudems-nilm-card.js?v={VERSION}",              "cloudems-nilm-card.js"),
+    (LOVELACE_MINI_PRICE_URL,    "cloudems-mini-price-card.js"),
+    (f"/local/cloudems/cloudems-decisions-learner-card.js?v={VERSION}", "cloudems-decisions-learner-card.js"),
+    (f"/local/cloudems/cloudems-alerts-card.js?v={VERSION}",            "cloudems-alerts-card.js"),
+    (f"/local/cloudems/cloudems-sankey-card.js?v={VERSION}",            "cloudems-sankey-card.js"),
+    (f"/local/cloudems/cloudems-pool-card.js?v={VERSION}",              "cloudems-pool-card.js"),
+    (f"/local/cloudems/cloudems-learning-card.js?v={VERSION}",          "cloudems-learning-card.js"),
+    # VERWIJDERD: cloudems-cards.backup-pre-phase.js — backup bestand mag nooit als resource geladen worden
+    # (conflicteert met cloudems-cards.js op unguarded customElements.define calls)
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -227,11 +274,16 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         current_items = list(resources.async_items())
 
         # Stap 1: verwijder verouderde CloudEMS resource-entries
-        all_keywords = [kw for _, kw in _ALL_JS_RESOURCES] + ["cloudems-card.js"]
+        # Expliciete stale URL-fragments die ALTIJD verwijderd moeten worden (ook zonder versie-match)
+        _always_remove_fragments = ["cloudems-flow-card.js", "cloudems-card.js", "cloudems-cards.backup-pre-phase.js"]
+        all_keywords = [kw for _, kw in _ALL_JS_RESOURCES] + _always_remove_fragments
         correct_urls = {url for url, _ in _ALL_JS_RESOURCES}
         for item in current_items:
             item_url = item.get("url", "")
-            if any(kw in item_url for kw in all_keywords) and item_url not in correct_urls:
+            # Verwijder als: (a) altijd te verwijderen fragment, of (b) CloudEMS URL maar niet de juiste versie
+            is_always_stale = any(frag in item_url for frag in _always_remove_fragments)
+            is_wrong_version = any(kw in item_url for kw in all_keywords) and item_url not in correct_urls
+            if is_always_stale or is_wrong_version:
                 try:
                     await resources.async_delete_item(item["id"])
                     _LOGGER.info("CloudEMS: verouderde Lovelace resource verwijderd → %s", item_url)

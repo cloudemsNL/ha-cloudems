@@ -237,7 +237,7 @@ class CloudEMSDecisionsCard extends HTMLElement {
   static getStubConfig() { return {}; }
 }
 
-customElements.define("cloudems-decisions-card", CloudEMSDecisionsCard);
+if (!customElements.get('cloudems-decisions-card')) customElements.define("cloudems-decisions-card", CloudEMSDecisionsCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "cloudems-decisions-card",

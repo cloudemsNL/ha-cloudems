@@ -243,7 +243,15 @@ class CloudemsSolarCard extends HTMLElement {
 
     // Self-consumption
     const scA=scS?.attributes||{};
-    const scPct=parseFloat(scS?.state||0)||0;
+    const scPct=(()=>{
+      const stored=parseFloat(scS?.state||0)||0;
+      if(stored>0) return stored;
+      // Fallback: instant ratio from coordinator data
+      const pvW=parseFloat(solS?.attributes?.solar_power_w||0)||0;
+      const expW=parseFloat(solS?.attributes?.export_power_w||0)||0;
+      if(pvW>50) return Math.max(0,Math.min(100,Math.round((pvW-expW)/pvW*1000)/10));
+      return 0;
+    })();
     const pvTodayKwh = (scA.pv_today_kwh != null && scA.pv_today_kwh !== undefined)
       ? scA.pv_today_kwh : fcKwh;
     const selfKwh=scA.self_consumed_kwh ?? null;
@@ -758,8 +766,8 @@ class CloudemsSolarCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("cloudems-solar-card-editor", CloudemsSolarCardEditor);
-customElements.define("cloudems-solar-card", CloudemsSolarCard);
+if (!customElements.get('cloudems-solar-card-editor')) customElements.define("cloudems-solar-card-editor", CloudemsSolarCardEditor);
+if (!customElements.get('cloudems-solar-card')) customElements.define("cloudems-solar-card", CloudemsSolarCard);
 window.customCards=window.customCards??[];
 if(!window.customCards.find(c=>c.type==="cloudems-solar-card"))
   window.customCards.push({type:"cloudems-solar-card",name:"CloudEMS Solar Card v2.1",description:"Zonnepanelen · forecast · benutting · clipping · zelfconsumptie · schaduw",preview:true});

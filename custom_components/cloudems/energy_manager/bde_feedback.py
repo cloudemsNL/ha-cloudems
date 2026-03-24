@@ -97,6 +97,8 @@ class BDEFeedbackTracker:
         self._pending: list[DecisionRecord] = []
         self._history: list[dict] = []
         self._loaded = False
+        # ThresholdLearner callback — set by coordinator after AI registry ready
+        self._threshold_callback = None
 
     async def async_load(self) -> None:
         try:
@@ -227,6 +229,19 @@ class BDEFeedbackTracker:
                 "✅" if was_good else "❌",
                 margin, new_w,
             )
+
+            # Feed into ThresholdLearner with hour context
+            if self._threshold_callback:
+                try:
+                    reward = min(1.0, margin / 0.05)  # €0.05 margin = full reward
+                    # Map action → price threshold
+                    thresh = ("PRICE_CHEAP_EUR_KWH" if rec.action == "charge"
+                              else "PRICE_EXPENSIVE_EUR_KWH")
+                    self._threshold_callback(thresh, hour, was_good, reward)
+                    self._threshold_callback("AI_BATTERY_MIN_CONFIDENCE", hour,
+                                             was_good, reward * 0.2)
+                except Exception as _e:
+                    _LOGGER.debug("BDE feedback threshold callback fout: %s", _e)
 
         self._pending = still_pending
         return results

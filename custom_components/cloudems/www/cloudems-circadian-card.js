@@ -94,7 +94,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-circadian-card", CloudemsCircadianCard);
-customElements.define("cloudems-circadian-card-editor", CloudemsCircadianCardEditor);
+if (!customElements.get('cloudems-circadian-card')) customElements.define("cloudems-circadian-card", CloudemsCircadianCard);
+if (!customElements.get('cloudems-circadian-card-editor')) customElements.define("cloudems-circadian-card-editor", CloudemsCircadianCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-circadian-card", name: "CloudEMS Slimme Verlichting" });

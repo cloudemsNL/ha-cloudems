@@ -23,6 +23,8 @@ class CloudEMSRoomsCard extends HTMLElement {
     this._config = config || {};
   }
 
+  getCardSize() { return 6; }
+
   set hass(hass) {
     this._hass = hass;
     this._render();
@@ -222,8 +224,8 @@ class CloudEMSRoomsCardEditor extends HTMLElement {
   }
 }
 
-customElements.define('cloudems-rooms-card', CloudEMSRoomsCard);
-customElements.define('cloudems-rooms-card-editor', CloudEMSRoomsCardEditor);
+if (!customElements.get('cloudems-rooms-card')) customElements.define('cloudems-rooms-card', CloudEMSRoomsCard);
+if (!customElements.get('cloudems-rooms-card-editor')) customElements.define('cloudems-rooms-card-editor', CloudEMSRoomsCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: 'cloudems-rooms-card', name: 'CloudEMS Rooms', description: 'Vermogen per kamer met apparaten' });
 console.info('%c CloudEMS Rooms Card v' + ROOMS_VERSION, 'color:#EF9F27;font-weight:700');

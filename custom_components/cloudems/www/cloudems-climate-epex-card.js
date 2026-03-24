@@ -362,8 +362,8 @@ class CloudEMSClimateEpexCardEditor extends HTMLElement {
   }
 }
 
-customElements.define("cloudems-climate-epex-card", CloudEMSClimateEpexCard);
-customElements.define("cloudems-climate-epex-card-editor", CloudEMSClimateEpexCardEditor);
+if (!customElements.get('cloudems-climate-epex-card')) customElements.define("cloudems-climate-epex-card", CloudEMSClimateEpexCard);
+if (!customElements.get('cloudems-climate-epex-card-editor')) customElements.define("cloudems-climate-epex-card-editor", CloudEMSClimateEpexCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push({

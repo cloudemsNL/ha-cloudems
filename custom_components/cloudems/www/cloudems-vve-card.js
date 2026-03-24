@@ -93,7 +93,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-vve-card", CloudemsVveCard);
-customElements.define("cloudems-vve-card-editor", CloudemsVveCardEditor);
+if (!customElements.get('cloudems-vve-card')) customElements.define("cloudems-vve-card", CloudemsVveCard);
+if (!customElements.get('cloudems-vve-card-editor')) customElements.define("cloudems-vve-card-editor", CloudemsVveCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-vve-card", name: "CloudEMS VvE Energieverdeling" });

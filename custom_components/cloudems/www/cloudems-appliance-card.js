@@ -514,8 +514,8 @@ input{background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,
   }
 }
 
-customElements.define("cloudems-appliance-card-editor",CloudemsApplianceCardEditor);
-customElements.define("cloudems-appliance-card",CloudemsApplianceCard);
+if (!customElements.get('cloudems-appliance-card-editor')) customElements.define("cloudems-appliance-card-editor",CloudemsApplianceCardEditor);
+if (!customElements.get('cloudems-appliance-card')) customElements.define("cloudems-appliance-card",CloudemsApplianceCard);
 window.customCards=window.customCards??[];
 window.customCards.push({type:"cloudems-appliance-card",name:"CloudEMS Appliance Card",description:"Slimme schakelaars — vaatwasser, wasmachine, droger",preview:true});
 console.info(`%c CLOUDEMS-APPLIANCE-CARD %c v${APPLIANCE_VERSION} `,"background:#378ADD;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#378ADD;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

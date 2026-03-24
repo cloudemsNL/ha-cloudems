@@ -32,13 +32,19 @@ from typing import Optional
 _LOGGER = logging.getLogger(__name__)
 
 # ── Constanten ────────────────────────────────────────────────────────────────
-MIN_SOC_DISCHARGE   = 15.0   # % — nooit onder dit niveau ontladen
+MIN_SOC_DISCHARGE   = 15.0   # % — nooit
+from ..const import AI_BATTERY_MIN_CONFIDENCE as _AI_MIN_CONFIDENCE_DEFAULT
+# AI_MIN_CONFIDENCE is overridden at runtime by ThresholdLearner via set_ai_thresholds()
+AI_MIN_CONFIDENCE = _AI_MIN_CONFIDENCE_DEFAULT   # minimum confidence before AI hint influences decisions
+AI_PRICE_NUDGE = 0.02  # TODO: make this learnable   # €/kWh threshold adjustment when AI agrees onder dit niveau ontladen
 MAX_SOC_CHARGE      = 95.0   # % — nooit boven dit laden (default)
 SOC_FULL_THRESHOLD  = 90.0
 SOC_LOW_THRESHOLD   = 25.0
 
-PRICE_CHEAP_EUR     = 0.10
-PRICE_EXPENSIVE_EUR = 0.25
+from ..const import PRICE_CHEAP_EUR_KWH as _PRICE_CHEAP_DEFAULT, PRICE_EXPENSIVE_EUR_KWH as _PRICE_EXPENSIVE_DEFAULT
+# Runtime values — updated from ThresholdLearner via set_ai_thresholds()
+PRICE_CHEAP_EUR     = _PRICE_CHEAP_DEFAULT
+PRICE_EXPENSIVE_EUR = _PRICE_EXPENSIVE_DEFAULT
 
 PV_SURPLUS_MIN_W    = 500.0
 MIN_USEFUL_CAPACITY_KWH = 0.5
@@ -128,6 +134,21 @@ class BatteryDecisionEngine:
 
     def set_learner(self, learner) -> None:
         """Koppel de DecisionOutcomeLearner voor bias-toepassing op drempels."""
+
+    def set_ai_thresholds(self, threshold_fn) -> None:
+        """
+        Koppel een threshold-lookup functie (van AIRegistry).
+        Daarna gebruikt de engine geleerde drempels i.p.v. vaste defaults.
+        threshold_fn('AI_BATTERY_MIN_CONFIDENCE') → float
+        """
+        global AI_MIN_CONFIDENCE, AI_PRICE_NUDGE, PRICE_CHEAP_EUR, PRICE_EXPENSIVE_EUR
+        try:
+            AI_MIN_CONFIDENCE   = threshold_fn("AI_BATTERY_MIN_CONFIDENCE")
+            AI_PRICE_NUDGE      = threshold_fn("AI_PRICE_NUDGE_EUR_KWH")
+            PRICE_CHEAP_EUR     = threshold_fn("PRICE_CHEAP_EUR_KWH")
+            PRICE_EXPENSIVE_EUR = threshold_fn("PRICE_EXPENSIVE_EUR_KWH")
+        except Exception:
+            pass  # keep defaults
         self._learner = learner
 
     def _biased_threshold(self, base: float, component: str, bucket: str, action: str) -> float:
@@ -186,6 +207,10 @@ class BatteryDecisionEngine:
         d = self._check_off_peak(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
 
+        # Laag 3.5: AI hint — nudge thresholds when confident
+        d = self._check_ai_hint(ctx, soc, available_kwh, headroom_kwh)
+        if d: return d
+
         # Laag 4: PV forecast
         d = self._check_pv(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
@@ -201,6 +226,63 @@ class BatteryDecisionEngine:
             tariff_group=tg,
             epex_eur=ctx.epex_eur_now,
         )
+
+    # ── Laag 3.5: AI hint ────────────────────────────────────────────────────────
+
+    def _check_ai_hint(self, ctx, soc, available_kwh, headroom_kwh):
+        """
+        Apply AI model suggestion as a nudge to battery decisions.
+
+        Only activates when:
+        - AI model is ready and confidence >= AI_MIN_CONFIDENCE (65%)
+        - Safety rules (layer 1) have already passed
+        - The AI suggestion aligns with existing EPEX direction or fills a gap
+
+        The AI does NOT override safety limits or hard rules.
+        It lowers/raises the price threshold slightly to act on borderline cases.
+        """
+        label = ctx.ai_hint_label
+        conf  = ctx.ai_hint_confidence or 0.0
+        if not label or conf < AI_MIN_CONFIDENCE:
+            return None
+
+        soc   = soc or 0.0
+        tg    = (ctx.tariff_group or "normal").lower()
+        price = ctx.epex_eur_now
+        ceil  = self._charge_ceiling(ctx.soh_pct)
+
+        # AI says: charge — act if there is headroom and price is reasonable
+        if label == "charge_battery" and headroom_kwh > 0.5:
+            # Only if price is not outright expensive (< avg + nudge)
+            prices = [p.get("price", 0) for p in (ctx.epex_forecast or []) if p.get("price")]
+            avg_price = sum(prices) / len(prices) if prices else 0.20
+            threshold = avg_price + AI_PRICE_NUDGE
+            if price is None or price <= threshold:
+                return BatteryDecision(
+                    action="charge",
+                    reason=f"AI ({conf:.0%} zekerheid): laden aanbevolen — prijs €{price:.3f}/kWh ≤ drempel €{threshold:.3f}",
+                    priority=35,   # between EPEX (3) and PV (4) — lower priority than hard rules
+                    confidence=conf * 0.9,
+                    source="ai_hint",
+                    soc_pct=soc, tariff_group=tg, epex_eur=price,
+                )
+
+        # AI says: discharge — act if battery has charge and price is above avg
+        if label == "discharge_battery" and available_kwh > 0.5:
+            prices = [p.get("price", 0) for p in (ctx.epex_forecast or []) if p.get("price")]
+            avg_price = sum(prices) / len(prices) if prices else 0.20
+            threshold = avg_price - AI_PRICE_NUDGE
+            if price is not None and price >= threshold:
+                return BatteryDecision(
+                    action="discharge",
+                    reason=f"AI ({conf:.0%} zekerheid): ontladen aanbevolen — prijs €{price:.3f}/kWh ≥ drempel €{threshold:.3f}",
+                    priority=35,
+                    confidence=conf * 0.9,
+                    source="ai_hint",
+                    soc_pct=soc, tariff_group=tg, epex_eur=price,
+                )
+
+        return None
 
     # ── Laag 1: Veiligheid ────────────────────────────────────────────────────
 
@@ -359,6 +441,11 @@ class BatteryDecisionEngine:
         # Laaddrempel: bij 0% saldering wil je vroeger laden (geen export-fallback)
         # Correctie: drempel iets hoger bij 0% saldering (agressiever laden)
         _charge_thresh = _cheap_thresh * (1.0 + (1.0 - _nm) * 0.15)
+
+        # Sla drempels op voor tooltip in coordinator
+        self._last_charge_thr    = round(_charge_thresh, 4)
+        self._last_discharge_thr = round(_discharge_thresh, 4)
+        self._last_nm_pct        = round(_nm, 3)
 
         if price <= _charge_thresh and headroom_kwh >= MIN_USEFUL_CAPACITY_KWH:
             if ctx.pv_forecast_tomorrow_kwh > ctx.battery_capacity_kwh * 0.7:

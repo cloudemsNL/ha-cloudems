@@ -67,7 +67,7 @@ input{width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;
   }
 }
 
-customElements.define("cloudems-vacation-card", CloudemsVacationCard);
-customElements.define("cloudems-vacation-card-editor", CloudemsVacationCardEditor);
+if (!customElements.get('cloudems-vacation-card')) customElements.define("cloudems-vacation-card", CloudemsVacationCard);
+if (!customElements.get('cloudems-vacation-card-editor')) customElements.define("cloudems-vacation-card-editor", CloudemsVacationCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({ type: "cloudems-vacation-card", name: "CloudEMS Vakantiemodus" });

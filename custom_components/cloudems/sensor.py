@@ -248,6 +248,7 @@ async def async_setup_entry(
         CloudEMSAtmosphericHPSensor(coordinator, entry),
         CloudEMSVvESensor(coordinator, entry),
         CloudEMSFCRAFRRSensor(coordinator, entry),
+        CloudEMSAISensor(coordinator, entry),
         CloudEMSPhaseOutletSensor(coordinator, entry),
         CloudEMSSelfSufficiencySensor(coordinator, entry),
         # v2.2.2: Installatie-kwaliteitsscore
@@ -258,6 +259,7 @@ async def async_setup_entry(
         CloudEMSEnergyLabelSensor(coordinator, entry),
         CloudEMSSalderingSensor(coordinator, entry),
         CloudEMSSystemHealthSensor(coordinator, entry),
+        CloudEMSCardHealthSensor(coordinator, entry),
         # v2.2.5: nieuwe module-sensoren
         CloudEMSGasAnalysisSensor(coordinator, entry),
         CloudEMSEnergyBudgetSensor(coordinator, entry),
@@ -1144,17 +1146,27 @@ class CloudEMSBoilerPowerSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         b = self._get_boiler()
         if b is None:
-            return self._last_nonzero_w  # Ariston 429 — toon laatste bekende waarde
-        # v4.6.170: gebruik ALLEEN current_power_w (echte meting).
-        # power_w is het geleerde nominale vermogen — dat nooit tonen als huidig vermogen.
+            return self._last_nonzero_w  # Ariston 429 — show last known value
+        # Use current_power_w (real measurement) — power_w is learned nominal, not current.
         v = b.get("current_power_w")
         if v is None:
-            # Geen meting beschikbaar — toon laatste bekende waarde uit cache
             return self._last_nonzero_w
         val = round(float(v), 0)
         if val > 0:
-            self._last_nonzero_w = val  # cache bijwerken voor volgende unavailable periode
+            self._last_nonzero_w = val
         return val
+
+    @property
+    def extra_state_attributes(self):
+        # Force recorder to store a new entry every cycle even when power=0
+        # Without this, recorder deduplicates consecutive 0W states and the
+        # boiler card power graph stays empty.
+        import time as _time
+        b = self._get_boiler()
+        return {
+            "is_on":      b.get("is_on", False) if b else False,
+            "updated_ts": round(_time.time(), 0),
+        }
 
 
 
@@ -3273,6 +3285,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
                         "local_ai": "local_ai",
                     }.get(d.get("source", ""), "nilm"),
                     "power_w":      round(d.get("current_power", 0), 1),
+                    "current_power": round(d.get("current_power", 0), 1),
                     "running":      True,
                     "state":        "on",
                 }
@@ -3288,6 +3301,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
                     "state":        "on",
                     "running":      True,
                     "power_w":      round(d.get("current_power", 0), 1),
+                    "current_power": round(d.get("current_power", 0), 1),
                     "confidence":   round(d.get("confidence", 0) * 100, 0),
                     "phase":        d.get("phase", "L1"),
                     "phase_label":  d.get("phase", "L1") if d.get("phase", "L1") not in ("ALL", "") else "3\u2205",
@@ -5220,7 +5234,7 @@ class CloudEMSGasSensor(CoordinatorEntity, SensorEntity):
             "week_m3":   round(week_m3, 3),
             "maand_m3":  round(maand_m3, 3),
             "jaar_m3":   round(jaar_m3, 3),
-            # Kosten €
+            # Cost €
             "dag_eur":   round(dag_m3   * prijs, 2),
             "week_eur":  round(week_m3  * prijs, 2),
             "maand_eur": round(maand_m3 * prijs, 2),
@@ -5451,8 +5465,18 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        sc = (self.coordinator.data or {}).get("self_consumption", {})
-        return sc.get("ratio_pct", None)
+        sc  = (self.coordinator.data or {}).get("self_consumption", {})
+        pct = sc.get("ratio_pct")
+        d   = self.coordinator.data or {}
+        solar_w = float(d.get("solar_power", 0) or 0)
+        if pct is not None and pct > 0:
+            return pct
+        # Instant fallback: SC = min(solar, house) / solar
+        # This is always correct regardless of battery state
+        house_w = float(d.get("house_power", 0) or 0)
+        if solar_w >= 50 and house_w >= 0:
+            return round(min(100.0, min(solar_w, house_w) / solar_w * 100), 1)
+        return pct
 
     @property
     def extra_state_attributes(self):
@@ -6406,6 +6430,7 @@ class CloudEMSWatchdogSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_watchdog"
+        self.entity_id = "sensor.cloudems_watchdog"
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -6789,6 +6814,8 @@ class CloudEMSSystemHealthSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_system_health"
+        # Explicit entity_id — cards use sensor.cloudems_system_health
+        self.entity_id = "sensor.cloudems_system_health"
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -6801,6 +6828,43 @@ class CloudEMSSystemHealthSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         return (self.coordinator.data or {}).get("system_health", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.0.91: CardHealth sensor — monitors JS card output plausibility
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSCardHealthSensor(CoordinatorEntity, SensorEntity):
+    """Monitort de output van alle JS kaarten en detecteert anomalieën."""
+    _attr_name  = "CloudEMS · Kaart Gezondheid"
+    _attr_icon  = "mdi:card-search"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_card_health"
+        self.entity_id = "sensor.cloudems_card_health"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self) -> str:
+        h = (self.coordinator.data or {}).get("card_health", {})
+        if not h:
+            return "onbekend"
+        n_err  = h.get("n_errors",   0)
+        n_warn = h.get("n_warnings", 0)
+        if n_err > 0:
+            return f"{n_err} error{'s' if n_err > 1 else ''}"
+        if n_warn > 0:
+            return f"{n_warn} waarschuwing{'en' if n_warn > 1 else ''}"
+        return "OK"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("card_health", {})
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -7491,6 +7555,7 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_savings"
+        self.entity_id = "sensor.cloudems_battery_savings"
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
@@ -7988,7 +8053,7 @@ class CloudEMSBatterijSOCSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sen
         zp = data.get("zonneplan") or {}
         soc = zp.get("soc_pct")
         if soc is None:
-            # Uit battery_providers attribuut van EPEX sensor
+            # Off battery_providers attribuut van EPEX sensor
             for bat in data.get("batteries", []):
                 soc = bat.get("soc_pct")
                 if soc is not None:
@@ -9126,7 +9191,7 @@ class CloudEMSAtmosphericHPSensor(CoordinatorEntity, SensorEntity):
         self.entity_id = "sensor.cloudems_atmospheric_hp"
 
     @property
-    def device_info(self): return sub_device_info(self._entry, SUB_CLIMATE)
+    def device_info(self): return sub_device_info(self._entry, SUB_ZONE_CLIMATE)
 
     @property
     def native_value(self):
@@ -9184,3 +9249,31 @@ class CloudEMSFCRAFRRSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return (self.coordinator.data or {}).get("fcr_afrr", {})
+
+
+class CloudEMSAISensor(CoordinatorEntity, SensorEntity):
+    """CloudEMS local AI status — k-NN model trained on own data."""
+    _attr_name  = "CloudEMS · AI Status"
+    _attr_icon  = "mdi:brain"
+    _attr_native_unit_of_measurement = None
+    _attr_state_class = None
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_ai_status"
+        self.entity_id = "sensor.cloudems_ai_status"
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_ZELFLEREND)
+
+    @property
+    def native_value(self):
+        ai = (self.coordinator.data or {}).get("ai_status", {})
+        if not ai: return "unavailable"
+        if not ai.get("ready"): return "learning"
+        return ai.get("last_label", "idle")
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("ai_status", {})

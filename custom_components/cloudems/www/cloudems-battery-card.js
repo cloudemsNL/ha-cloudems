@@ -249,13 +249,19 @@ class CloudemsBatteryCard extends HTMLElement {
       {label:'Gebruik', value:'Verrekend in EPEX laad/ontlaad beslissing',dim:true},
     ],{footer:'Lager = goedkopere batterijslijtage per kWh doorvoer'}) : {wrap:'',tip:''};
 
+    const _bdeChargeThr    = _bde.charge_threshold_eur;
+    const _bdeDisThr       = _bde.discharge_threshold_eur;
+    const _bdeNm           = _bde.net_metering_pct;
     const _ttDec = _TT ? _TT.html('bat-dec','BDE Beslissing',[
-      {label:'Actie',       value:_bdeAction},
-      {label:'Prioriteit',  value:_bdePrio!=null?_bdePrio.toString():'—'},
-      {label:'Zekerheid',   value:_bdeConf!=null?((_bdeConf*100).toFixed(0)+'%'):'—'},
-      {label:'Bron',        value:_bdeSrc},
-      {label:'Reden',       value:_bdeExpl||reason||'—'},
-    ],{footer:'BDE = Battery Decision Engine'}) : {wrap:'',tip:''};
+      {label:'Actie',             value:_bdeAction},
+      {label:'Prioriteit',        value:_bdePrio!=null?_bdePrio.toString():'—'},
+      {label:'Zekerheid',         value:_bdeConf!=null?((_bdeConf*100).toFixed(0)+'%'):'—'},
+      {label:'Bron',              value:_bdeSrc},
+      {label:'Reden',             value:_bdeExpl||reason||'—'},
+      {label:'Laaddrempel',       value:_bdeChargeThr!=null?('≤ €'+(_bdeChargeThr*100).toFixed(1)+'/kWh'):'—', dim:true},
+      {label:'Ontlaaddrempel',    value:_bdeDisThr!=null?('≥ €'+(_bdeDisThr*100).toFixed(1)+'/kWh'):'—', dim:true},
+      {label:'Saldering',         value:_bdeNm!=null?((_bdeNm*100).toFixed(0)+'%'):'—', dim:true},
+    ],{footer:'BDE = Battery Decision Engine — drempels worden geleerd via AI'}) : {wrap:'',tip:''};
 
     // Schedule timeline
     let tlHtml='';
@@ -670,8 +676,8 @@ class CloudemsBatteryCardEditor extends HTMLElement {
     });
   }
 }
-customElements.define('cloudems-battery-card-editor', CloudemsBatteryCardEditor);
-customElements.define('cloudems-battery-card', CloudemsBatteryCard);
+if (!customElements.get('cloudems-battery-card-editor')) customElements.define('cloudems-battery-card-editor', CloudemsBatteryCardEditor);
+if (!customElements.get('cloudems-battery-card')) customElements.define('cloudems-battery-card', CloudemsBatteryCard);
 window.customCards=window.customCards??[];
 if(!window.customCards.find(c=>c.type==='cloudems-battery-card'))
   window.customCards.push({type:'cloudems-battery-card',name:'CloudEMS Battery Card v3',description:'Batterij SoC arc, 24u grafiek, schema-tijdlijn, providers & Zonneplan sturing',preview:true});
