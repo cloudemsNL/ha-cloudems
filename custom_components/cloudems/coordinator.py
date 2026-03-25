@@ -6122,7 +6122,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 )
                 sc = self._self_consumption.get_data()
                 self_cons_data = {
-                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else _selfcons_pct,
+                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else locals().get("_selfcons_pct", 0.0),
                     "export_pct":         sc.export_pct,
                     "pv_today_kwh":       sc.pv_today_kwh,
                     "self_consumed_kwh":  sc.self_consumed_kwh,

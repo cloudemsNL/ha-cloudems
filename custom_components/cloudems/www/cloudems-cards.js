@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.591
+ * CloudEMSTooltip — v4.6.593
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -487,6 +487,7 @@ window.CloudEMSTooltip = {
       const st  = hass.states;
       const ph  = st['sensor.cloudems_status']?.attributes?.phases || {};
       const e   = this._config.entities || {};
+      const _p1sig = st['sensor.cloudems_p1_power']?.attributes;
       const sig = JSON.stringify([
         st['sensor.cloudems_grid_net_power']?.state,
         st['sensor.cloudems_solar_system']?.state,
@@ -496,6 +497,10 @@ window.CloudEMSTooltip = {
         ph['L1']?.current_a, ph['L2']?.current_a, ph['L3']?.current_a,
         e.battery?.entity ? st[e.battery.entity]?.state : null,
         e.grid?.entity    ? st[e.grid.entity]?.state    : null,
+        // Per-fase richting in sig zodat flip grid→hub / hub→grid direct een full render triggert
+        _p1sig?.power_l1_w != null ? (_p1sig.power_l1_w > 0 ? 1 : -1) : (ph['L1']?.power_w > 0 ? 1 : -1),
+        _p1sig?.power_l2_w != null ? (_p1sig.power_l2_w > 0 ? 1 : -1) : (ph['L2']?.power_w > 0 ? 1 : -1),
+        _p1sig?.power_l3_w != null ? (_p1sig.power_l3_w > 0 ? 1 : -1) : (ph['L3']?.power_w > 0 ? 1 : -1),
       ]);
       if (sig !== this._hassSig) {
         this._hassSig = sig;
