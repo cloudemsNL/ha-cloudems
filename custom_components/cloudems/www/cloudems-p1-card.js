@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS P1 Card  v1.1.0
 
-const P1_VERSION = "1.0.0";
+const P1_VERSION = "5.3.31";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 function fmt(v, dec=0, unit="") {
@@ -131,12 +131,12 @@ class CloudemsP1Card extends HTMLElement {
     const isImport = net > 20;
 
     // Per fase: netto = import - export
-    // Netto fase-vermogen uit sensor.cloudems_power attributen (berekend in backend)
-    const _gna = h.states['sensor.cloudems_power']?.attributes || {};
-    const l1net = _gna.power_l1_net_w ?? ((p1.power_l1_import_w ?? 0) - (p1.power_l1_export_w ?? 0));
-    const l2net = _gna.power_l2_net_w ?? ((p1.power_l2_import_w ?? 0) - (p1.power_l2_export_w ?? 0));
-    const l3net = _gna.power_l3_net_w ?? ((p1.power_l3_import_w ?? 0) - (p1.power_l3_export_w ?? 0));
-    const hasPhases = _gna.power_l1_net_w != null || p1.power_l1_import_w != null;
+    // Netto fase-vermogen uit sensor.cloudems_status attributen (berekend in backend)
+    const _st_phases = h.states['sensor.cloudems_status']?.attributes?.phases || {};
+    const l1net = _st_phases['L1']?.power_w ?? null;
+    const l2net = _st_phases['L2']?.power_w ?? null;
+    const l3net = _st_phases['L3']?.power_w ?? null;
+    const hasPhases = l1net != null;
     const hasVoltage = parseFloat(p1.voltage_l1 ?? 0) > 0;
 
     // Onbalans

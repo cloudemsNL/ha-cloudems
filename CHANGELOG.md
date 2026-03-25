@@ -221,3 +221,86 @@
 ## v5.3.15 (2026-03-25)
 - Fix: sensor.cloudems_grid_net_power bestond niet meer na verwijdering CloudEMSGridNetPowerSensor
 - Alle kaarten, dashboard YAML en HTML lezen nu sensor.cloudems_power (CloudEMSPowerSensor, unique_id _power, de actieve sensor)
+
+## v5.3.16 (2026-03-25)
+- Fix: flow card valt terug op sensor.cloudems_power als geconfigureerde grid-entity niet bestaat in HA (migratie van sensor.cloudems_grid_net_power naar sensor.cloudems_power)
+
+## v5.3.17 (2026-03-25)
+- Revert v5.3.16 fallback-truc — niet nodig: dashboard YAML wordt bij elke herstart overschreven via _do_storage_work, sensor.cloudems_power staat al in de YAML
+
+## v5.3.18 (2026-03-25)
+- Fix: CloudEMSPowerSensor native_value teruggebracht naar origineel — leest power_w uit coordinator data. P1 net_power_w logica veroorzaakte 0W weergave in flow card.
+
+## v5.3.19 (2026-03-25)
+- Fix: eenmalige migratie in _do_storage_work — vervangt sensor.cloudems_grid_net_power door sensor.cloudems_power in alle opgeslagen Lovelace configs bij elke herstart
+- Versie-bump: alle JS kaarten gebumpt naar 5.3.19
+
+## v5.3.20 (2026-03-25)
+- CLAUDE_INSTRUCTIONS bijgewerkt met volledige bump-verplichting
+- Backup versie voor Joan
+
+## v5.3.21 (2026-03-25)
+- Fix: flow card gebruikt nu sensor.cloudems_grid_import_power en sensor.cloudems_grid_export_power voor grid waarde — zelfde sensoren als overview kaart, bestaan altijd in elke installatie
+
+## v5.3.22 (2026-03-25)
+- Revert: alles terug naar sensor.cloudems_grid_net_power — die sensor bestaat en werkt in alle installaties. De migratie naar sensor.cloudems_power was fout.
+
+## v5.3.23 (2026-03-25)
+- Fix dashboard: dubbele kaarten verwijderd uit alle tabs
+  - Solar: pv-forecast-card dubbel
+  - Batterij: batterij-levensduur-card dubbel, batterij-arbitrage-card dubbel
+  - EV: ev-trip-card dubbel
+  - Klimaat: climate-epex-card dubbel
+  - Lampen: lamp-auto-card dubbel
+  - NILM: nilm-visual-card dubbel, apparaat-tijdlijn-card dubbel
+  - Zelflerend: fase-balans-card dubbel
+  - Prijzen: prijsverloop-card (legacy) en mini-price-card verwijderd (3 prijskaarten → 1)
+
+## v5.3.24 (2026-03-25)
+- Fix: sensor.cloudems_status publiceert nu grid_power_w, import_power_w, export_power_w
+- Fix: flow card leest grid_power_w van sensor.cloudems_status — werkt in elke installatie ongeacht entity_id van andere sensoren
+
+## v5.3.25 (2026-03-25)
+- Nieuw: tests/test_integration.py — herbruikbare test suite voor kritieke integratiepunten
+- Fix: sanity check stroom — 51A bij 770W wordt nu correct als corrupt herkend (was: grens 100A te hoog)
+  Nieuwe logica: als stroom > 5x verwacht (P/U) dan corrupt → reset naar 0 → berekend als I=P/U
+- Tests: 22/22 geslaagd
+
+## v5.3.26 (2026-03-25)
+- Fix: zelfconsumptie altijd 0% — battery_power stond niet in data dict, dus batterij-ontlading werd niet afgetrokken van export. Fix: _last_battery_w gebruiken.
+- Tests: 23/23 geslaagd
+
+## v5.3.27 (2026-03-25)
+- Test suite uitgebreid: OutcomeTracker, DecisionOutcomeLearner bias, AI samples, energiebalans
+- Tests: 32/32 geslaagd
+
+## v5.3.27 (2026-03-25)
+- Uitgebreide test suite: 40 tests voor P1, stroom sanity, status sensor, fase richting, zelfconsumptie, BDE, OutcomeTracker, Limiter, PowerCalculator, SelfConsumptionTracker, BatteryDecisionEngine, aanwezigheid, Kirchhoff
+- Alle 40 tests geslaagd
+
+## v5.3.28 (2026-03-25)
+- Nieuw: tests/test_real_modules.py — draait echte modules zonder HA (26 tests, 0 mislukt)
+- Nieuw: tests/mock_homeassistant.py — HA mock voor tests
+- Fix: 37 JS kaarten hadden geen versienummer — versieconstant toegevoegd aan alle kaarten
+- Fix: cloudems-p1-card.js lazen nog import-export berekening — nu via sensor.cloudems_status.phases
+
+## v5.3.28 (2026-03-25)
+- Fix: p1-card import-export berekening verwijderd — leest nu sensor.cloudems_status.phases[L1].power_w
+- Nieuw: tests/test_real_modules.py — 26 echte module tests zonder HA installatie
+- Nieuw: tests/mock_ha.py — volledige MockHA omgeving voor end-to-end tests
+- Totaal: 66 tests, 0 mislukt
+
+## v5.3.29 (2026-03-25)
+- Fix: bolletjes richting omgekeerd bij import — _gridL1w/L2w/L3w lazen sensor.cloudems_grid_net_power.power_l1_net_w (was 0, niet null) → verkeerde richting. Terug naar sensor.cloudems_status.phases[L1].power_w — altijd correct.
+
+## v5.3.30 (2026-03-25)
+- Fix: fase-bolletjes richting — gebruikt nu current_a (zelfde bron als piekschaving): positief=import=grid→hub, negatief=export=hub→grid
+
+## v5.3.31 (2026-03-25)
+- Fix: lokale AI 0 samples — _record_decision_dual riep zichzelf recursief aan (oneindige lus) → nooit samples doorgestuurd. Nu roept het _decision_learner.record() correct aan.
+- Fix: zelfconsumptie data verloren na herstart — _today_date was leeg bij korte sessies waardoor save een lege datum opslaat. Nu altijd geïnitialiseerd bij async_setup.
+
+## v5.3.31 (2026-03-25)
+- Fix: NILM ankers altijd alle 5 zichtbaar (?, L1, L2, L3, Σ) op vaste gelijkmatige posities
+- Fix: NILM devices verdeeld onder hun eigen anker zonder overlap
+- Fix: bolletjes op THUIS→anker lijnen voor actieve apparaten

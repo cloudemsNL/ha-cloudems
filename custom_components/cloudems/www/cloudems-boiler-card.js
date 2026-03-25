@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Boiler Card  v1.3.0
 
-const BOILER_CARD_VERSION = "1.3.0";
+const BOILER_CARD_VERSION = "5.3.31";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');

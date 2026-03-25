@@ -1,7 +1,7 @@
 // CloudEMS Lamp Automatisering Card — v1.0.0
 // Los van lamp-circulatie: aan/uit onafhankelijk
 
-const CARD_VERSION = '1.0.0';
+const CARD_VERSION = '5.3.31';
 const MODES = { manual: '⏸ Handmatig', semi: '🔔 Semi-auto', auto: '⚡ Automatisch' };
 const MODE_COLOR = { manual: '#6b7280', semi: '#f59e0b', auto: '#22c55e' };
 

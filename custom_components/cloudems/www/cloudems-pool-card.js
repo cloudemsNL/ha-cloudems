@@ -2,7 +2,7 @@
  * CloudEMS Pool Card  v1.0.0
  * Zwembad — filtreerpomp, warmtepomp, temperatuur, UV, robot, advies
  */
-const POOL_VERSION = '1.0.0';
+const POOL_VERSION = '5.3.31';
 
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 

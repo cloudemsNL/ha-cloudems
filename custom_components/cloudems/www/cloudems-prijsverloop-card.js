@@ -22,6 +22,7 @@
  */
 
 const TPL = document.createElement('template');
+const CARD_PRIJSVERLOOP_VERSION = '5.3.31';
 TPL.innerHTML = `
 <style>
   :host { display: block; }

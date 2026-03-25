@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Appliance Card  v1.2.0
 
-const APPLIANCE_VERSION = "1.3.0";
+const APPLIANCE_VERSION = "5.3.31";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const DEVICE_ICONS = {

@@ -5,6 +5,7 @@
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
 const HCV = '1.8.8';
+const CARD_HOME_VERSION = '5.3.31';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';
@@ -432,14 +433,14 @@ ${t==='diagnose'?this._tabDiagnose():''}
     // phases komt uit sensor.cloudems_status.attributes.phases — direct uit de limiter.
     // current_a is al gesigneerd: positief=import, negatief=export.
     const _phases=this._a('sensor.cloudems_status','phases')||{};
-    const _gridNetW=this._v('sensor.cloudems_power')||0;  // negatief=export
+    const _gridNetW=this._v('sensor.cloudems_grid_net_power')||0;  // negatief=export
     // Stroom: uit phases (limiter, gesigneerd) — backend berekend
     const _clampA=(a)=>Math.abs(a)>100?0:a;
     const l1a=_clampA(_phases['L1']?.current_a??0);
     const l2a=_clampA(_phases['L2']?.current_a??0);
     const l3a=_clampA(_phases['L3']?.current_a??0);
-    // Vermogen: uit sensor.cloudems_power attributen (backend berekend)
-    const _gna=this._a('sensor.cloudems_power',null)||{};
+    // Vermogen: uit sensor.cloudems_grid_net_power attributen (backend berekend)
+    const _gna=this._a('sensor.cloudems_grid_net_power',null)||{};
     const l1w=_gna.power_l1_net_w??_phases['L1']?.power_w??0;
     const l2w=_gna.power_l2_net_w??_phases['L2']?.power_w??0;
     const l3w=_gna.power_l3_net_w??_phases['L3']?.power_w??0;
@@ -856,7 +857,7 @@ ${inactive.length?`<div class="sep"></div><div class="sec-lbl">uit · vandaag kW
   _tabDevices(){
     const devList=this._a('sensor.cloudems_nilm_running_devices','device_list',[])||this._a('sensor.cloudems_nilm_running_devices','devices',[])||[];
     // Stroom uit cloudems_grid_net_power attributen of limiter phases (backend)
-    const _gna2=this._a('sensor.cloudems_power',null)||{};
+    const _gna2=this._a('sensor.cloudems_grid_net_power',null)||{};
     const l1=_gna2.current_l1??this._a('sensor.cloudems_status','phases')?.L1?.current_a??0;
     const l2=_gna2.current_l2??this._a('sensor.cloudems_status','phases')?.L2?.current_a??0;
     const l3=_gna2.current_l3??this._a('sensor.cloudems_status','phases')?.L3?.current_a??0;

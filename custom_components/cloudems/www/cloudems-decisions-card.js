@@ -4,7 +4,7 @@
  * v4.6.104
  */
 
-const CARD_VERSION = "4.6.171";
+const CARD_VERSION = "5.3.31";
 
 const CAT_CONFIG = {
   // ── Batterij ──────────────────────────────────────────────────────────────

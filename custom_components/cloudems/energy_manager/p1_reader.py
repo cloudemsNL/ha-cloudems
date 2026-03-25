@@ -811,13 +811,24 @@ class HAEntityFallbackReader:
         _cur_l1 = _r("current_l1", 1.0)
         _cur_l2 = _r("current_l2", 1.0)
         _cur_l3 = _r("current_l3", 1.0)
-        # Sanity check: stroom > 100A is corrupt (HA sensor artifact)
-        # Gebruik dan I = P/U als fase-vermogen beschikbaar is
+        # Sanity check: stroom die niet overeenkomt met vermogen is corrupt
+        # Als I > (P/U * 10) dan is de sensor corrupt → reset naar 0 zodat I=P/U berekend wordt
         _mains_v = 230.0
-        _MAX_A = 100.0
+        _MAX_A = 100.0  # absolute grens
         if abs(_cur_l1) > _MAX_A: _cur_l1 = 0.0
         if abs(_cur_l2) > _MAX_A: _cur_l2 = 0.0
         if abs(_cur_l3) > _MAX_A: _cur_l3 = 0.0
+        # Extra check: stroom veel groter dan verwacht op basis van vermogen
+        for _cur, _pw, _attr in (
+            (_cur_l1, t.power_l1_w, 'l1'),
+            (_cur_l2, t.power_l2_w, 'l2'),
+            (_cur_l3, t.power_l3_w, 'l3'),
+        ):
+            if _pw > 10 and abs(_cur) > (_pw / _mains_v * 5):
+                # Stroom is meer dan 5x verwacht op basis van vermogen → corrupt
+                if _attr == 'l1': _cur_l1 = 0.0
+                elif _attr == 'l2': _cur_l2 = 0.0
+                else: _cur_l3 = 0.0
         # Als stroom-sensor 0 geeft maar er wel fase-vermogen is: bereken I = P/U
         if _cur_l1 == 0.0 and t.power_l1_w > 10:
             _cur_l1 = (t.power_l1_w - t.power_l1_export_w) / _mains_v

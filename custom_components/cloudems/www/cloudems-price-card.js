@@ -19,6 +19,7 @@
  */
 
 const TPL = document.createElement('template');
+const CARD_PRICE_VERSION = '5.3.31';
 TPL.innerHTML = `
 <style>
   :host { display: block; }

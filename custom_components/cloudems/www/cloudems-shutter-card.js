@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v3.0.0
 
-const SHUTTER_VERSION = "3.3.0";
+const SHUTTER_VERSION = "5.3.31";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const CSS = `

@@ -1,4 +1,5 @@
 // CloudEMS Lifecycle Arbitrage Card v1.0.0
+const CARD_LIFECYCLE_VERSION = '5.3.31';
 // Shows whether running appliances is worth the wear cost
 
 class CloudemsLifecycleCard extends HTMLElement {

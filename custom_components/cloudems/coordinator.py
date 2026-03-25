@@ -6114,7 +6114,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 # BUG FIX: when battery is discharging, total export includes battery export.
                 # Self-consumption only tracks SOLAR self-consumption, so we must subtract
                 # battery discharge from export. Formula: solar_export = max(0, export - battery_discharge)
-                _batt_w_sc     = float(data.get("battery_power", 0) or 0)
+                _batt_w_sc     = float(getattr(self, "_last_battery_w", 0) or data.get("battery_power", 0) or 0)
                 _batt_discharge = max(0.0, -_batt_w_sc)  # positive when discharging
                 _solar_export_w = max(0.0, _export_w - _batt_discharge)
                 self._self_consumption.tick(
@@ -9274,17 +9274,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         DecisionOutcomeLearner blijft actief voor threshold-bias.
         OutcomeTracker verzamelt data voor toekomstige AI feedback loop.
         """
-        # Oud systeem
+        # Oud systeem — DecisionOutcomeLearner
         try:
-            self._record_decision_dual(
-                component=component,
-                action=action,
-                context_bucket=context_bucket,
-                price_eur_kwh=price_eur_kwh,
-                energy_kwh=energy_kwh,
-                eval_after_s=eval_after_s,
-                **kwargs,
-            )
+            if self._decision_learner:
+                self._decision_learner.record(
+                    component=component,
+                    action=action,
+                    context_bucket=context_bucket,
+                    price_eur_kwh=price_eur_kwh,
+                    energy_kwh=energy_kwh,
+                    eval_after_s=eval_after_s,
+                    **kwargs,
+                )
         except Exception as _dol_err:
             _LOGGER.debug("DOL record fout (%s/%s): %s", component, action, _dol_err)
 

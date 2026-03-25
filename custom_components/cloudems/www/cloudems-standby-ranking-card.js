@@ -1,4 +1,5 @@
 // CloudEMS Standby Ranking Card v1.0.0
+const CARD_STANDBY_RANKING_VERSION = '5.3.31';
 // Top energy wasters with monthly cost
 
 class CloudemsStandbyRankingCard extends HTMLElement {

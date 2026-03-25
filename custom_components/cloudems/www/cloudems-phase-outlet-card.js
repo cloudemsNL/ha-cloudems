@@ -1,4 +1,5 @@
 // CloudEMS Phase Outlet Detector Card v1.0.0
+const CARD_PHASE_OUTLET_VERSION = '5.3.31';
 // Auto-detected phase assignments for devices
 
 class CloudemsPhaseOutletCard extends HTMLElement {

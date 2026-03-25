@@ -1,4 +1,5 @@
 // CloudEMS Warmtebron Vergelijker Card v1.0.0 — Gas vs electricity heat cost
+const CARD_WARMTEBRON_VERSION = '5.3.31';
 
 class CloudemsWarmtebronCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

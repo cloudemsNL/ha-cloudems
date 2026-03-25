@@ -2,7 +2,7 @@
  * CloudEMS Learning Card  v1.0.0
  * Zelflerend — leervoortgang, anomalie, standby hunters, weerkalibratie, EV leermodel
  */
-const LEARNING_VERSION = '1.0.0';
+const LEARNING_VERSION = '5.3.31';
 
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 

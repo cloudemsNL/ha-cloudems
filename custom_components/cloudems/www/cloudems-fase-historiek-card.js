@@ -1,4 +1,5 @@
 // CloudEMS Fase Balans Historiek Card v1.0.0
+const CARD_FASE_HISTORIEK_VERSION = '5.3.31';
 // Live + in-memory sparkline history of L1/L2/L3 currents and imbalance
 
 class CloudemsFaseHistoriekCard extends HTMLElement {

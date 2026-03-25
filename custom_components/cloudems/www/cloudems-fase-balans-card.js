@@ -1,4 +1,5 @@
 // CloudEMS Fase Balans Card v1.0.0 — Phase balance with cos phi
+const CARD_FASE_BALANS_VERSION = '5.3.31';
 
 class CloudemsFaseBalansCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
@@ -33,9 +34,9 @@ class CloudemsFaseBalansCard extends HTMLElement {
         </div>
       </div>`;
     };
-    // Stroom uit sensor.cloudems_power (backend berekend, gesigneerd)
+    // Stroom uit sensor.cloudems_grid_net_power (backend berekend, gesigneerd)
     // Fallback naar sensor.cloudems_status.phases (limiter, zelfde bron als piekschaving)
-    const _gna = h.states['sensor.cloudems_power']?.attributes || {};
+    const _gna = h.states['sensor.cloudems_grid_net_power']?.attributes || {};
     const _st_phases = h.states['sensor.cloudems_status']?.attributes?.phases || {};
     const l1 = Math.abs(parseFloat(_gna.current_l1 ?? _st_phases['L1']?.current_a ?? bal.current_l1 ?? 0));
     const l2 = Math.abs(parseFloat(_gna.current_l2 ?? _st_phases['L2']?.current_a ?? bal.current_l2 ?? 0));

@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Diagnose Card  v1.1.0
 
-const DIAGNOSE_VERSION = "2.0.0";
+const DIAGNOSE_VERSION = "5.3.31";
 const _esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const _fmt = (v, dec=1) => v != null && !isNaN(v) ? parseFloat(v).toFixed(dec) : "—";
 const _st  = (hass, eid) => hass?.states?.[eid];
@@ -384,7 +384,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
       <div class="section-title">Net & Fasen sensor</div>
       ${(()=>{
         const ph = _st(h,'sensor.cloudems_grid_phase_imbalance');
-        const gn = _st(h,'sensor.cloudems_power');
+        const gn = _st(h,'sensor.cloudems_grid_net_power');
         if(ph||gn) return `<div class="kv"><span class="kl">Status</span><span class="kv_ ok">✅ Beschikbaar</span></div>`;
         return `<div class="kv"><span class="kl">Status</span><span class="kv_ err">❌ Niet gevonden</span></div>`;
       })()}

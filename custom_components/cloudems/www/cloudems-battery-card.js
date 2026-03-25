@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Battery Card  v3.0.0
 
-const BAT_VERSION = "3.0.0";
+const BAT_VERSION = "5.3.31";
 const BAT_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {

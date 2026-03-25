@@ -1,4 +1,5 @@
 // CloudEMS V2H Card v1.0.0
+const CARD_V2H_VERSION = '5.3.31';
 // Vehicle-to-Home status and control
 
 class CloudemsV2hCard extends HTMLElement {

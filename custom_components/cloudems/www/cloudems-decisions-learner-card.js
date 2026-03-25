@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Decision Outcome Learner Card v1.0
 
-const DLC_VERSION = "1.0.0";
+const DLC_VERSION = "5.3.31";
 const DLC_SENSOR  = "sensor.cloudems_decision_learner";
 
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");

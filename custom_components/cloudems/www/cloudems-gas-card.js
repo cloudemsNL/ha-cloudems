@@ -5,6 +5,7 @@
  */
 
 class CloudEMSGasCard extends HTMLElement {
+const CARD_GAS_VERSION = '5.3.31';
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });

@@ -1,4 +1,5 @@
 // CloudEMS AI Card v1.4.0 — Local AI status, k-NN model trained on own data
+const CARD_AI_VERSION = '5.3.31';
 // No pre-trained data — learns purely from this installation
 'use strict';
 

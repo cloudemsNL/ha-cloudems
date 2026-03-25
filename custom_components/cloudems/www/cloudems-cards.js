@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.601
+ * CloudEMSTooltip — v4.6.617
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -488,7 +488,7 @@ window.CloudEMSTooltip = {
       const ph  = st['sensor.cloudems_status']?.attributes?.phases || {};
       const e   = this._config.entities || {};
       const sig = JSON.stringify([
-        st['sensor.cloudems_power']?.state,
+        st['sensor.cloudems_grid_net_power']?.state,
         st['sensor.cloudems_solar_system']?.state,
         st['sensor.cloudems_home_rest']?.state,
         st['sensor.cloudems_status']?.state,
@@ -1006,7 +1006,9 @@ window.CloudEMSTooltip = {
       if (!_statusSt) { this._needsFullRender = true; return; }
 
       const e           = this._config.entities || {};
-      let   grid        = this._getVal(e.grid);
+      // Grid: lees altijd van sensor.cloudems_status.grid_power_w — altijd beschikbaar, altijd correct
+      const _statusGrid = _statusSt?.attributes?.grid_power_w;
+      let   grid        = _statusGrid != null ? _statusGrid : this._getVal(e.grid);
       const home        = this._getVal(e.home);
       const solarNodes  = this._getSolarNodes();
       // Read per-phase power from status sensor (for 3-wire rendering)
@@ -1015,16 +1017,15 @@ window.CloudEMSTooltip = {
       const _phL2 = _statusPhases['L2'] || {};
       const _phL3 = _statusPhases['L3'] || {};
       const _isThreePhase = Object.keys(_statusPhases).length >= 2;
-      // Per-fase netto vermogen uit sensor.cloudems_power attributen (berekend in backend)
-      const _gna = this._hass?.states['sensor.cloudems_power']?.attributes || {};
+      // Per-fase netto vermogen uit sensor.cloudems_grid_net_power attributen (berekend in backend)
+      const _gna = this._hass?.states['sensor.cloudems_grid_net_power']?.attributes || {};
 
       // Per-fase netto vermogen: positief = import, negatief = export
       // power_w uit coordinator is al signed (Kirchhoff-gecorrigeerd)
-      // Fase-richting: lees netto fase-vermogen uit sensor.cloudems_power (berekend in backend)
-      // Fallback naar limiter phases als attribuut nog niet beschikbaar (bijv. na herstart)
-      const _gridL1w = _gna.power_l1_net_w != null ? _gna.power_l1_net_w : (_phL1.power_w || 0);
-      const _gridL2w = _gna.power_l2_net_w != null ? _gna.power_l2_net_w : (_phL2.power_w || 0);
-      const _gridL3w = _gna.power_l3_net_w != null ? _gna.power_l3_net_w : (_phL3.power_w || 0);
+      // Fase-richting: gebruik current_a (zelfde als piekschaving) — positief=import, negatief=export
+      const _gridL1w = (_phL1.current_a || 0) * 230;
+      const _gridL2w = (_phL2.current_a || 0) * 230;
+      const _gridL3w = (_phL3.current_a || 0) * 230;
       // Solar per-phase (from inverter data)
       const _solarInvs = this._hass?.states['sensor.cloudems_solar_system']?.attributes?.inverters || [];
       const _solarByPhase = {L1:0, L2:0, L3:0};
@@ -1619,22 +1620,25 @@ window.CloudEMSTooltip = {
           devs:  _phGroups[k],
         }));
 
+      // Altijd 5 ankers tonen — vaste posities gelijkmatig verdeeld
+      const _ALL_ANCHORS = ['?', 'L1', 'L2', 'L3', 'MF'];
+      const _ALL_ANCHOR_LABELS = {'?':'?', 'L1':'L1', 'L2':'L2', 'L3':'L3', 'MF':'Σ'};
+      const _ALL_ANCHOR_COLS   = {'?':C.sub, 'L1':C.L1, 'L2':C.L2, 'L3':C.L3, 'MF':'#fbbf24'};
+      // Vaste X posities — 5 ankers gelijkmatig over W=500
+      const _ANC_PAD = 50;
+      const _ancXs = {};
+      _ALL_ANCHORS.forEach((k, i) => {
+        _ancXs[k] = _ANC_PAD + i * (W - _ANC_PAD*2) / (_ALL_ANCHORS.length - 1);
+      });
+
+      // Hermap _ancGroups naar vaste posities
+      _ancGroups.forEach(g => { g._fixedKey = g.key; });
+
       if (_ancGroups.length > 0) {
-        // Dynamic canvas height based on presence of NILM row
         const _ANCHOR_Y = R_HOME + 82;
         const _DEV_Y    = _ANCHOR_Y + 70;
 
-        // Anchor X positions — evenly spread across card width
-        const _ANC_PAD = 44;
-        const _ancXs = {};
-        if (_ancGroups.length === 1) {
-          _ancXs[_ancGroups[0].key] = COL_HUB;
-        } else {
-          const _step = (W - _ANC_PAD*2) / (_ancGroups.length - 1);
-          _ancGroups.forEach((g, i) => { _ancXs[g.key] = _ANC_PAD + i * _step; });
-        }
-
-        // Device X positions — spread under anchor, push-apart to prevent overlap
+        // Device X: verdeel devices per anker gelijkmatig onder hun vaste anker-X
         const _devXs = {};
         _ancGroups.forEach(g => {
           const ax = _ancXs[g.key], n = g.devs.length;
@@ -1642,24 +1646,9 @@ window.CloudEMSTooltip = {
             _devXs[d._uid || d.label] = ax - (n-1)*NILM_BOX_W/2 + i*NILM_BOX_W;
           });
         });
-        // Push-apart (4 passes)
-        const _flatDevs = _ancGroups.flatMap(g => g.devs.map(d => ({...d, _col:g.col})))
-          .sort((a,b) => (_devXs[a._uid||a.label]||0) - (_devXs[b._uid||b.label]||0));
-        for (let pass=0; pass<4; pass++) {
-          for (let i=1; i<_flatDevs.length; i++) {
-            const ka = _flatDevs[i-1]._uid||_flatDevs[i-1].label;
-            const kb = _flatDevs[i]._uid||_flatDevs[i].label;
-            const gap = (_devXs[kb]||0) - (_devXs[ka]||0);
-            if (gap < NILM_BOX_W) {
-              const push = (NILM_BOX_W - gap) / 2;
-              _devXs[kb] = (_devXs[kb]||0) + push;
-              _devXs[ka] = (_devXs[ka]||0) - push;
-            }
-          }
-        }
-        _flatDevs.forEach(d => {
-          const k = d._uid||d.label;
-          _devXs[k] = Math.max(38, Math.min(W-38, _devXs[k]||0));
+        // Clamp binnen canvas
+        Object.keys(_devXs).forEach(k => {
+          _devXs[k] = Math.max(38, Math.min(W-38, _devXs[k]));
         });
 
         // Store _devXs on nodes for pipeDefs
@@ -1671,13 +1660,14 @@ window.CloudEMSTooltip = {
           d._phCol = g.col;
         }));
 
-        // ── Draw THUIS → anchor wires ──────────────────────────────────────
-        _ancGroups.forEach(g => {
-          const ax = _ancXs[g.key];
-          const hasActive = g.devs.some(d => (d.power_w||0) > T);
-          // Always draw THUIS→anchor wire, active or not
-        h += `<line x1="${COL_HUB.toFixed(1)}" y1="${(R_HOME+22).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(_ANCHOR_Y-15).toFixed(1)}"
-          stroke="${g.col}" stroke-width="1.0" opacity="${hasActive?0.75:0.22}" stroke-linecap="round"/>`;
+        // ── Draw THUIS → anchor wires (altijd alle 5 ankers) ─────────────
+        _ALL_ANCHORS.forEach(ak => {
+          const ax = _ancXs[ak];
+          const col = _ALL_ANCHOR_COLS[ak];
+          const grp = _ancGroups.find(g => g.key === ak);
+          const hasActive = grp ? grp.devs.some(d => (d.power_w||0) > T) : false;
+          h += `<line x1="${COL_HUB.toFixed(1)}" y1="${(R_HOME+22).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(_ANCHOR_Y-15).toFixed(1)}"
+            stroke="${col}" stroke-width="1.0" opacity="${hasActive?0.75:0.15}" stroke-linecap="round"/>`;
         });
 
         // ── Draw anchor → device wires ─────────────────────────────────────
@@ -1695,17 +1685,19 @@ window.CloudEMSTooltip = {
           }
         }));
 
-        // ── Draw anchor pills ─────────────────────────────────────────────
-        _ancGroups.forEach(g => {
-          const ax = _ancXs[g.key], ay = _ANCHOR_Y;
-          const col = g.col;
-          const hasActive = g.devs.some(d => (d.power_w||0) > T);
-          const op = hasActive ? 1 : 0.3;
+        // ── Draw anchor pills (altijd alle 5) ────────────────────────────
+        _ALL_ANCHORS.forEach(ak => {
+          const ax = _ancXs[ak], ay = _ANCHOR_Y;
+          const col = _ALL_ANCHOR_COLS[ak];
+          const lbl = _ALL_ANCHOR_LABELS[ak];
+          const grp = _ancGroups.find(g => g.key === ak);
+          const hasActive = grp ? grp.devs.some(d => (d.power_w||0) > T) : false;
+          const op = hasActive ? 1 : 0.25;
           h += `<g opacity="${op}">
             <rect x="${ax-17}" y="${ay-13}" width="34" height="26" rx="13"
               fill="${col}35" stroke="${col}" stroke-width="1.5"/>
             <text x="${ax}" y="${ay+2}" text-anchor="middle" font-size="9" font-weight="700"
-              fill="${col}">${g.label}</text>
+              fill="${col}">${lbl}</text>
           </g>`;
         });
 
@@ -1890,6 +1882,13 @@ window.CloudEMSTooltip = {
         { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:_heEv_x,    y1:_heEv_y,    x2:COL_LEFT+44, y2:R_EV },
         { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:_heEbike_x, y1:_heEbike_y, x2:COL_LEFT+44, y2:R_EBIKE },
         { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:_hePool_x,  y1:_hePool_y,  x2:COL_LEFT+44, y2:R_POOL },
+        // THUIS → anker bolletjes (voor alle actieve ankers)
+        ..._ancGroups.filter(g => g.devs.some(d => (d.power_w||0) > T)).map(g => ({
+          key:`anc_${g.key}`, color: _ALL_ANCHOR_COLS[g.key],
+          on: true, pw: g.devs.reduce((s,d) => s+(d.power_w||0), 0),
+          x1: COL_HUB, y1: R_HOME+22,
+          x2: _ancXs[g.key], y2: _ANCHOR_Y-15,
+        })),
         // NILM device pipes — use stored _devX/_ancX from NILM layout above
         ...layer2.filter(n => n._devX !== undefined).map((node, i) => {
           return {
@@ -2671,7 +2670,7 @@ window.CloudEMSTooltip = {
         watt_threshold: 1000,
         entities: {
           solar_system: { entity: 'sensor.cloudems_solar_system' },
-          grid:    { entity: 'sensor.cloudems_power',   name: 'Net' },
+          grid:    { entity: 'sensor.cloudems_grid_net_power',   name: 'Net' },
           home:    { entity: 'sensor.cloudems_home_rest',       name: 'Thuis' },
           weather: { entity: 'weather.forecast_thuis' },
           // Optioneel — worden anders auto-detected via CloudEMS sensors:
@@ -3110,7 +3109,7 @@ window.CloudEMSTooltip = {
             'sensor.cloudems_solar_system',
             'Leest automatisch alle omvormers uit dit sensor attribuut')}
 
-          ${entityRow('grid', '⚡ Net', 'sensor.cloudems_power')}
+          ${entityRow('grid', '⚡ Net', 'sensor.cloudems_grid_net_power')}
 
           ${entityRow('home', '🏠 Thuis', 'sensor.cloudems_home_rest')}
 
@@ -4580,7 +4579,7 @@ window.CloudEMSTooltip = {
     _render() {
       if (!this._hass) return;
       const e = this._config.entities || {};
-      const grid   = this._val(e.grid   || 'sensor.cloudems_power');
+      const grid   = this._val(e.grid   || 'sensor.cloudems_grid_net_power');
       const solar  = this._val(e.solar  || 'sensor.cloudems_solar_system_intelligence');
       const house  = this._val(e.house  || 'sensor.cloudems_house_consumption') || (Math.abs(grid) + solar);
       const batSt  = this._hass.states['sensor.cloudems_battery_so_c'];

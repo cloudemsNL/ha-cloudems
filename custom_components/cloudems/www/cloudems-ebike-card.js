@@ -1,4 +1,5 @@
 // CloudEMS E-bike & Scooter Card v1.0.0
+const CARD_EBIKE_VERSION = '5.3.31';
 
 class CloudemsEbikeCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

@@ -96,6 +96,9 @@ class SelfConsumptionTracker:
         self._tick_interval_s = 10.0
 
     async def async_setup(self) -> None:
+        # Initialiseer datum altijd zodat async_save nooit een lege datum opslaat
+        from datetime import datetime, timezone
+        self._today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         saved: dict = await self._store.async_load() or {}
         hourly_raw  = saved.get("hourly", [])
         if len(hourly_raw) == 24:

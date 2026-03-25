@@ -659,24 +659,12 @@ class CloudEMSPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEnt
 
     @property
     def native_value(self):
-        d  = self.coordinator.data or {}
-        p1 = d.get("p1_data", {})
-        # P1 net power takes priority; fall back to coordinator-computed grid_power
-        v = p1.get("net_power_w")
-        if v is not None:
-            # Sanity check: waarden > 50kW zijn corrupt (P1 uitval artifact)
-            if abs(v) > 50000:
-                limiter = getattr(self.coordinator, "_limiter", None)
-                if limiter:
-                    phases = limiter.get_phase_summary()
-                    phase_sum = sum(p.get("power_w", 0) for p in phases.values())
-                    if phase_sum != 0:
-                        return round(phase_sum, 1)
-            return v
+        d = self.coordinator.data or {}
+        # power_w is de coordinator-berekende grid waarde (gesigneerd: positief=import)
         # BUG FIX: use `is not None` so value 0 is returned correctly (or → falsy on 0)
-        vp = d.get("power_w")
-        if vp is not None:
-            return vp
+        v = d.get("power_w")
+        if v is not None:
+            return v
         return d.get("grid_power_w", 0)
 
     @property
@@ -7412,7 +7400,12 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         # v4.6.449: circuit monitor
         circuit_monitor = (self.coordinator.data or {}).get("circuit_monitor", {})
         ups = (self.coordinator.data or {}).get("ups", {})
-        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups}
+        data = self.coordinator.data or {}
+        grid_power_w = data.get("grid_power_w") or data.get("power_w", 0)
+        return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups,
+                "grid_power_w": grid_power_w,
+                "import_power_w": data.get("import_power_w", 0),
+                "export_power_w": data.get("export_power_w", 0)}
 
 
 class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
