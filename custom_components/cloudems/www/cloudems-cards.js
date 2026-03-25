@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.593
+ * CloudEMSTooltip — v4.6.594
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -498,9 +498,9 @@ window.CloudEMSTooltip = {
         e.battery?.entity ? st[e.battery.entity]?.state : null,
         e.grid?.entity    ? st[e.grid.entity]?.state    : null,
         // Per-fase richting in sig zodat flip grid→hub / hub→grid direct een full render triggert
-        _p1sig?.power_l1_w != null ? (_p1sig.power_l1_w > 0 ? 1 : -1) : (ph['L1']?.power_w > 0 ? 1 : -1),
-        _p1sig?.power_l2_w != null ? (_p1sig.power_l2_w > 0 ? 1 : -1) : (ph['L2']?.power_w > 0 ? 1 : -1),
-        _p1sig?.power_l3_w != null ? (_p1sig.power_l3_w > 0 ? 1 : -1) : (ph['L3']?.power_w > 0 ? 1 : -1),
+        _p1sig?.power_l1_import_w != null ? (_p1sig.power_l1_import_w > _p1sig.power_l1_export_w ? 1 : -1) : (ph['L1']?.power_w > 0 ? 1 : -1),
+        _p1sig?.power_l2_import_w != null ? (_p1sig.power_l2_import_w > _p1sig.power_l2_export_w ? 1 : -1) : (ph['L2']?.power_w > 0 ? 1 : -1),
+        _p1sig?.power_l3_import_w != null ? (_p1sig.power_l3_import_w > _p1sig.power_l3_export_w ? 1 : -1) : (ph['L3']?.power_w > 0 ? 1 : -1),
       ]);
       if (sig !== this._hassSig) {
         this._hassSig = sig;
@@ -1027,14 +1027,14 @@ window.CloudEMSTooltip = {
       // Per-fase netto vermogen: positief = import, negatief = export
       // power_w uit coordinator is al signed (Kirchhoff-gecorrigeerd)
       // p1_data geeft power_l1_w (import) en power_l1_export_w apart — netto = import - export
-      const _gridL1w = _p1a.power_l1_w != null
-        ? (_p1a.power_l1_w - (_p1a.power_l1_export_w || 0))
+      const _gridL1w = _p1a.power_l1_import_w != null
+        ? (_p1a.power_l1_import_w - (_p1a.power_l1_export_w || 0))
         : (_phL1.power_w || 0);
-      const _gridL2w = _p1a.power_l2_w != null
-        ? (_p1a.power_l2_w - (_p1a.power_l2_export_w || 0))
+      const _gridL2w = _p1a.power_l2_import_w != null
+        ? (_p1a.power_l2_import_w - (_p1a.power_l2_export_w || 0))
         : (_phL2.power_w || 0);
-      const _gridL3w = _p1a.power_l3_w != null
-        ? (_p1a.power_l3_w - (_p1a.power_l3_export_w || 0))
+      const _gridL3w = _p1a.power_l3_import_w != null
+        ? (_p1a.power_l3_import_w - (_p1a.power_l3_export_w || 0))
         : (_phL3.power_w || 0);
       // Solar per-phase (from inverter data)
       const _solarInvs = this._hass?.states['sensor.cloudems_solar_system']?.attributes?.inverters || [];
