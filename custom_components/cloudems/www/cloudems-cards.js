@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.595
+ * CloudEMSTooltip — v4.6.601
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -487,9 +487,8 @@ window.CloudEMSTooltip = {
       const st  = hass.states;
       const ph  = st['sensor.cloudems_status']?.attributes?.phases || {};
       const e   = this._config.entities || {};
-      const _p1sig = st['sensor.cloudems_p1_power']?.attributes;
       const sig = JSON.stringify([
-        st['sensor.cloudems_grid_net_power']?.state,
+        st['sensor.cloudems_power']?.state,
         st['sensor.cloudems_solar_system']?.state,
         st['sensor.cloudems_home_rest']?.state,
         st['sensor.cloudems_status']?.state,
@@ -498,9 +497,9 @@ window.CloudEMSTooltip = {
         e.battery?.entity ? st[e.battery.entity]?.state : null,
         e.grid?.entity    ? st[e.grid.entity]?.state    : null,
         // Per-fase richting in sig zodat flip grid→hub / hub→grid direct een full render triggert
-        _p1sig?.power_l1_import_w != null ? (_p1sig.power_l1_import_w > _p1sig.power_l1_export_w ? 1 : -1) : (ph['L1']?.power_w > 0 ? 1 : -1),
-        _p1sig?.power_l2_import_w != null ? (_p1sig.power_l2_import_w > _p1sig.power_l2_export_w ? 1 : -1) : (ph['L2']?.power_w > 0 ? 1 : -1),
-        _p1sig?.power_l3_import_w != null ? (_p1sig.power_l3_import_w > _p1sig.power_l3_export_w ? 1 : -1) : (ph['L3']?.power_w > 0 ? 1 : -1),
+        ph['L1']?.power_w > 0 ? 1 : -1,
+        ph['L2']?.power_w > 0 ? 1 : -1,
+        ph['L3']?.power_w > 0 ? 1 : -1,
       ]);
       if (sig !== this._hassSig) {
         this._hassSig = sig;
@@ -1015,27 +1014,17 @@ window.CloudEMSTooltip = {
       const _phL1 = _statusPhases['L1'] || {};
       const _phL2 = _statusPhases['L2'] || {};
       const _phL3 = _statusPhases['L3'] || {};
-      // Sanity check: als grid > 50000W (50 kW) is de sensor stale/corrupt.
-      // Fallback: bereken grid uit fase-data van sensor.cloudems_status.
-      if (Math.abs(grid) > 50000 && Object.keys(_statusPhases).length >= 1) {
-        const _phaseGrid = (_phL1.power_w || 0) + (_phL2.power_w || 0) + (_phL3.power_w || 0);
-        if (_phaseGrid !== 0) grid = _phaseGrid;
-      }
       const _isThreePhase = Object.keys(_statusPhases).length >= 2;
-      // P1 per-phase import/export power
-      const _p1a = this._hass?.states['sensor.cloudems_p1_power']?.attributes || {};
+      // Per-fase netto vermogen uit sensor.cloudems_power attributen (berekend in backend)
+      const _gna = this._hass?.states['sensor.cloudems_power']?.attributes || {};
+
       // Per-fase netto vermogen: positief = import, negatief = export
       // power_w uit coordinator is al signed (Kirchhoff-gecorrigeerd)
-      // p1_data geeft power_l1_w (import) en power_l1_export_w apart — netto = import - export
-      const _gridL1w = _p1a.power_l1_import_w != null
-        ? (_p1a.power_l1_import_w - (_p1a.power_l1_export_w || 0))
-        : (_phL1.power_w || 0);
-      const _gridL2w = _p1a.power_l2_import_w != null
-        ? (_p1a.power_l2_import_w - (_p1a.power_l2_export_w || 0))
-        : (_phL2.power_w || 0);
-      const _gridL3w = _p1a.power_l3_import_w != null
-        ? (_p1a.power_l3_import_w - (_p1a.power_l3_export_w || 0))
-        : (_phL3.power_w || 0);
+      // Fase-richting: lees netto fase-vermogen uit sensor.cloudems_power (berekend in backend)
+      // Fallback naar limiter phases als attribuut nog niet beschikbaar (bijv. na herstart)
+      const _gridL1w = _gna.power_l1_net_w != null ? _gna.power_l1_net_w : (_phL1.power_w || 0);
+      const _gridL2w = _gna.power_l2_net_w != null ? _gna.power_l2_net_w : (_phL2.power_w || 0);
+      const _gridL3w = _gna.power_l3_net_w != null ? _gna.power_l3_net_w : (_phL3.power_w || 0);
       // Solar per-phase (from inverter data)
       const _solarInvs = this._hass?.states['sensor.cloudems_solar_system']?.attributes?.inverters || [];
       const _solarByPhase = {L1:0, L2:0, L3:0};
@@ -2682,7 +2671,7 @@ window.CloudEMSTooltip = {
         watt_threshold: 1000,
         entities: {
           solar_system: { entity: 'sensor.cloudems_solar_system' },
-          grid:    { entity: 'sensor.cloudems_grid_net_power',   name: 'Net' },
+          grid:    { entity: 'sensor.cloudems_power',   name: 'Net' },
           home:    { entity: 'sensor.cloudems_home_rest',       name: 'Thuis' },
           weather: { entity: 'weather.forecast_thuis' },
           // Optioneel — worden anders auto-detected via CloudEMS sensors:
@@ -3121,7 +3110,7 @@ window.CloudEMSTooltip = {
             'sensor.cloudems_solar_system',
             'Leest automatisch alle omvormers uit dit sensor attribuut')}
 
-          ${entityRow('grid', '⚡ Net', 'sensor.cloudems_grid_net_power')}
+          ${entityRow('grid', '⚡ Net', 'sensor.cloudems_power')}
 
           ${entityRow('home', '🏠 Thuis', 'sensor.cloudems_home_rest')}
 
@@ -4591,7 +4580,7 @@ window.CloudEMSTooltip = {
     _render() {
       if (!this._hass) return;
       const e = this._config.entities || {};
-      const grid   = this._val(e.grid   || 'sensor.cloudems_grid_net_power');
+      const grid   = this._val(e.grid   || 'sensor.cloudems_power');
       const solar  = this._val(e.solar  || 'sensor.cloudems_solar_system_intelligence');
       const house  = this._val(e.house  || 'sensor.cloudems_house_consumption') || (Math.abs(grid) + solar);
       const batSt  = this._hass.states['sensor.cloudems_battery_so_c'];

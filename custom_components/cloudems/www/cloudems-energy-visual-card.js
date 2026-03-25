@@ -107,7 +107,7 @@ class CloudemsEnergyVisualCard extends HTMLElement {
 
     const st  = h.states['sensor.cloudems_status']?.attributes || {};
     const pvW   = parseFloat(st.solar_power_w || h.states['sensor.cloudems_solar_system_intelligence']?.state || 0);
-    const gridW = parseFloat(st.grid_power_w || h.states['sensor.cloudems_grid_net_power']?.state || 0);
+    const gridW = parseFloat(st.grid_power_w || h.states['sensor.cloudems_power']?.state || 0);
     const batW  = parseFloat(st.battery_power_w || h.states['sensor.thuisbatterij_power']?.state || 0);
     const soc   = parseFloat(h.states['sensor.thuisbatterij_percentage']?.state || 0);
     const houseW = parseFloat(st.house_load_w || h.states['sensor.cloudems_home_rest']?.state || 0);

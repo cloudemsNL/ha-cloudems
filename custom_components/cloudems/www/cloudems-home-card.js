@@ -432,29 +432,17 @@ ${t==='diagnose'?this._tabDiagnose():''}
     // phases komt uit sensor.cloudems_status.attributes.phases — direct uit de limiter.
     // current_a is al gesigneerd: positief=import, negatief=export.
     const _phases=this._a('sensor.cloudems_status','phases')||{};
-    const _gridNetW=this._v('sensor.cloudems_grid_net_power')||0;  // negatief=export
-    const _signedA=(ph)=>{
-      const pd=_phases[ph];
-      // Prioriteit 1: Kirchhoff-gecorrigeerde waarde uit coordinator phases dict
-      // (signed: negatief = export/teruglevering)
-      if(pd&&pd.current_a!=null) return pd.current_a;
-      // Prioriteit 2: per-fase vermogen → sign afleiden
-      const pw=pd?.power_w??this._v(`sensor.cloudems_grid_phase_${ph.toLowerCase()}_power`)??null;
-      const raw=Math.abs(this._v(`sensor.cloudems_current_${ph.toLowerCase()}`)||0);
-      if(pw!=null) return raw*(pw<0?-1:1);
-      // Prioriteit 3: als huis exporteert (grid negatief) EN geen per-fase data
-      // → gebruik totaal grid-richting maar log dat het een schatting is
-      return raw*(_gridNetW<0?-1:1);
-    };
-    // v1.8.1: sanity clamp — waarden >100A zijn opstartartefacten
+    const _gridNetW=this._v('sensor.cloudems_power')||0;  // negatief=export
+    // Stroom: uit phases (limiter, gesigneerd) — backend berekend
     const _clampA=(a)=>Math.abs(a)>100?0:a;
-    const l1a=_clampA(_signedA('L1')); const l2a=_clampA(_signedA('L2')); const l3a=_clampA(_signedA('L3'));
-    const phaseSt=this._s('sensor.cloudems_batterij_soc'); // just to get hass
-    const phData=this._a('sensor.cloudems_status','phase_data')||{};
-    // Try to get per-phase power from phases attribute on battery sensor or net_vermogen
-    const l1w=this._v('sensor.cloudems_import_power_l1')||this._v('sensor.cloudems_power_l1');
-    const l2w=this._v('sensor.cloudems_import_power_l2')||this._v('sensor.cloudems_power_l2');
-    const l3w=this._v('sensor.cloudems_import_power_l3')||this._v('sensor.cloudems_power_l3');
+    const l1a=_clampA(_phases['L1']?.current_a??0);
+    const l2a=_clampA(_phases['L2']?.current_a??0);
+    const l3a=_clampA(_phases['L3']?.current_a??0);
+    // Vermogen: uit sensor.cloudems_power attributen (backend berekend)
+    const _gna=this._a('sensor.cloudems_power',null)||{};
+    const l1w=_gna.power_l1_net_w??_phases['L1']?.power_w??0;
+    const l2w=_gna.power_l2_net_w??_phases['L2']?.power_w??0;
+    const l3w=_gna.power_l3_net_w??_phases['L3']?.power_w??0;
     const maxA=this._config.max_ampere||25;
     const imbalance=Math.max(Math.abs(l1a),Math.abs(l2a),Math.abs(l3a))-Math.min(Math.abs(l1a),Math.abs(l2a),Math.abs(l3a)); // v4.6.511: abs
     const phColor=(a,w)=>a<0||w<0?'#34d399':Math.abs(a)>maxA?'#ef4444':'#f87171';
@@ -867,9 +855,11 @@ ${inactive.length?`<div class="sep"></div><div class="sec-lbl">uit · vandaag kW
   /* ── APPARATEN ───────────────────────────────────────────────────────────── */
   _tabDevices(){
     const devList=this._a('sensor.cloudems_nilm_running_devices','device_list',[])||this._a('sensor.cloudems_nilm_running_devices','devices',[])||[];
-    const l1=this._v('sensor.cloudems_current_l1')||this._v('sensor.cloudems_grid_phase_l1_current');
-    const l2=this._v('sensor.cloudems_current_l2')||this._v('sensor.cloudems_grid_phase_l2_current');
-    const l3=this._v('sensor.cloudems_current_l3')||this._v('sensor.cloudems_grid_phase_l3_current');
+    // Stroom uit cloudems_grid_net_power attributen of limiter phases (backend)
+    const _gna2=this._a('sensor.cloudems_power',null)||{};
+    const l1=_gna2.current_l1??this._a('sensor.cloudems_status','phases')?.L1?.current_a??0;
+    const l2=_gna2.current_l2??this._a('sensor.cloudems_status','phases')?.L2?.current_a??0;
+    const l3=_gna2.current_l3??this._a('sensor.cloudems_status','phases')?.L3?.current_a??0;
     const phC=ph=>ph==='L1'?'#60a5fa':ph==='L2'?'#a78bfa':ph==='L3'?'#34d399':'rgba(255,255,255,0.25)';
     const q=(this._devSearch||'').toLowerCase();
     const filtered=q?devList.filter(d=>(d.name||d.device_type||'').toLowerCase().includes(q)):devList;

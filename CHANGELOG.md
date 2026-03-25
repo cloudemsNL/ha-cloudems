@@ -193,3 +193,31 @@
 
 ## v5.3.9 (2026-03-25)
 - Fix KRITIEK: _selfcons_pct UnboundLocalError — de locals().get() fix in v5.3.6 werkte niet omdat Python de variabele als lokaal markeert in de hele functie. Echte fix: _selfcons_pct = 0.0 initialiseren aan het begin van _async_update_data.
+
+## v5.3.10 (2026-03-25)
+- Fix: flow card grid-node toonde waarde van stale sensor.cloudems_grid_net_power (0W/1W) — nu sensor.cloudems_p1_power.net_power_w gebruikt als die beschikbaar is
+
+## v5.3.11 (2026-03-25)
+- Fix: CloudEMSGridNetPowerSensor opnieuw geregistreerd in sensor.py — leest p1_data.net_power_w met fallback naar grid_power. Alle kaarten lezen nu sensor.cloudems_grid_net_power zonder per-kaart fallbacks.
+- Cleanup: flow card p1 net_power_w fallback-hack verwijderd
+
+## v5.3.12 (2026-03-25)
+- Fix: bolletjesrichting flow card gebruikt nu limiter power_w (sensor.cloudems_status.attributes.phases) — zelfde bron als piekschaving kaart. Eerder werden P1 per-fase waarden gebruikt die konden afwijken van de limiter.
+
+## v5.3.13 (2026-03-25)
+- Architectuur: kaart-niveau logica verplaatst naar backend
+  - sensor.cloudems_grid_net_power publiceert nu power_l1_net_w/l2/l3, current_l1/l2/l3, alle p1 fase-data
+  - Sanity check (>50kW corrupt) verplaatst van flow card naar sensor.py native_value
+  - flow card: _signedA, dubbele sensor-fallbacks en _p1a verwijderd
+  - home card: _signedA() functie en dubbele sensor-namen vervangen door backend attributen
+  - p1 card: l1net berekening vervangen door backend power_l1_net_w attribuut
+
+## v5.3.14 (2026-03-25)
+- Fix: sensor.cloudems_grid_net_power_2 dubbele entity — CloudEMSGridNetPowerSensor niet meer geregistreerd, CloudEMSPowerSensor (unique_id _power, entity_id cloudems_grid_net_power) krijgt nu alle benodigde attributen (power_l1_net_w etc.) en P1 prioriteit in native_value
+- Fix: 51A corrupt stroom — limiter negeert stroomwaarden > 3× max_ampere
+- Fix: HAEntityFallbackReader negeert stroomwaarden > 100A
+- Fix: fase-balans-card gebruikt nu sensor.cloudems_status.phases (backend)
+
+## v5.3.15 (2026-03-25)
+- Fix: sensor.cloudems_grid_net_power bestond niet meer na verwijdering CloudEMSGridNetPowerSensor
+- Alle kaarten, dashboard YAML en HTML lezen nu sensor.cloudems_power (CloudEMSPowerSensor, unique_id _power, de actieve sensor)

@@ -205,7 +205,7 @@ class CloudemsControlCard extends HTMLElement {
     const wd  = h.states["sensor.cloudems_watchdog"];
     const bp  = h.states["sensor.cloudems_battery_power"];
     const epx = h.states["sensor.cloudems_batterij_epex_schema"];
-    const gn  = h.states["sensor.cloudems_grid_net_power"];
+    const gn  = h.states["sensor.cloudems_power"];
     const al  = h.states["sensor.cloudems_actieve_meldingen"];
     const nd  = h.states["sensor.cloudems_nilm_running_devices"];
     const sol = h.states["sensor.cloudems_solar_system"];
@@ -265,7 +265,7 @@ class CloudemsControlCard extends HTMLElement {
                  ?? "?";
 
     // Power — all from dedicated sensors
-    const gridW   = this._fn("sensor.cloudems_grid_net_power");
+    const gridW   = this._fn("sensor.cloudems_power");
     const solarW  = this._fn("sensor.cloudems_solar_system") || this._fn("sensor.cloudems_flexibel_vermogen");
     const batW    = this._fn("sensor.cloudems_battery_power");
     const homeW   = this._fn("sensor.cloudems_home_rest");

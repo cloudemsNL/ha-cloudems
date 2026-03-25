@@ -131,10 +131,12 @@ class CloudemsP1Card extends HTMLElement {
     const isImport = net > 20;
 
     // Per fase: netto = import - export
-    const l1net = ((p1.power_l1_import_w ?? 0) - (p1.power_l1_export_w ?? 0));
-    const l2net = ((p1.power_l2_import_w ?? 0) - (p1.power_l2_export_w ?? 0));
-    const l3net = ((p1.power_l3_import_w ?? 0) - (p1.power_l3_export_w ?? 0));
-    const hasPhases = p1.power_l1_import_w != null;
+    // Netto fase-vermogen uit sensor.cloudems_power attributen (berekend in backend)
+    const _gna = h.states['sensor.cloudems_power']?.attributes || {};
+    const l1net = _gna.power_l1_net_w ?? ((p1.power_l1_import_w ?? 0) - (p1.power_l1_export_w ?? 0));
+    const l2net = _gna.power_l2_net_w ?? ((p1.power_l2_import_w ?? 0) - (p1.power_l2_export_w ?? 0));
+    const l3net = _gna.power_l3_net_w ?? ((p1.power_l3_import_w ?? 0) - (p1.power_l3_export_w ?? 0));
+    const hasPhases = _gna.power_l1_net_w != null || p1.power_l1_import_w != null;
     const hasVoltage = parseFloat(p1.voltage_l1 ?? 0) > 0;
 
     // Onbalans

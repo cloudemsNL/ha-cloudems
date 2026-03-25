@@ -99,9 +99,7 @@ async def async_setup_entry(
         CloudEMSPowerSensor(coordinator, entry),
         CloudEMSHomeLoadSensor(coordinator, entry),   # v4.0.9+: EMA-gefilterd huisverbruik
         CloudEMSHomeRestSensor(coordinator, entry),   # v4.5.98+: REST voor flow kaart
-        # CloudEMSGridNetPowerSensor removed – CloudEMSPowerSensor owns
-        # sensor.cloudems_power (unique_id _power). Name was fixed from
-        # "CloudEMS Grid · Net Power" → "CloudEMS Power" to match expected entity_id.
+        # CloudEMSGridNetPowerSensor niet geregistreerd — CloudEMSPowerSensor heeft entity_id sensor.cloudems_grid_net_power in HA registry
         CloudEMSGridImportPowerSensor(coordinator, entry),
         CloudEMSGridExportPowerSensor(coordinator, entry),
         CloudEMSGridImportEnergySensor(coordinator, entry, tariff=1),
@@ -661,22 +659,57 @@ class CloudEMSPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEnt
 
     @property
     def native_value(self):
-        d = self.coordinator.data or {}
-        # BUG FIX: use `is not None` so value 0 is returned correctly (or → falsy on 0)
-        v = d.get("power_w")
+        d  = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        # P1 net power takes priority; fall back to coordinator-computed grid_power
+        v = p1.get("net_power_w")
         if v is not None:
+            # Sanity check: waarden > 50kW zijn corrupt (P1 uitval artifact)
+            if abs(v) > 50000:
+                limiter = getattr(self.coordinator, "_limiter", None)
+                if limiter:
+                    phases = limiter.get_phase_summary()
+                    phase_sum = sum(p.get("power_w", 0) for p in phases.values())
+                    if phase_sum != 0:
+                        return round(phase_sum, 1)
             return v
+        # BUG FIX: use `is not None` so value 0 is returned correctly (or → falsy on 0)
+        vp = d.get("power_w")
+        if vp is not None:
+            return vp
         return d.get("grid_power_w", 0)
 
     @property
     def extra_state_attributes(self):
-        d = self.coordinator.data or {}
+        d  = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        # Per-fase netto vermogen berekend in backend — kaarten hoeven dit niet zelf te berekenen
+        def _net(imp_key, exp_key):
+            imp = p1.get(imp_key)
+            if imp is None:
+                return None
+            return round(imp - (p1.get(exp_key) or 0.0), 1)
         return {
             "solar_power_w":   d.get("solar_power", 0),
             "import_power_w":  d.get("import_power_w", 0),
             "export_power_w":  d.get("export_power_w", 0),
             "solar_surplus_w": d.get("solar_surplus_w", 0),
             "ev_current_a":    d.get("ev_decision", {}).get("target_current_a", 0),
+            "source":           "p1" if p1.get("net_power_w") is not None else "calculated",
+            # Per-fase netto (W, gesigneerd: positief=import, negatief=export)
+            "power_l1_net_w":   _net("power_l1_import_w", "power_l1_export_w"),
+            "power_l2_net_w":   _net("power_l2_import_w", "power_l2_export_w"),
+            "power_l3_net_w":   _net("power_l3_import_w", "power_l3_export_w"),
+            "power_l1_import_w": p1.get("power_l1_import_w"),
+            "power_l2_import_w": p1.get("power_l2_import_w"),
+            "power_l3_import_w": p1.get("power_l3_import_w"),
+            "power_l1_export_w": p1.get("power_l1_export_w"),
+            "power_l2_export_w": p1.get("power_l2_export_w"),
+            "power_l3_export_w": p1.get("power_l3_export_w"),
+            "current_l1":        p1.get("current_l1"),
+            "current_l2":        p1.get("current_l2"),
+            "current_l3":        p1.get("current_l3"),
+            "net_power_w":       p1.get("net_power_w"),
         }
 
 
@@ -2785,6 +2818,15 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
         # P1 net power takes priority; fall back to coordinator-computed grid_power
         v = p1.get("net_power_w")
         if v is not None:
+            # Sanity check: waarden > 50kW zijn corrupt (P1 uitval artifact)
+            # Fallback: bereken uit fase-data van de limiter
+            if abs(v) > 50000:
+                limiter = getattr(self.coordinator, "_limiter", None)
+                if limiter:
+                    phases = limiter.get_phase_summary()
+                    phase_sum = sum(p.get("power_w", 0) for p in phases.values())
+                    if phase_sum != 0:
+                        return round(phase_sum, 1)
             return v
         v = d.get("grid_power")
         return v if v is not None else 0
@@ -2792,10 +2834,31 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         d  = self.coordinator.data or {}
+        p1 = d.get("p1_data", {})
+        # Per-fase netto vermogen berekend in backend — kaarten hoeven dit niet zelf te berekenen
+        def _net(imp_key, exp_key):
+            imp = p1.get(imp_key)
+            if imp is None:
+                return None
+            return round(imp - (p1.get(exp_key) or 0.0), 1)
         return {
-            "import_power_w": d.get("import_power_w", 0),
-            "export_power_w": d.get("export_power_w", 0),
-            "source":         "p1" if d.get("p1_data", {}).get("net_power_w") is not None else "calculated",
+            "import_power_w":   d.get("import_power_w", 0),
+            "export_power_w":   d.get("export_power_w", 0),
+            "source":           "p1" if p1.get("net_power_w") is not None else "calculated",
+            # Per-fase (W, gesigneerd: positief=import, negatief=export)
+            "power_l1_net_w":   _net("power_l1_import_w", "power_l1_export_w"),
+            "power_l2_net_w":   _net("power_l2_import_w", "power_l2_export_w"),
+            "power_l3_net_w":   _net("power_l3_import_w", "power_l3_export_w"),
+            "power_l1_import_w": p1.get("power_l1_import_w"),
+            "power_l2_import_w": p1.get("power_l2_import_w"),
+            "power_l3_import_w": p1.get("power_l3_import_w"),
+            "power_l1_export_w": p1.get("power_l1_export_w"),
+            "power_l2_export_w": p1.get("power_l2_export_w"),
+            "power_l3_export_w": p1.get("power_l3_export_w"),
+            "current_l1":        p1.get("current_l1"),
+            "current_l2":        p1.get("current_l2"),
+            "current_l3":        p1.get("current_l3"),
+            "net_power_w":       p1.get("net_power_w"),
         }
 
 

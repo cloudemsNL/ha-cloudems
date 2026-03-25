@@ -23,7 +23,7 @@ views:
             title: ⚡ Energiestroom
             entities:
               grid:
-                entity: sensor.cloudems_grid_net_power
+                entity: sensor.cloudems_power
                 name: Net
                 invert_state: false
               solar_system:

@@ -384,7 +384,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
       <div class="section-title">Net & Fasen sensor</div>
       ${(()=>{
         const ph = _st(h,'sensor.cloudems_grid_phase_imbalance');
-        const gn = _st(h,'sensor.cloudems_grid_net_power');
+        const gn = _st(h,'sensor.cloudems_power');
         if(ph||gn) return `<div class="kv"><span class="kl">Status</span><span class="kv_ ok">✅ Beschikbaar</span></div>`;
         return `<div class="kv"><span class="kl">Status</span><span class="kv_ err">❌ Niet gevonden</span></div>`;
       })()}

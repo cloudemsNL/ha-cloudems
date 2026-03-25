@@ -33,9 +33,13 @@ class CloudemsFaseBalansCard extends HTMLElement {
         </div>
       </div>`;
     };
-    const l1 = parseFloat(bal.current_l1 || phases[0]?.current_a || 0);
-    const l2 = parseFloat(bal.current_l2 || phases[1]?.current_a || 0);
-    const l3 = parseFloat(bal.current_l3 || phases[2]?.current_a || 0);
+    // Stroom uit sensor.cloudems_power (backend berekend, gesigneerd)
+    // Fallback naar sensor.cloudems_status.phases (limiter, zelfde bron als piekschaving)
+    const _gna = h.states['sensor.cloudems_power']?.attributes || {};
+    const _st_phases = h.states['sensor.cloudems_status']?.attributes?.phases || {};
+    const l1 = Math.abs(parseFloat(_gna.current_l1 ?? _st_phases['L1']?.current_a ?? bal.current_l1 ?? 0));
+    const l2 = Math.abs(parseFloat(_gna.current_l2 ?? _st_phases['L2']?.current_a ?? bal.current_l2 ?? 0));
+    const l3 = Math.abs(parseFloat(_gna.current_l3 ?? _st_phases['L3']?.current_a ?? bal.current_l3 ?? 0));
     sh.innerHTML = `
 <style>:host{display:block;width:100%}.card{background:rgb(34,34,34);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;font-family:var(--primary-font-family,sans-serif)}.hdr{display:flex;align-items:center;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.07)}.summary{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(255,255,255,.07)}.sum{padding:10px 16px;text-align:center}.sum-val{font-size:18px;font-weight:700}.sum-lbl{font-size:10px;color:rgba(163,163,163,.5);margin-top:2px}</style>
 <div class="card">
