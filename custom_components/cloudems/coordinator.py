@@ -3485,6 +3485,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._coordinator_tick = getattr(self, "_coordinator_tick", 0) + 1
             # v4.6.152: start cycle timer
             self._perf.start_cycle()
+            # Initialiseer vroeg zodat er geen UnboundLocalError is als code eerder gebruikt dan gedefinieerd
+            _selfcons_pct: float = 0.0
             # Lazy init decisions_history
             if self._decisions_history is None:
                 from .decisions_history import DecisionsHistory
@@ -6122,7 +6124,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 )
                 sc = self._self_consumption.get_data()
                 self_cons_data = {
-                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else locals().get("_selfcons_pct", 0.0),
+                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else _selfcons_pct,
                     "export_pct":         sc.export_pct,
                     "pv_today_kwh":       sc.pv_today_kwh,
                     "self_consumed_kwh":  sc.self_consumed_kwh,

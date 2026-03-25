@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.594
+ * CloudEMSTooltip — v4.6.595
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
