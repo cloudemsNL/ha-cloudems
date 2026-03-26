@@ -1344,7 +1344,7 @@ class NILMDetector:
             await self._store_energy.async_save(edata)
             self._last_energy_save = time.time()
         # v1.25: PowerLearner state opslaan (elke 5 min)
-        if self._store_learner and time.time() - self._last_energy_save > 300:
+        if self._store_learner and time.time() - self._last_energy_save > 60:
             await self._store_learner.async_save(self._power_learner.to_dict())
         # v4.4: Unsupervised clusterer opslaan
         await self._clusterer.async_save()

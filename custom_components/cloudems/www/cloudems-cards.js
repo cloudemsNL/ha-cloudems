@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.617
+ * CloudEMSTooltip — v4.6.641
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -882,7 +882,7 @@ window.CloudEMSTooltip = {
             .map(c => ({ label: c.name || 'Apparaat', power_w: c.power_w || 0, color: '#a78bfa' }));
           nodes.push({ label: node.name || 'Meter', power_w: node.power_w || 0, color: '#a78bfa', isSub: true, children });
         }
-        return nodes.slice(0, 5);
+        return nodes.slice(0, 6);
       }
 
       const TYPE_COLORS = {
@@ -914,7 +914,7 @@ window.CloudEMSTooltip = {
       // Top 5 op vermogen, skip dedicated nodes
       return _dedupedRunning
         .sort((a, b) => (b.power_w || b.current_power || 0) - (a.power_w || a.current_power || 0))
-        .slice(0, 5)
+        .slice(0, 6)
         .map(d => ({
           label:   d.name || d.device_type || '?',
           power_w: d.power_w || d.current_power || 0,
@@ -990,7 +990,17 @@ window.CloudEMSTooltip = {
           errorCount = 0;
         } catch(e) {
           errorCount++;
-          if (errorCount > 10) { this._animId = null; return; }
+          if (errorCount <= 3) {
+            console.error('[CloudEMS flow-card] render fout:', e.message || e, e.stack ? e.stack.split('\n')[1] : '');
+          }
+          // Na 10 fouten: reset en herstart na 5s ipv permanent stoppen
+          if (errorCount > 10) {
+            errorCount = 0;
+            this._animId = null;
+            this._needsFullRender = true;
+            if (this.isConnected) setTimeout(() => { if (this.isConnected && !this._animId) this._startAnim(); }, 5000);
+            return;
+          }
         }
         this._animId = requestAnimationFrame(loop);
       };
@@ -1003,7 +1013,16 @@ window.CloudEMSTooltip = {
       // Wacht totdat sensor.cloudems_status geladen is — anders weten we niet of 1- of 3-fase.
       // Zo voorkom je dat de kaart eerst als 1-fase rendert en daarna flipt naar 3-fase.
       const _statusSt = this._hass?.states['sensor.cloudems_status'];
-      if (!_statusSt) { this._needsFullRender = true; return; }
+      if (!_statusSt) {
+        this._needsFullRender = true;
+        if (!this.shadowRoot.innerHTML) {
+          this.shadowRoot.innerHTML = `<style>:host{display:block}</style>
+            <ha-card style="background:linear-gradient(145deg,#0d1117,#111827);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:32px 16px;text-align:center;font-family:monospace;color:rgba(255,255,255,.3);font-size:11px">
+              ⚡ Energiestroom laden...
+            </ha-card>`;
+        }
+        return;
+      }
 
       const e           = this._config.entities || {};
       // Grid: lees altijd van sensor.cloudems_status.grid_power_w — altijd beschikbaar, altijd correct
@@ -1163,11 +1182,15 @@ window.CloudEMSTooltip = {
       const aircoX = COL_R - 16, aircoY = R_AIRCO;
       const hpX    = COL_R - 16, hpY    = R_HP;
 
-      // Init dots
+      // Init dots — NILM keys vast gedefinieerd (voor _ANC declaratie)
+      const _nilmAncKeys = ['?','L1','L2','L3','MF'].map(k => `nilm_anc_${k}`);
+      const _nilmDevKeys = Array.from({length: 6}, (_, i) => `nilm_dev_${i}`);
       const pipeKeys = [
         'grid_l1', 'grid_l2', 'grid_l3', 'solar', 'batt', 'boiler', 'home_l1', 'home_l2', 'home_l3', 'ev', 'ebike', 'pool', 'airco', 'hp',
         ...layer2.map((_, i) => `l2_${i}`),
         ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
+        ..._nilmAncKeys,
+        ..._nilmDevKeys,
       ];
       this._initDots(pipeKeys);
 
@@ -1585,129 +1608,86 @@ window.CloudEMSTooltip = {
       if ((this._config.entities||{}).pool || this._hass?.states['sensor.cloudems_zwembad_status']) h += pipe(COL_LEFT+44, R_POOL, _hePool_x, _hePool_y, C.pool, pool>T);
       // ── NILM: 5 fase-ankers (?, L1, L2, L3, Σ) dynamisch verdeeld ─────────────
       // Max devices that fit = canvas width / device box width
-      const NILM_BOX_W = 74;   // device box + gap
-      const NILM_MAX   = Math.min(5, Math.floor((W - 40) / NILM_BOX_W));
+      // ── NILM: 5 vaste ankers + top 6 op vaste slots ─────────────────────
+      const NILM_MAX = 6;
+      const _allSorted = [...layer2].sort((a,b) => {
+        const aOn = (a.power_w||0) > T ? 1 : 0;
+        const bOn = (b.power_w||0) > T ? 1 : 0;
+        return bOn - aOn || (b.power_w||0) - (a.power_w||0);
+      });
+      const _topDevs = _allSorted.slice(0, NILM_MAX);
 
-      // Build phase groups — cap total at NILM_MAX, priority: active devices first
-      const _phOrder = ['L1','L2','L3','','MF'];
-      const _phGroups = { L1:[], L2:[], L3:[], '':[], MF:[] };
-      const _allSorted = [...layer2].sort((a,b) => (b.power_w||0)-(a.power_w||0));
-      let _slotsBudget = NILM_MAX;
-      // First pass: active devices
-      _allSorted.forEach(node => {
-        if ((node.power_w||0) <= T) return;
+      // Fase → kleur
+      const _phCol = ph => ph==='L1' ? C.L1 : ph==='L2' ? C.L2 : ph==='L3' ? C.L3 :
+                           ph==='MF' ? '#fbbf24' : C.sub;
+      const _phKey  = node => {
         const ph = (node.phase||'').toUpperCase();
-        const key = (ph==='L1'||ph==='L2'||ph==='L3') ? ph : (node.isSub ? 'MF' : '');
-        if (_slotsBudget > 0) { _phGroups[key].push(node); _slotsBudget--; }
-      });
-      // Second pass: inactive devices (fill remaining slots)
-      _allSorted.forEach(node => {
-        if ((node.power_w||0) > T) return;
-        const ph = (node.phase||'').toUpperCase();
-        const key = (ph==='L1'||ph==='L2'||ph==='L3') ? ph : (node.isSub ? 'MF' : '');
-        if (_slotsBudget > 0 && !Object.values(_phGroups).flat().includes(node)) {
-          _phGroups[key].push(node); _slotsBudget--;
-        }
-      });
+        if (ph==='L1'||ph==='L2'||ph==='L3') return ph;
+        return node.isSub ? 'MF' : '?';
+      };
 
-      // Active anchor groups (only show anchors that have devices)
-      const _ancGroups = _phOrder
-        .filter(k => _phGroups[k].length > 0)
-        .map(k => ({
-          key: k,
-          label: k === '' ? '?' : (k === 'MF' ? 'Σ' : k),
-          col:   k === '' ? C.sub : (k === 'MF' ? '#fbbf24' : C[k]),
-          devs:  _phGroups[k],
-        }));
+      // 5 vaste ankers: ?,L1,L2,L3,Σ — vaste X posities
+      const _ANC = { '?':55, 'L1':152, 'L2':250, 'L3':348, 'MF':445 };
+      const _ANC_COL = { '?':C.sub, 'L1':C.L1, 'L2':C.L2, 'L3':C.L3, 'MF':'#fbbf24' };
+      const _ANC_LBL = { '?':'?', 'L1':'L1', 'L2':'L2', 'L3':'L3', 'MF':'Σ' };
 
-      // Altijd 5 ankers tonen — vaste posities gelijkmatig verdeeld
-      const _ALL_ANCHORS = ['?', 'L1', 'L2', 'L3', 'MF'];
-      const _ALL_ANCHOR_LABELS = {'?':'?', 'L1':'L1', 'L2':'L2', 'L3':'L3', 'MF':'Σ'};
-      const _ALL_ANCHOR_COLS   = {'?':C.sub, 'L1':C.L1, 'L2':C.L2, 'L3':C.L3, 'MF':'#fbbf24'};
-      // Vaste X posities — 5 ankers gelijkmatig over W=500
-      const _ANC_PAD = 50;
-      const _ancXs = {};
-      _ALL_ANCHORS.forEach((k, i) => {
-        _ancXs[k] = _ANC_PAD + i * (W - _ANC_PAD*2) / (_ALL_ANCHORS.length - 1);
+      // 6 vaste device slots — gelijkmatig
+      const _SLOTS = [45, 127, 209, 291, 373, 455];
+
+      const _ANCHOR_Y = R_HOME + 75;
+      const _DEV_Y    = _ANCHOR_Y + 72;
+
+      // Store op nodes voor dots/pipes
+      _topDevs.forEach((d, i) => {
+        const pk = _phKey(d);
+        d._devX  = _SLOTS[i];
+        d._devY  = _DEV_Y;
+        d._ancX  = _ANC[pk] || COL_HUB;
+        d._ancY  = _ANCHOR_Y;
+        d._phCol = _phCol((d.phase||'').toUpperCase());
       });
 
-      // Hermap _ancGroups naar vaste posities
-      _ancGroups.forEach(g => { g._fixedKey = g.key; });
+      // Welke ankers hebben actieve devices?
+      const _ancActive = {};
+      _topDevs.forEach(d => { if ((d.power_w||0) > T) _ancActive[_phKey(d)] = true; });
 
-      if (_ancGroups.length > 0) {
-        const _ANCHOR_Y = R_HOME + 82;
-        const _DEV_Y    = _ANCHOR_Y + 70;
+      // ── THUIS → anker lijnen (altijd alle 5) ────────────────────────
+      Object.entries(_ANC).forEach(([k, ax]) => {
+        const col = _ANC_COL[k];
+        const active = !!_ancActive[k];
+        const isDash = k === '?';
+        h += `<line x1="${COL_HUB}" y1="${R_HOME+20}" x2="${ax}" y2="${_ANCHOR_Y-12}"
+          stroke="${col}" stroke-width="${active?1:0.6}" opacity="${active?0.65:0.15}"
+          ${isDash?'stroke-dasharray="4,3"':''} stroke-linecap="round"/>`;
+      });
 
-        // Device X: verdeel devices per anker gelijkmatig onder hun vaste anker-X
-        const _devXs = {};
-        _ancGroups.forEach(g => {
-          const ax = _ancXs[g.key], n = g.devs.length;
-          g.devs.forEach((d, i) => {
-            _devXs[d._uid || d.label] = ax - (n-1)*NILM_BOX_W/2 + i*NILM_BOX_W;
-          });
-        });
-        // Clamp binnen canvas
-        Object.keys(_devXs).forEach(k => {
-          _devXs[k] = Math.max(38, Math.min(W-38, _devXs[k]));
-        });
+      // ── Anker pills (alle 5) ────────────────────────────────────────
+      Object.entries(_ANC).forEach(([k, ax]) => {
+        const col = _ANC_COL[k];
+        const active = !!_ancActive[k];
+        h += `<g opacity="${active?1:0.3}">
+          <rect x="${ax-14}" y="${_ANCHOR_Y-11}" width="28" height="22" rx="11"
+            fill="${col}25" stroke="${col}" stroke-width="${active?1.2:0.8}"/>
+          <text x="${ax}" y="${_ANCHOR_Y+4}" text-anchor="middle" font-size="9" font-weight="700"
+            fill="${col}">${_ANC_LBL[k]}</text>
+        </g>`;
+      });
 
-        // Store _devXs on nodes for pipeDefs
-        _ancGroups.forEach(g => g.devs.forEach(d => {
-          d._devX = _devXs[d._uid||d.label];
-          d._ancX = _ancXs[g.key];
-          d._ancY = _ANCHOR_Y;
-          d._devY = _DEV_Y;
-          d._phCol = g.col;
-        }));
+      // ── Anker → device slot lijnen ───────────────────────────────────
+      _topDevs.forEach((d, i) => {
+        const dx  = _SLOTS[i];
+        const ax  = _ANC[_phKey(d)] || COL_HUB;
+        const col = d._phCol;
+        const on  = (d.power_w||0) > T;
+        h += `<line x1="${ax}" y1="${_ANCHOR_Y+11}" x2="${dx}" y2="${_DEV_Y-30}"
+          stroke="${col}" stroke-width="${on?1.2:0.6}" opacity="${on?0.65:0.15}"
+          stroke-linecap="round"/>`;
+      });
 
-        // ── Draw THUIS → anchor wires (altijd alle 5 ankers) ─────────────
-        _ALL_ANCHORS.forEach(ak => {
-          const ax = _ancXs[ak];
-          const col = _ALL_ANCHOR_COLS[ak];
-          const grp = _ancGroups.find(g => g.key === ak);
-          const hasActive = grp ? grp.devs.some(d => (d.power_w||0) > T) : false;
-          h += `<line x1="${COL_HUB.toFixed(1)}" y1="${(R_HOME+22).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(_ANCHOR_Y-15).toFixed(1)}"
-            stroke="${col}" stroke-width="1.0" opacity="${hasActive?0.75:0.15}" stroke-linecap="round"/>`;
-        });
-
-        // ── Draw anchor → device wires ─────────────────────────────────────
-        _ancGroups.forEach(g => g.devs.forEach(d => {
-          const dkey = d._uid||d.label;
-          const dx = _devXs[dkey];
-          const on = (d.power_w||0) > T;
-          const col = g.key === '' ? `${g.col}` : g.col;
-          if (g.key === '') {
-            // Unknown phase — dashed line
-            h += `<line x1="${_ancXs[g.key].toFixed(1)}" y1="${_ANCHOR_Y+15}" x2="${dx.toFixed(1)}" y2="${_DEV_Y-33}"
-              stroke="${col}" stroke-width="1.0" opacity="${on?0.45:0.15}" stroke-dasharray="4,3" stroke-linecap="round"/>`;
-          } else {
-            h += pipe(_ancXs[g.key], _ANCHOR_Y+15, dx, _DEV_Y-33, col, on);
-          }
-        }));
-
-        // ── Draw anchor pills (altijd alle 5) ────────────────────────────
-        _ALL_ANCHORS.forEach(ak => {
-          const ax = _ancXs[ak], ay = _ANCHOR_Y;
-          const col = _ALL_ANCHOR_COLS[ak];
-          const lbl = _ALL_ANCHOR_LABELS[ak];
-          const grp = _ancGroups.find(g => g.key === ak);
-          const hasActive = grp ? grp.devs.some(d => (d.power_w||0) > T) : false;
-          const op = hasActive ? 1 : 0.25;
-          h += `<g opacity="${op}">
-            <rect x="${ax-17}" y="${ay-13}" width="34" height="26" rx="13"
-              fill="${col}35" stroke="${col}" stroke-width="1.5"/>
-            <text x="${ax}" y="${ay+2}" text-anchor="middle" font-size="9" font-weight="700"
-              fill="${col}">${lbl}</text>
-          </g>`;
-        });
-
-        // ── Draw NILM device boxes ─────────────────────────────────────────
-        _ancGroups.forEach(g => g.devs.forEach(d => {
-          const dkey = d._uid||d.label;
-          const dx = _devXs[dkey], dy = _DEV_Y;
-          h += nilmBox(dx, dy, { ...d, color: g.col });
-        }));
-      }
+      // ── Device boxes ─────────────────────────────────────────────────
+      _topDevs.forEach((d, i) => {
+        h += nilmBox(_SLOTS[i], _DEV_Y, { ...d, color: d._phCol });
+      });
 
       // Arrows removed — direction shown by animated dots
 
@@ -1882,20 +1862,25 @@ window.CloudEMSTooltip = {
         { key:'ev',     color:C.ev,    on:ev>T,    pw:ev,    x1:_heEv_x,    y1:_heEv_y,    x2:COL_LEFT+44, y2:R_EV },
         { key:'ebike',  color:C.ebike, on:ebike>T, pw:ebike, x1:_heEbike_x, y1:_heEbike_y, x2:COL_LEFT+44, y2:R_EBIKE },
         { key:'pool',   color:C.pool,  on:pool>T,  pw:pool,  x1:_hePool_x,  y1:_hePool_y,  x2:COL_LEFT+44, y2:R_POOL },
-        // THUIS → anker bolletjes (voor alle actieve ankers)
-        ..._ancGroups.filter(g => g.devs.some(d => (d.power_w||0) > T)).map(g => ({
-          key:`anc_${g.key}`, color: _ALL_ANCHOR_COLS[g.key],
-          on: true, pw: g.devs.reduce((s,d) => s+(d.power_w||0), 0),
-          x1: COL_HUB, y1: R_HOME+22,
-          x2: _ancXs[g.key], y2: _ANCHOR_Y-15,
-        })),
-        // NILM device pipes — use stored _devX/_ancX from NILM layout above
-        ...layer2.filter(n => n._devX !== undefined).map((node, i) => {
-          return {
-            key:`l2_${i}`, color: node._phCol || node.color,
-            on:node.power_w>T, pw:node.power_w,
-            x1:node._ancX, y1:(node._ancY||0)+15, x2:node._devX, y2:(node._devY||0)-33 };
-        }),
+        // Segment 1: THUIS → fase-anker dots
+        ...(typeof _topDevs !== 'undefined' ? (() => {
+          const seenAnc = {};
+          return _topDevs.filter(d => (d.power_w||0) > T).flatMap((d, i) => {
+            const ak = _phKey(d);
+            const ax = _ANC[ak] || COL_HUB;
+            const results = [];
+            // Teken dots THUIS→anker maar slechts 1x per anker
+            if (!seenAnc[ak]) {
+              seenAnc[ak] = true;
+              results.push({ key:`nilm_anc_${ak}`, color: d._phCol||C.sub, on:true, pw:d.power_w||0,
+                x1: COL_HUB, y1: R_HOME+20, x2: ax, y2: _ANCHOR_Y-12 });
+            }
+            // Segment 2: fase-anker → device slot
+            results.push({ key:`nilm_dev_${i}`, color: d._phCol||C.sub, on:true, pw:d.power_w||0,
+              x1: ax, y1: _ANCHOR_Y+11, x2: d._devX, y2: d._devY-30 });
+            return results;
+          });
+        })() : []),
         ...subs.flatMap((s, si) => {
           const sx = L2_XS[layer2.indexOf(s)];
           return (s._cxs||[]).map((cx, ci) => ({

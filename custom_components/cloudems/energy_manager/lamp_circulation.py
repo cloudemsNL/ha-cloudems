@@ -737,3 +737,268 @@ class LampCirculationController:
             "sun_derived_night":    status.sun_derived_night,
             "lamp_phases":          status.lamp_phases,
         }
+
+
+# ── Ghost 2.0 — TV Simulator ──────────────────────────────────────────────────
+
+class GhostTVSimulator:
+    """Simuleert het flikkerende licht van een televisie via een RGB lamp.
+
+    Werkt alleen als het huis in Away-mode staat.
+    Simuleert scene-wisselingen op basis van gemiddelde TV-kijkpatronen:
+    - Elke 3-8 seconden: kleine kleur/helderheidswissel (scene change)
+    - Elke 20-120 seconden: grotere wissel (kanaalwisseling of commercial)
+    - Pauzeert automatisch tussen 02:00 en 06:00 (niemand kijkt TV)
+    - Stopt zodra huis niet meer Away is
+
+    Configuratie:
+      entity_id    str   — RGB lamp in de woonkamer
+      active       bool  — module in/uitschakelen
+      night_pause_start_h  int  — uur om te pauzeren (default 2)
+      night_pause_end_h    int  — uur om te hervatten (default 6)
+    """
+
+    # TV-achtige kleurtemperaturen (RGB waarden, warm blauw-grijs van LCD schermen)
+    _TV_COLORS = [
+        (120, 140, 180),  # koud blauw (actiefilm)
+        (180, 160, 120),  # warm geel (documentaire)
+        ( 80, 120, 160),  # donkerblauw (nachtscène)
+        (200, 190, 160),  # neutraal wit (nieuws)
+        (160,  80,  60),  # rood-oranje (explosie)
+        ( 60, 100, 140),  # donker (thriller)
+        (180, 170, 150),  # licht grijs (talkshow)
+        (100, 140, 100),  # groen (natuur)
+    ]
+
+    def __init__(self, hass, entity_id: str, active: bool = True,
+                 night_pause_start_h: int = 2, night_pause_end_h: int = 6) -> None:
+        self._hass     = hass
+        self._entity   = entity_id
+        self._active   = active
+        self._night_start = night_pause_start_h
+        self._night_end   = night_pause_end_h
+        self._running  = False
+        self._next_small_change = 0.0   # kleine scene-wissel
+        self._next_big_change   = 0.0   # grote scene-wissel
+        self._current_color     = (120, 140, 180)
+        self._current_brightness = 120
+
+    def _is_night_pause(self) -> bool:
+        h = datetime.now().hour
+        if self._night_start > self._night_end:
+            return h >= self._night_start or h < self._night_end
+        return self._night_start <= h < self._night_end
+
+    async def _set_rgb(self, r: int, g: int, b: int, brightness: int) -> None:
+        try:
+            await self._hass.services.async_call(
+                "light", "turn_on",
+                {
+                    "entity_id":  self._entity,
+                    "rgb_color":  [r, g, b],
+                    "brightness": max(10, min(255, brightness)),
+                    "transition": random.uniform(0.3, 1.5),
+                },
+                blocking=False,
+            )
+        except Exception as e:
+            _LOGGER.debug("GhostTVSim: set_rgb fout: %s", e)
+
+    async def _turn_off(self) -> None:
+        try:
+            await self._hass.services.async_call(
+                "light", "turn_off",
+                {"entity_id": self._entity, "transition": 2},
+                blocking=False,
+            )
+        except Exception as e:
+            _LOGGER.debug("GhostTVSim: turn_off fout: %s", e)
+
+    async def tick(self, is_away: bool) -> str:
+        """Aanroepen elke coordinator tick. Returns: actieve modus string."""
+        if not self._active or not self._entity:
+            return "disabled"
+
+        now = time.time()
+
+        # Niet Away of nachtpauze → lamp uit
+        if not is_away or self._is_night_pause():
+            if self._running:
+                self._running = False
+                await self._turn_off()
+                _LOGGER.debug("GhostTVSim: gestopt (%s)", "nachtpauze" if self._is_night_pause() else "thuis")
+            return "off"
+
+        # Away mode actief → TV simuleren
+        if not self._running:
+            self._running = True
+            self._next_small_change = now + random.uniform(3, 8)
+            self._next_big_change   = now + random.uniform(20, 60)
+            _LOGGER.info("GhostTVSim: TV simulatie gestart op %s", self._entity)
+
+        # Kleine scene-wissel (elke 3-8s): kleine helderheidswijziging
+        if now >= self._next_small_change:
+            r, g, b = self._current_color
+            # Kleine variatie ±15 per kanaal
+            r2 = max(10, min(255, r + random.randint(-15, 15)))
+            g2 = max(10, min(255, g + random.randint(-15, 15)))
+            b2 = max(10, min(255, b + random.randint(-15, 15)))
+            bri = max(30, min(200, self._current_brightness + random.randint(-20, 20)))
+            await self._set_rgb(r2, g2, b2, bri)
+            self._current_brightness = bri
+            self._next_small_change = now + random.uniform(3, 8)
+
+        # Grote scene-wissel (elke 20-120s): nieuwe kleur (kanaalwisseling)
+        if now >= self._next_big_change:
+            self._current_color = random.choice(self._TV_COLORS)
+            r, g, b = self._current_color
+            # Bij grote wissel soms even zwart (reclame/einde scène)
+            if random.random() < 0.2:
+                await self._turn_off()
+                self._next_small_change = now + random.uniform(1, 3)
+            else:
+                bri = random.randint(60, 180)
+                await self._set_rgb(r, g, b, bri)
+                self._current_brightness = bri
+            self._next_big_change = now + random.uniform(20, 120)
+
+        return "simulating"
+
+    def get_status(self) -> dict:
+        return {
+            "entity_id": self._entity,
+            "active":    self._active,
+            "running":   self._running,
+            "mode":      "simulating" if self._running else "off",
+        }
+
+
+# ── Ghost 2.0 — Audio Deterrence ─────────────────────────────────────────────
+
+class GhostAudioDeterrence:
+    """Speelt huiselijke geluiden af via media_player bij bewegingsdetectie in Away mode.
+
+    Werkt samen met GhostTVSimulator:
+    - Als huis Away is en een bewegingssensor triggert → speel afschrikkend geluid
+    - Geluiden: hond blaft, vaatwasser, TV-geluid, stemmen
+    - Cooldown na elke trigger (5 min) om herhaling te voorkomen
+    - Nachtpauze configureerbaar
+
+    Configuratie:
+      media_player     str        — media_player entity voor geluidsweergave
+      motion_sensors   list[str]  — binary_sensor.* bewegingssensoren bij de deur
+      sounds           list[str]  — URLs of media-content IDs
+      volume           float      — volume 0.0-1.0 (default 0.4)
+      cooldown_s       int        — seconden tussen triggers (default 300)
+      active           bool
+      night_pause_start_h  int    — uur pauzeren (default 23)
+      night_pause_end_h    int    — uur hervatten (default 6)
+    """
+
+    # Standaard geluiden — overschrijfbaar via configuratie
+    DEFAULT_SOUNDS = [
+        "media-source://media_source/local/cloudems/sounds/dog_bark.mp3",
+        "media-source://media_source/local/cloudems/sounds/dishwasher.mp3",
+        "media-source://media_source/local/cloudems/sounds/voices_background.mp3",
+    ]
+
+    def __init__(
+        self,
+        hass,
+        media_player: str,
+        motion_sensors: list,
+        sounds: list        = None,
+        volume: float       = 0.4,
+        cooldown_s: int     = 300,
+        active: bool        = True,
+        night_pause_start_h: int = 23,
+        night_pause_end_h: int   = 6,
+    ) -> None:
+        self._hass          = hass
+        self._player        = media_player
+        self._sensors       = motion_sensors or []
+        self._sounds        = sounds or self.DEFAULT_SOUNDS
+        self._volume        = max(0.0, min(1.0, volume))
+        self._cooldown_s    = cooldown_s
+        self._active        = active
+        self._night_start   = night_pause_start_h
+        self._night_end     = night_pause_end_h
+        self._last_trigger  = 0.0
+        self._trigger_count = 0
+
+    def _is_night_pause(self) -> bool:
+        h = datetime.now().hour
+        if self._night_start > self._night_end:
+            return h >= self._night_start or h < self._night_end
+        return self._night_start <= h < self._night_end
+
+    def _motion_detected(self) -> bool:
+        """Check of een van de bewegingssensoren actief is."""
+        for eid in self._sensors:
+            state = self._hass.states.get(eid)
+            if state and state.state == "on":
+                return True
+        return False
+
+    async def _play_sound(self, sound_url: str) -> None:
+        try:
+            await self._hass.services.async_call(
+                "media_player", "play_media",
+                {
+                    "entity_id":   self._player,
+                    "media_content_id":   sound_url,
+                    "media_content_type": "music",
+                },
+                blocking=False,
+            )
+            await self._hass.services.async_call(
+                "media_player", "volume_set",
+                {"entity_id": self._player, "volume_level": self._volume},
+                blocking=False,
+            )
+        except Exception as e:
+            _LOGGER.debug("GhostAudio: play fout: %s", e)
+
+    async def tick(self, is_away: bool) -> str:
+        """Aanroepen elke coordinator tick. Returns: status string."""
+        if not self._active or not self._player or not self._sensors:
+            return "disabled"
+
+        if not is_away:
+            return "home"
+
+        if self._is_night_pause():
+            return "night_pause"
+
+        now = time.time()
+
+        # Cooldown check
+        if now - self._last_trigger < self._cooldown_s:
+            return "cooldown"
+
+        # Beweging gedetecteerd?
+        if not self._motion_detected():
+            return "watching"
+
+        # Trigger — kies willekeurig geluid
+        sound = random.choice(self._sounds)
+        await self._play_sound(sound)
+        self._last_trigger = now
+        self._trigger_count += 1
+
+        _LOGGER.info(
+            "GhostAudio: beweging gedetecteerd — %s afgespeeld (trigger #%d)",
+            sound.split("/")[-1], self._trigger_count
+        )
+        return "triggered"
+
+    def get_status(self) -> dict:
+        cooldown_left = max(0, int(self._cooldown_s - (time.time() - self._last_trigger)))
+        return {
+            "active":         self._active,
+            "media_player":   self._player,
+            "sensors":        self._sensors,
+            "trigger_count":  self._trigger_count,
+            "cooldown_left_s": cooldown_left,
+            "last_trigger_ts": self._last_trigger,
+        }

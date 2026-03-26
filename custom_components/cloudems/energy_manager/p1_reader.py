@@ -667,6 +667,109 @@ class HAEntityFallbackReader:
             return
         self._last_scan = time.time()
 
+        # Pass 0: zoek via entity_registry op platform="dsmr"
+        # Dit werkt onafhankelijk van config_entry laadvolgorde
+        try:
+            from homeassistant.helpers import entity_registry as _er0
+            _er0_inst = _er0.async_get(self._hass)
+            keyword_map_p0 = {
+                # HA DSMR Smart Meter NL namen (Joan's installatie):
+                # energieverbruik = actueel verbruik (W), energieproductie = teruglevering (W)
+                # energieverbruik_fase_l1/l2/l3 = per-fase verbruik
+                # energieproductie_fase_l1/l2/l3 = per-fase teruglevering
+                "power_import_w": (
+                    "current_electricity_usage", "power_consumption",
+                    "currently_delivered", "actueel_vermogen", "huidig_vermogen",
+                    "active_power_w", "power_delivered",
+                    "actueel_verbruik", "huidig_verbruik", "actual_consumption",
+                    "power_flow",
+                    # HA DSMR NL: sensor.electricity_meter_energieverbruik
+                    # maar NIET energieverbruik_tarief_* of energieverbruik_fase_*
+                ),
+                "power_export_w": (
+                    "current_electricity_delivery", "power_production",
+                    "currently_returned", "actuele_teruglevering",
+                    "active_power_export", "power_returned", "actual_production",
+                    # HA DSMR NL: sensor.electricity_meter_energieproductie (exact)
+                ),
+                "power_l1_import": (
+                    "power_consumption_phase_l1", "currently_delivered_l1", "active_power_l1",
+                    "energieverbruik_fase_l1",
+                ),
+                "power_l2_import": (
+                    "power_consumption_phase_l2", "currently_delivered_l2", "active_power_l2",
+                    "energieverbruik_fase_l2",
+                ),
+                "power_l3_import": (
+                    "power_consumption_phase_l3", "currently_delivered_l3", "active_power_l3",
+                    "energieverbruik_fase_l3",
+                ),
+                "power_l1_export": (
+                    "power_production_phase_l1", "currently_returned_l1",
+                    "energieproductie_fase_l1",
+                ),
+                "power_l2_export": (
+                    "power_production_phase_l2", "currently_returned_l2",
+                    "energieproductie_fase_l2",
+                ),
+                "power_l3_export": (
+                    "power_production_phase_l3", "currently_returned_l3",
+                    "energieproductie_fase_l3",
+                ),
+                "current_l1": ("current_l1", "current_phase_l1",),
+                "current_l2": ("current_l2", "current_phase_l2",),
+                "current_l3": ("current_l3", "current_phase_l3",),
+                "energy_import_t1_kwh": ("electricity_used_tariff_1", "energieverbruik_tarief_1",),
+                "energy_import_t2_kwh": ("electricity_used_tariff_2", "energieverbruik_tarief_2",),
+                "energy_export_t1_kwh": (
+                    "electricity_delivered_tariff_1", "energieproductie_tarief_1",
+                ),
+                "energy_export_t2_kwh": (
+                    "electricity_delivered_tariff_2", "energieproductie_tarief_2",
+                ),
+                "gas_m3": ("gas_consumption", "gasverbruik", "total_gas", "gas_delivered",),
+            }
+            for _ent in _er0_inst.entities.values():
+                if _ent.platform not in ("dsmr", "homewizard", "slimmelezer", "p1_monitor", "ams_han"):
+                    continue
+                # Registreer entity_id ook als sensor nog unavailable is na herstart
+                # De waarde wordt pas gelezen als de sensor available is
+                _eid_lower = _ent.entity_id.lower()
+                for key, keywords in keyword_map_p0.items():
+                    if key in self._resolved:
+                        continue
+                    if any(kw in _eid_lower for kw in keywords):
+                        # Voorkom dat totaal-vermogen sensor gematcht wordt op fase/tarief sensor
+                        # bijv. power_import_w moet sensor.electricity_meter_energieverbruik zijn,
+                        # NIET sensor.electricity_meter_energieverbruik_fase_l1
+                        if key == "power_import_w" and (
+                            "_fase_l" in _eid_lower or "_tarief_" in _eid_lower
+                        ):
+                            continue
+                        if key == "power_export_w" and (
+                            "_fase_l" in _eid_lower or "_tarief_" in _eid_lower
+                        ):
+                            continue
+                        _LOGGER.warning(
+                            "P1 HAFallback pass0 (registry/%s): %s → %s",
+                            _ent.platform, key, _ent.entity_id
+                        )
+                        self._resolved[key] = _ent.entity_id
+            # Log ongematche DSMR entiteiten voor debugging
+            _unmatched = [
+                _ent.entity_id for _ent in _er0_inst.entities.values()
+                if _ent.platform in ("dsmr", "homewizard", "slimmelezer", "p1_monitor", "ams_han")
+                and _ent.entity_id not in self._resolved.values()
+                and "sensor" in _ent.entity_id
+            ]
+            if _unmatched:
+                _LOGGER.warning(
+                    "P1 HAFallback pass0: niet gematcht: %s", 
+                    ", ".join(sorted(_unmatched)[:15])
+                )
+        except Exception as _e0:
+            _LOGGER.debug("P1 HAFallback pass0 fout: %s", _e0)
+
         # Pass 1: exact hardcoded entity_id match (backwards compat)
         all_states = {s.entity_id for s in self._hass.states.async_all()}
         for key, candidates in self._PATTERNS.items():
@@ -689,10 +792,10 @@ class HAEntityFallbackReader:
             found_domains = dsmr_domains & active_domains
 
             if not found_domains:
-                _LOGGER.info(
-                    "P1 HAFallback: no DSMR/HomeWizard integration found in config_entries. "
-                    "Active domains: %s (looking for: %s)",
-                    sorted(active_domains)[:10], sorted(dsmr_domains)
+                _LOGGER.warning(
+                    "P1 HAFallback: geen DSMR/HomeWizard integratie gevonden. "
+                    "Actieve domeinen: %s | Gezocht: %s",
+                    sorted(active_domains)[:15], sorted(dsmr_domains)
                 )
                 return
 
@@ -884,6 +987,53 @@ class MQTTP1Reader:
         except Exception as err:
             _LOGGER.warning("P1 MQTT reader kon niet starten: %s", err)
 
+    async def _auto_detect_p1_host(self) -> tuple[Optional[str], int]:
+        """
+        Zoek host/poort automatisch in HA config_entries van DSMR/P1 integraties.
+
+        LET OP: de HA DSMR Smart Meter integratie houdt de TCP verbinding met de
+        P1 meter bezet. Een P1 meter accepteert maar 1 client tegelijk.
+        Als de DSMR integratie actief is, gebruik dan de entity fallback
+        (die leest de sensoren van de DSMR integratie).
+        Alleen voor Slimmelezer/P1ib/ESPHome verbinden we direct via TCP
+        omdat die meerdere clients ondersteunen.
+        """
+        try:
+            for entry in self._hass.config_entries.async_entries():
+                domain = entry.domain
+                data = {**entry.data, **entry.options}
+                state = str(entry.state).lower()
+                if state not in ("configentrystate.loaded", "loaded"):
+                    continue
+
+                # HA DSMR Smart Meter: houdt TCP verbinding bezet → entity fallback
+                if domain == "dsmr":
+                    host = data.get("host")
+                    if host and not host.startswith("/"):
+                        _LOGGER.warning(
+                            "P1Reader auto-detectie: HA DSMR integratie actief op %s — "
+                            "CloudEMS gebruikt entity fallback (P1 meter staat slechts "
+                            "1 TCP verbinding toe)", host
+                        )
+                        # Geef None terug → entity fallback wordt gebruikt
+                        return None, DEFAULT_P1_PORT
+
+                # Slimmelezer / P1ib / ESPHome: ondersteunen meerdere clients → direct
+                if domain in ("slimmelezer", "p1_monitor", "ams_han"):
+                    host = data.get("host") or data.get("ip_address")
+                    port = int(data.get("port", 23))
+                    if host:
+                        _LOGGER.warning(
+                            "P1Reader auto-detectie: %s integratie gevonden — "
+                            "verbind direct met %s:%d", domain, host, port
+                        )
+                        return host, port
+
+        except Exception as exc:
+            _LOGGER.debug("P1Reader auto-detectie mislukt: %s", exc)
+
+        return None, DEFAULT_P1_PORT
+
     async def async_stop(self) -> None:
         if self._unsub:
             self._unsub()
@@ -1069,6 +1219,10 @@ class P1Reader:
         if self._hass:
             self._fallback_reader = HAEntityFallbackReader(self._hass)
 
+        # Auto-detectie: als geen host geconfigureerd, zoek in DSMR/P1 integraties
+        if not self._host and not self._serial and self._hass:
+            self._host, self._port = await self._auto_detect_p1_host()
+
         if self._host:
             self._task = asyncio.ensure_future(self._read_tcp())
         elif self._serial:
@@ -1078,6 +1232,53 @@ class P1Reader:
                 "P1Reader: geen directe verbinding geconfigureerd -- "
                 "gebruik HA entity fallback of MQTT als beschikbaar"
             )
+
+    async def _auto_detect_p1_host(self) -> tuple[Optional[str], int]:
+        """
+        Zoek host/poort automatisch in HA config_entries van DSMR/P1 integraties.
+
+        LET OP: de HA DSMR Smart Meter integratie houdt de TCP verbinding met de
+        P1 meter bezet. Een P1 meter accepteert maar 1 client tegelijk.
+        Als de DSMR integratie actief is, gebruik dan de entity fallback
+        (die leest de sensoren van de DSMR integratie).
+        Alleen voor Slimmelezer/P1ib/ESPHome verbinden we direct via TCP
+        omdat die meerdere clients ondersteunen.
+        """
+        try:
+            for entry in self._hass.config_entries.async_entries():
+                domain = entry.domain
+                data = {**entry.data, **entry.options}
+                state = str(entry.state).lower()
+                if state not in ("configentrystate.loaded", "loaded"):
+                    continue
+
+                # HA DSMR Smart Meter: houdt TCP verbinding bezet → entity fallback
+                if domain == "dsmr":
+                    host = data.get("host")
+                    if host and not host.startswith("/"):
+                        _LOGGER.warning(
+                            "P1Reader auto-detectie: HA DSMR integratie actief op %s — "
+                            "CloudEMS gebruikt entity fallback (P1 meter staat slechts "
+                            "1 TCP verbinding toe)", host
+                        )
+                        # Geef None terug → entity fallback wordt gebruikt
+                        return None, DEFAULT_P1_PORT
+
+                # Slimmelezer / P1ib / ESPHome: ondersteunen meerdere clients → direct
+                if domain in ("slimmelezer", "p1_monitor", "ams_han"):
+                    host = data.get("host") or data.get("ip_address")
+                    port = int(data.get("port", 23))
+                    if host:
+                        _LOGGER.warning(
+                            "P1Reader auto-detectie: %s integratie gevonden — "
+                            "verbind direct met %s:%d", domain, host, port
+                        )
+                        return host, port
+
+        except Exception as exc:
+            _LOGGER.debug("P1Reader auto-detectie mislukt: %s", exc)
+
+        return None, DEFAULT_P1_PORT
 
     async def async_stop(self) -> None:
         self._running = False

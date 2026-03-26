@@ -331,6 +331,7 @@ class BoilerState:
     cop_curve_override:  Optional[dict] = None  # {temp_c: cop, ...} interpolatietabel
 
     _temp_history:       list  = field(default_factory=list, repr=False)
+    _power_history:      list  = field(default_factory=list, repr=False)
     _energy_kwh_last:    Optional[float] = field(default=None, repr=False)
     _energy_ts_last:     Optional[float] = field(default=None, repr=False)
     _dimmer_last_pct:    float = field(default=0.0, repr=False)
@@ -721,6 +722,9 @@ class BoilerLearner:
         hist = boiler._temp_history
         hist.append((now, boiler.current_temp_c))
         boiler._temp_history = hist[-30:]
+        # Sla ook vermogen op voor grafiek
+        pw = boiler.current_power_w if boiler.current_power_w is not None else 0.0
+        boiler._power_history = (boiler._power_history + [(now, pw)])[-48:]
         if len(hist) < 2:
             return
         dt_s    = hist[-1][0] - hist[0][0]
@@ -1367,6 +1371,12 @@ class BoilerController:
         """Laad eerder geleerde vermogens uit opslag."""
         import time as _time
         saved = await self._power_store.async_load() or {}
+        # Herstel temp/power histories
+        for b in list(self._boilers) + [bb for g in self._groups for bb in g.boilers]:
+            th = saved.get("_temp_hist_" + b.entity_id)
+            ph = saved.get("_pow_hist_"  + b.entity_id)
+            if isinstance(th, list): b._temp_history  = th
+            if isinstance(ph, list): b._power_history = ph
 
         # Laad persistente temp cache — restore last_known_temp_c voor alle boilers
         _saved_temps = await self._temp_store.async_load() or {}
@@ -1460,6 +1470,12 @@ class BoilerController:
         await self._power_store.async_save(
             {b.entity_id: round(b.power_w, 0) for b in all_b if b.power_w > 50}
         )
+        # Sla ook temp/power histories op voor grafieken
+        await self._power_store.async_save({
+            **{b.entity_id: round(b.power_w, 0) for b in all_b if b.power_w > 50},
+            **{"_temp_hist_" + b.entity_id: b._temp_history[-48:] for b in all_b},
+            **{"_pow_hist_"  + b.entity_id: b._power_history[-48:] for b in all_b},
+        })
         self._power_dirty     = False
         self._power_last_save = _time.time()
 
@@ -4011,6 +4027,15 @@ class BoilerController:
              "tank_liters_active":  round(b._effective_tank_liters, 0),
              "ramp_setpoint_c":     round(b._cheap_ramp_setpoint_c, 1) if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0 else None,
              "ramp_max_c":          b.cheap_ramp_max_c if b.boiler_type == BOILER_TYPE_HYBRID else None,
+             # Geschiedenis voor grafieken in boiler card
+             "temp_history":  [
+                 {"t": round(ts), "v": round(v, 1)}
+                 for ts, v in (b._temp_history or [])[-48:]
+             ],
+             "power_history": [
+                 {"t": round(ts), "v": round(v, 0)}
+                 for ts, v in (b._power_history or [])[-48:]
+             ],
              }
             for b in all_boilers
         ]

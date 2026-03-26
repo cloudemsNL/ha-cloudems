@@ -367,9 +367,9 @@ class AIRegistry:
                 is_weekend     = 1.0 if now.weekday() >= 5 else 0.0,
                 # Power
                 grid_w         = float(data.get("grid_power", data.get("grid_power_w", 0.0)) or 0.0),
-                solar_w        = float(data.get("solar_power", 0.0) or 0.0),
-                battery_w      = float(data.get("battery_power", 0.0) or 0.0),
-                battery_soc_pct= float(data.get("battery_soc", 0.0) or 0.0),
+                solar_w        = float(data.get("solar_power", data.get("solar_power_w", 0.0)) or 0.0),
+                battery_w      = float(data.get("battery_power", data.get("battery_power_w", 0.0)) or 0.0),
+                battery_soc_pct= float(data.get("battery_soc", data.get("battery_soc_pct", 0.0)) or 0.0),
                 house_load_w   = float(data.get("house_load_w", data.get("house_power", 0.0)) or 0.0),
                 # Prices
                 epex_now       = float(data.get("epex_price_now", data.get("current_price", 0.0)) or 0.0),

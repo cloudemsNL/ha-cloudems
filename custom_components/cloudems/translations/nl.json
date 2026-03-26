@@ -2755,6 +2755,8 @@
           "lc_min_confidence": "Minimale zekerheid afwezigheid",
           "lc_night_start_h": "Nacht begint (uur, fallback)",
           "lc_night_end_h": "Nacht eindigt (uur, fallback)",
+          "lc_tv_sim_entity": "TV-simulator lamp (RGB)",
+          "lc_tv_sim_active": "TV-simulator inschakelen",
           "back_to_menu": "← Terug naar menu",
           "budget_elec_eur_month": "Maandbudget elektriciteit (€)",
           "budget_elec_kwh_month": "Maandbudget elektriciteit (kWh)",
@@ -2777,7 +2779,9 @@
           "lc_use_sun_entity": "Bepaal nacht op basis van zon-elevatie — automatisch seizoensaanpassing.",
           "lc_min_confidence": "Hoe zeker moet CloudEMS zijn dat niemand thuis is (0.3–0.95). Hoger = minder vals alarm.",
           "lc_night_start_h": "Fallback nacht-starttijd als sun.sun niet beschikbaar is.",
-          "lc_night_end_h": "Fallback nacht-eindtijd als sun.sun niet beschikbaar is."
+          "lc_night_end_h": "Fallback nacht-eindtijd als sun.sun niet beschikbaar is.",
+          "lc_tv_sim_entity": "RGB lamp in de woonkamer die TV-licht simuleert bij Away. Kies een lamp die kleur ondersteunt.",
+          "lc_tv_sim_active": "Start automatisch bij Away mode, stopt bij thuiskomst. Pauzeert tussen 02:00 en 06:00."
         }
       },
       "cheap_switches_opts": {

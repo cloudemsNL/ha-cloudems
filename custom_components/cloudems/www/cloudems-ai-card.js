@@ -1,5 +1,5 @@
 // CloudEMS AI Card v1.4.0 — Local AI status, k-NN model trained on own data
-const CARD_AI_VERSION = '5.3.31';
+const CARD_AI_VERSION = '5.4.1';
 // No pre-trained data — learns purely from this installation
 'use strict';
 
@@ -103,7 +103,7 @@ class CloudemsAiCard extends HTMLElement {
         <span style="font-size:10px;color:rgba(255,255,255,.3)">${nTrained} / ${MIN_SAMPLES} samples</span>
         <span style="font-size:10px;color:#fbbf24;font-weight:600">
           ${nTrained === 0
-            ? '⏱ ~48 min tot eerste model'
+            ? '⏱ ~2 min tot eerste model'
             : nTrained < MIN_SAMPLES
               ? '⏱ nog ~' + (MIN_SAMPLES - nTrained) + ' min'
               : ''}

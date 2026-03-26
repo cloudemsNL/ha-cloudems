@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Boiler Card  v1.3.0
 
-const BOILER_CARD_VERSION = "5.3.31";
+const BOILER_CARD_VERSION = "5.3.56";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -351,7 +351,12 @@ class CloudemsBoilerCard extends HTMLElement {
     const usablePct=clamp(usableL/(tankL*2),0,1);
     const spColor=tempToColor(setpoint);
     const cop=b.cop_at_current_temp;
-    const hist=this._history[b.entity_id],histP=(this._historyPower||{})[b.entity_id];
+    // Gebruik history direct van sensor attributen ipv HA recorder API
+    const _buildHist = (arr) => arr.length >= 2
+      ? arr.map(pt => { const d = new Date(pt.t*1000); return {t:d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'),v:pt.v}; })
+      : null;
+    const hist  = _buildHist(b.temp_history  || []) || this._history[b.entity_id]         || null;
+    const histP = _buildHist(b.power_history || []) || (this._historyPower||{})[b.entity_id] || null;
 
     // Warmtebron
     const wbSt=hass.states['sensor.cloudems_goedkoopste_warmtebron'];

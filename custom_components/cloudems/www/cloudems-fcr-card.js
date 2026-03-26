@@ -1,5 +1,5 @@
 // CloudEMS FCR/aFRR Card v1.0.0
-const CARD_FCR_VERSION = '5.3.31';
+const CARD_FCR_VERSION = '5.4.1';
 
 class CloudemsFcrCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

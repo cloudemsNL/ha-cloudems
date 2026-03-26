@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Solar Card  v2.1.1
 
-const SOL_VERSION = "5.3.31";
+const SOL_VERSION = "5.3.56";
 const SOL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {

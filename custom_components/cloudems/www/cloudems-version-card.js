@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-const CARD_VERSION_VERSION = '5.3.31';
+const CARD_VERSION_VERSION = '5.4.1';
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Version Card  v1.0.1
 
@@ -8,17 +8,30 @@ class CloudEMSVersionCard extends HTMLElement {
   setConfig(c){ this._cfg = c; }
   set hass(h){
     this._hass = h;
+    // Lees van sensor.cloudems_version_info — kleine dedicated sensor, nooit 16KB issue
+    const vi  = h?.states['sensor.cloudems_version_info']?.attributes || {};
+    // Fallback: lees rechtstreeks uit watchdog subdicts
     const wd  = h?.states['sensor.cloudems_watchdog']?.attributes || {};
-    const sig = [wd.cloudems_version, wd.version, wd.uptime_s, wd.update_cycles, wd.errors_total].join('|');
+    const _sys = wd.system || {};
+    const _wdg = wd.watchdog || {};
+    const _prf = wd.performance || {};
+
+    const ver      = vi.cloudems_version || _sys.version || '?';
+    const uptime_s = vi.uptime_s != null ? vi.uptime_s : _sys.uptime_s;
+    const cycles_v = vi.update_cycles != null ? vi.update_cycles : _sys.update_cycles;
+    const fails_v  = vi.total_failures != null ? vi.total_failures : _wdg.total_failures;
+    const restart_v= vi.total_restarts != null ? vi.total_restarts : _wdg.total_restarts;
+    const avgms_v  = vi.avg_ms != null ? vi.avg_ms : _prf.avg_ms;
+
+    const sig = [ver, uptime_s, fails_v, restart_v, avgms_v].join('|');
     if(sig === this._prev) return;
     this._prev = sig;
 
-    const ver     = wd.cloudems_version || wd.version || h?.states['sensor.cloudems_watchdog']?.attributes?.cloudems_version || '?';
-    const uptime  = wd.uptime_s  ? _fmtUp(wd.uptime_s)  : '—';
-    const cycles  = wd.update_cycles != null ? wd.update_cycles.toLocaleString('nl') : '—';
-    const errors  = wd.errors_total  != null ? wd.errors_total  : '—';
-    const restarts= wd.restart_count != null ? wd.restart_count : '—';
-    const perf    = wd.cycle_ms != null ? `${wd.cycle_ms} ms` : '—';
+    const uptime  = uptime_s != null ? _fmtUp(uptime_s) : '—';
+    const cycles  = cycles_v != null ? Number(cycles_v).toLocaleString('nl') : '—';
+    const errors  = fails_v  != null ? fails_v  : '—';
+    const restarts= restart_v != null ? restart_v : '—';
+    const perf    = avgms_v  != null ? `${Math.round(avgms_v)} ms` : '—';
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -43,7 +56,7 @@ class CloudEMSVersionCard extends HTMLElement {
   }
   getCardSize(){ return 2; }
   static getConfigElement(){ return document.createElement('cloudems-version-card-editor'); }
-  static getStubConfig(){ return {type:'custom:cloudems-version-card'}; }
+  static getStubConfig(){ return {}; }
 }
 
 function _fmtUp(s){

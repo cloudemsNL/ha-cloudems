@@ -5,8 +5,9 @@
  * Module toggles + Leerdata beheer met bevestigingsdialoog
  */
 
+const CARD_CONFIG_VERSION = '5.4.1';
+
 class CloudEMSConfigCard extends HTMLElement {
-const CARD_CONFIG_VERSION = '5.3.31';
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });

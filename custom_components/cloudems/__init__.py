@@ -46,8 +46,6 @@ LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={
 LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VERSION}"
 LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
-LOVELACE_PRIJSVERLOOP_URL   = f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}"
-LOVELACE_PRICE_URL          = f"/local/cloudems/cloudems-price-card.js?v={VERSION}"
 LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={VERSION}"
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
@@ -108,7 +106,6 @@ LOVELACE_RESOURCE_TYPE = "module"
 #   cloudems-boiler-card        → cloudems-boiler-card.js       ✓ actief
 #   cloudems-shutter-card       → cloudems-shutter-card.js      ✓ actief
 #   cloudems-decisions-card     → cloudems-decisions-card.js    ✓ actief
-#   cloudems-prijsverloop-card  → cloudems-prijsverloop-card.js ✓ actief
 #   cloudems-config-card        → cloudems-config-card.js       ✓ actief
 #   cloudems-gas-card           → cloudems-gas-card.js          ✓ actief
 #   cloudems-nilm-card          → cloudems-nilm-card.js         ✓ actief
@@ -124,7 +121,6 @@ LOVELACE_RESOURCE_TYPE = "module"
 # GEREGISTREERD MAAR NIET IN DASHBOARD (kandidaat voor verwijdering):
 #   cloudems-battery-card.js    → cloudems-battery-card        ⚠ Batterij tab gebruikt andere opzet?
 #   cloudems-solar-card.js      → cloudems-solar-card          ⚠ Solar tab gebruikt andere opzet?
-#   cloudems-price-card.js      → cloudems-price-card          ⚠ Prijzen tab gebruikt andere opzet?
 #   cloudems-pv-forecast-card.js→ cloudems-pv-forecast-card    ⚠ Idem
 #   cloudems-rooms-card.js      → cloudems-rooms-card          ⚠ Kamers tab?
 #   cloudems-switches-card.js   → cloudems-switches-card       ⚠ Goedkope uren?
@@ -187,8 +183,9 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_SWITCHES_URL,      "cloudems-switches-card.js"),
     (LOVELACE_ZELFCONS_URL,      "cloudems-zelfconsumptie-card.js"),
     (LOVELACE_DECISIONS_URL,     "cloudems-decisions-card.js"),
-    (LOVELACE_PRIJSVERLOOP_URL,  "cloudems-prijsverloop-card.js"),
-    (LOVELACE_PRICE_URL,         "cloudems-price-card.js"),
+    (f"/local/cloudems/cloudems-prijsverloop-card.js?v={VERSION}", "cloudems-prijsverloop-card.js"),
+    (f"/local/cloudems/cloudems-future-shadow-card.js?v={VERSION}", "cloudems-future-shadow-card.js"),
+    (f"/local/cloudems/cloudems-self-healing-card.js?v={VERSION}", "cloudems-self-healing-card.js"),
     (LOVELACE_ROOMS_URL,         "cloudems-rooms-card.js"),
     (LOVELACE_HOME_URL,          "cloudems-home-card.js"),
     (LOVELACE_CLIMATE_EPEX_URL,  "cloudems-climate-epex-card.js"),
@@ -593,7 +590,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Flush leerdata bij HA stop (harde restart, power-off) — voorkomt azimuth reset
     async def _flush_on_stop(event=None) -> None:
         try:
-            await coordinator.async_shutdown()
+            if not getattr(coordinator, "_shutdown_done", False):
+                coordinator._shutdown_done = True
+                await coordinator.async_shutdown()
         except Exception:
             pass
 
@@ -658,6 +657,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _schedule_dashboard_creation()
     else:
         async_at_started(hass, _schedule_dashboard_creation)
+
+    # Sensor diagnostics — controleer na startup welke sensoren ontbreken of disabled zijn
+    @_ha_callback
+    def _schedule_sensor_check(_now=None):
+        async def _run_sensor_check():
+            try:
+                import asyncio
+                await asyncio.sleep(5)  # wacht tot alle sensoren geregistreerd zijn
+                from .sensor_diagnostics import async_check_sensors
+                await async_check_sensors(hass, entry)
+            except Exception as _diag_err:
+                _LOGGER.debug("CloudEMS: sensor diagnostics mislukt: %s", _diag_err)
+        hass.async_create_task(_run_sensor_check())
+
+    if hass.is_running:
+        _schedule_sensor_check()
+    else:
+        async_at_started(hass, _schedule_sensor_check)
 
     return True
 
@@ -2901,7 +2918,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = domain_data.pop(entry.entry_id, None)
     if coordinator is not None:
         try:
-            await coordinator.async_shutdown()
+            if not getattr(coordinator, "_shutdown_done", False):
+                coordinator._shutdown_done = True
+                await coordinator.async_shutdown()
         except Exception:
             pass
 

@@ -1,5 +1,5 @@
 // CloudEMS Fase Balans Card v1.0.0 — Phase balance with cos phi
-const CARD_FASE_BALANS_VERSION = '5.3.31';
+const CARD_FASE_BALANS_VERSION = '5.4.1';
 
 class CloudemsFaseBalansCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

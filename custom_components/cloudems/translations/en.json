@@ -2709,6 +2709,8 @@
           "lc_min_confidence": "Minimum absence confidence (0.3–0.95)",
           "lc_night_start_h": "Night starts (hour, fallback)",
           "lc_night_end_h": "Night ends (hour, fallback)",
+          "lc_tv_sim_entity": "TV simulator light (RGB)",
+          "lc_tv_sim_active": "Enable TV simulator",
           "back_to_menu": "← Back to menu",
           "budget_elec_eur_month": "Monthly electricity budget (€)",
           "budget_elec_kwh_month": "Monthly electricity budget (kWh)",
@@ -2731,7 +2733,9 @@
           "lc_use_sun_entity": "Derive night from sun elevation — automatic seasonal adjustment.",
           "lc_min_confidence": "How certain CloudEMS must be that nobody is home. Higher = fewer false alarms.",
           "lc_night_start_h": "Fallback night start time if sun.sun is unavailable.",
-          "lc_night_end_h": "Fallback night end time if sun.sun is unavailable."
+          "lc_night_end_h": "Fallback night end time if sun.sun is unavailable.",
+          "lc_tv_sim_entity": "RGB light in living room to simulate TV flicker when Away. Must support color.",
+          "lc_tv_sim_active": "Starts automatically in Away mode, stops on arrival. Pauses between 02:00 and 06:00."
         }
       },
       "cheap_switches_opts": {

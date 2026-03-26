@@ -670,12 +670,22 @@ class WashCycleDetector:
         self._cyclus_kwh      = 0.0
         self._klaar_notif_sent= False
         self._bijna_klaar_sent= False
+        self._startup_piek_w  = 0.0   # aanloopstroom meting deze cyclus
+        self._startup_gemeten = False  # eenmalig meten bij start wasfase
         self._pid.reset()
         _LOGGER.info("%s: wasbeurt gestart", self._label)
 
     def _track_fase(self, fase: WasFase, power_w: float, ts: float) -> None:
         if fase in (WasFase.IDLE, WasFase.KLAAR):
             return
+        # Aanloopstroom: hoogste vermogen in eerste 60s van VERWARMEN of WASSEN
+        if not self._startup_gemeten and fase in (WasFase.VERWARMEN, WasFase.WASSEN):
+            elapsed = ts - self._cyclus_start_ts
+            if elapsed <= 60.0:
+                self._startup_piek_w = max(self._startup_piek_w, power_w)
+            elif elapsed > 60.0:
+                self._startup_gemeten = True
+                self._cyclus_fase_data["_startup_piek_w"] = self._startup_piek_w
         key = fase.value
         if key not in self._cyclus_fase_data:
             self._cyclus_fase_data[key] = {
@@ -710,6 +720,9 @@ class WashCycleDetector:
             "%s: cyclus klaar — %.0f min, %.3f kWh, programma: %s (cyclus #%d)",
             self._label, duur_min, self._cyclus_kwh, programma.naam, self._totaal_cycli
         )
+
+        # Slijtage-check aanloopstroom
+        await self._check_slijtage(data, programma)
 
         # Notificatie
         await self._notify_klaar(data, programma, duur_min)
@@ -850,12 +863,133 @@ class WashCycleDetector:
         )
         _LOGGER.info("%s: bijna-klaar notificatie verstuurd (%.0f min resterend)", self._label, remaining_min)
 
+    async def _check_slijtage(self, data: dict, programma: "ProgrammaProfiel") -> None:
+        """Controleer aanloopstroom op motorverslechtering.
+
+        Vergelijkt de aanloopstroom van deze cyclus met het geleerde gemiddelde
+        van dit programma. Waarschuwing als >20% afwijking en >5 cycli beschikbaar.
+        """
+        if self._apparaat_type != ApparaatType.WASMACHINE:
+            return
+        startup = self._cyclus_fase_data.get("_startup_piek_w", 0.0)
+        if startup < 100:
+            return  # Geen meting beschikbaar
+
+        # Sla aanloopstroom op in programma-profiel
+        if not hasattr(programma, "_startup_samples"):
+            programma._startup_samples = []
+        programma._startup_samples.append(startup)
+        # Bewaar max 20 metingen
+        if len(programma._startup_samples) > 20:
+            programma._startup_samples = programma._startup_samples[-20:]
+
+        # Analyse pas na 5+ metingen
+        if len(programma._startup_samples) < 5:
+            return
+
+        gemiddeld = sum(programma._startup_samples[:-1]) / (len(programma._startup_samples) - 1)
+        if gemiddeld < 50:
+            return
+
+        afwijking_pct = abs(startup - gemiddeld) / gemiddeld * 100
+
+        if afwijking_pct >= 20:
+            richting = "hoger" if startup > gemiddeld else "lager"
+            _LOGGER.warning(
+                "%s: aanloopstroom afwijking %.0f%% (%s) — mogelijke motorslijtage",
+                self._label, afwijking_pct, richting
+            )
+            await self._stuur_notificatie(
+                title=f"⚠️ {self._label} — mogelijke slijtage",
+                message=(
+                    f"De aanloopstroom van {self._label} wijkt {afwijking_pct:.0f}% af "
+                    f"van het geleerde gemiddelde ({richting} dan normaal).\n"
+                    f"Meting: {startup:.0f}W | Gemiddeld: {gemiddeld:.0f}W\n"
+                    f"Mogelijke oorzaak: koolborstels, lagers of condensator.\n"
+                    f"Overweeg een controle door een monteur."
+                ),
+                notification_id=f"cloudems_slijtage_{self._label}",
+                data={"tag": f"cloudems_slijtage_{self._label}"},
+            )
+
+    def _dryer_advies(self, data: dict) -> str:
+        """Bereken EPEX droger-advies: nu vs goedkoopste uur komende 6 uur.
+
+        Gebruikt hourly_prices uit data (lijst van {hour, price_eur_kwh}).
+        Droger verbruikt gemiddeld ~2.5 kWh per cyclus.
+        """
+        DRYER_KWH = 2.5  # gemiddeld droger-verbruik per cyclus
+
+        # Haal prijsdata op uit coordinator data
+        hourly = data.get("hourly_prices") or data.get("epex_prices_today") or []
+        if not hourly:
+            # Probeer via energy_price attribuut
+            ep = data.get("energy_price") or {}
+            hourly = ep.get("prices_today") or ep.get("today") or []
+
+        if not hourly:
+            return ""
+
+        # Huidige uur
+        from datetime import datetime, timezone
+        now_h = datetime.now(timezone.utc).hour
+
+        # Bouw dict hour→price
+        price_map: dict[int, float] = {}
+        for entry in hourly:
+            if isinstance(entry, dict):
+                h = entry.get("hour", entry.get("h"))
+                p = entry.get("price_eur_kwh", entry.get("price", entry.get("p")))
+                if h is not None and p is not None:
+                    price_map[int(h)] = float(p)
+
+        if not price_map:
+            return ""
+
+        # Prijs nu
+        price_now = price_map.get(now_h)
+        if price_now is None:
+            return ""
+
+        # Goedkoopste uur in komende 6 uur
+        upcoming = {h: p for h, p in price_map.items()
+                    if (h - now_h) % 24 <= 6 and h != now_h}
+        if not upcoming:
+            return ""
+
+        best_hour = min(upcoming, key=upcoming.get)
+        best_price = upcoming[best_hour]
+
+        cost_now   = price_now  * DRYER_KWH
+        cost_later = best_price * DRYER_KWH
+        saving     = cost_now - cost_later
+
+        if saving <= 0.02:
+            # Nauwelijks verschil — geen advies
+            return f"\n💡 Droger nu aanzetten: €{cost_now:.2f} (prijsverschil minimaal)"
+
+        return (
+            f"\n\n🌀 Droger advies:\n"
+            f"  Nu: €{cost_now:.2f} ({price_now*100:.1f} ct/kWh)\n"
+            f"  Wacht tot {best_hour:02d}:00: €{cost_later:.2f} ({best_price*100:.1f} ct/kWh)\n"
+            f"  💰 Besparing: €{saving:.2f}"
+        )
+
     async def _notify_klaar(self, data: dict, programma: ProgrammaProfiel, duur_min: float) -> None:
         if self._klaar_notif_sent:
             return
         self._klaar_notif_sent = True
         icon  = APPARAAT_ICON.get(self._apparaat_type, "🧺")
         label = APPARAAT_LABEL.get(self._apparaat_type, self._label)
+
+        # Droger-advies alleen bij wasmachine
+        dryer_advies = ""
+        if self._apparaat_type == ApparaatType.WASMACHINE:
+            try:
+                dryer_advies = self._dryer_advies(data)
+            except Exception as _da_err:
+                _LOGGER.debug("Droger advies fout: %s", _da_err)
+
         await self._stuur_notificatie(
             title=f"{icon} {self._label} klaar",
             message=(
@@ -863,6 +997,7 @@ class WashCycleDetector:
                 f"⏱️ Duur: {duur_min:.0f} min | "
                 f"⚡ Verbruik: {self._cyclus_kwh:.3f} kWh\n"
                 f"(Cyclus #{self._totaal_cycli} van dit apparaat)"
+                f"{dryer_advies}"
             ),
             notification_id=f"cloudems_{self._apparaat_type.value}_{self._label}_klaar",
             data={"tag": f"cloudems_{self._label}_klaar"},

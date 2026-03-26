@@ -1,5 +1,5 @@
 // CloudEMS blackout Card v1.0.0
-const CARD_BLACKOUT_VERSION = '5.3.31';
+const CARD_BLACKOUT_VERSION = '5.4.1';
 class CloudemsCardblackout extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:"open"}); this._p=""; }
   setConfig(c){ this._cfg={title:"CloudEMS blackout",  ...c}; this._r(); }

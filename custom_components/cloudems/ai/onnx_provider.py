@@ -45,7 +45,7 @@ MODEL_KEY       = "cloudems_ai_model_v1"
 # Minimum samples before training is attempted
 MIN_TRAIN_SAMPLES = 48   # ~8 minutes of 10s ticks
 # Retrain every N new samples
-RETRAIN_INTERVAL  = 144  # ~24 minutes
+RETRAIN_INTERVAL  = 48   # eerste training na 48 nieuwe samples (~8 min)
 
 
 # ── Pure-Python k-NN fallback (no numpy required) ─────────────────────────────
@@ -187,8 +187,9 @@ class OnnxProvider(AIProvider):
                 _LOGGER.warning("CloudEMS AI: failed to load saved model: %s", exc)
                 self._model = KNNModel()
 
-        # Load buffered samples
+        # Load buffered samples and training counter
         self._buffer = saved.get("buffer", [])
+        self._n_since_train = saved.get("n_since_train", 0)
 
         # Check if onnxruntime is available
         try:
@@ -300,6 +301,10 @@ class OnnxProvider(AIProvider):
         # Retrain when buffer is large enough
         if len(self._buffer) >= MIN_TRAIN_SAMPLES and self._n_since_train >= RETRAIN_INTERVAL:
             return await self._retrain()
+        # Sla op na elke 2 batches (24 samples) zodat herstart de voortgang bewaart
+        # en we na herstart niet opnieuw bij n_since_train=0 beginnen
+        if self._n_since_train > 0 and self._n_since_train % 24 == 0:
+            await self._save()
         return True
 
     async def async_explain(self, features: AIModelContract) -> str:
@@ -340,6 +345,7 @@ class OnnxProvider(AIProvider):
             await self._store.async_save({
                 "knn_model": self._model.to_dict() if self._model else {},
                 "buffer": self._buffer[-5000:],  # save last 5000 samples
+                "n_since_train": self._n_since_train,
                 "contract_version": CONTRACT_VERSION,
             })
         except Exception as exc:

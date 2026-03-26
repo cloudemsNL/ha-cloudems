@@ -202,6 +202,9 @@ except Exception:
     _InfluxDBWriter = None
 from .energy_manager.weekly_insights import WeeklyComparison, BlueprintGenerator
 from .energy_manager.wash_cycle import ApplianceCycleManager
+from .energy_manager.virtual_cold_storage import VirtualColdStorageManager
+from .energy_manager.electrical_fingerprint import ElectricalFingerprintMonitor
+from .energy_manager.contextual_occupancy import ContextualOccupancyLearner
 from .energy_manager.generator_manager import GeneratorManager
 from .energy_manager.lamp_automation import LampAutomationEngine, ROOM_DEFAULT_MODE
 from .energy_manager.circuit_monitor import CircuitMonitor
@@ -435,6 +438,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # v4.0.4: tijdpatroon store
         from .nilm.time_pattern_learner import STORAGE_KEY_TIME_PATTERNS as _SKEY_TP
         self._store_time_patterns = Store(hass, 1, _SKEY_TP)
+        self._store_phase_hist   = Store(hass, 1, "cloudems_phase_history_v1")
         # v4.5: co-occurrence store
         self._store_co_occurrence = Store(hass, 1, "cloudems_nilm_co_occurrence_v1")
         # v4.6.484: realtime kWh tellers voor altijd-aan apparaten (smart_plug/anchor)
@@ -751,6 +755,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Sub-modules
         self._dynamic_loader    = None
         self._phase_balancer    = None
+        self._phase_hist_t:  list = []  # timestamps
+        self._phase_hist_l1: list = []  # L1 stroom A
+        self._phase_hist_l2: list = []  # L2 stroom A
+        self._phase_hist_l3: list = []  # L3 stroom A
+        self._phase_hist_imb: list = [] # onbalans A
+        self._phase_hist_max = 720      # 720 × 5s = 1 uur
+        self._phase_hist_dirty = False  # of er nieuwe samples zijn om op te slaan
         self._p1_reader         = None
         self._solar_learner     = None
         self._multi_inv_manager = None
@@ -1907,6 +1918,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         flush_targets = [
             self._solar_learner,
             self._pv_forecast,
+            getattr(self, "_elec_fingerprint", None),
+            getattr(self, "_contextual_occ", None),
+            getattr(self, "_virtual_cold_storage", None),
             self._clipping_loss,
             self._shadow_detector,
             self._pv_health,
@@ -1942,6 +1956,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     break  # only call the first available save method
 
         # AI registry shutdown — save model
+        # Fase historiek opslaan bij shutdown
+        try:
+            if getattr(self, "_store_phase_hist", None) and self._phase_hist_t:
+                await self._store_phase_hist.async_save({
+                    "t":   self._phase_hist_t[-720:],
+                    "l1":  self._phase_hist_l1[-720:],
+                    "l2":  self._phase_hist_l2[-720:],
+                    "l3":  self._phase_hist_l3[-720:],
+                    "imb": self._phase_hist_imb[-720:],
+                })
+        except Exception:
+            pass
         if getattr(self, '_ai_registry', None):
             try:
                 await self._ai_registry.async_shutdown()
@@ -2096,6 +2122,18 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
     async def async_setup(self):
         self._session = async_get_clientsession(self.hass)
+        # Laad fase historiek uit storage
+        try:
+            _ph_saved = await self._store_phase_hist.async_load()
+            if isinstance(_ph_saved, dict) and _ph_saved.get("t"):
+                self._phase_hist_t   = _ph_saved["t"]
+                self._phase_hist_l1  = _ph_saved["l1"]
+                self._phase_hist_l2  = _ph_saved["l2"]
+                self._phase_hist_l3  = _ph_saved["l3"]
+                self._phase_hist_imb = _ph_saved["imb"]
+                _LOGGER.debug("CloudEMS: %d fase historiek samples geladen", len(self._phase_hist_t))
+        except Exception as _ph_err:
+            _LOGGER.debug("CloudEMS: fase historiek laden mislukt: %s", _ph_err)
         self._nilm._cloud_ai._session = self._session
         await self._nilm.async_load()
         # v4.0.1: ExportDailyTracker laden
@@ -2659,6 +2697,13 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         from .energy_manager.smart_delay_switch import SmartDelayScheduler
         _smart_delay_cfgs = cfg.get("smart_delay_switches", []) or []
         self._smart_delay_scheduler = SmartDelayScheduler(self.hass, _smart_delay_cfgs)
+        # Virtual Cold Storage — vrieskist als thermische batterij
+        _vcs_cfgs = self._config.get("virtual_cold_storage", [])
+        if _vcs_cfgs:
+            self._virtual_cold_storage = VirtualColdStorageManager(self.hass, _vcs_cfgs)
+            await self._virtual_cold_storage.async_setup()
+        else:
+            self._virtual_cold_storage = None
 
         # v4.6.217: NILM Load Shifter — automatisch uitstellen via NILM detectie
         from .energy_manager.nilm_load_shifter import NILMLoadShifter
@@ -2887,8 +2932,49 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 )
         # Always een LampCirculationController aanmaken — ook als er nu 0 lampen zijn.
         # De lazy re-discovery in de update-loop vult de lampenlijst zodra HA volledig geladen is.
-        from .energy_manager.lamp_circulation import LampCirculationController
+        from .energy_manager.lamp_circulation import LampCirculationController, GhostTVSimulator, GhostAudioDeterrence
         self._lamp_circulation = LampCirculationController(self.hass)
+
+        # Elektrische Vingerafdruk monitor
+        self._elec_fingerprint = ElectricalFingerprintMonitor(self.hass)
+        await self._elec_fingerprint.async_setup()
+        # Contextual Occupancy Learner
+        self._contextual_occ = ContextualOccupancyLearner(self.hass)
+        await self._contextual_occ.async_setup()
+
+        # Ghost 2.0 TV Simulator
+        _tv_sim_cfg = lamp_cfg.get("tv_simulator", {})
+        _tv_eid = _tv_sim_cfg.get("entity_id", "")
+        if _tv_eid:
+            self._ghost_tv_sim = GhostTVSimulator(
+                self.hass, _tv_eid,
+                active              = bool(_tv_sim_cfg.get("active", True)),
+                night_pause_start_h = int(_tv_sim_cfg.get("night_pause_start_h", 2)),
+                night_pause_end_h   = int(_tv_sim_cfg.get("night_pause_end_h", 6)),
+            )
+            _LOGGER.info("CloudEMS: Ghost TV Simulator actief op %s", _tv_eid)
+        else:
+            self._ghost_tv_sim = None
+
+        # Ghost 2.0 Audio Deterrence
+        _audio_cfg = lamp_cfg.get("audio_deterrence", {})
+        _audio_player = _audio_cfg.get("media_player", "")
+        _audio_sensors = _audio_cfg.get("motion_sensors", [])
+        if _audio_player and _audio_sensors:
+            self._ghost_audio = GhostAudioDeterrence(
+                self.hass,
+                media_player   = _audio_player,
+                motion_sensors = _audio_sensors,
+                sounds         = _audio_cfg.get("sounds", []),
+                volume         = float(_audio_cfg.get("volume", 0.4)),
+                cooldown_s     = int(_audio_cfg.get("cooldown_s", 300)),
+                active         = bool(_audio_cfg.get("active", True)),
+                night_pause_start_h = int(_audio_cfg.get("night_pause_start_h", 23)),
+                night_pause_end_h   = int(_audio_cfg.get("night_pause_end_h", 6)),
+            )
+            _LOGGER.info("CloudEMS: Ghost Audio Deterrence actief op %s", _audio_player)
+        else:
+            self._ghost_audio = None
 
         # v4.6.445: Lamp Automation Engine — los van circulatie
         self._lamp_auto = LampAutomationEngine(self.hass, self._config)
@@ -3483,6 +3569,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Dict:
         try:
             self._coordinator_tick = getattr(self, "_coordinator_tick", 0) + 1
+            self._health_cycle_count = getattr(self, "_health_cycle_count", 0) + 1
+            # Slow-path guard: zware modules alleen elke 10 ticks (~10s bij 1s interval)
+            # Fast-path: P1, NILM sampling, fase data, sensor updates — elke tick
+            _slow_tick = (self._health_cycle_count % 10 == 0)
             # v4.6.152: start cycle timer
             self._perf.start_cycle()
             # Initialiseer vroeg zodat er geen UnboundLocalError is als code eerder gebruikt dan gedefinieerd
@@ -4236,6 +4326,44 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "phase_currents":   status.phase_currents,
                 }
 
+            # Fase historiek buffer bijhouden en toevoegen aan balance_data
+            import time as _time_ph
+            _ph_now = round(_time_ph.time())
+            _ph_sum = self._limiter.get_phase_summary() if self._limiter else {}
+            self._phase_hist_t.append(_ph_now)
+            self._phase_hist_l1.append(round(float((_ph_sum.get("L1") or {}).get("current_a", 0)), 2))
+            self._phase_hist_l2.append(round(float((_ph_sum.get("L2") or {}).get("current_a", 0)), 2))
+            self._phase_hist_l3.append(round(float((_ph_sum.get("L3") or {}).get("current_a", 0)), 2))
+            self._phase_hist_imb.append(round(float((balance_data or {}).get("imbalance_a", 0) or 0), 2))
+            if len(self._phase_hist_t) > self._phase_hist_max:
+                self._phase_hist_t   = self._phase_hist_t[-self._phase_hist_max:]
+                self._phase_hist_l1  = self._phase_hist_l1[-self._phase_hist_max:]
+                self._phase_hist_l2  = self._phase_hist_l2[-self._phase_hist_max:]
+                self._phase_hist_l3  = self._phase_hist_l3[-self._phase_hist_max:]
+                self._phase_hist_imb = self._phase_hist_imb[-self._phase_hist_max:]
+            # Sla op elke 10 nieuwe samples (~10s bij 1s interval)
+            if len(self._phase_hist_t) % 10 == 0 and len(self._phase_hist_t) >= 2:
+                try:
+                    await self._store_phase_hist.async_save({
+                        "t":   self._phase_hist_t[-720:],
+                        "l1":  self._phase_hist_l1[-720:],
+                        "l2":  self._phase_hist_l2[-720:],
+                        "l3":  self._phase_hist_l3[-720:],
+                        "imb": self._phase_hist_imb[-720:],
+                    })
+                except Exception:
+                    pass
+            # Publiceer max 144 punten (12 min @ 5s) in het attribuut
+            _ph_n = min(144, len(self._phase_hist_t))
+            if balance_data and _ph_n >= 2:
+                balance_data["phase_history"] = {
+                    "t":   self._phase_hist_t[-_ph_n:],
+                    "l1":  self._phase_hist_l1[-_ph_n:],
+                    "l2":  self._phase_hist_l2[-_ph_n:],
+                    "l3":  self._phase_hist_l3[-_ph_n:],
+                    "imb": self._phase_hist_imb[-_ph_n:],
+                }
+
             # P1 reader
             p1_data = {}
             if self._p1_reader and self._p1_reader.available:
@@ -4272,6 +4400,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "power_l1_export_w": t.power_l1_export_w,
                     "power_l2_export_w": t.power_l2_export_w,
                     "power_l3_export_w": t.power_l3_export_w,
+                    # Verbindingsbron: "ha_entity" = via DSMR/HW integratie, "5"/"4" = direct TCP
+                    "source": getattr(t, "dsmr_version", "unknown"),
                 }
                 # P1 directe boiler sturing: push net_power_w naar boiler controller
                 if self._boiler_ctrl and hasattr(t, "net_power_w") and t.net_power_w is not None:
@@ -4949,8 +5079,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         }
                     )
 
-            # Boiler controller
-            boiler_decisions: list = []
+            # Boiler controller — slow tick (~10s), fast tick gebruikt cached decisions
+            _run_boiler = _slow_tick
+            boiler_decisions: list = [] if _run_boiler else getattr(self, "_cached_boiler_decisions", [])
 
             # PV-surplus via centrale helper — batterij-ontlading telt NIET mee als surplus.
             _batt_w_now   = getattr(self, "_last_battery_w", 0.0)
@@ -5186,6 +5317,37 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "mimicry_active": False, "neg_price_active": False,
                         "sun_derived_night": False, "lamp_phases": [],
                     }
+            # Cache boiler decisions voor fast ticks
+            if _run_boiler:
+                self._cached_boiler_decisions = boiler_decisions
+
+            # ── Ghost TV Simulator ───────────────────────────────────────────
+            try:
+                if getattr(self, "_ghost_tv_sim", None):
+                    _is_away = _occ_state in ("away", "extended_away")
+                    _tv_mode = await self._ghost_tv_sim.tick(_is_away)
+                    if self._data:
+                        self._data["ghost_tv_sim"] = {
+                            **self._ghost_tv_sim.get_status(),
+                            "mode": _tv_mode,
+                        }
+            except Exception as _tv_err:
+                _LOGGER.debug("GhostTVSim tick fout: %s", _tv_err)
+
+            # ── Ghost Audio Deterrence ───────────────────────────────────────
+            try:
+                if getattr(self, "_ghost_audio", None):
+                    _is_away = _occ_state in ("away", "extended_away")
+                    _audio_status = await self._ghost_audio.tick(_is_away)
+                    if self._data and _audio_status == "triggered":
+                        self._log_decision(
+                            "ghost_audio",
+                            f"🔊 Audio deterrence getriggerd — beweging gedetecteerd",
+                            payload=self._ghost_audio.get_status(),
+                        )
+            except Exception as _audio_err:
+                _LOGGER.debug("GhostAudio tick fout: %s", _audio_err)
+
             # ── Lamp Automation Engine ───────────────────────────────────────
             if self._lamp_auto and self._lamp_auto.enabled:
                 try:
@@ -5201,8 +5363,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 except Exception as _la_exc:
                     _LOGGER.debug("LampAutomation fout: %s", _la_exc)
 
-            # ── Rolluiken evaluatie ───────────────────────────────────────────
-            if self._shutter_ctrl is not None and getattr(self, "_shutter_enabled", False):
+            # ── Rolluiken evaluatie — alleen op slow tick ────────────────────
+            if _slow_tick and self._shutter_ctrl is not None and getattr(self, "_shutter_enabled", False):
                 try:
                     # v4.6.464: lees sun.sun automatisch — geen gebruikersconfiguratie nodig
                     _sun_state = self.hass.states.get("sun.sun")
@@ -6123,9 +6285,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     export_w = _solar_export_w,   # only solar portion of export
                 )
                 sc = self._self_consumption.get_data()
+                # Realtime fallback: min(solar, house) / solar
+                # Werkt altijd, ook na herstart als dagaccumulatie nog leeg is
+                _rt_selfcons = round(
+                    min(100.0, max(0.0, _pv_w_sc - _solar_export_w) / _pv_w_sc * 100), 1
+                ) if _pv_w_sc > 10 else 0.0
+
                 self_cons_data = {
-                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else _selfcons_pct,
-                    "export_pct":         sc.export_pct,
+                    "ratio_pct":          sc.ratio_pct if sc.pv_today_kwh > 0 else _rt_selfcons,
+                    "export_pct":         sc.export_pct if sc.pv_today_kwh > 0 else round(100.0 - _rt_selfcons, 1),
                     "pv_today_kwh":       sc.pv_today_kwh,
                     "self_consumed_kwh":  sc.self_consumed_kwh,
                     "exported_kwh":       sc.exported_kwh,
@@ -6596,6 +6764,49 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("CloudEMS NILMLoadShifter fout: %s", _shift_err)
 
             # v4.2: Slimme uitstelmodus
+            # Elektrische Vingerafdruk tick
+            try:
+                _nilm_devs_list = (self._data or {}).get("nilm_devices", [])
+                _outside_t = (self._data or {}).get("outdoor_temp_c")
+                _efp_warnings = self._elec_fingerprint.tick(_nilm_devs_list, _outside_t)
+                for _efpw in _efp_warnings:
+                    self._log_decision(
+                        "electrical_fingerprint",
+                        f"🔍 {_efpw['label']}: {_efpw['problem_type']} ({_efpw['max_dev_pct']:.0f}% afwijking)",
+                        payload=_efpw,
+                    )
+            except Exception as _efp_err:
+                _LOGGER.debug("ElectricalFingerprint tick fout: %s", _efp_err)
+
+            # Contextual Occupancy tick
+            try:
+                _cocc_result = self._contextual_occ.tick(
+                    (self._data or {}).get("nilm_devices", [])
+                )
+                for _anom in _cocc_result.get("anomalies", []):
+                    self._log_decision(
+                        "contextual_occupancy",
+                        f"⚠️ {_anom['label']}: {_anom['message'][:80]}",
+                        payload=_anom,
+                    )
+            except Exception as _cocc_err:
+                _LOGGER.debug("ContextualOccupancy tick fout: %s", _cocc_err)
+
+            # Virtual Cold Storage tick
+            vcs_data: list = []
+            try:
+                if getattr(self, "_virtual_cold_storage", None):
+                    _vcs_actions = self._virtual_cold_storage.tick(data)
+                    vcs_data     = self._virtual_cold_storage.get_status()
+                    for _vca in (_vcs_actions or []):
+                        self._log_decision(
+                            "virtual_cold_storage",
+                            f"🧊 {_vca.get('label','?')}: {_vca.get('action','?')} — {_vca.get('reason','')}",
+                            payload=_vca,
+                        )
+            except Exception as _vcs_err:
+                _LOGGER.debug("VirtualColdStorage tick fout: %s", _vcs_err)
+
             smart_delay_data: dict = {}
             try:
                 if hasattr(self, "_smart_delay_scheduler") and self._smart_delay_scheduler:
@@ -8854,6 +9065,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 "room_meter":       room_meter_data,         # ← v1.20
                 "cheap_switches":   cheap_switch_data,        # ← v1.20
                 "smart_delay":      smart_delay_data,         # ← v4.2
+                "virtual_cold_storage": vcs_data,             # ← v5.3.43
+                "electrical_fingerprint": self._elec_fingerprint.get_status(),  # ← v5.3.46
+                "contextual_occupancy":   self._contextual_occ.get_status(),    # ← v5.3.47
                 "nilm_load_shift":  nilm_shift_data,          # ← v4.6.217
                 "battery_providers": (lambda: {               # ← v1.21 + v4.5.7 balancer-verrijking
                     **((getattr(self, "_battery_providers", None) and
@@ -9037,7 +9251,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._watchdog.report_success()
             self._data["watchdog"] = self._watchdog.get_data() if self._watchdog else {}
             # v2.2.3: health cycle counter
-            self._health_cycle_count = getattr(self, "_health_cycle_count", 0) + 1
+            # health_cycle_count wordt bovenaan de loop bijgehouden
 
             # v2.5: Periodieke herverificatie van NILM config-sensor excludes.
             # set_config_sensor_eids wordt ook bij init aangeroepen, maar nieuwe
@@ -9268,28 +9482,12 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         eval_after_s: int = 600,
         **kwargs,
     ) -> None:
-        """Registreer een beslissing in zowel DecisionOutcomeLearner als OutcomeTracker.
+        """Registreer een beslissing in OutcomeTracker (AI feedback loop).
 
-        Stap 1 van uitfasering: beide systemen draaien parallel.
-        DecisionOutcomeLearner blijft actief voor threshold-bias.
-        OutcomeTracker verzamelt data voor toekomstige AI feedback loop.
+        Stap 2 van uitfasering: DOL.record() verwijderd — OutcomeTracker is de enige recorder.
+        DOL blijft actief voor apply_bias_to_threshold() (BDE + ShutterController).
         """
-        # Oud systeem — DecisionOutcomeLearner
-        try:
-            if self._decision_learner:
-                self._decision_learner.record(
-                    component=component,
-                    action=action,
-                    context_bucket=context_bucket,
-                    price_eur_kwh=price_eur_kwh,
-                    energy_kwh=energy_kwh,
-                    eval_after_s=eval_after_s,
-                    **kwargs,
-                )
-        except Exception as _dol_err:
-            _LOGGER.debug("DOL record fout (%s/%s): %s", component, action, _dol_err)
-
-        # Nieuw systeem — parallel
+        # Nieuw systeem — OutcomeTracker
         try:
             data = self._data or {}
             context_snapshot = {

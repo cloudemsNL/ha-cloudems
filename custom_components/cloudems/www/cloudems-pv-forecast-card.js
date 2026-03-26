@@ -23,7 +23,7 @@
  *   power_sensor: "sensor.mijn_omvormer"   (override live PV sensor)
  */
 
-const PV_CARD_VERSION = "5.3.31";
+const PV_CARD_VERSION = "5.3.56";
 
 // ── Stijlen ───────────────────────────────────────────────────────────────────
 const PV_STYLES = `
@@ -220,7 +220,9 @@ class CloudemsPvForecastCard extends HTMLElement {
     const priceSensor    = hass.states["sensor.cloudems_energy_price_current_hour"];
     const powerSensor    = cfg.power_sensor ? hass.states[cfg.power_sensor] : null;
 
-    const todayKwh    = parseFloat(todaySensor?.state ?? 0) || 0;
+    const scSensor       = hass.states["sensor.cloudems_self_consumption"];
+    const measuredKwh    = parseFloat(scSensor?.attributes?.pv_today_kwh ?? 0) || 0;
+    const todayKwh       = parseFloat(todaySensor?.state ?? 0) || measuredKwh || 0;
     const tomorrowKwh = parseFloat(tomorrowSensor?.state ?? 0) || 0;
     const hourlyToday    = todaySensor?.attributes?.hourly ?? [];
     const hourlyTomorrow = tomorrowSensor?.attributes?.hourly_tomorrow ?? [];
@@ -235,7 +237,7 @@ class CloudemsPvForecastCard extends HTMLElement {
 
     // Stats
     const peakH   = hourlyActive.reduce((m, h) => h.forecast_w > (m?.forecast_w ?? 0) ? h : m, null);
-    const avgConf = hourlyActive.length ? Math.round(hourlyActive.reduce((s,h) => s + (h.confidence ?? 0), 0) / hourlyActive.length * 100) : 0;
+    const avgConf = hourlyActive.length ? Math.round(hourlyActive.reduce((s,h) => s + (h.confidence ?? 0), 0) / hourlyActive.length * 100) : (measuredKwh > 0 ? null : 0);
     const hasSolcast = hourlyActive.some(h => h.solcast_w != null);
     const source     = hasSolcast ? "solcast+statistical" : (todaySensor?.attributes?.source ?? "statistical");
     const srcBadge   = hasSolcast
@@ -266,7 +268,7 @@ class CloudemsPvForecastCard extends HTMLElement {
       <div class="stats-row ${statCols}">
         <div class="stat"><div class="stat-val green">${activeKwh.toFixed(2)}</div><div class="stat-key">kWh ${this._activeDay === "today" ? "vandaag" : "morgen"}</div></div>
         <div class="stat"><div class="stat-val yellow">${peakH ? Math.round(peakH.forecast_w) + " W" : "—"}</div><div class="stat-key">Piek ${peakH ? peakH.hour + ":00" : ""}</div></div>
-        <div class="stat"><div class="stat-val">${avgConf}%</div><div class="stat-key">Zekerheid</div></div>
+        <div class="stat"><div class="stat-val">${avgConf !== null ? avgConf+'%' : '—'}</div><div class="stat-key">${avgConf !== null ? 'Zekerheid' : 'Forecast'}</div></div>
         ${cfg.show_epex && currentPrice != null ? `<div class="stat"><div class="stat-val sky">${(currentPrice*100).toFixed(1)} ct</div><div class="stat-key">EPEX nu</div></div>` : ""}
       </div>`;
 
@@ -319,9 +321,20 @@ class CloudemsPvForecastCard extends HTMLElement {
   _drawChart(hourly, epex, nowH) {
     const sh     = this.shadowRoot;
     const canvas = sh.getElementById("pvChart");
-    if (!canvas || !hourly.length) return;
-
+    if (!canvas) return;
     const ctx    = canvas.getContext("2d");
+    if (!hourly.length) {
+      const W = canvas.parentElement?.clientWidth || 300;
+      const H = 180;
+      canvas.width = W; canvas.height = H;
+      ctx.clearRect(0, 0, W, H);
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(163,163,163,0.4)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Forecast bouwt op na 3+ zonnedagen', W / 2, H / 2);
+      return;
+    }
     const dpr    = window.devicePixelRatio || 1;
     const W      = canvas.parentElement.clientWidth - 36;
     const H      = 180;

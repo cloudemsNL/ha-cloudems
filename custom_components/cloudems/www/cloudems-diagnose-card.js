@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Diagnose Card  v1.1.0
 
-const DIAGNOSE_VERSION = "5.3.31";
+const DIAGNOSE_VERSION = "5.3.56";
 const _esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const _fmt = (v, dec=1) => v != null && !isNaN(v) ? parseFloat(v).toFixed(dec) : "—";
 const _st  = (hass, eid) => hass?.states?.[eid];
@@ -81,7 +81,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
     const h = this._hass;
     if (!h) { sh.innerHTML = `<style>${CSS}</style><div class="card" style="padding:24px;color:var(--m)">Laden…</div>`; return; }
 
-    const tabs = ["💚 Gezondheid","🔁 Watchdog","📡 Sensoren","🔬 NILM","⚡ Fasen","🏎️ Prestaties","🔌 Generator/Groepen","🏠 Slimme Verlichting","🔋 UPS Systemen"];
+    const tabs = ["💚 Gezondheid","🔁 Watchdog","📡 Sensoren","🔬 NILM","⚡ Fasen","🏎️ Prestaties","🔌 Generator/Groepen","🏠 Slimme Verlichting","🔋 UPS Systemen","🔧 HA Systeem"];
 
     sh.innerHTML = `<style>${CSS}</style>
     <div class="card">
@@ -231,6 +231,11 @@ class CloudemsDiagnoseCard extends HTMLElement {
     const batSampl  = bal.battery_lag_samples || 0;
     const p1Meas    = bal.p1_measured_interval_s;
     const p1Samp    = bal.p1_telegram_samples || 0;
+    const p1Src     = (p1 && p1.p1_connection_source) || null;  // "ha_entity", "tcp", "serial"
+    const p1SrcLabel = p1Src === 'ha_entity' ? '📡 HA DSMR/HW integratie'
+                     : p1Src === 'tcp'       ? '🔌 Directe TCP verbinding'
+                     : p1Src === 'serial'    ? '🔌 Directe serieel verbinding'
+                     : p1Src              ? p1Src : null;
     const dsmrType  = bal.dsmr_type_configured || 'universal';
     const dsmrCorr  = bal.dsmr_type_auto_corrected || false;
     const lagComp   = bal.lag_compensated || false;
@@ -257,6 +262,7 @@ class CloudemsDiagnoseCard extends HTMLElement {
 
     <div class="section">
       <div class="section-title">⚡ P1 / DSMR Updatesnelheid</div>
+      ${p1SrcLabel ? `<div class="kv"><span class="kl">P1 verbindingsbron</span><span class="kv_ ok">${p1SrcLabel}</span></div>` : ''}
       ${_kvTT("DSMR-type ingesteld",`${dsmrLabel}${dsmrCorr?' (auto-gecorrigeerd)':''}`,[{label:'Ingesteld',value:dsmrLabel},{label:'Auto-gecorrigeerd',value:dsmrCorr?'✅ Ja':'Nee'},{label:'Normaal',value:'DSMR 4 = ~10s, DSMR 5 = ~1s',dim:true}])}
       ${p1Meas != null
         ? `<div class="kv"><span class="kl">Gemeten P1-interval</span><span class="kv_ ${p1Color}">${p1Meas.toFixed(2)}s <span style="font-size:10px;opacity:.7">(n=${p1Samp})</span></span></div>
@@ -562,8 +568,130 @@ class CloudemsDiagnoseCard extends HTMLElement {
     `;
   }
 
+  _panel9() {
+    const h = this._hass; if (!h) return '';
+    const states = h.states;
+    const now = Date.now();
+
+    // ── Integraties met problemen ──────────────────────────────────────────
+    const cfgEntries = Object.values(states)
+      .filter(s => s.entity_id.startsWith('sensor.') || s.entity_id.startsWith('binary_sensor.'))
+      .filter(s => s.state === 'unavailable')
+      .map(s => s.entity_id);
+
+    // Lees config_entries info via HA states (niet direct beschikbaar in JS)
+    // Gebruik unavailable/unknown sensoren als proxy voor kapotte integraties
+    const unavailByDomain = {};
+    Object.values(states).forEach(s => {
+      if (s.state === 'unavailable') {
+        const parts = s.entity_id.split('.');
+        const domain = parts[0];
+        if (!unavailByDomain[domain]) unavailByDomain[domain] = 0;
+        unavailByDomain[domain]++;
+      }
+    });
+
+    // ── Stale sensoren (niet bijgewerkt > 10 min) ─────────────────────────
+    const staleSensors = Object.values(states)
+      .filter(s => {
+        if (s.state === 'unavailable' || s.state === 'unknown') return false;
+        const lu = new Date(s.last_updated).getTime();
+        const age = (now - lu) / 60000;
+        // Alleen sensoren die normaal vaker updaten - skip daily/static sensors
+        const numeric = !isNaN(parseFloat(s.state));
+        return numeric && age > 10 && s.entity_id.includes('sensor.');
+      })
+      .sort((a,b) => new Date(a.last_updated) - new Date(b.last_updated))
+      .slice(0, 10);
+
+    // ── Template fouten in sensoren ───────────────────────────────────────
+    const templateErrors = Object.values(states)
+      .filter(s => s.state === 'unknown' && s.entity_id.includes('sensor.'))
+      .slice(0, 10);
+
+    // ── Totaal aantallen ──────────────────────────────────────────────────
+    const totalEntities = Object.keys(states).length;
+    const totalUnavail  = Object.values(states).filter(s => s.state === 'unavailable').length;
+    const totalUnknown  = Object.values(states).filter(s => s.state === 'unknown').length;
+    const unavailPct    = ((totalUnavail / totalEntities) * 100).toFixed(1);
+
+    // ── Automations met problemen ─────────────────────────────────────────
+    const brokenAutomations = Object.values(states)
+      .filter(s => s.entity_id.startsWith('automation.') && s.state === 'unavailable')
+      .map(s => s.attributes?.friendly_name || s.entity_id);
+
+    // ── Domeinen met veel unavailable sensoren ────────────────────────────
+    const topBrokenDomains = Object.entries(unavailByDomain)
+      .filter(([d, n]) => n >= 3 && d !== 'update')
+      .sort((a,b) => b[1]-a[1])
+      .slice(0, 8);
+
+    const healthColor = totalUnavail === 0 ? 'var(--green)' : totalUnavail < 10 ? 'var(--amber)' : 'var(--red)';
+    const healthLabel = totalUnavail === 0 ? '✅ Alles bereikbaar' : `⚠️ ${totalUnavail} entiteiten unavailable`;
+
+    return `
+    <div class="section">
+      <div class="section-title">🏠 HA Systeemoverzicht</div>
+      <div class="kv"><span class="kl">Totaal entiteiten</span><span class="kv_">${totalEntities.toLocaleString('nl')}</span></div>
+      <div class="kv"><span class="kl">Unavailable</span><span class="kv_ ${totalUnavail>0?'warn':'ok'}">${totalUnavail} (${unavailPct}%)</span></div>
+      <div class="kv"><span class="kl">Unknown</span><span class="kv_ ${totalUnknown>0?'warn':'ok'}">${totalUnknown}</span></div>
+      <div class="kv"><span class="kl">Status</span><span class="kv_" style="color:${healthColor}">${healthLabel}</span></div>
+    </div>
+
+    ${topBrokenDomains.length ? `
+    <div class="section">
+      <div class="section-title">❌ Domeinen met problemen</div>
+      ${topBrokenDomains.map(([domain, count]) => `
+        <div class="kv">
+          <span class="kl">${domain}</span>
+          <span class="kv_ warn">${count} unavailable</span>
+        </div>`).join('')}
+    </div>` : ''}
+
+    ${brokenAutomations.length ? `
+    <div class="section">
+      <div class="section-title">🤖 Automations met fouten</div>
+      ${brokenAutomations.slice(0,8).map(name => `
+        <div class="kv"><span class="kl err" style="font-size:11px">⚠ ${_esc(name)}</span><span class="kv_ err">unavailable</span></div>
+      `).join('')}
+    </div>` : ''}
+
+    ${staleSensors.length ? `
+    <div class="section">
+      <div class="section-title">🕐 Stale sensoren (>10 min niet bijgewerkt)</div>
+      ${staleSensors.map(s => {
+        const age = Math.round((now - new Date(s.last_updated).getTime()) / 60000);
+        const ageStr = age >= 60 ? `${Math.floor(age/60)}u ${age%60}m` : `${age}m`;
+        return `<div class="kv"><span class="kl" style="font-size:11px">${_esc(s.entity_id)}</span><span class="kv_ warn">${ageStr} geleden</span></div>`;
+      }).join('')}
+    </div>` : ''}
+
+    ${templateErrors.length ? `
+    <div class="section">
+      <div class="section-title">⚙️ Sensoren in unknown state</div>
+      ${templateErrors.slice(0,8).map(s => `
+        <div class="kv"><span class="kl" style="font-size:11px">${_esc(s.entity_id)}</span><span class="kv_ warn">unknown</span></div>
+      `).join('')}
+    </div>` : ''}
+
+    <div class="section">
+      <div class="section-title">🔗 Snelkoppelingen</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:4px 0">
+        ${[
+          ['⚙️ Integraties', '/config/integrations'],
+          ['🤖 Automations', '/config/automation'],
+          ['📝 Logboek', '/logbook'],
+          ['📊 Statistieken', '/config/energy'],
+          ['🔧 Developer Tools', '/developer-tools/template'],
+        ].map(([label, path]) => `
+          <a href="${path}" style="padding:6px 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-size:11px;color:var(--t);text-decoration:none">${label}</a>
+        `).join('')}
+      </div>
+    </div>`;
+  }
+
   static getConfigElement() { return document.createElement("cloudems-diagnose-card-editor"); }
-  static getStubConfig() { return {type:"custom:cloudems-diagnose-card"}; }
+  static getStubConfig() { return {}; }
   getCardSize() { return 6; }
 }
 

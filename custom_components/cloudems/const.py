@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "5.3.31"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "5.4.0"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "5.3.31"  # manifest.json ongeldig
+    VERSION = "5.4.0"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -276,7 +276,7 @@ DEFAULT_MAX_CURRENT_EXPORT = 25
 LIMITER_UPDATE_INTERVAL    = 10
 MIN_EV_CURRENT             = 6
 MAX_EV_CURRENT             = 32
-UPDATE_INTERVAL_FAST       = 10
+UPDATE_INTERVAL_FAST       = 1   # v5.4.0: 1s voor DSMR5 real-time sampling
 UPDATE_INTERVAL_SLOW       = 300
 
 # ── Cloud ─────────────────────────────────────────────────────────────────────

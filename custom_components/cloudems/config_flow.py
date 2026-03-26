@@ -5818,6 +5818,65 @@ class CloudEMSOptionsFlow(_OptionsBase):
             }),
         )
 
+    # ── Virtual Cold Storage wizard stap ─────────────────────────────────────
+    async def async_step_virtual_cold_storage(self, user_input=None):
+        """Wizard stap: vriezer als thermische batterij (Virtual Cold Storage)."""
+        data = self._data()
+        vcs_list = data.get("virtual_cold_storage", [])
+        vcs = vcs_list[0] if vcs_list else {}
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            entity = user_input.get("vcs_entity_id", "")
+            if entity:
+                new_vcs = [{
+                    "entity_id":             entity,
+                    "label":                 user_input.get("vcs_label", "Vriezer"),
+                    "temp_sensor":           user_input.get("vcs_temp_sensor", ""),
+                    "min_temp_c":            float(user_input.get("vcs_min_temp_c", -24.0)),
+                    "max_temp_c":            float(user_input.get("vcs_max_temp_c", -16.0)),
+                    "nominal_temp_c":        float(user_input.get("vcs_nominal_temp_c", -18.0)),
+                    "super_cool_surplus_w":  float(user_input.get("vcs_surplus_w", 800.0)),
+                    "price_off_eur_kwh":     float(user_input.get("vcs_price_off", 0.25)),
+                    "active":                bool(user_input.get("vcs_active", True)),
+                }]
+            else:
+                new_vcs = []
+            return self._save({"virtual_cold_storage": new_vcs})
+        return self.async_show_form(
+            step_id="virtual_cold_storage",
+            data_schema=vol.Schema({
+                vol.Optional("vcs_entity_id",
+                             default=vcs.get("entity_id", "")):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["switch"])),
+                vol.Optional("vcs_label",
+                             default=vcs.get("label", "Vriezer")): str,
+                vol.Optional("vcs_temp_sensor",
+                             default=vcs.get("temp_sensor", "")):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor"])),
+                vol.Optional("vcs_min_temp_c",
+                             default=float(vcs.get("min_temp_c", -24.0))):
+                    vol.All(vol.Coerce(float), vol.Range(min=-30.0, max=-20.0)),
+                vol.Optional("vcs_max_temp_c",
+                             default=float(vcs.get("max_temp_c", -16.0))):
+                    vol.All(vol.Coerce(float), vol.Range(min=-20.0, max=-10.0)),
+                vol.Optional("vcs_nominal_temp_c",
+                             default=float(vcs.get("nominal_temp_c", -18.0))):
+                    vol.All(vol.Coerce(float), vol.Range(min=-22.0, max=-14.0)),
+                vol.Optional("vcs_surplus_w",
+                             default=float(vcs.get("super_cool_surplus_w", 800.0))):
+                    vol.All(vol.Coerce(float), vol.Range(min=200.0, max=5000.0)),
+                vol.Optional("vcs_price_off",
+                             default=float(vcs.get("price_off_eur_kwh", 0.25))):
+                    vol.All(vol.Coerce(float), vol.Range(min=0.05, max=0.60)),
+                vol.Optional("vcs_active",
+                             default=bool(vcs.get("active", True))): bool,
+            }),
+            description_placeholders={
+                "info": "Stel een lege switch in om Virtual Cold Storage uit te schakelen."
+            }
+        )
+
     # ── Lamp Circulatie wizard stap ───────────────────────────────────────────
     async def async_step_lamp_circ_opts(self, user_input=None):
         """Wizard stap: lampcirculatie configuratie (beveiliging + energiebesparing)."""
@@ -5826,6 +5885,14 @@ class CloudEMSOptionsFlow(_OptionsBase):
         if user_input is not None:
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
+            # TV simulator config
+            tv_sim_entity = user_input.get("lc_tv_sim_entity", "")
+            tv_sim_cfg = {}
+            if tv_sim_entity:
+                tv_sim_cfg = {
+                    "entity_id": tv_sim_entity,
+                    "active":    bool(user_input.get("lc_tv_sim_active", True)),
+                }
             new_lc = {
                 "light_entities":  [],  # auto-discovery: alle light.* entiteiten
                 "excluded_ids":    user_input.get("lc_excluded_ids", []),
@@ -5834,6 +5901,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "night_start_h":   int(user_input.get("lc_night_start_h", 22)),
                 "night_end_h":     int(user_input.get("lc_night_end_h", 7)),
                 "use_sun_entity":  bool(user_input.get("lc_use_sun_entity", True)),
+                "tv_simulator":    tv_sim_cfg,
             }
             return self._save({"lamp_circulation": new_lc})
         return self.async_show_form(
@@ -5856,6 +5924,12 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("lc_night_end_h",
                              default=int(lc_cfg.get("night_end_h", 7))):
                     vol.All(vol.Coerce(int), vol.Range(min=5, max=10)),
+                # Ghost 2.0 TV Simulator
+                vol.Optional("lc_tv_sim_entity",
+                             default=lc_cfg.get("tv_simulator", {}).get("entity_id", "")):
+                    selector.EntitySelector(selector.EntitySelectorConfig(domain=["light"])),
+                vol.Optional("lc_tv_sim_active",
+                             default=bool(lc_cfg.get("tv_simulator", {}).get("active", True))): bool,
             }),
         )
 

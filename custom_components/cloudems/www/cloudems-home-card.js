@@ -5,7 +5,7 @@
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
 const HCV = '1.8.8';
-const CARD_HOME_VERSION = '5.3.31';
+const CARD_HOME_VERSION = '5.4.1';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';

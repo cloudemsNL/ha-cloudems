@@ -86,6 +86,46 @@ def _trim_attrs(attrs: dict) -> dict:
                 break
     return result
 
+
+
+class CloudEMSVersionSensor(CoordinatorEntity, SensorEntity):
+    """Kleine sensor met alleen versie/uptime/watchdog info voor de versie kaart.
+    Aparte sensor zodat de watchdog sensor (groot) de 16KB attribute limiet niet
+    kan blokkeren.
+    """
+    _attr_name = "CloudEMS Version Info"
+    _attr_icon = "mdi:information-outline"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_version_info"
+        self.entity_id = "sensor.cloudems_version_info"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        return VERSION
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        g  = data.get("guardian", {})
+        wd = data.get("watchdog_data", data.get("watchdog", {}))
+        perf = data.get("performance", {})
+        uptime_s = g.get("uptime_s") or wd.get("uptime_s") or 0
+        cycles = getattr(self.coordinator, "_health_cycle_count", None)
+        return {
+            "cloudems_version": VERSION,
+            "uptime_s":         uptime_s,
+            "update_cycles":    cycles,
+            "total_failures":   wd.get("total_failures", 0),
+            "total_restarts":   wd.get("total_restarts", 0),
+            "avg_ms":           perf.get("avg_ms"),
+        }
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -229,6 +269,8 @@ async def async_setup_entry(
         CloudEMSHybridNILMSensor(coordinator, entry),
         # v2.1.9: Watchdog — crashgeschiedenis en herstartteller
         CloudEMSWatchdogSensor(coordinator, entry),
+        # v5.3.86: Versie info sensor — klein, nooit 16KB limiet issue
+        CloudEMSVersionSensor(coordinator, entry),
         # v4.0.5: Zelfconsumptie & zelfvoorzieningsgraad
         CloudEMSSelfConsumptionSensor(coordinator, entry),
         CloudEMSEVTripPlannerSensor(coordinator, entry),
@@ -246,7 +288,8 @@ async def async_setup_entry(
         CloudEMSAtmosphericHPSensor(coordinator, entry),
         CloudEMSVvESensor(coordinator, entry),
         CloudEMSFCRAFRRSensor(coordinator, entry),
-        CloudEMSAISensor(coordinator, entry),
+        # CloudEMSAISensor niet geregistreerd — CloudEMSAIStatusSensor (reg 190) heeft
+        # dezelfde entity_id + unique_id en publiceert nu ook k-NN attributen
         CloudEMSPhaseOutletSensor(coordinator, entry),
         CloudEMSSelfSufficiencySensor(coordinator, entry),
         # v2.2.2: Installatie-kwaliteitsscore
@@ -318,7 +361,78 @@ async def async_setup_entry(
     # v4.6.152: Adaptive performance monitor sensor
     entities.append(CloudEMSPerformanceSensor(coordinator, entry))
 
+    # Log welke sensoren we aanbieden
+    explicit_ids = sorted(set(
+        e.entity_id for e in entities
+        if hasattr(e, 'entity_id') and e.entity_id and e.entity_id.startswith('sensor.cloudems_')
+    ))
+    import logging as _log_tmp
+    _LOG_TMP = _log_tmp.getLogger(__name__)
+    _LOG_TMP.warning(
+        "CloudEMS sensor setup: %d sensoren totaal, %d met expliciete entity_id",
+        len(entities), len(explicit_ids)
+    )
+
+    # Fix: hernoem registry entries die de verkeerde entity_id hebben.
+    # Gebruik async_update_entity (niet async_remove) zodat HA's interne cache
+    # ook bijgewerkt wordt. async_remove werkt niet omdat entity_platform
+    # een aparte unique_id-cache bijhoudt die niet gereset wordt.
+    from homeassistant.helpers import entity_registry as _er_mod
+    _er_fix = _er_mod.async_get(hass)
+    _fixed = 0
+    for _entity in entities:
+        if not (hasattr(_entity, 'entity_id') and _entity.entity_id
+                and hasattr(_entity, '_attr_unique_id') and _entity._attr_unique_id):
+            continue
+        _wanted_eid = _entity.entity_id
+        _uid = _entity._attr_unique_id
+        _existing_eid = _er_fix.async_get_entity_id("sensor", "cloudems", _uid)
+        if _existing_eid and _existing_eid != _wanted_eid:
+            # Hernoem: pas de entity_id aan naar de gewenste waarde
+            try:
+                _er_fix.async_update_entity(_existing_eid, new_entity_id=_wanted_eid)
+                _LOG_TMP.warning(
+                    "CloudEMS registry fix: %s → %s (unique_id=%s)",
+                    _existing_eid, _wanted_eid, _uid
+                )
+                _fixed += 1
+            except Exception as _fe:
+                _LOG_TMP.warning("CloudEMS registry fix mislukt voor %s: %s", _existing_eid, _fe)
+
+    if _fixed:
+        _LOG_TMP.warning(
+            "CloudEMS: %d entity_id's hernoemd in registry. Herstart niet nodig.", _fixed
+        )
+
     async_add_entities(entities, update_before_add=True)
+
+    # Check DIRECT na registratie welke sensoren er al in hass.states staan
+    _WATCH = [
+        "sensor.cloudems_solar_system",
+        "sensor.cloudems_battery_so_c",
+        "sensor.cloudems_price_current_hour",
+        "sensor.cloudems_self_consumption",
+    ]
+    async def _post_add_check():
+        import asyncio as _asyncio
+        await _asyncio.sleep(2)
+        from homeassistant.helpers import entity_registry as _er2
+        _er2_inst = _er2.async_get(hass)
+        for _eid in _WATCH:
+            _st = hass.states.get(_eid)
+            _reg2 = _er2_inst.async_get(_eid)
+            # Zoek ook via unique_id
+            _uid = f"{entry.entry_id}_{_eid.split('cloudems_')[1]}"
+            _by_uid = _er2_inst.async_get_entity_id("sensor", "cloudems", _uid)
+            _LOG_TMP.warning(
+                "CloudEMS post-add: %s → hass.states=%s | registry=%s | by_uid(%s)=%s",
+                _eid,
+                _st.state if _st else "LEEG",
+                f"entry={_reg2.config_entry_id[:8]} uid={_reg2.unique_id} dis={_reg2.disabled_by}" if _reg2 else "LEEG",
+                _uid[:20],
+                _by_uid or "NIET GEVONDEN"
+            )
+    hass.async_create_task(_post_add_check())
 
     # Pre-populate registered sets from the HA entity registry so that on HA
     # restart, already-known dynamic entities are not re-added (which causes
@@ -3592,13 +3706,21 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return (self.coordinator.data or {}).get("nilm_mode", "database")
+        d  = self.coordinator.data or {}
+        ai = d.get("ai_status", {})
+        # k-NN ready → toon last_label, anders learning/database
+        if ai.get("ready"):
+            return ai.get("last_label", "idle")
+        if ai.get("n_trained", 0) > 0:
+            return "learning"
+        return d.get("nilm_mode", "database")
 
     @property
     def extra_state_attributes(self):
         d  = self.coordinator.data or {}
         ai = d.get("ai_status", {})
         return {
+            # NILM info
             "provider":           d.get("nilm_mode", "database"),
             "api_calls_total":    ai.get("call_count", 0),
             "provider_available": ai.get("available", True),
@@ -3610,6 +3732,13 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
                 "total_peak_w":  ai.get("solar_peak_w", 0),
                 "estimated_kwp": round(ai.get("solar_peak_w", 0) / 1000, 2),
             },
+            # k-NN lokale AI — zichtbaar in dashboard AI kaart
+            "n_trained":     ai.get("n_trained", 0),
+            "buffer_size":   ai.get("buffer_size", 0),
+            "model_version": ai.get("model_version", "none"),
+            "ready":         ai.get("ready", False),
+            "onnx_available": ai.get("onnx_available", False),
+            "contract_version": ai.get("contract_version", ""),
         }
 
 
@@ -5334,9 +5463,10 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
     def device_info(self): return sub_device_info(self._entry, SUB_GAS)
 
     def _get_electricity_price(self) -> Optional[float]:
-        """Current electricity price from EPEX sensor (€/kWh, incl. tax)."""
+        """Current electricity price from EPEX sensor (€/kWh, all-in incl. tax)."""
         ep = (self.coordinator.data or {}).get("energy_price", {})
-        return ep.get("current")
+        # current_eur_kwh = all-in prijs; "current" = kale EPEX
+        return ep.get("current_eur_kwh") or ep.get("current_display") or ep.get("current")
 
     def _get_gas_price_m3(self) -> float:
         """Gas price per m³. Try HA sensor first, then fixed config, then default."""
@@ -5494,6 +5624,9 @@ class CloudEMSEnergySourceSensor(CoordinatorEntity, SensorEntity):
             "savings_electric_boiler_vs_gas": savings_boiler,
             "savings_heat_pump_vs_gas":       savings_hp if has_hp else None,
             "recommendation":                 recommendation,
+            # Aliassen voor warmtebron-kaart JS (verwacht deze namen)
+            "electricity_price_eur_kwh":       elec,
+            "gas_price_eur_m3":                round(gas_m3, 4),
         }
 
 
@@ -5532,9 +5665,15 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         sc = (self.coordinator.data or {}).get("self_consumption", {})
+        # Fallback voor pv_today_kwh: gebruik _pv_today_hourly_kwh sum als sc nog leeg is
+        pv_today = sc.get("pv_today_kwh")
+        if pv_today is None or pv_today == 0:
+            hourly = getattr(self.coordinator, "_pv_today_hourly_kwh", None)
+            if hourly:
+                pv_today = round(sum(hourly), 3) or None
         return {
             "export_pct":         sc.get("export_pct"),
-            "pv_today_kwh":       sc.get("pv_today_kwh"),
+            "pv_today_kwh":       pv_today,
             "self_consumed_kwh":  sc.get("self_consumed_kwh"),
             "exported_kwh":       sc.get("exported_kwh"),
             "best_solar_hour":    sc.get("best_solar_hour"),
@@ -7388,6 +7527,7 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
             # Watchdog
             "watchdog_restarts":      wd.get("total_restarts", 0),
             "watchdog_failures":      wd.get("total_failures", 0),
+            "update_cycles":          getattr(self.coordinator, "_health_cycle_count", None),
         }
         shutters = (self.coordinator.data or {}).get("shutters", {})
         # v4.6.520: fase-data uit de limiter exposeren zodat home-card piekschaving correct werkt
@@ -7402,10 +7542,18 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         ups = (self.coordinator.data or {}).get("ups", {})
         data = self.coordinator.data or {}
         grid_power_w = data.get("grid_power_w") or data.get("power_w", 0)
+        perf_data = data.get("performance", {})
         return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups,
                 "grid_power_w": grid_power_w,
                 "import_power_w": data.get("import_power_w", 0),
-                "export_power_w": data.get("export_power_w", 0)}
+                "export_power_w": data.get("export_power_w", 0),
+                "performance": perf_data,
+                # Shortcuts voor versie kaart (direct leesbaar zonder subdict)
+                "cloudems_version": VERSION,
+                "update_cycles": system.get("update_cycles"),
+                "total_failures": wd.get("total_failures", 0),
+                "total_restarts": wd.get("total_restarts", 0),
+                "avg_ms": perf_data.get("avg_ms")}
 
 
 class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
@@ -7416,17 +7564,12 @@ class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coord, entry):
         super().__init__(coord)
+        self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_standby_intelligence"
         self.entity_id = "sensor.cloudems_standby_intelligence"
 
     @property
-    def device_info(self): return sub_device_info(self._entry, SUB_NILM) if hasattr(self, "_entry") else None
-
-    def __init__(self, coord, entry):
-        super().__init__(coord)
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_standby_intelligence"
-        self.entity_id = "sensor.cloudems_standby_intelligence"
+    def device_info(self): return sub_device_info(self._entry, SUB_NILM)
 
     @property
     def native_value(self):

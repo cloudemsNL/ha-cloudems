@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Appliance Card  v1.2.0
 
-const APPLIANCE_VERSION = "5.3.31";
+const APPLIANCE_VERSION = "5.3.56";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const DEVICE_ICONS = {
@@ -490,7 +490,7 @@ class CloudemsApplianceCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement("cloudems-appliance-card-editor"); }
-  static getStubConfig()    { return {type:"custom:cloudems-appliance-card",title:"Slimme Schakelaars"}; }
+  static getStubConfig()    { return {title:"Slimme Schakelaars"}; }
   getCardSize() { return 6; }
 }
 

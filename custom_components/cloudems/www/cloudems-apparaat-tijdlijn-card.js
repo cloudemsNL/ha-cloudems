@@ -1,5 +1,5 @@
 // CloudEMS Apparaat Tijdlijn Card v1.0.0 — Today's appliance activity swimlane
-const CARD_APPARAAT_TIJDLIJN_VERSION = '5.3.31';
+const CARD_APPARAAT_TIJDLIJN_VERSION = '5.4.1';
 
 class CloudemsApparaatTijdlijnCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

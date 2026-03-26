@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Shutter Card  v3.0.0
 
-const SHUTTER_VERSION = "5.3.31";
+const SHUTTER_VERSION = "5.3.56";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const CSS = `
@@ -325,7 +325,7 @@ class CloudemsShutterCard extends HTMLElement {
   }
 
   static getConfigElement(){ return document.createElement("cloudems-shutter-card-editor"); }
-  static getStubConfig(){ return {type:"custom:cloudems-shutter-card",title:"Rolluiken"}; }
+  static getStubConfig(){ return {title:"Rolluiken"}; }
   getCardSize(){ return 5; }
 }
 

@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS P1 Card  v1.1.0
 
-const P1_VERSION = "5.3.31";
+const P1_VERSION = "5.3.56";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 function fmt(v, dec=0, unit="") {
@@ -113,7 +113,7 @@ class CloudemsP1Card extends HTMLElement {
     const pr    = h.states["sensor.cloudems_price_current_hour"];
     const price = pr ? parseFloat(pr.state) : null;
 
-    if (!st || !p1.net_power_w) {
+    if (!st || (!p1.net_power_w && !p1.power_import_w && !p1.power_export_w && !p1.source)) {
       const src = p1.source || '';
       const msg = src === 'ha_entity'
         ? 'P1 data actief via DSMR/HomeWizard integratie. Direct TCP niet geconfigureerd — dat is geen probleem.'
@@ -241,7 +241,7 @@ class CloudemsP1Card extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement("cloudems-p1-card-editor"); }
-  static getStubConfig()    { return {type:"custom:cloudems-p1-card",title:"P1 Netbalans"}; }
+  static getStubConfig()    { return {title:"P1 Netbalans"}; }
   getCardSize() { return 5; }
 }
 
