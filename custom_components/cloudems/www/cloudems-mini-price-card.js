@@ -1,5 +1,5 @@
 // CloudEMS Mini Prijs Widget — cloudems-mini-price-card
-const CARD_MINI_PRICE_VERSION = '5.4.1';
+const CARD_MINI_PRICE_VERSION = '5.4.8';
 // Compact EPEX prijskaart met incl/excl belasting toggle.
 // v1.2.0 — leest sensor.cloudems_energy_epex_today (alle data voor toggle aanwezig)
 

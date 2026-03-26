@@ -115,6 +115,82 @@ class ClimatePreHeatAdvisor:
         self._last_advice = advice
         return advice
 
+    def update_cooling(
+        self,
+        current_price:    Optional[float],
+        avg_price_today:  Optional[float],
+        outdoor_temp_c:   Optional[float],
+        indoor_temp_c:    Optional[float],
+        cooling_setpoint: float = 24.0,
+        w_per_k:          Optional[float] = None,
+    ) -> PreHeatAdvice:
+        """
+        Pre-Cooling strategie: koel het huis extra in de ochtend met goedkope/zonneenergie
+        zodat je de warmste uren doorkomt zonder dure stroom.
+
+        Logica:
+        - Als buitentemperatuur > 25°C verwacht (warm dag) EN
+          prijs nu goedkoop (< 65% van daggemiddelde) EN
+          kamertemperatuur nog niet te koud (<= setpoint - 1°C):
+          → adviseer 1-2°C lager setpoint nu (pre-koelen)
+
+        - Als prijs duur EN buitentemperatuur hoog:
+          → adviseer setpoint verhogen (koeling beperken, huis buffert de koude)
+        """
+        if current_price is None or avg_price_today is None or avg_price_today == 0:
+            return PreHeatAdvice(
+                mode="normal", setpoint_offset_c=0.0,
+                reason="Geen prijsdata beschikbaar voor pre-cooling.",
+                price_ratio=1.0, w_per_k=w_per_k or 0.0, reliable=False,
+            )
+
+        ratio  = current_price / avg_price_today
+        wk     = w_per_k or MIN_W_PER_K
+        inertia = min(1.0, max(0.0, (wk - MIN_W_PER_K) / max(1, HEAVY_W_PER_K - MIN_W_PER_K)))
+        max_off = MAX_OFFSET_C * (0.3 + 0.7 * inertia)
+
+        is_warm_day  = outdoor_temp_c is not None and outdoor_temp_c > 22.0
+        room_ok      = indoor_temp_c is None or indoor_temp_c > (cooling_setpoint - 2.0)
+
+        if ratio < PREHEAT_RATIO and is_warm_day and room_ok:
+            # Goedkoop uur + warme dag → pre-koelen
+            offset = -round(min(max_off, 2.0) * (1.0 - ratio / PREHEAT_RATIO), 1)
+            return PreHeatAdvice(
+                mode="pre_cool",
+                setpoint_offset_c=offset,
+                reason=(
+                    f"Pre-koelen: prijs {current_price*100:.1f}ct ({ratio:.2f}× gem.), "
+                    f"buiten {outdoor_temp_c:.1f}°C. "
+                    f"Setpoint {abs(offset):.1f}°C lager nu voor koele buffer later."
+                ),
+                price_ratio=round(ratio, 3),
+                w_per_k=round(wk, 1),
+                reliable=True,
+            )
+
+        if ratio > REDUCE_RATIO and is_warm_day:
+            # Duur uur + warm → koeling beperken, vertrouw op thermische buffer
+            offset = round(min(1.5, max_off * 0.5), 1)
+            return PreHeatAdvice(
+                mode="reduce_cooling",
+                setpoint_offset_c=offset,
+                reason=(
+                    f"Duur uur ({current_price*100:.1f}ct): koeling terugschroeven "
+                    f"{offset:.1f}°C. Huis buffert de opgeslagen koude."
+                ),
+                price_ratio=round(ratio, 3),
+                w_per_k=round(wk, 1),
+                reliable=True,
+            )
+
+        return PreHeatAdvice(
+            mode="normal", setpoint_offset_c=0.0,
+            reason=f"Geen pre-cooling actie nodig (prijs {current_price*100:.1f}ct, buiten {outdoor_temp_c or 0:.1f}°C).",
+            price_ratio=round(ratio, 3),
+            w_per_k=round(wk, 1),
+            reliable=False,
+        )
+
     @property
     def last_advice(self) -> Optional[PreHeatAdvice]:
         return self._last_advice

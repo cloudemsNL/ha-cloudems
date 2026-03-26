@@ -1,5 +1,5 @@
 // CloudEMS AI Card v1.4.0 — Local AI status, k-NN model trained on own data
-const CARD_AI_VERSION = '5.4.1';
+const CARD_AI_VERSION = '5.4.8';
 // No pre-trained data — learns purely from this installation
 'use strict';
 
@@ -16,8 +16,10 @@ class CloudemsAiCard extends HTMLElement {
     const attr     = ai.attributes || {};
     const state    = ai.state || 'unavailable';
     const ready    = attr.ready === true;
-    const nTrained = attr.n_trained || 0;
-    const bufSize  = attr.buffer_size || 0;
+    const nTrained    = attr.n_trained || 0;
+    const bufSize     = attr.buffer_size || 0;
+    const nSinceTrain = attr.n_since_train != null ? attr.n_since_train : null;
+    const retrainAt   = attr.retrain_at || 24;
     const onnx     = attr.onnx_available === true;
     const provider = attr.default_provider || 'onnx_local';
     const providers= attr.providers || [provider];
@@ -122,6 +124,7 @@ class CloudemsAiCard extends HTMLElement {
     ${conf !== null ? kv('Zekerheid', conf + '%', conf >= 70 ? '#4ade80' : conf >= 40 ? '#fbbf24' : '#f87171') : ''}
     ${kv('Getraind op', nTrained.toLocaleString() + ' samples')}
     ${kv('Buffer', bufSize + ' samples')}
+      ${nSinceTrain != null ? kv('Nieuw (→retrain)', nSinceTrain + ' / ' + retrainAt) : ''}
     ${kv('Model versie', version)}
     ${kv('Contract', 'v' + contract)}
     ${kv('ONNX runtime', onnx ? '✓ Beschikbaar' : '— k-NN fallback', onnx ? '#4ade80' : 'rgba(255,255,255,.35)')}

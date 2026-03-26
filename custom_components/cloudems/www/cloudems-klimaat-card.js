@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Klimaat Card  v1.0.0
 
-const KLIM_VERSION = '5.4.1';
+const KLIM_VERSION = '5.4.8';
 
 const KLIM_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');

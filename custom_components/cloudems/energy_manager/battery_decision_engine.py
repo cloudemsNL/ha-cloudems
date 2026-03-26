@@ -110,6 +110,13 @@ class DecisionContext:
     # Gebruikt om te bepalen of accu genoeg heeft voor rest van de dag
     expected_remaining_kwh:   float           = 0.0   # device + systeem vraag rest dag
     system_demand_kwh:        float           = 0.0   # boiler + zones + EV (doel-gebaseerd)
+    # v5.4.6: cel-balancering
+    cell_balancing_needed:    bool            = False  # True = laad naar 100% deze maand
+
+    # v5.4.5: dispatch planner suggestie
+    dispatch_action:          str             = ""     # "charge"/"discharge"/"idle" van planner
+    dispatch_target_soc:      Optional[float] = None   # Gewenste SoC dit uur
+
     # v4.6.507: salderingspercentage — bepaalt werkelijke waarde van export vs. self-consumption
     # NL 2026: 0.36, NL 2027+: 0.00, DE/BE/FR: 0.00
     # Beïnvloedt laad/ontlaad drempels: bij 0% saldering is zelf-consumptie veel waardevoller
@@ -131,6 +138,9 @@ class BatteryDecisionEngine:
 
     def __init__(self) -> None:
         self._learner = None   # v4.6.498: DecisionOutcomeLearner — optioneel koppelen
+        self._last_action:    str   = "idle"   # laatste batterij actie
+        self._last_action_ts: float = 0.0       # timestamp van laatste actiewissel
+        self.anti_cycling_min: int  = 10        # minimale minuten tussen actiewissel
 
     def set_learner(self, learner) -> None:
         """Koppel de DecisionOutcomeLearner voor bias-toepassing op drempels."""
@@ -161,6 +171,10 @@ class BatteryDecisionEngine:
             return base
 
     def evaluate(self, ctx: DecisionContext) -> BatteryDecision:
+        decision = self._evaluate_inner(ctx)
+        return self._apply_anti_cycling(decision)
+
+    def _evaluate_inner(self, ctx: DecisionContext) -> BatteryDecision:
         soc = ctx.soc_pct
         tg  = (ctx.tariff_group or "normal").lower().strip()
         ceil = self._charge_ceiling(ctx.soh_pct)
@@ -187,9 +201,28 @@ class BatteryDecisionEngine:
         _demand_gap   = max(0.0, _total_demand - available_kwh)
         _needs_charge = _demand_gap > 0.5  # meer dan 500Wh tekort
 
+        # Laag 0: anti-cycling — voorkom snelle wissel tussen laden en ontladen
+        import time as _t
+        _now = _t.time()
+        _elapsed = _now - self._last_action_ts
+        _cooldown_s = self.anti_cycling_min * 60
+
         # Laag 1: veiligheidsgrenzen
         d = self._check_safety(ctx, soc, ceil, available_kwh, headroom_kwh)
         if d: return d
+
+        # Laag 1a: cel-balancering — maandelijkse volledige lading heeft prioriteit
+        if ctx.cell_balancing_needed and headroom_kwh > 0.5:
+            # Alleen laden als prijs acceptabel (< 25ct) — niet bij piekprijzen
+            if ctx.epex_eur_now is None or ctx.epex_eur_now < 0.25:
+                return BatteryDecision(
+                    action="charge",
+                    reason="Cel-balancering: maandelijkse volledige lading naar 100%",
+                    priority=15,
+                    confidence=1.0,
+                    source="cell_balancing",
+                    soc_pct=soc, tariff_group=tg, epex_eur=ctx.epex_eur_now,
+                )
 
         # Laag 1b: peak shaving
         d = self._check_peak_shaving(ctx, soc, available_kwh)
@@ -197,6 +230,11 @@ class BatteryDecisionEngine:
 
         # Laag 2: tariefgroep
         d = self._check_tariff_group(ctx, tg, soc, available_kwh, headroom_kwh)
+        if d: return d
+
+        # Laag 2b: Negative Price Dumping
+        # Als het volgende uur negatief geprijsd is → ontlaad nu om maximale laadruimte te hebben
+        d = self._check_negative_price_dump(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
 
         # Laag 3: EPEX
@@ -207,6 +245,10 @@ class BatteryDecisionEngine:
         d = self._check_off_peak(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
 
+        # Laag 3.4: Dispatch plan — planner suggestie als zachte nudge
+        d = self._check_dispatch_plan(ctx, soc, available_kwh, headroom_kwh)
+        if d: return d
+
         # Laag 3.5: AI hint — nudge thresholds when confident
         d = self._check_ai_hint(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
@@ -214,6 +256,9 @@ class BatteryDecisionEngine:
         # Laag 4: PV forecast
         d = self._check_pv(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
+
+        # Anti-cycling: als actie wisselt en cooldown nog actief, terug naar idle
+        # (wordt toegepast na alle lagen via _apply_anti_cycling)
 
         # Laag 5: default idle
         return BatteryDecision(
@@ -226,6 +271,109 @@ class BatteryDecisionEngine:
             tariff_group=tg,
             epex_eur=ctx.epex_eur_now,
         )
+
+    def _apply_anti_cycling(self, decision: "BatteryDecision") -> "BatteryDecision":
+        """
+        Laag 0: Anti-cycling filter.
+
+        Twee beschermingen:
+        1. Micro-cycle prevention: blokkeer actiewissels korter dan MIN_CYCLE_S seconden.
+           Voorkomt dat de batterij tientallen keren per uur voor/ontlaadt (slijt chemie).
+        2. Anti-cycling cooldown: na een actiewissel, wacht anti_cycling_min minuten
+           voor de volgende wissel van richting (laden→ontladen of andersom).
+        """
+        import time as _t
+        _now  = _t.time()
+        _prev = self._last_action
+        _new  = decision.action
+
+        MIN_CYCLE_S = 120  # 2 minuten minimale cyclustijd
+
+        # Altijd safety-acties doorlaten
+        if decision.source in ("safety", "cell_balancing", "peak_shaving"):
+            self._last_action    = _new
+            self._last_action_ts = _now
+            return decision
+
+        # Micro-cycle prevention: blokkeer als actie te snel wisselt
+        elapsed = _now - self._last_action_ts
+        if _prev != "idle" and _new != _prev and _new != "idle" and elapsed < MIN_CYCLE_S:
+            return BatteryDecision(
+                action   = "idle",
+                reason   = (
+                    f"Micro-cycle preventie: {_prev}→{_new} geweigerd "
+                    f"({elapsed:.0f}s < {MIN_CYCLE_S}s minimum). Batterij beschermd."
+                ),
+                priority  = 0,
+                confidence= 1.0,
+                source    = "anti_cycling",
+                soc_pct   = decision.soc_pct,
+                tariff_group = decision.tariff_group,
+                epex_eur  = decision.epex_eur,
+            )
+
+        # Anti-cycling cooldown: laden→ontladen of andersom pas na cooldown
+        cooldown = self.anti_cycling_min * 60
+        is_direction_flip = (
+            (_prev == "charge"    and _new == "discharge") or
+            (_prev == "discharge" and _new == "charge")
+        )
+        if is_direction_flip and elapsed < cooldown:
+            return BatteryDecision(
+                action   = "idle",
+                reason   = (
+                    f"Anti-cycling: richting {_prev}→{_new} geweigerd "
+                    f"({elapsed:.0f}s < {cooldown:.0f}s cooldown). Wacht nog {cooldown-elapsed:.0f}s."
+                ),
+                priority  = 0,
+                confidence= 1.0,
+                source    = "anti_cycling",
+                soc_pct   = decision.soc_pct,
+                tariff_group = decision.tariff_group,
+                epex_eur  = decision.epex_eur,
+            )
+
+        # Actie geaccepteerd — update state
+        if _new != _prev:
+            self._last_action_ts = _now
+        self._last_action = _new
+        return decision
+
+    def _check_dispatch_plan(self, ctx, soc, available_kwh, headroom_kwh):
+        """Laag 3.4: Gebruik dispatch-plan suggestie als zachte nudge."""
+        action = ctx.dispatch_action
+        target = ctx.dispatch_target_soc
+        if not action or action == "idle":
+            return None
+        soc = soc or 0.0
+        tg  = (ctx.tariff_group or "normal").lower()
+        price = ctx.epex_eur_now
+
+        if action == "charge" and headroom_kwh > 0.3:
+            # Alleen laden als prijs acceptabel (< 20ct)
+            if price is None or price < 0.20:
+                return BatteryDecision(
+                    action="charge",
+                    reason=f"Dispatch plan: laden aanbevolen (target SoC {target:.0f}%)" if target else "Dispatch plan: laden",
+                    priority=34, confidence=0.7, source="dispatch_plan",
+                    soc_pct=soc, tariff_group=tg, epex_eur=price,
+                )
+
+        if action == "discharge" and available_kwh > 0.3:
+            # Alleen ontladen als prijs hoog genoeg (> 15ct)
+            if price is not None and price > 0.15:
+                return BatteryDecision(
+                    action="discharge",
+                    reason=f"Dispatch plan: ontladen aanbevolen (target SoC {target:.0f}%)" if target else "Dispatch plan: ontladen",
+                    priority=34, confidence=0.7, source="dispatch_plan",
+                    soc_pct=soc, tariff_group=tg, epex_eur=price,
+                )
+
+        if action == "dump_to_boiler":
+            # Negatieve prijs: geef hint maar laat boiler controller beslissen
+            return None
+
+        return None
 
     # ── Laag 3.5: AI hint ────────────────────────────────────────────────────────
 
@@ -475,6 +623,65 @@ class BatteryDecisionEngine:
                 tariff_group=tg, epex_eur=price,
             )
         return None
+
+    def _check_negative_price_dump(self, ctx, soc, available_kwh, headroom_kwh):
+        """
+        Laag 2b: Negative Price Dumping.
+
+        Als er in de komende 1-2 uur een negatief EPEX-uur is:
+        1. Ontlaad nu tot minimum (ruimte creëren voor gratis/betaald laden)
+        2. Zodat we in het negatieve uur maximaal kunnen laden (je krijgt geld toe)
+
+        Actief als: volgende uur prijs < NEGATIVE_PRICE_THRESHOLD EN huidige SoC > 30%
+        """
+        if not ctx.epex_forecast:
+            return None
+
+        # Zoek negatief uur in de komende 3 uur
+        NEGATIVE_THRESHOLD = -0.005  # -0.5 ct/kWh of lager
+        LOOKAHEAD_HOURS    = 3
+        now_hour = ctx.current_hour
+
+        upcoming_negative = None
+        for slot in ctx.epex_forecast:
+            h = slot.get("hour", -1)
+            p = slot.get("price", 0)
+            # Uur is in de komende LOOKAHEAD_HOURS uur
+            diff = (h - now_hour) % 24
+            if 0 < diff <= LOOKAHEAD_HOURS and p <= NEGATIVE_THRESHOLD:
+                upcoming_negative = slot
+                break
+
+        if upcoming_negative is None:
+            return None
+
+        # Huidig uur moet NIET al negatief zijn (dan laden we al)
+        if ctx.epex_eur_now is not None and ctx.epex_eur_now <= NEGATIVE_THRESHOLD:
+            return None
+
+        # Ontlaad alleen als er voldoende te ontladen valt
+        if available_kwh < 1.0:
+            return None
+
+        soc  = soc or 0.0
+        tg   = (ctx.tariff_group or "normal").lower()
+        neg_h = upcoming_negative.get("hour", "?")
+        neg_p = upcoming_negative.get("price", 0)
+
+        return BatteryDecision(
+            action   = "discharge",
+            reason   = (
+                f"Negative Price Dump: uur {neg_h:02d}:00 heeft prijs €{neg_p:.3f}/kWh — "
+                f"nu ontladen om maximale laadruimte te hebben bij betaald laden"
+            ),
+            priority  = 25,   # hoger dan EPEX (3) maar lager dan safety (1)
+            confidence= 0.85,
+            source    = "negative_price_dump",
+            soc_pct   = soc,
+            target_soc_pct = MIN_SOC_DISCHARGE + 5,
+            tariff_group  = tg,
+            epex_eur  = ctx.epex_eur_now,
+        )
 
     # ── Laag 3b: Off-peak tarief ─────────────────────────────────────────────
 

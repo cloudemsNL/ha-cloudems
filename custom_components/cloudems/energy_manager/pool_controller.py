@@ -580,5 +580,12 @@ class PoolController:
                 domain, service, {"entity_id": entity_id}, blocking=False
             )
             _LOGGER.info("PoolController: %s → %s", entity_id, service)
+            # Watchdog registratie
+            _wd = getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
+            if _wd:
+                desired = "on" if turn_on else "off"
+                async def _restore(eid=entity_id, ton=turn_on):
+                    await self._hass.services.async_call(eid.split(".")[0], "turn_on" if ton else "turn_off", {"entity_id": eid}, blocking=False)
+                _wd.register(f"pool_{entity_id}", entity_id, desired, _restore)
         except Exception as exc:
             _LOGGER.warning("PoolController: fout bij %s %s: %s", service, entity_id, exc)

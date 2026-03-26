@@ -256,6 +256,19 @@ class ClimateEpexController:
                 {"entity_id": dev.entity_id, "temperature": target},
                 blocking=False,
             )
+            # Watchdog: controleer elke 60s of de temperature klopt
+            _wd = getattr(getattr(self, "hass", None), "_cloudems_watchdog", None)
+            if _wd is None:
+                # Probeer via coordinator
+                import homeassistant.core as _ha_core
+                for _d in (self.hass.data or {}).values():
+                    _coord = getattr(_d, "get", lambda k, d=None: d)("coordinator")
+                    if hasattr(_coord, "_actuator_watchdog"):
+                        _wd = _coord._actuator_watchdog; break
+            if _wd:
+                async def _restore_temp(eid=dev.entity_id, t=target):
+                    await self.hass.services.async_call("climate", "set_temperature", {"entity_id": eid, "temperature": t}, blocking=False)
+                _wd.register(f"climate_epex_{dev.entity_id}", dev.entity_id, str(target), _restore_temp, tolerance=0.5)
         except Exception as e:
             _LOGGER.debug("ClimateEpex: set_temperature fout voor %s: %s", dev.entity_id, e)
 

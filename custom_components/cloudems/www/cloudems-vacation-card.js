@@ -1,5 +1,5 @@
 // CloudEMS Vacation Mode Card v1.0.0
-const CARD_VACATION_VERSION = '5.4.1';
+const CARD_VACATION_VERSION = '5.4.8';
 
 class CloudemsVacationCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }

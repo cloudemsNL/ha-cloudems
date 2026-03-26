@@ -1,5 +1,5 @@
 // CloudEMS Standby Intelligence Card v1.0.0
-const CARD_STANDBY_VERSION = '5.4.1';
+const CARD_STANDBY_VERSION = '5.4.8';
 // Bundled inefficiency report: always-on, creep, unaccounted power
 
 class CloudemsStandbyCard extends HTMLElement {

@@ -1,5 +1,5 @@
 // CloudEMS EV Laadplan Card v1.0.0 — 24h EPEX-based EV + battery charging plan
-const CARD_EV_LAADPLAN_VERSION = '5.4.1';
+const CARD_EV_LAADPLAN_VERSION = '5.4.8';
 
 class CloudemsEvLaadplanCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode:"open" }); this._p = ""; }

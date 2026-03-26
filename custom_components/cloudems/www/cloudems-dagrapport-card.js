@@ -1,5 +1,5 @@
 // CloudEMS Dagrapport Card v1.0.0 — Daily energy summary
-const CARD_DAGRAPPORT_VERSION = '5.4.1';
+const CARD_DAGRAPPORT_VERSION = '5.4.8';
 
 class CloudemsDagrapportCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }

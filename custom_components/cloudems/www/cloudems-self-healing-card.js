@@ -1,6 +1,6 @@
 // CloudEMS Self-Healing Dashboard Card v3.0.0
 
-const SHC_VERSION = '5.4.1';
+const SHC_VERSION = '5.4.8';
 
 const SHC_STYLES = `
   :host { display:block; }
@@ -308,6 +308,45 @@ const SITUATIONS = [
     sub:   () => 'netkosten worden verlaagd',
     tag:   d => `${d.soc}%`,
     pills: () => [{ t:'ontladen actief', c:'on' }],
+  },
+  {
+    id: 'neg_price_dump',
+    check: d => (d.battSource||'') === 'negative_price_dump',
+    theme: 'charging',
+    label: d => `Negatieve prijs dump — batterij ontlaadt`,
+    sub:   () => 'ruimte vrijmaken voor betaald laden',
+    tag:   () => 'arbitrage',
+    pills: () => [{ t:'ontladen voor negatief uur', c:'info' }, { t:'max laadruimte', c:'on' }],
+  },
+  {
+    id: 'micro_cycle',
+    check: d => (d.battSource||'') === 'anti_cycling',
+    theme: 'normal',
+    label: () => `Micro-cycle preventie actief`,
+    sub:   () => 'batterij beschermd tegen snelle wisselingen',
+    tag:   () => 'beschermd',
+    pills: () => [{ t:'anti-cycling', c:'warn' }],
+  },
+  {
+    id: 'window_open',
+    check: d => !!d.windowOpen,
+    theme: 'peak',
+    label: d => `Raam open — verwarming gepauzeerd`,
+    sub:   () => 'temperatuurval gedetecteerd, ECO-stand actief',
+    tag:   () => 'raam open',
+    pills: () => [{ t:'ECO-window', c:'warn' }, { t:'verwarming uit', c:'bad' }],
+  },
+  {
+    id: 'voltage_rise',
+    check: d => (d.voltageAction||'ok') !== 'ok',
+    theme: 'expensive',
+    label: d => `Spanning ${d.voltageV||'—'}V — export verlaagd`,
+    sub:   () => 'netspanning te hoog door teruglevering',
+    tag:   d => `${d.voltageV||'—'}V`,
+    pills: d => [
+      { t: `${d.voltageV||'—'}V`, c: 'bad' },
+      { t: `export -${d.voltageReducePct||0}%`, c: 'warn' },
+    ],
   },
   {
     id: 'wash',

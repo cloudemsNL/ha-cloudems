@@ -1,5 +1,19 @@
 # CloudEMS Changelog
 
+## v5.4.7 (2026-03-26)
+- Nieuw: Micro-Cycle Prevention — _apply_anti_cycling() nu volledig geïmplementeerd in BDE; blokkeert actiewissels <2 min en richting-flips <anti_cycling_min (veiligheids-acties altijd doorgelaten)
+- Nieuw: Negative Price Dumping — BDE laag 2b: ontlaad batterij vóór negatief EPEX-uur zodat maximale laadruimte beschikbaar is bij betaald laden (lookahead 3 uur, drempel -0.5 ct/kWh)
+- Nieuw: Open Window Heat-Kill — smart_climate detecteert raam open via temperatuurval >1.5°C in 5 min (geen sensor vereist); activeert ECO_WINDOW preset automatisch
+- Nieuw: RL Feedback UI — 👍/👎 knoppen in decisions-learner-card; cloudems.submit_feedback service geregistreerd; feedback naar DecisionOutcomeLearner + AI registry ThresholdLearner
+- Nieuw: Voltage Rise Prevention — export_limit_monitor.check_voltage_rise(): 248V licht verlagen, 251V sterk verlagen, 253V stoppen
+- Nieuw: Pre-Cooling Strategy — climate_preheat.update_cooling(): pre-koelen bij goedkoop uur + warme dag, koeling beperken bij duur uur
+- Uitgebreid: EnergyDispatchPlanner — 12-uurs dispatch-plan als BDE laag 3.4 (pSoC trajectory)
+- Uitgebreid: ActuatorWatchdog — battery_scheduler, climate_epex, pool_controller, peak_shaving aangesloten
+- Fix: Solar dimmer restore bij herstart — async_setup() roept altijd _restore() aan
+- Fix: AI buffer stuck op 24 — ongeldige samples gefilterd bij laden én retrain; n_since_train zichtbaar in AI kaart
+- Fix: DLC_VERSION decisions-learner-card gebumpt naar 5.4.7
+- Uitgebreid: Self-healing card — nieuwe situaties neg_price_dump, micro_cycle, window_open, voltage_rise
+
 ## v5.3.60 (2026-03-26)
 - Fix (root cause): sensor.cloudems_self_consumption en andere sensoren ontbraken doordat ze in HA's entity_registry gekoppeld waren aan een oud config_entry_id. HA weigert herregistratie dan stil — sensor verschijnt nooit. sensor_diagnostics v1.3 detecteert en verwijdert deze orphaned entries automatisch, na een herstart registreert de sensor opnieuw correct
 - Fix: self-healing card prijs 0ct — las price sensor state als 0 of NaN zonder te vallen op attributen. Nu: state → price_incl_tax attribuut → 0

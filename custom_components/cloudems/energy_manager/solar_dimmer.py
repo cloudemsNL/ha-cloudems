@@ -71,6 +71,14 @@ class SolarDimmer:
         _LOGGER.info(
             "SolarDimmer ready — threshold: %.4f €/kWh", self._threshold
         )
+        # Bij herstart: altijd restore uitvoeren zodat een eerder gedimde inverter
+        # niet permanent op 0% blijft staan (is_active staat na herstart op False
+        # maar de fysieke inverter kan nog steeds gedimd zijn)
+        try:
+            await self._restore()
+            _LOGGER.info("SolarDimmer: inverter hersteld naar 100%% bij opstarten")
+        except Exception as _e:
+            _LOGGER.debug("SolarDimmer: restore bij opstarten mislukt: %s", _e)
 
     def update_solar_power(self, solar_w: float) -> None:
         """Bijwerken PV-vermogen voor curtailment-schatting. Elke coordinator-cyclus."""
@@ -168,6 +176,23 @@ class SolarDimmer:
             )
             await self._restore()
             self.is_active = False
+
+        # Registreer gewenste staat in ActuatorWatchdog
+        self._register_watchdog()
+
+    def _register_watchdog(self) -> None:
+        """Registreer gewenste staat van schakelaar(s) in de ActuatorWatchdog.
+        Zo wordt elke 60s gecontroleerd of de feitelijke staat klopt.
+        """
+        watchdog = getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
+        if not watchdog:
+            return
+        desired = "off" if self.is_active else "on"
+        for key_conf in (CONF_SOLAR_INVERTER_SWITCH, CONF_EV_CHARGER_SWITCH):
+            eid = self.config.get(key_conf)
+            if eid:
+                restore = self._restore if desired == "on" else self._dim
+                watchdog.register(f"solar_dimmer_{key_conf}", eid, desired, restore)
 
     async def _dim(self) -> None:
         """Reduce solar export and stop EV charging to avoid negative price penalties."""

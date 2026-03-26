@@ -256,6 +256,72 @@ class ExportLimitMonitor:
             alert                 = alert,
         )
 
+    def check_voltage_rise(
+        self,
+        voltage_v: Optional[float],
+        export_w: float,
+        inverter_limit_pct: float = 100.0,
+    ) -> dict:
+        """
+        Voltage Rise Prevention — controleer of spanning te hoog oploopt door teruglevering.
+
+        Als de netspanning de 253V nadert (EU max = 253V), moet de omvormer zijn
+        uitvoervermogen verlagen om spanning-stijging te beperken.
+
+        Teruggegeven dict:
+          - action:       "ok" | "reduce_export" | "stop_export"
+          - voltage_v:    gemeten spanning
+          - threshold_v:  drempel waarbij actie ondernomen wordt
+          - reduce_pct:   hoeveel % te verlagen (0-100)
+          - reason:       uitleg
+        """
+        VOLTAGE_WARN   = 248.0   # begin verlagen
+        VOLTAGE_REDUCE = 251.0   # sterk verlagen
+        VOLTAGE_STOP   = 253.0   # stoppen met terugleveren
+
+        if voltage_v is None or voltage_v <= 0:
+            return {"action": "ok", "voltage_v": None, "reason": "Geen spanning gemeten"}
+
+        if voltage_v >= VOLTAGE_STOP:
+            return {
+                "action":      "stop_export",
+                "voltage_v":   voltage_v,
+                "threshold_v": VOLTAGE_STOP,
+                "reduce_pct":  100,
+                "reason":      f"Spanning {voltage_v:.1f}V ≥ {VOLTAGE_STOP}V — teruglevering stoppen",
+            }
+
+        if voltage_v >= VOLTAGE_REDUCE:
+            # Lineair reduceren tussen VOLTAGE_REDUCE en VOLTAGE_STOP
+            fraction = (voltage_v - VOLTAGE_REDUCE) / (VOLTAGE_STOP - VOLTAGE_REDUCE)
+            reduce_pct = int(min(80, fraction * 80) + 20)  # 20-100% reductie
+            return {
+                "action":      "reduce_export",
+                "voltage_v":   voltage_v,
+                "threshold_v": VOLTAGE_REDUCE,
+                "reduce_pct":  reduce_pct,
+                "reason":      f"Spanning {voltage_v:.1f}V hoog — export {reduce_pct}% verlagen",
+            }
+
+        if voltage_v >= VOLTAGE_WARN:
+            fraction = (voltage_v - VOLTAGE_WARN) / (VOLTAGE_REDUCE - VOLTAGE_WARN)
+            reduce_pct = int(fraction * 20)  # 0-20% reductie
+            return {
+                "action":      "reduce_export",
+                "voltage_v":   voltage_v,
+                "threshold_v": VOLTAGE_WARN,
+                "reduce_pct":  reduce_pct,
+                "reason":      f"Spanning {voltage_v:.1f}V verhoogd — export licht verlagen",
+            }
+
+        return {
+            "action":      "ok",
+            "voltage_v":   voltage_v,
+            "threshold_v": VOLTAGE_WARN,
+            "reduce_pct":  0,
+            "reason":      f"Spanning {voltage_v:.1f}V normaal",
+        }
+
     def to_sensor_dict(self, status: ExportLimitStatus) -> dict:
         return {
             "year":                   status.year,

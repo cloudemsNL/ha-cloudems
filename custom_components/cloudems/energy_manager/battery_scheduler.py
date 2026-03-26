@@ -123,11 +123,28 @@ class BatteryEPEXScheduler:
         self._seasonal_params: Optional[SeasonalParameters] = None
         self._last_season: str = ""
 
+        # v5.4.6: cell balancing — plan maandelijks een volledige lading
+        self._last_cell_balance_month: str = ""  # "YYYY-MM" van laatste balancing
+
+    @property
+    def cell_balancing_needed(self) -> bool:
+        """True als er deze maand nog geen cel-balancering heeft plaatsgevonden."""
+        from datetime import datetime
+        current_month = datetime.now().strftime("%Y-%m")
+        return self._last_cell_balance_month != current_month
+
+    def mark_cell_balanced(self) -> None:
+        """Markeer cel-balancering als voltooid voor deze maand."""
+        from datetime import datetime
+        self._last_cell_balance_month = datetime.now().strftime("%Y-%m")
+        _LOGGER.info("BatteryScheduler: cel-balancering voltooid voor %s", self._last_cell_balance_month)
+
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
         saved = await self._store.async_load() or {}
         self._plan_hits  = int(saved.get("plan_hits", 0))
+        self._last_cell_balance_month = saved.get("last_cell_balance_month", "")
         self._plan_total = int(saved.get("plan_total", 0))
         _LOGGER.info("CloudEMS BatteryScheduler: setup (capacity=%.1f kWh)", self._capacity_kwh)
 
@@ -136,6 +153,7 @@ class BatteryEPEXScheduler:
         await self._store.async_save({
             "plan_hits":  self._plan_hits,
             "plan_total": self._plan_total,
+            "last_cell_balance_month": self._last_cell_balance_month,
         })
 
     # ── Main evaluate loop ─────────────────────────────────────────────────────
@@ -446,8 +464,21 @@ class BatteryEPEXScheduler:
             # Set both to 0 (idle)
             if self._charge_eid:
                 await self._call_service(self._charge_eid, 0.0)
+                self._register_watchdog(self._charge_eid, 0.0)
             if self._discharge_eid:
                 await self._call_service(self._discharge_eid, 0.0)
+                self._register_watchdog(self._discharge_eid, 0.0)
+
+    def _register_watchdog(self, entity_id: str, desired_value: float) -> None:
+        """Registreer gewenste staat in ActuatorWatchdog."""
+        coord = getattr(self, "_coordinator", None) or getattr(self, "_hass", None)
+        watchdog = getattr(coord, "_actuator_watchdog", None)
+        if not watchdog or not entity_id:
+            return
+        desired_str = str(round(desired_value)) if entity_id.startswith("number.") else ("on" if desired_value > 0 else "off")
+        async def _restore(): await self._call_service(entity_id, desired_value)
+        tol = 50.0 if entity_id.startswith("number.") else 0.0
+        watchdog.register(f"batt_sched_{entity_id}", entity_id, desired_str, _restore, tolerance=tol)
 
     async def _call_service(self, entity_id: str, value: float) -> None:
         domain = entity_id.split(".")[0]

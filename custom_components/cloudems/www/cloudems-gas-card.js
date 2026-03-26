@@ -4,7 +4,7 @@
  * Klik op periode → zie breakdown (week→dagen, maand→weken, jaar→maanden)
  */
 
-const CARD_GAS_VERSION = '5.4.1';
+const CARD_GAS_VERSION = '5.4.8';
 
 class CloudEMSGasCard extends HTMLElement {
   constructor() {

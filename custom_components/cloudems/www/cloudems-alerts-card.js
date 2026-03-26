@@ -3,7 +3,7 @@
  * Meldingen — actieve alerts, systeem-status, dempen
  */
 
-const ALERTS_VERSION = '5.4.1';
+const ALERTS_VERSION = '5.4.8';
 
 // Prioriteit → kleur + icoon
 const PRI = {

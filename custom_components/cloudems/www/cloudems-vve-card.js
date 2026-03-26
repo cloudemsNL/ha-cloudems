@@ -1,5 +1,5 @@
 // CloudEMS VvE Energy Split Card v1.0.0
-const CARD_VVE_VERSION = '5.4.1';
+const CARD_VVE_VERSION = '5.4.8';
 
 class CloudemsVveCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }

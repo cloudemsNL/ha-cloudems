@@ -1361,6 +1361,48 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             entity_id = call.data["entity_id"]
             coordinator._boiler_ctrl.force_green_permanent(entity_id)
 
+    # RL Feedback service — duimpje omhoog/omlaag vanuit dashboard
+    async def submit_feedback(call):
+        coordinator = hass.data.get(DOMAIN, {}).get("coordinator")
+        if not coordinator:
+            return
+        ts       = float(call.data.get("decision_ts", 0))
+        comp     = str(call.data.get("component", ""))
+        action   = str(call.data.get("action", ""))
+        feedback = int(call.data.get("feedback", 0))  # 1 = goed, -1 = slecht
+        reward   = 1.0 if feedback > 0 else -1.0
+        # Feed terug naar DecisionOutcomeLearner
+        dol = getattr(coordinator, "_decision_outcome_learner", None)
+        if dol and ts > 0:
+            try:
+                dol.update_outcome(
+                    decision_ts=ts,
+                    reward=reward,
+                    hindsight_label=f"user_{'positive' if feedback > 0 else 'negative'}",
+                )
+            except Exception:
+                pass
+        # Feed ook naar AI registry threshold learner
+        ai_reg = getattr(coordinator, "_ai_registry", None)
+        if ai_reg:
+            try:
+                ai_reg.submit_user_feedback(comp, action, reward)
+            except Exception:
+                pass
+        import logging
+        logging.getLogger(__name__).info(
+            "CloudEMS RL feedback: %s/%s → %s (ts=%.0f)",
+            comp, action, "👍" if feedback > 0 else "👎", ts
+        )
+
+    hass.services.async_register(DOMAIN, "submit_feedback", submit_feedback,
+        schema=vol.Schema({
+            vol.Optional("decision_ts", default=0): vol.Coerce(float),
+            vol.Optional("component", default=""): str,
+            vol.Optional("action", default=""): str,
+            vol.Optional("feedback", default=0): vol.Coerce(int),
+        }))
+
     hass.services.async_register(DOMAIN, "confirm_device",         confirm_device)
     hass.services.async_register(DOMAIN, "dismiss_device",         dismiss_device)
     hass.services.async_register(DOMAIN, "nilm_feedback",          nilm_feedback)

@@ -5,7 +5,7 @@
  */
 
 const SANKEY_STYLES = `
-const CARD_SANKEY_VERSION = '5.4.1';
+const CARD_SANKEY_VERSION = '5.4.8';
   :host { display:block; }
   .card { background:var(--ha-card-background,#1a2332); border-radius:12px; padding:14px; font-family:var(--primary-font-family,sans-serif); color:#e2e8f0; }
   .card-title { font-size:12px; font-weight:600; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }

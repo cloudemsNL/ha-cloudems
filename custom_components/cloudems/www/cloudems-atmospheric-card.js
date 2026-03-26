@@ -1,5 +1,5 @@
 // CloudEMS Atmospheric Heat Pump Card v1.0.0
-const CARD_ATMOSPHERIC_VERSION = '5.4.1';
+const CARD_ATMOSPHERIC_VERSION = '5.4.8';
 
 class CloudemsAtmosphericCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }

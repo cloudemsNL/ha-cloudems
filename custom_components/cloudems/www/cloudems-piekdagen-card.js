@@ -1,5 +1,5 @@
 // CloudEMS Piekdagen Kalender Card v1.0.0 — monthly EPEX price calendar
-const CARD_PIEKDAGEN_VERSION = '5.4.1';
+const CARD_PIEKDAGEN_VERSION = '5.4.8';
 
 class CloudemsPiekdagenCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode:"open" }); this._p = ""; }

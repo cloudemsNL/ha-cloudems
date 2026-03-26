@@ -762,17 +762,63 @@ class ZoneController:
         return self._last_temp
 
     def _is_window_open(self) -> bool:
-        # Eigen sensor heeft prioriteit
+        """
+        Detecteert raam open via 3 methodes:
+        1. Eigen window sensor (binary_sensor)
+        2. VTherm window detectie
+        3. Automatische temperatuurval detectie (geen sensor nodig):
+           als de kamertemperatuur in 5 minuten meer dan 1.5°C daalt → raam open
+        """
+        # Methode 1: Eigen sensor
         if self._window_sensor:
             st = self._hass.states.get(self._window_sensor)
             if st and st.state == "on":
                 return True
 
-        # Fallback: VTherm window_state detectie
+        # Methode 2: VTherm window detectie
         if self._vtherm_bridge:
             summary = self._vtherm_bridge._zone_cache.get(self._name)
             if summary and summary.any_window_open:
                 return True
+
+        # Methode 3: Automatische temperatuurval detectie
+        # Vereist geen sensor — detecteert snelle daling van kamertemperatuur
+        try:
+            import time as _t
+            now = _t.time()
+            # Haal huidige kamertemperatuur op
+            cur_temp = None
+            for eid in self._climate_entities:
+                st = self._hass.states.get(eid)
+                if st and st.attributes.get("current_temperature"):
+                    cur_temp = float(st.attributes["current_temperature"])
+                    break
+            if cur_temp is not None:
+                # Init temp history als die er niet is
+                if not hasattr(self, "_temp_hist"):
+                    self._temp_hist = []
+                self._temp_hist.append((now, cur_temp))
+                # Bewaar alleen laatste 10 minuten
+                self._temp_hist = [(t, v) for t, v in self._temp_hist if now - t < 600]
+                # Check: daling > 1.5°C in 5 minuten
+                if len(self._temp_hist) >= 2:
+                    old_samples = [(t, v) for t, v in self._temp_hist if now - t > 240]
+                    if old_samples:
+                        oldest_temp = old_samples[-1][1]
+                        drop = oldest_temp - cur_temp
+                        if drop > 1.5:
+                            if not getattr(self, "_window_auto_logged", False):
+                                import logging
+                                logging.getLogger(__name__).info(
+                                    "SmartClimate [%s]: raam open gedetecteerd via temperatuurval (%.1f°C in 5min)",
+                                    self._name, drop
+                                )
+                                self._window_auto_logged = True
+                            return True
+                        else:
+                            self._window_auto_logged = False
+        except Exception:
+            pass
 
         return False
 

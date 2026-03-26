@@ -1,5 +1,5 @@
 // CloudEMS Multi-Split Airco Card v1.0.0
-const CARD_AIRCO_VERSION = '5.4.1';
+const CARD_AIRCO_VERSION = '5.4.8';
 // Shows all configured AC units with live status, temperature, power, EPEX mode
 
 class CloudemsAircoCard extends HTMLElement {

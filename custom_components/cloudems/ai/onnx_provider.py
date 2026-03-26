@@ -187,8 +187,20 @@ class OnnxProvider(AIProvider):
                 _LOGGER.warning("CloudEMS AI: failed to load saved model: %s", exc)
                 self._model = KNNModel()
 
-        # Load buffered samples and training counter
-        self._buffer = saved.get("buffer", [])
+        # Load buffered samples en filter op geldig formaat
+        _raw_buf = saved.get("buffer", [])
+        self._buffer = [
+            s for s in _raw_buf
+            if isinstance(s, dict)
+            and isinstance(s.get("features"), list)
+            and len(s.get("features", [])) > 0
+            and s.get("label")
+        ]
+        if len(self._buffer) != len(_raw_buf):
+            _LOGGER.info(
+                "CloudEMS AI: buffer gefilterd — %d van %d samples geldig",
+                len(self._buffer), len(_raw_buf)
+            )
         self._n_since_train = saved.get("n_since_train", 0)
 
         # Check if onnxruntime is available
@@ -300,6 +312,10 @@ class OnnxProvider(AIProvider):
 
         # Retrain when buffer is large enough
         if len(self._buffer) >= MIN_TRAIN_SAMPLES and self._n_since_train >= RETRAIN_INTERVAL:
+            _LOGGER.info(
+                "CloudEMS AI: retrain trigger — buffer=%d, n_since=%d",
+                len(self._buffer), self._n_since_train
+            )
             return await self._retrain()
         # Sla op na elke 2 batches (24 samples) zodat herstart de voortgang bewaart
         # en we na herstart niet opnieuw bij n_since_train=0 beginnen
@@ -326,18 +342,39 @@ class OnnxProvider(AIProvider):
             if len(self._buffer) > 10_000:
                 self._buffer = self._buffer[-10_000:]
 
-            self._model.fit(self._buffer)
+            # Filter op geldige samples: moet "features" key hebben als lijst
+            # Ongeldige samples (oud formaat, corrupte data) worden overgeslagen
+            _valid = [
+                s for s in self._buffer
+                if isinstance(s, dict)
+                and isinstance(s.get("features"), list)
+                and len(s["features"]) > 0
+                and s.get("label")
+            ]
+            _LOGGER.info(
+                "CloudEMS AI: retrain gestart — %d van %d samples geldig",
+                len(_valid), len(self._buffer)
+            )
+            if len(_valid) < MIN_TRAIN_SAMPLES:
+                _LOGGER.warning(
+                    "CloudEMS AI: te weinig geldige samples (%d < %d) — retrain overgeslagen",
+                    len(_valid), MIN_TRAIN_SAMPLES
+                )
+                self._n_since_train = 0
+                return False
+
+            self._model.fit(_valid)
             self._ready = self._model._n_trained >= MIN_TRAIN_SAMPLES
             self._n_since_train = 0
             elapsed = time.time() - t0
             _LOGGER.info(
-                "CloudEMS AI: retrained k-NN on %d samples in %.2fs",
-                self._model._n_trained, elapsed
+                "CloudEMS AI: k-NN getraind op %d samples in %.2fs (ready=%s)",
+                self._model._n_trained, elapsed, self._ready
             )
             await self._save()
             return True
         except Exception as exc:
-            _LOGGER.error("CloudEMS AI: training failed: %s", exc)
+            _LOGGER.error("CloudEMS AI: training mislukt: %s", exc, exc_info=True)
             return False
 
     async def _save(self) -> None:
@@ -384,6 +421,8 @@ class OnnxProvider(AIProvider):
             "outcome_stats": self._outcome_tracker.stats,
             "n_trained": self._model._n_trained if self._model else 0,
             "buffer_size": len(self._buffer),
+            "n_since_train": self._n_since_train,
+            "retrain_at": RETRAIN_INTERVAL,
             "onnx_available": self._onnx_available,
             "model_version": self._model._version if self._model else "none",
             "contract_version": CONTRACT_VERSION,

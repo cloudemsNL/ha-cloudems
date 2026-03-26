@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Decision Outcome Learner Card v1.0
 
-const DLC_VERSION = "5.3.56";
+const DLC_VERSION = "5.4.7";
 const DLC_SENSOR  = "sensor.cloudems_decision_learner";
 
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -226,13 +226,18 @@ class CloudEMSDecisionsLearnerCard extends HTMLElement {
       const ago     = this._ago(o.ts);
       const bucket  = (o.context_bucket || "").split(":").slice(1,4).join(" · ");
 
-      return `<div class="outcome-row">
+      const rowId = `out_${o.ts||Math.random()}`;
+      return `<div class="outcome-row" id="${rowId}">
         <span class="out-icon">${comp}</span>
         <div class="out-body">
           <div class="out-title">${esc(COMP_NL[o.component] || o.component)} · ${esc(action)}</div>
           <div class="out-detail">${esc(bucket)} · ${ago}</div>
         </div>
         <div class="out-val ${isPos?"pos":"neg"}">${valTxt}</div>
+        <div class="fb-btns">
+          <button class="fb-btn pos" title="Goede beslissing" data-ts="${o.ts}" data-comp="${o.component}" data-action="${o.action}" data-fb="1">👍</button>
+          <button class="fb-btn neg" title="Slechte beslissing" data-ts="${o.ts}" data-comp="${o.component}" data-action="${o.action}" data-fb="-1">👎</button>
+        </div>
       </div>`;
     }).join("");
 

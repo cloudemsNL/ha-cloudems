@@ -150,11 +150,23 @@ class PeakShaving:
                 _LOGGER.info("CloudEMS PeakShaving: shed %s (%.0f W)", entity_id, current_w)
                 if entity_id not in self._shed_active:
                     self._shed_active.append(entity_id)
+                # Watchdog: entity moet "off" blijven tijdens peak shaving
+                _wd = getattr(getattr(self, "_hass", None), "_cloudems_watchdog", None) or \
+                      getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
+                if _wd:
+                    async def _restore_off(eid=entity_id):
+                        await self._hass.services.async_call("homeassistant", "turn_off", {"entity_id": eid}, blocking=False)
+                    _wd.register(f"peak_shed_{entity_id}", entity_id, "off", _restore_off)
                 return f"shed:{entity_id}"
         return "at_limit_no_assets"
 
     async def _restore_loads(self) -> None:
         """Restore sheddable assets (reverse order)."""
+        # Deregistreer uit watchdog
+        _wd = getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
+        if _wd:
+            for eid in self._shed_active:
+                _wd.unregister(f"peak_shed_{eid}")
         self._shed_active = []
         for entity_id in reversed(self._assets):
             state = self._hass.states.get(entity_id)
