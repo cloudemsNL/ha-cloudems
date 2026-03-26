@@ -1,5 +1,32 @@
 # CloudEMS Changelog
 
+## v5.3.60 (2026-03-26)
+- Fix (root cause): sensor.cloudems_self_consumption en andere sensoren ontbraken doordat ze in HA's entity_registry gekoppeld waren aan een oud config_entry_id. HA weigert herregistratie dan stil — sensor verschijnt nooit. sensor_diagnostics v1.3 detecteert en verwijdert deze orphaned entries automatisch, na een herstart registreert de sensor opnieuw correct
+- Fix: self-healing card prijs 0ct — las price sensor state als 0 of NaN zonder te vallen op attributen. Nu: state → price_incl_tax attribuut → 0
+- Fix: versie kaart lege velden, self-healing card solar, standby_intelligence DB-spam (zie v5.3.58/59)
+
+## v5.3.59 (2026-03-26)
+- Uitgebreid: card_output_watcher v2.0 — elke 5 minuten kaart-snapshot in HA logs met solar/grid/huis/accu/prijs/zelfconsumptie. Problemen zijn nu direct leesbaar in de logs zonder screenshots
+- Uitgebreid: checks toegevoegd voor self-healing card solar, prijs, PV forecast, coordinator performance
+- Fix: self-healing card 0W solar — las sensor.cloudems_solar_system (leeg bij herstart), nu sensor.cloudems_zon_vermogen
+- Fix: sensor.cloudems_standby_intelligence publiceerde heel coordinator.data — DB-spam elke 30s
+- Fix: versie kaart lege velden — sleutelnamen gecorrigeerd naar wd.watchdog.total_restarts, wd.performance.avg_ms
+- Fix: performance subdict toegevoegd aan sensor.cloudems_watchdog attributes
+- Fix: sensor_diagnostics module — nu alleen sensoren met expliciete entity_id
+
+## v5.3.58 (2026-03-26)
+- Fix: self-healing card toonde 0W solar — las sensor.cloudems_solar_system (leeg bij herstart), nu sensor.cloudems_zon_vermogen (zelfde bron als sankey kaart)
+- Fix: self-healing card re-renderde niet bij solar update — signature miste solar sensor state
+- Fix: sensor.cloudems_standby_intelligence publiceerde héél coordinator.data (~50KB) → DB-spam elke 30s. Nu alleen standby_intelligence subdict
+- Fix: versie kaart toonde streepjes — sleutelnamen update_cycles/errors_total/restart_count/cycle_ms bestonden niet. Nu wd.watchdog.total_restarts, wd.watchdog.total_failures, wd.performance.avg_ms
+- Fix: performance subdict toegevoegd aan sensor.cloudems_watchdog attributes zodat cyclustijd zichtbaar is
+- Fix: sensor_diagnostics module had verkeerde entity_ids (pv_forecast_today, p1_power) — nu alleen sensoren met expliciete entity_id
+
+## v5.3.57 (2026-03-26)
+- Fix: sensor.cloudems_ai_status dubbel geregistreerd (CloudEMSAIStatusSensor + CloudEMSAISensor met zelfde entity_id/unique_id) — tweede verwijderd, eerste uitgebreid met k-NN attributen (n_trained, buffer_size, model_version, ready)
+- Fix: CloudEMSStandbyIntelligenceSensor had dubbele __init__ — samengevoegd
+- Nieuw: sensor_diagnostics.py — controleert bij elke opstarten welke kritieke sensoren ontbreken of disabled zijn, re-enablet automatisch door HA uitgeschakelde sensoren (niet user-disabled), logt conflicten
+
 ## v5.3.3 (2026-03-24)
 - Feature: aanwezigheidsdetectie wizard-stap toegevoegd (async_step_presence)
 - Auto-detectie van person.*, device_tracker.* en binary_sensor presence/occupancy/motion werkte al
@@ -304,3 +331,187 @@
 - Fix: NILM ankers altijd alle 5 zichtbaar (?, L1, L2, L3, Σ) op vaste gelijkmatige posities
 - Fix: NILM devices verdeeld onder hun eigen anker zonder overlap
 - Fix: bolletjes op THUIS→anker lijnen voor actieve apparaten
+
+## v5.3.32 (2026-03-25)
+- Fix: cloudems-gas-card en cloudems-config-card kapot door versie-bump die VERSION const binnen class plaatste ipv ervoor
+- Alle JS kaarten syntax-gecontroleerd: 0 fouten
+
+## v5.3.33 (2026-03-25)
+- Verwijderd: cloudems-prijsverloop-card.js — legacy kaart vervangen door cloudems-price-card
+- Registratie en bestand volledig verwijderd zodat de oude kaart niet meer verschijnt
+
+## v5.3.34 (2026-03-25)
+- Hersteld: cloudems-prijsverloop-card terug — was per ongeluk verwijderd
+- Prijzen tab gebruikt nu weer cloudems-prijsverloop-card
+
+## v5.3.35 (2026-03-25)
+- Verwijderd: cloudems-price-card.js — cloudems-prijsverloop-card is de correcte prijskaart
+
+## v5.3.36 (2026-03-25)
+- Dashboard: cloudems-energy-visual-card toegevoegd aan NILM tab
+- Dashboard: cloudems-energy-visual-card en cloudems-overview-card toegevoegd aan Configuratie tab (was onderhoud)
+- Dashboard: cloudems-beheer-card verwijderd uit Configuratie tab (toonde al "vervangen" melding)
+
+## v5.3.37 (2026-03-25)
+- Dashboard: mini-price-card als eerste kaart op alle tabs (behalve Prijzen & Kosten)
+- Dashboard: version-card als laatste kaart op alle 17 tabs
+
+## v5.3.38 (2026-03-25)
+- Dashboard: alle 17 tabs op max_columns: 2 — consistente 2-koloms layout overal
+
+## v5.3.38 (2026-03-26)
+- Fix AI: n_since_train en buffer worden nu opgeslagen en hersteld na herstart
+- Fix AI: RETRAIN_INTERVAL verlaagd van 144 naar 48 — eerste training na ~8 minuten
+- Fix AI: battery_soc/solar_power/battery_power sleutels met _w fallback in _build_features
+- Fix AI: buffer periodiek opgeslagen (elke 60 samples) zodat data niet verloren gaat bij crash
+
+## v5.3.39 (2026-03-26)
+- Fix: dubbele shutdown logs — coordinator._shutdown_done guard voorkomt 2x uitvoering
+- CLAUDE_INSTRUCTIONS: dashboard kaart volgorde (mini-price eerst, version laatst) vastgelegd
+
+## v5.3.39 (2026-03-26)
+- Fix: flow card verdwijnt niet meer na errors — animatieloop herstart zichzelf na 5s ipv permanent te stoppen
+
+## v5.3.40 (2026-03-26)
+- AI refactor stap 2: DOL.record() verwijderd uit _record_decision_dual
+- OutcomeTracker is nu de enige recorder voor beslissingen
+- DOL blijft actief voor apply_bias_to_threshold() (BDE + ShutterController)
+
+## v5.3.41 (2026-03-26)
+- Dashboard: alle 17 tabs nu 2 kolommen (links=hoofd, rechts=ondersteunend)
+- Dashboard: mini-price eerste, version-card laatste op alle tabs gecontroleerd
+
+## v5.3.42 (2026-03-26)
+- Nieuw: Wasmachine Finish-at Predictor
+  - Bij klaar-notificatie: EPEX droger-advies (nu vs goedkoopste uur komende 6 uur)
+  - Slijtage-detector: aanloopstroom gemonitord per cyclus, waarschuwing bij >20% afwijking
+  - Beide features alleen voor wasmachine (ApparaatType.WASMACHINE)
+
+## v5.3.43 (2026-03-26)
+- Nieuw: Virtual Cold Storage (VirtualColdStorageManager)
+  - Vrieskist als thermische batterij via slimme stekker
+  - Super-cool bij PV-surplus of negatieve prijs → koel naar min_temp_c
+  - Off-peak uitschakel-venster bij hoge prijs → laat opwarmen tot max_temp_c
+  - Leert opwarm/afkoelsnelheid van de specifieke vriezer (EMA model)
+  - Temperatuursensor optioneel voor feedback-loop
+  - Configuratie via virtual_cold_storage[] in CloudEMS opties
+
+## v5.3.44 (2026-03-26)
+- Nieuw: Future Shadow Card (cloudems-future-shadow-card)
+  - Toont werkelijke kosten vs schaduw (zonder CloudEMS) per dag
+  - Geleerd voordeel, recente uitkomsten, DOL insights
+- Nieuw: Ghost 2.0 TV Simulator (GhostTVSimulator in lamp_circulation.py)
+  - Simuleert TV-flikkering via RGB lamp bij Away-mode
+  - Scene-wisselingen elke 3-8s, kleurwisselingen elke 20-120s
+  - Nachtpauze 02:00-06:00, stopt bij thuiskomst
+  - Configuratie via lamp_circulation.tv_simulator in CloudEMS opties
+
+## v5.3.44 (2026-03-26)
+- Nieuw: Future Shadow Card (cloudems-future-shadow-card)
+  - Toont werkelijk verbruik/kosten vs "zonder CloudEMS" schaduw
+  - Leest DOL total_value_eur + cost_today_eur voor dagvergelijking
+  - Toegevoegd aan Zelflerend tab rechterkolom
+- Nieuw: Ghost 2.0 TV Simulator volledig geïmplementeerd
+  - GhostTVSimulator klasse in lamp_circulation.py
+  - RGB lamp simuleert TV-flikkering (scene changes 3-8s, kanaalwisselingen 20-120s)
+  - Nachtpauze 02:00-06:00, stopt automatisch als huis niet meer Away
+  - Configuratie via lamp_cfg.tv_simulator.entity_id in CloudEMS opties
+  - Status nu ook gepubliceerd naar coordinator data (ghost_tv_sim)
+
+## v5.3.45 (2026-03-26)
+- Nieuw: Ghost 2.0 Audio Deterrence (GhostAudioDeterrence)
+  - Speelt huiselijke geluiden (hond, vaatwasser, stemmen) bij bewegingsdetectie in Away mode
+  - Cooldown 5 min, nachtpauze 23:00-06:00 configureerbaar
+  - Configuratie via lamp_cfg.audio_deterrence in CloudEMS opties
+  - Triggers worden gelogd als decision_audio events
+
+## v5.3.46 (2026-03-26)
+- Nieuw: Elektrische Vingerafdruk (ElectricalFingerprintMonitor)
+  - Monitort inschakel-curves voor koelkast, vriezer, warmtepomp, airco via NILM
+  - Detecteert: motorwikkeling degradatie, koelmiddelverlies, wikkeling kortsluiting, mechanische weerstand
+  - Baseline opgebouwd uit eerste 10 cycli, daarna EMA-bijwerking
+  - Waarschuwing bij >25% afwijking, kritiek bij >40%
+  - Cooldown 24u per apparaat, opgeslagen in HA Store
+  - Triggers gelogd als electrical_fingerprint decision events
+
+## v5.3.47 (2026-03-26)
+- Nieuw: Contextual Occupancy (ContextualOccupancyLearner)
+  - Leert gedragssequenties via NILM: slaap/opstaan/vertrek/thuiskomst
+  - Detecteert intenties op basis van apparaat-activatievolgorde
+  - Anomalie-detectie: gevaarlijke apparaten 's nachts (oven, strijkijzer)
+  - Leert eigen varianten na 3+ herhalingen
+  - Notificatie bij ongewone activiteit: "Oven aan om 02:00 — wil je uitschakelen?"
+
+## v5.3.48 (2026-03-26)
+- Nieuw: Self-Healing Dashboard Card (cloudems-self-healing-card)
+  - Eerste kaart op de Overzicht tab — altijd zichtbaar
+  - 7 contextuele situaties: negatieve prijs, PV-surplus, piekschaving, dure stroom,
+    batterij laden/ontladen, Away mode, normaal
+  - Toont: situatie-icon, titel, sub-tekst, badge, 4 real-time metrics
+  - Actieve CloudEMS-acties als pills onderaan
+  - Achtergrond en kleur passen zich dynamisch aan de situatie aan
+
+## v5.3.49 (2026-03-26)
+- Self-Healing Card v2.0.0 — alle CloudEMS modules geïntegreerd:
+  - Nieuw: maintenance_warning (ElectricalFingerprint afwijking)
+  - Nieuw: super_cool (Virtual Cold Storage actief)
+  - Nieuw: boiler_boost situatie
+  - Nieuw: wash_cycle (wasmachine actief + resterende tijd + droger-advies pill)
+  - Nieuw: sleeping situatie (nachtmodus)
+  - Away: Ghost TV-simulatie pill toegevoegd
+  - Normal: Contextual Occupancy intent als sub-tekst
+  - Normal: NILM apparaten-count als metric sub
+  - Normal: DOL totaal geleerd voordeel als pill
+  - Metrics: surplus sub-tekst, batterij richting, EPEX prijs per kWh
+
+## v5.3.50 (2026-03-26)
+- Bugfix: CloudEMS startte niet op — AttributeError '_elec_fingerprint' niet gevonden
+  ElectricalFingerprintMonitor en ContextualOccupancyLearner werden te vroeg
+  via async_setup() aangeroepen, vóór hun initialisatie in de setup-flow.
+  async_setup() aanroepen verplaatst naar direct na de instantiatie van beide modules.
+
+## v5.3.51 (2026-03-26)
+- Fix: Self-Healing Card toonde 0 ct/kWh — prijs nu correct gelezen uit sensor.cloudems_price_current_hour
+- Fix: 'dure stroom' drempel verlaagd van 30 naar 25 ct/kWh (23.7 ct was al hoog maar werd niet getoond)
+- Fix: prijssensor toegevoegd aan change-detectie signaal
+
+## v5.3.52 (2026-03-26)
+- Fix: Self-Healing Card "Huis" toont nu totaal huisverbruik (incl. boiler, airco, EV)
+  Leest sensor.cloudems_huisverbruik (Kirchhoff-gefilterd), fallback: solar+grid-batterij
+
+## v5.3.53 (2026-03-26)
+- Self-Healing Card v3.0 — volledig redesign
+  - Donker palet met één kleuraccent per situatie (streep + dot + tag)
+  - Geen emoji's als structuurelement — typografie doet het werk
+  - Compacte labels, geen helptext
+  - Metrics met tabular-nums, subtiele sub-labels
+  - Pills als kleine status-chips, niet als grote knoppen
+
+## v5.3.53 (2026-03-26)
+- Stijl: Self-Healing Card teksten herschreven — korter, feitelijker, minder AI-achtig
+- CLAUDE_INSTRUCTIONS: stijlregel toegevoegd voor professionele maar menselijke UI/teksten
+
+## v5.3.54 (2026-03-26)
+- Fix: Self-Healing Card PV leest nu sensor.cloudems_solar_system (was altijd 0W)
+- Fix: Self-Healing Card prijs leest sensor.cloudems_price_current_hour direct
+- Fix: VirtualColdStorage thermisch model nu persistent via HA Store (overleeft herstart)
+- Info: zelfconsumptie 0% na herstart lost zichzelf op — storage was leeg door crashes gisteren
+
+## v5.3.55 (2026-03-26)
+- Bugfix: Zelfconsumptie was altijd 0% — realtime fallback berekening was 0.0 door
+  volgorde-probleem in coordinator tick (_selfcons_pct pas later berekend)
+  Fix: inline realtime berekening (solar - export) / solar × 100
+- Fix: TV-simulator config veld had geen label/beschrijving in alle talen
+  Vertaling toegevoegd voor nl/en/de/fr
+- Info: TV-simulator = 1 RGB lamp kiezen via "TV-simulator lamp (RGB)" dropdown
+
+## v5.3.56 (2026-03-26)
+- Bugfix: cloudems-overview-card bestond niet meer als JS element — verwijderd uit dashboard
+- Bugfix: Flow card toonde leeg scherm als sensor.cloudems_status nog niet geladen was
+  Nu zichtbaar "Energiestroom laden..." in plaats van onzichtbaar
+- Fix: self-healing card batterij sensor fallback toegevoegd (cloudems_batterij_epex_schema → cloudems_battery_schedule)
+- Fix: self-healing card SoC en battW fallback op cloudems_battery_soc/power
+- Fix: PV forecast kaart toont gemeten kWh als forecast nog niet beschikbaar is
+- Fix: PV forecast lege grafiek toont "Forecast bouwt op na 3+ zonnedagen"
+- Fix: Zelfconsumptie realtime berekening — geen opbouw meer nodig na herstart
+- Test: alle 61 dashboard cards gecontroleerd op JS definitie
