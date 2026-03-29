@@ -15,7 +15,7 @@
  *   price_sensor: "sensor.cloudems_price_current_hour"  (default)
  */
 
-const CE_CARD_VERSION = "5.3.56";
+const CE_CARD_VERSION = "5.4.96";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');

@@ -49,6 +49,8 @@ LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VE
 LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={VERSION}"
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
+LOVELACE_ARCH_URL           = f"/local/cloudems/cloudems-arch-card.js?v={VERSION}"
+LOVELACE_ISO_URL            = f"/local/cloudems/cloudems-iso-card.js?v={VERSION}"
 LOVELACE_CLIMATE_EPEX_URL   = f"/local/cloudems/cloudems-climate-epex-card.js?v={VERSION}"
 LOVELACE_LAMP_URL           = f"/local/cloudems/cloudems-lamp-card.js?v={VERSION}"
 LOVELACE_DEMAND_URL         = f"/local/cloudems/cloudems-demand-card.js?v={VERSION}"
@@ -188,6 +190,9 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-self-healing-card.js?v={VERSION}", "cloudems-self-healing-card.js"),
     (LOVELACE_ROOMS_URL,         "cloudems-rooms-card.js"),
     (LOVELACE_HOME_URL,          "cloudems-home-card.js"),
+    (LOVELACE_ARCH_URL,          "cloudems-arch-card.js"),
+    (LOVELACE_ISO_URL,           "cloudems-iso-card.js"),
+    (f"/local/cloudems/cloudems-load-plan-card.js?v={VERSION}", "cloudems-load-plan-card.js"),
     (LOVELACE_CLIMATE_EPEX_URL,  "cloudems-climate-epex-card.js"),
     (f"/local/cloudems/cloudems-config-card.js?v={VERSION}",            "cloudems-config-card.js"),
     (f"/local/cloudems/cloudems-gas-card.js?v={VERSION}",               "cloudems-gas-card.js"),
@@ -204,6 +209,13 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-sankey-card.js?v={VERSION}",            "cloudems-sankey-card.js"),
     (f"/local/cloudems/cloudems-pool-card.js?v={VERSION}",              "cloudems-pool-card.js"),
     (f"/local/cloudems/cloudems-learning-card.js?v={VERSION}",          "cloudems-learning-card.js"),
+    # v5.5.4: nieuwe kaarten
+    (f"/local/cloudems/cloudems-alerts-ticker-card.js?v={VERSION}",      "cloudems-alerts-ticker-card.js"),
+    (f"/local/cloudems/cloudems-energie-potentieel-card.js?v={VERSION}", "cloudems-energie-potentieel-card.js"),
+    # v5.5.6: energie calculators
+    (f"/local/cloudems/cloudems-offgrid-card.js?v={VERSION}",            "cloudems-offgrid-card.js"),
+    (f"/local/cloudems/cloudems-fuse-monitor-card.js?v={VERSION}",       "cloudems-fuse-monitor-card.js"),
+    (f"/local/cloudems/cloudems-kosten-calculator-card.js?v={VERSION}",  "cloudems-kosten-calculator-card.js"),
     # VERWIJDERD: cloudems-cards.backup-pre-phase.js — backup bestand mag nooit als resource geladen worden
     # (conflicteert met cloudems-cards.js op unguarded customElements.define calls)
 ]
@@ -545,6 +557,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         VERSION,
     )
     _LOGGER.info("CloudEMS: Starting setup v%s", VERSION)
+
+    # ISO afbeelding upload endpoint registreren
+    try:
+        from homeassistant.components.http import HomeAssistantView
+        import pathlib as _pl
+
+        class CloudEMSIsoUploadView(HomeAssistantView):
+            url  = "/api/cloudems/upload_iso_image"
+            name = "api:cloudems:upload_iso_image"
+            requires_auth = True
+
+            async def post(self, request):
+                import time as _time
+                data = await request.post()
+                file_field = data.get("file")
+                if not file_field:
+                    return self.json({"error": "no file"}, status_code=400)
+                ext      = (file_field.filename or "jpg").rsplit(".", 1)[-1].lower()
+                fname    = f"iso_house_{int(_time.time())}.{ext}"
+                dest_dir = _pl.Path(hass.config.config_dir) / "www" / "cloudems"
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest    = dest_dir / fname
+                content = file_field.file.read()
+                # Schrijf synchroon in executor — geen aiofiles nodig
+                await hass.async_add_executor_job(dest.write_bytes, content)
+                url = f"/local/cloudems/{fname}"
+                return self.json({"url": url, "filename": fname})
+
+        hass.http.register_view(CloudEMSIsoUploadView())
+        _LOGGER.debug("CloudEMS: ISO upload endpoint geregistreerd")
+    except Exception as _upl_err:
+        _LOGGER.debug("CloudEMS: ISO upload view niet geregistreerd: %s", _upl_err)
 
     # v3.9: Maak CloudEMS HA-ruimtes aan als ze nog niet bestaan.
     # "CloudEMS"         → voor alle CloudEMS sensors/switches (suggested_area)
@@ -2889,6 +2933,29 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             vol.Required("device_name"): str,
             vol.Optional("exclude", default=True): bool,
             vol.Optional("reason", default="user"): str,
+        }),
+    )
+
+    async def set_nilm_phase(call) -> None:
+        """Stel de fase van een NILM apparaat handmatig in (persistent via phase_votes)."""
+        det = getattr(coordinator, "_nilm_detector", None) or getattr(coordinator, "_nilm", None)
+        if not det:
+            return
+        name  = call.data.get("device_name", "")
+        phase = call.data.get("phase", "")
+        if phase not in ("L1", "L2", "L3"):
+            return
+        for dev in det._devices.values():
+            if (dev.name or "").lower() == name.lower() or (dev.user_name or "").lower() == name.lower():
+                det.set_feedback(dev.device_id, dev.user_feedback or "correct", corrected_phase=phase)
+                coordinator.async_update_listeners()
+                break
+
+    hass.services.async_register(
+        DOMAIN, "set_nilm_phase", set_nilm_phase,
+        schema=vol.Schema({
+            vol.Required("device_name"): str,
+            vol.Required("phase"): vol.In(["L1", "L2", "L3"]),
         }),
     )
 

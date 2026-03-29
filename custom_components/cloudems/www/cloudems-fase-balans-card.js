@@ -1,5 +1,5 @@
-// CloudEMS Fase Balans Card v1.0.0 — Phase balance with cos phi
-const CARD_FASE_BALANS_VERSION = '5.4.8';
+// CloudEMS Fase Balans Card v5.4.96 — Phase balance with cos phi
+const CARD_FASE_BALANS_VERSION = '5.4.96';
 
 class CloudemsFaseBalansCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
@@ -44,7 +44,7 @@ class CloudemsFaseBalansCard extends HTMLElement {
     sh.innerHTML = `
 <style>:host{display:block;width:100%}.card{background:rgb(34,34,34);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;font-family:var(--primary-font-family,sans-serif)}.hdr{display:flex;align-items:center;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.07)}.summary{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(255,255,255,.07)}.sum{padding:10px 16px;text-align:center}.sum-val{font-size:18px;font-weight:700}.sum-lbl{font-size:10px;color:rgba(163,163,163,.5);margin-top:2px}</style>
 <div class="card">
-  <div class="hdr"><span>⚡</span><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
+  <div class="hdr"><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
   <div class="summary">
     <div class="sum">
       <div class="sum-val" style="color:${imbalCol}">${imbalance.toFixed(1)} A</div>

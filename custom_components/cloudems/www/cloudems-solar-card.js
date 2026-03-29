@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Solar Card  v2.1.1
+// CloudEMS Solar Card  v5.4.96
 
-const SOL_VERSION = "5.3.56";
+const SOL_VERSION = "5.4.96";
 const SOL_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -770,5 +770,5 @@ if (!customElements.get('cloudems-solar-card-editor')) customElements.define("cl
 if (!customElements.get('cloudems-solar-card')) customElements.define("cloudems-solar-card", CloudemsSolarCard);
 window.customCards=window.customCards??[];
 if(!window.customCards.find(c=>c.type==="cloudems-solar-card"))
-  window.customCards.push({type:"cloudems-solar-card",name:"CloudEMS Solar Card v2.1",description:"Zonnepanelen · forecast · benutting · clipping · zelfconsumptie · schaduw",preview:true});
+  window.customCards.push({type:"cloudems-solar-card",name:"CloudEMS Solar Card v2.1",description:"Zonnepanelen · forecast · benutting · clipping · zelfconsumptie · schaduw"});
 console.info(`%c CLOUDEMS-SOLAR-CARD %c v${SOL_VERSION} `,"background:#f0c040;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0c1409;color:#f0c040;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

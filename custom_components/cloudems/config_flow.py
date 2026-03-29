@@ -3069,6 +3069,7 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="automatisering", label="🤖 Automatisering & NILM"),
                         selector.SelectOptionDict(value="mobiliteit",   label="🚗 Mobiliteit & Laden"),
                         selector.SelectOptionDict(value="systeem",      label="🔧 Systeem & Communicatie"),
+                        selector.SelectOptionDict(value="dashboard",    label="🏠 Dashboard & Weergave"),
                     ], mode="list"))
             }),
             description_placeholders={
@@ -3262,8 +3263,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Required("section", default="boiler_groups_opts"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value="boiler_groups_opts", label="🚿 Boiler Controller"),
-                        selector.SelectOptionDict(value="climate_opts",       label="🌡️ Klimaatbeheer"),
                         selector.SelectOptionDict(value="multisplit_count_opts", label="❄️ Airco / Multisplit"),
+                        selector.SelectOptionDict(value="climate_opts",       label="🌡️ Klimaatbeheer"),
                         selector.SelectOptionDict(value="shutter_count_opts", label="🪟 Rolluiken"),
                         selector.SelectOptionDict(value="pool_opts",          label="🏊 Zwembad Controller"),
                         selector.SelectOptionDict(value="lamp_circ_opts",      label="💡 Lampcirculatie & Beveiliging"),
@@ -3321,6 +3322,37 @@ class CloudEMSOptionsFlow(_OptionsBase):
             }),
         )
 
+    async def async_step_menu_dashboard(self, user_input=None):
+        """Dashboard & Weergave instellingen."""
+        from .const import CONF_LICENSE_KEY
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            self._opts["iso_house_type"]      = user_input.get("iso_house_type", "modern")
+            self._opts["iso_custom_image_url"] = user_input.get("iso_custom_image_url", "")
+            return self._save(self._opts)
+
+        data = self._data()
+        return self.async_show_form(
+            step_id="menu_dashboard",
+            data_schema=vol.Schema({
+                vol.Optional("iso_house_type", default=data.get("iso_house_type", "modern")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="modern",    label="Modern (glas/flat dak)"),
+                        selector.SelectOptionDict(value="villa",     label="Villa"),
+                        selector.SelectOptionDict(value="terraced",  label="Rijtjeshuis"),
+                        selector.SelectOptionDict(value="apartment", label="Appartement"),
+                        selector.SelectOptionDict(value="farmhouse", label="Boerderij"),
+                        selector.SelectOptionDict(value="custom",    label="Eigen foto (URL invullen)"),
+                    ], mode="list")),
+                vol.Optional("iso_custom_image_url", default=data.get("iso_custom_image_url", "")):
+                    selector.TextSelector(selector.TextSelectorConfig(type="url")),
+            }),
+            description_placeholders={
+                "info": "Kies een huistype voor de isometrische energiekaart. Bij 'Eigen foto' vult CloudEMS AI automatisch de elementposities in.",
+            },
+        )
+
     async def async_step_menu_systeem(self, user_input=None):
         """Submenu: Systeem & Communicatie."""
         if user_input is not None:
@@ -3336,9 +3368,43 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Required("section", default="mail_opts"): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=[
                         selector.SelectOptionDict(value="mail_opts",     label="📧 E-mail rapporten"),
+                        selector.SelectOptionDict(value="demo_opts",     label="🎮 Demo modus"),
                         selector.SelectOptionDict(value="__terug__",     label="← Terug"),
                     ], mode="list"))
             }),
+        )
+
+    async def async_step_demo_opts(self, user_input=None):
+        """Demo modus — virtuele installatie met tijdversnelling."""
+        from .const import CONF_DEMO_ENABLED, CONF_DEMO_SPEED
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Zet demo aan/uit via coordinator
+            enabled = bool(user_input.get(CONF_DEMO_ENABLED, False))
+            speed   = int(user_input.get(CONF_DEMO_SPEED, 48))
+            coord   = self.hass.data.get("cloudems", {})
+            if hasattr(coord, "set_demo_mode"):
+                await coord.set_demo_mode(enabled, speed)
+            return self._save(user_input)
+        enabled = bool(data.get(CONF_DEMO_ENABLED, False))
+        speed   = int(data.get(CONF_DEMO_SPEED, 48))
+        return self.async_show_form(
+            step_id="demo_opts",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_DEMO_ENABLED, default=enabled): bool,
+                vol.Optional(CONF_DEMO_SPEED, default=speed): vol.In({
+                    1: "1x — realtime",
+                    10: "10x — dag in 2.4 uur",
+                    48: "48x — dag in 30 min",
+                    96: "96x — dag in 15 min",
+                }),
+            }),
+            description_placeholders={
+                "info": "Demo modus simuleert een volledige energie-installatie. "
+                        "Echte sensoren en geleerde data blijven onaangetast."
+            },
         )
 
     async def async_step_sensors(self, user_input=None):

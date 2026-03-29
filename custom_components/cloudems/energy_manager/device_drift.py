@@ -60,7 +60,6 @@ DRIFT_RETENTION_NORMAL_H   = 48   # uur bewaren voor gezonde profielen
 # power_tool staat NIET meer hier — het staat in DRIFT_SKIP_TYPES (zie hieronder).
 HIGH_VARIANCE_TYPES = {
     "medical",      # CPAP (druk varieert per nacht)
-    "kitchen",      # wafelijzer, mixer (belasting varieert met gebruik)
     "gaming",       # gaming PC (idle vs full load)
 }
 HIGH_VARIANCE_ALERT_THRESHOLD = 2.00   # 100% boven referentie voor variabele apparaten
@@ -93,6 +92,9 @@ DRIFT_SKIP_TYPES = {
     "garden",      # grasmaaier, heggeschaar — seizoensgebonden, sterk variabel
     # Overig variabel
     "lighting",    # LED-dimmer — verbruik varieert met dimstand
+    # Keukenapparaten — vermogen hangt af van hoeveelheid water/voedsel, starttemperatuur
+    # Koffiezetter op koude dag vs warme dag = 30% verschil, geen defect
+    "kitchen",     # koffiezetter, waterkoker, magnetron, wafelijzer, mixer
 }
 
 # Label/entiteit-fragmenten — extra vangnet bij verkeerde device_type classificatie.
@@ -121,6 +123,7 @@ class DeviceDriftProfile:
     current_avg_w:  float   = 0.0    # Huidig voortschrijdend gemiddelde
     samples_total:  int     = 0      # Totaal aantal NILM-detecties
     baseline_frozen: bool   = False  # Baseline vastgezet na MIN_BASELINE_SAMPLES
+    baseline_max_w:  float  = 0.0    # Hoogste geziene waarde tijdens baseline — voor variatie-bewuste drempel
     # Duty-cycle bijhouden (voor cyclische apparaten zoals koelkasten)
     duty_cycle_ref: float   = 0.0    # Referentie duty-cycle
     duty_cycle_now: float   = 0.0    # Huidige duty-cycle
@@ -160,12 +163,23 @@ class DeviceDriftProfile:
         return abs(self.current_avg_w - self.baseline_w)
 
     @property
+    def _within_seen_range(self) -> bool:
+        """True als huidig gemiddelde binnen het eerder geziene bereik valt.
+        Voorkomt false positives bij apparaten met variabel vermogen:
+        koffiezetter die soms 1400W trekt was al eens 1400W → geen drift.
+        5% marge voor ruis."""
+        if self.baseline_max_w <= 0:
+            return False
+        return self.current_avg_w <= self.baseline_max_w * 1.05
+
+    @property
     def has_alert(self) -> bool:
         return (
             not self._skip_drift
             and self.baseline_frozen
             and self.drift_ratio >= self._alert_threshold
             and self._absolute_drift_w >= MIN_ABSOLUTE_DRIFT_W
+            and not self._within_seen_range   # alleen alert als BUITEN eerder gezien bereik
         )
 
     @property
@@ -175,6 +189,7 @@ class DeviceDriftProfile:
             and self.baseline_frozen
             and self.drift_ratio >= self._drift_threshold
             and self._absolute_drift_w >= MIN_ABSOLUTE_DRIFT_W
+            and not self._within_seen_range   # alleen warning als BUITEN eerder gezien bereik
         )
 
 
@@ -227,6 +242,7 @@ class DeviceDriftTracker:
                 current_avg_w   = float(d.get("current_avg_w", 0)),
                 samples_total   = int(d.get("samples_total", 0)),
                 baseline_frozen = bool(d.get("baseline_frozen", False)),
+                baseline_max_w  = float(d.get("baseline_max_w", 0)),
                 duty_cycle_ref  = float(d.get("duty_cycle_ref", 0)),
                 duty_cycle_now  = float(d.get("duty_cycle_now", 0)),
                 duty_samples    = int(d.get("duty_samples", 0)),
@@ -277,9 +293,11 @@ class DeviceDriftTracker:
             if n == 0:
                 profile.baseline_w    = power_w
                 profile.current_avg_w = power_w
+                profile.baseline_max_w = power_w
             else:
                 profile.baseline_w    = alpha_bl * power_w + (1 - alpha_bl) * profile.baseline_w
                 profile.current_avg_w = ALPHA_CURRENT * power_w + (1 - ALPHA_CURRENT) * profile.current_avg_w
+                profile.baseline_max_w = max(profile.baseline_max_w, power_w)  # alleen tijdens leren
 
             bar = '#' * (n + 1) + '.' * max(0, MIN_BASELINE_SAMPLES - n - 1)
             _LOGGER.info(
@@ -295,6 +313,7 @@ class DeviceDriftTracker:
                 )
         else:
             # Update lopend gemiddelde (sneller dan baseline)
+            # baseline_max_w NIET meer bijwerken na freeze — anders groeit de drempel mee met drift
             profile.current_avg_w = ALPHA_CURRENT * power_w + (1 - ALPHA_CURRENT) * profile.current_avg_w
 
             # Log eerste drift-moment
@@ -454,6 +473,7 @@ class DeviceDriftTracker:
                     "current_avg_w":   round(p.current_avg_w, 2),
                     "samples_total":   p.samples_total,
                     "baseline_frozen": p.baseline_frozen,
+                    "baseline_max_w":  round(p.baseline_max_w, 2),
                     "duty_cycle_ref":  round(p.duty_cycle_ref, 4),
                     "duty_cycle_now":  round(p.duty_cycle_now, 4),
                     "duty_samples":    p.duty_samples,

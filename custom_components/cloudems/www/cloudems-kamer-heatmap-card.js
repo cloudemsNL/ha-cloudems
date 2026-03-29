@@ -1,5 +1,5 @@
-// CloudEMS Kamer Temperatuur Heatmap Card v1.0.0
-const CARD_KAMER_HEATMAP_VERSION = '5.4.8';
+// CloudEMS Kamer Temperatuur Heatmap Card v5.4.96
+const CARD_KAMER_HEATMAP_VERSION = '5.4.96';
 
 class CloudemsKamerHeatmapCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode:"open" }); this._p = ""; }
@@ -99,7 +99,7 @@ class CloudemsKamerHeatmapCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>🌡️</span>
+    
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     ${outside ? `<span style="font-size:11px;color:rgba(163,163,163,.5)">Buiten ${outside.toFixed(1)}°C</span>` : ''}
   </div>

@@ -1,5 +1,5 @@
-// CloudEMS FCR/aFRR Card v1.0.0
-const CARD_FCR_VERSION = '5.4.8';
+// CloudEMS FCR/aFRR Card v5.4.96
+const CARD_FCR_VERSION = '5.4.96';
 
 class CloudemsFcrCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
@@ -50,7 +50,7 @@ class CloudemsFcrCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>📈</span>
+    
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     <span class="badge">${stateLabel}</span>
   </div>

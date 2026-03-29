@@ -53,6 +53,10 @@ views:
     - type: custom:cloudems-home-card
     - type: custom:cloudems-vacation-card
       title: 🏖 Vakantiemodus
+    - type: custom:cloudems-alerts-ticker-card
+    - type: custom:cloudems-energie-potentieel-card
+      show_bat: true
+      show_pv: true
     - type: custom:cloudems-rooms-card
     - type: custom:cloudems-version-card
 - title: Solar & PV
@@ -192,6 +196,8 @@ views:
   - type: grid
     column_span: 1
     cards:
+    - type: custom:cloudems-offgrid-card
+    - type: custom:cloudems-kosten-calculator-card
     - type: custom:cloudems-version-card
 - title: Warm Water
   path: cloudems-boiler
@@ -245,6 +251,9 @@ views:
   - type: grid
     column_span: 1
     cards:
+    - type: custom:cloudems-energie-potentieel-card
+      show_bat: true
+      show_pv: true
     - type: custom:cloudems-version-card
 - title: EV & Mobiliteit
   path: cloudems-mobiliteit
@@ -767,6 +776,7 @@ views:
   - type: grid
     column_span: 1
     cards:
+    - type: custom:cloudems-fuse-monitor-card
     - type: custom:cloudems-version-card
 - title: Configuratie
   path: cloudems-config
@@ -785,3 +795,13 @@ views:
     - type: custom:cloudems-energy-visual-card
       title: Energiestroom NILM
     - type: custom:cloudems-version-card
+
+- title: Architectuur
+  path: cloudems-architectuur
+  icon: mdi:sitemap
+  type: panel
+  cards:
+    - type: vertical-stack
+      cards:
+        - type: custom:cloudems-arch-card
+        - type: custom:cloudems-load-plan-card

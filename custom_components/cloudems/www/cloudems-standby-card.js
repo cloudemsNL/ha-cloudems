@@ -1,5 +1,5 @@
-// CloudEMS Standby Intelligence Card v1.0.0
-const CARD_STANDBY_VERSION = '5.4.8';
+// CloudEMS Standby Intelligence Card v5.4.96
+const CARD_STANDBY_VERSION = '5.4.96';
 // Bundled inefficiency report: always-on, creep, unaccounted power
 
 class CloudemsStandbyCard extends HTMLElement {
@@ -66,7 +66,7 @@ class CloudemsStandbyCard extends HTMLElement {
   .na{padding:20px;text-align:center;font-size:12px;color:rgba(163,163,163,.5)}
 </style>
 <div class="card">
-  <div class="hdr"><span>💤</span><span class="hdr-title">${c.title}</span></div>
+  <div class="hdr"><span class="hdr-title">${c.title}</span></div>
   ${!attr.score && attr.score !== 0 ? `<div class="na">Nog geen sluimerdata — loopt na eerste NILM-cyclus</div>` : `
   <div class="score-wrap">
     <div class="score-num">${score}</div>

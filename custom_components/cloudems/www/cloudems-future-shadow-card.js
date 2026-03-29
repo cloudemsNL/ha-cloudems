@@ -1,8 +1,8 @@
-// CloudEMS Future Shadow Card v1.0.0
+// CloudEMS Future Shadow Card v5.4.96
 // "Wat zou je verbruik/kosten zijn geweest zonder CloudEMS?"
 // Leest DOL uitkomsten + cost_today_eur voor vergelijking werkelijkheid vs schaduw
 
-const FSC_VERSION = '5.4.8';
+const FSC_VERSION = '5.4.96';
 const FSC_SENSOR  = 'sensor.cloudems_decision_learner';
 const FSC_STATUS  = 'sensor.cloudems_status';
 

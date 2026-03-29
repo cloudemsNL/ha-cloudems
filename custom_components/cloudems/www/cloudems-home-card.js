@@ -5,7 +5,7 @@
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
 const HCV = '1.8.8';
-const CARD_HOME_VERSION = '5.4.8';
+const CARD_HOME_VERSION = '5.4.96';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';
@@ -1388,6 +1388,147 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
     </div>`;
   }
 
+
+
+  _tabArch(){
+    // Lees actieve data van sensors
+    const status    = this._hass?.states['sensor.cloudems_status']?.attributes || {};
+    const decisions = this._hass?.states['sensor.cloudems_decisions_history']?.attributes?.decisions || [];
+    const ai        = this._hass?.states['sensor.cloudems_ai_status']?.attributes || {};
+
+    // Bouw een set van recent actieve categorieën (laatste 30 beslissingen)
+    const recentCats = new Set(decisions.slice(0,30).map(d => (d.cat||'').toLowerCase()));
+
+    // Activiteit score per module (hoe recent was de laatste beslissing?)
+    const now = Date.now() / 1000;
+    const activity = {};
+    decisions.slice(0,50).forEach(d => {
+      const cat = (d.cat||'unknown').toLowerCase();
+      if (!activity[cat] || d.ts > activity[cat]) activity[cat] = d.ts || 0;
+    });
+    const ageSec = (cat) => activity[cat] ? now - activity[cat] : 9999;
+    const glow   = (cat) => {
+      const a = ageSec(cat);
+      if (a < 60)   return '#3fb950'; // actief < 1 min: groen
+      if (a < 300)  return '#d29922'; // actief < 5 min: geel
+      if (a < 3600) return '#58a6ff'; // actief < 1u: blauw
+      return '';                       // inactief: geen glow
+    };
+    const pulse = (cat) => ageSec(cat) < 60 ? 'arch-pulse' : '';
+
+    // Helper: module blok
+    const blk = (col, title, cats, body) => {
+      const activeCol = cats.some(c => ageSec(c) < 300);
+      const g = cats.map(glow).find(x=>x) || '';
+      const border = g ? `border-color:${g}40;box-shadow:0 0 8px ${g}22` : '';
+      return `<div class="arch-blk arch-${col} ${activeCol?'arch-active':''}" style="${border}">
+        <div class="arch-title" style="${g?`color:${g}`:''}">
+          ${g ? `<span class="arch-dot ${pulse(cats[0])}" style="background:${g}"></span>` : ''}
+          ${title}
+        </div>
+        <div class="arch-body">${body}</div>
+      </div>`;
+    };
+
+    // Batterij BDE actief?
+    const bdeAction = status.bde_action || (decisions.find(d=>d.cat==='battery')?.action || '');
+    const bdeColor  = bdeAction==='charge' ? '#3fb950' : bdeAction==='discharge' ? '#f85149' : '#58a6ff';
+    const bdeReason = status.bde_reason || (decisions.find(d=>d.cat==='battery')?.reason || '—');
+
+    // AI status
+    const nTrained   = ai.n_trained || 0;
+    const nSince     = ai.n_since_train || 0;
+    const aiReady    = ai.ready ? '✅ Gereed' : `⏳ ${nTrained}/${ai.retrain_at||24} samples`;
+    const aiColor    = ai.ready ? '#3fb950' : '#d29922';
+
+    // Actieve module teller
+    const activeCount = status.active_modules || '?';
+
+    return `
+    <style>
+      .arch-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:8px 0; }
+      .arch-blk { border-radius:8px; border:1px solid rgba(255,255,255,.1); padding:10px; font-size:11px; transition:border-color .5s,box-shadow .5s; }
+      .arch-title { font-weight:700; font-size:12px; margin-bottom:6px; display:flex; align-items:center; gap:6px; color:rgba(255,255,255,.7); }
+      .arch-body { color:rgba(255,255,255,.45); font-size:10px; line-height:1.6; }
+      .arch-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+      .arch-pulse { animation:arch-glow 1.5s ease-in-out infinite; }
+      @keyframes arch-glow { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.4)} }
+      .arch-data   { background:rgba(88,166,255,.06); }
+      .arch-brain  { background:rgba(188,140,255,.06); }
+      .arch-decide { background:rgba(249,115,22,.06); }
+      .arch-act    { background:rgba(63,185,80,.06); }
+      .arch-report { background:rgba(210,153,34,.06); }
+      .arch-flow { display:flex; align-items:center; justify-content:space-between; padding:6px 0; margin:4px 0; }
+      .arch-arrow { flex:1; height:1px; background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.2),rgba(255,255,255,.05)); margin:0 4px; }
+      .arch-node { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; padding:3px 8px; border-radius:4px; white-space:nowrap; }
+      .arch-hdr { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:rgba(255,255,255,.3); margin-bottom:6px; display:flex; justify-content:space-between; }
+      .arch-bde { grid-column:1/-1; border-radius:8px; padding:10px 14px; margin-bottom:4px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); }
+      .arch-bde-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      .arch-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; }
+    </style>
+
+    <div style="padding:4px 0">
+      <div class="arch-hdr">
+        <span>🏗️ CloudEMS Architectuur</span>
+        <span>${activeCount} modules actief</span>
+      </div>
+
+      <!-- BDE beslissing banner -->
+      <div class="arch-bde">
+        <div class="arch-bde-row">
+          <span class="arch-dot arch-pulse" style="background:${bdeColor}"></span>
+          <span style="font-size:11px;font-weight:700;color:${bdeColor}">Batterij: ${bdeAction||'idle'}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.4);flex:1">${bdeReason.slice?.(0,80)||'—'}</span>
+          <span class="arch-badge" style="background:${aiColor}22;color:${aiColor}">${aiReady}</span>
+        </div>
+      </div>
+
+      <!-- Dataflow pijl -->
+      <div class="arch-flow">
+        <div class="arch-node" style="background:rgba(88,166,255,.15);color:#58a6ff">DATA</div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node" style="background:rgba(188,140,255,.15);color:#bc8cff">AI/LEREN</div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node" style="background:rgba(249,115,22,.15);color:#f97316">BESLISSEN</div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node" style="background:rgba(63,185,80,.15);color:#3fb950">AANSTUREN</div>
+        <div class="arch-arrow"></div>
+        <div class="arch-node" style="background:rgba(210,153,34,.15);color:#d29922">RAPPORTEREN</div>
+      </div>
+
+      <!-- Module grid -->
+      <div class="arch-grid">
+        ${blk('data','📡 Data', ['p1','solar','grid'],
+          'P1/DSMR · Omvormers · Weersensoren · EPEX-prijzen · Fase-stroom')}
+        ${blk('brain','🧠 AI & Leren', ['battery','boiler'],
+          `k-NN model · ${nTrained} samples · NILM patroonherkenning · ShutterLearner`)}
+        ${blk('decide','⚡ Beslissing', ['battery'],
+          `BDE 5-laags · Dispatch plan · Anti-cycling · Neg. price dump`)}
+        ${blk('act','🔧 Actie', ['battery','boiler','shutter','ev'],
+          'Batterij · Boiler · Rolluiken · EV · Klimaat · Zonnedimmer')}
+        ${blk('report','📊 Rapportage', ['nilm','diagnose'],
+          'Dagrapport · Maandfactuur · CO₂ · NILM · Diagnose')}
+        ${blk('brain','👁️ NILM', ['nilm'],
+          `Fase-detectie · Apparaatherkenning · ${decisions.filter(d=>d.cat==='nilm').length} recente events`)}
+      </div>
+
+      <!-- Recente beslissingen -->
+      <div style="margin-top:10px">
+        <div class="arch-hdr"><span>Recente beslissingen</span></div>
+        ${decisions.slice(0,6).map(d => {
+          const a = now - (d.ts||0);
+          const ago = a < 60 ? `${Math.round(a)}s` : a < 3600 ? `${Math.round(a/60)}m` : `${Math.round(a/3600)}u`;
+          const col = d.cat==='battery'?'#58a6ff':d.cat==='boiler'?'#f97316':d.cat==='solar'?'#d29922':'#bc8cff';
+          return `<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05)">
+            <span style="font-size:9px;color:${col};font-weight:700;min-width:52px">${(d.cat||'?').toUpperCase()}</span>
+            <span style="font-size:10px;font-weight:600;color:rgba(255,255,255,.7);min-width:70px">${d.action||'—'}</span>
+            <span style="font-size:10px;color:rgba(255,255,255,.35);flex:1">${(d.reason||'').slice(0,60)}</span>
+            <span style="font-size:9px;color:rgba(255,255,255,.25)">${ago} geleden</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
 
   static getConfigElement(){return document.createElement('cloudems-home-card-editor');}
   static getStubConfig(){return {title:'CloudEMS Home', max_ampere:25, phase_count:3};}

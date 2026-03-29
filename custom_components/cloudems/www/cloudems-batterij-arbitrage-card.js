@@ -1,5 +1,5 @@
-// CloudEMS Batterij Arbitrage Card v1.0.0
-const CARD_BATTERIJ_ARBITRAGE_VERSION = '5.4.8';
+// CloudEMS Batterij Arbitrage Card v5.4.96
+const CARD_BATTERIJ_ARBITRAGE_VERSION = '5.4.96';
 // Shows battery savings breakdown: eigenverbruik, arbitrage, PV zelfconsumptie
 
 class CloudemsBatterijArbitrageCard extends HTMLElement {
@@ -81,7 +81,7 @@ class CloudemsBatterijArbitrageCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>💰</span>
+    
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     <span style="font-size:10px;color:rgba(163,163,163,.4)">Saldering ${saldPct}%</span>
   </div>

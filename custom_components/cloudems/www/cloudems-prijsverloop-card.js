@@ -20,7 +20,7 @@
  *   sensor.cloudems_pool_water_temp     → state
  *   switch.cloudems_module_accu/ev/ketel/zwembad → state on/off
  */
-const CARD_PRIJS_VERSION = '5.4.8';
+const CARD_PRIJS_VERSION = '5.4.96';
 
 
 const TPL = document.createElement('template');

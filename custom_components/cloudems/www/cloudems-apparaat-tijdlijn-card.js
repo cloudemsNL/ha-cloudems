@@ -1,5 +1,5 @@
-// CloudEMS Apparaat Tijdlijn Card v1.0.0 — Today's appliance activity swimlane
-const CARD_APPARAAT_TIJDLIJN_VERSION = '5.4.8';
+// CloudEMS Apparaat Tijdlijn Card v5.4.96 — Today's appliance activity swimlane
+const CARD_APPARAAT_TIJDLIJN_VERSION = '5.4.96';
 
 class CloudemsApparaatTijdlijnCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
@@ -34,7 +34,7 @@ class CloudemsApparaatTijdlijnCard extends HTMLElement {
     sh.innerHTML = `
 <style>:host{display:block;width:100%}.card{background:rgb(34,34,34);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;font-family:var(--primary-font-family,sans-serif)}.hdr{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:1px solid rgba(255,255,255,.07)}.row{display:flex;align-items:center;gap:8px;padding:5px 16px}.name{font-size:11px;color:rgba(163,163,163,.9);min-width:90px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.track{flex:1;height:8px;background:rgba(255,255,255,.06);border-radius:4px;position:relative;overflow:visible}.power{font-size:10px;color:rgba(163,163,163,.5);min-width:40px;text-align:right}.time-axis{display:flex;justify-content:space-between;padding:2px 16px 10px 114px;font-size:9px;color:rgba(163,163,163,.3)}.now-line{position:absolute;top:-2px;bottom:-2px;width:2px;background:rgba(255,255,255,.3);border-radius:1px;z-index:2}</style>
 <div class="card">
-  <div class="hdr"><span>📅</span><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span><span style="font-size:10px;color:rgba(163,163,163,.4)">vandaag</span></div>
+  <div class="hdr"><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span><span style="font-size:10px;color:rgba(163,163,163,.4)">vandaag</span></div>
   ${sorted.length === 0 ? `<div style="padding:20px;text-align:center;font-size:12px;color:rgba(163,163,163,.5)">Geen NILM-data beschikbaar</div>` :
     sorted.map((d, i) => {
       const isOn = runningIds.has(d.name || d.label || d.id);

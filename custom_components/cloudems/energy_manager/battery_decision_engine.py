@@ -26,6 +26,8 @@ v4.0.2:
 from __future__ import annotations
 
 import logging
+import time as _time
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -55,7 +57,7 @@ PEAK_SHAVING_RESERVE_SOC = 20.0
 
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
-@dataclass
+@dataclass(slots=True)
 class BatteryDecision:
     action:        str             # "charge" | "discharge" | "idle"
     reason:        str
@@ -82,7 +84,7 @@ class BatteryDecision:
         return self.confidence >= 0.75 and self.action != "idle"
 
 
-@dataclass
+@dataclass(slots=True)
 class DecisionContext:
     soc_pct:                  Optional[float] = None
     soh_pct:                  Optional[float] = None
@@ -116,6 +118,10 @@ class DecisionContext:
     # v5.4.5: dispatch planner suggestie
     dispatch_action:          str             = ""     # "charge"/"discharge"/"idle" van planner
     dispatch_target_soc:      Optional[float] = None   # Gewenste SoC dit uur
+    # v5.4.13: cost-based optimizer suggestie
+    optimizer_action:         str             = ""     # actie van BatteryOptimizer
+    optimizer_target_soc:     Optional[float] = None   # target SoC van optimizer
+    optimizer_reason:         str             = ""     # uitleg van optimizer
 
     # v4.6.507: salderingspercentage — bepaalt werkelijke waarde van export vs. self-consumption
     # NL 2026: 0.36, NL 2027+: 0.00, DE/BE/FR: 0.00
@@ -159,7 +165,10 @@ class BatteryDecisionEngine:
             PRICE_EXPENSIVE_EUR = threshold_fn("PRICE_EXPENSIVE_EUR_KWH")
         except Exception:
             pass  # keep defaults
-        self._learner = learner
+        # _learner is de BDEFeedbackTracker — set door coordinator na initialisatie
+        # (was eerder undefined 'learner' variabele → silent crash)
+        if not hasattr(self, '_learner'):
+            self._learner = None
 
     def _biased_threshold(self, base: float, component: str, bucket: str, action: str) -> float:
         """Pas de geleerde bias toe op een drempelwaarde. Veilig: max ±30%, min 5 samples."""
@@ -202,8 +211,7 @@ class BatteryDecisionEngine:
         _needs_charge = _demand_gap > 0.5  # meer dan 500Wh tekort
 
         # Laag 0: anti-cycling — voorkom snelle wissel tussen laden en ontladen
-        import time as _t
-        _now = _t.time()
+        _now = _time.time()
         _elapsed = _now - self._last_action_ts
         _cooldown_s = self.anti_cycling_min * 60
 
@@ -237,7 +245,11 @@ class BatteryDecisionEngine:
         d = self._check_negative_price_dump(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
 
-        # Laag 3: EPEX
+        # Laag 2.5: Cost-based optimizer — 48-uurs plan weet meer dan losse EPEX-drempel
+        d = self._check_optimizer(ctx, soc, available_kwh, headroom_kwh)
+        if d: return d
+
+        # Laag 3: EPEX (fallback als optimizer geen signaal geeft)
         d = self._check_epex(ctx, soc, available_kwh, headroom_kwh)
         if d: return d
 
@@ -282,8 +294,7 @@ class BatteryDecisionEngine:
         2. Anti-cycling cooldown: na een actiewissel, wacht anti_cycling_min minuten
            voor de volgende wissel van richting (laden→ontladen of andersom).
         """
-        import time as _t
-        _now  = _t.time()
+        _now  = _time.time()
         _prev = self._last_action
         _new  = decision.action
 
@@ -338,6 +349,53 @@ class BatteryDecisionEngine:
             self._last_action_ts = _now
         self._last_action = _new
         return decision
+
+    def _check_optimizer(self, ctx, soc, available_kwh, headroom_kwh):
+        """
+        Laag 3.3: Cost-based BatteryOptimizer — sterker signaal dan dispatch planner.
+
+        De optimizer heeft 48 uur vooruit gekeken en de goedkoopste combinatie
+        van laden/ontladen berekend. Dit is een sterk signaal — hoger dan EPEX-drempel.
+        Maar veiligheidsregels (laag 1) hebben altijd prioriteit.
+        """
+        action = ctx.optimizer_action
+        target = ctx.optimizer_target_soc
+        reason = ctx.optimizer_reason or "Cost-optimizer"
+
+        if not action or action == "idle":
+            return None
+
+        soc_  = soc or 0.0
+        tg    = (ctx.tariff_group or "normal").lower()
+        price = ctx.epex_eur_now
+
+        if action in ("charge_grid", "charge_pv") and headroom_kwh > 0.2:
+            return BatteryDecision(
+                action    = "charge",
+                reason    = f"Optimizer (48u plan): {reason}",
+                priority  = 25,   # boven EPEX drempel (3), onder safety (1)
+                confidence= 0.85,
+                source    = "cost_optimizer",
+                soc_pct   = soc_,
+                target_soc_pct = target,
+                tariff_group   = tg,
+                epex_eur  = price,
+            )
+
+        if action == "discharge" and available_kwh > 0.2:
+            return BatteryDecision(
+                action    = "discharge",
+                reason    = f"Optimizer (48u plan): {reason}",
+                priority  = 25,
+                confidence= 0.85,
+                source    = "cost_optimizer",
+                soc_pct   = soc_,
+                target_soc_pct = target,
+                tariff_group   = tg,
+                epex_eur  = price,
+            )
+
+        return None
 
     def _check_dispatch_plan(self, ctx, soc, available_kwh, headroom_kwh):
         """Laag 3.4: Gebruik dispatch-plan suggestie als zachte nudge."""

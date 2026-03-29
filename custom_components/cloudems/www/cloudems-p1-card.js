@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS P1 Card  v1.1.0
+// CloudEMS P1 Card  v5.4.96
 
-const P1_VERSION = "5.3.56";
+const P1_VERSION = "5.4.96";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 function fmt(v, dec=0, unit="") {
@@ -268,5 +268,5 @@ input{background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,
 if (!customElements.get('cloudems-p1-card-editor')) customElements.define("cloudems-p1-card-editor", CloudemsP1CardEditor);
 if (!customElements.get('cloudems-p1-card')) customElements.define("cloudems-p1-card", CloudemsP1Card);
 window.customCards=window.customCards??[];
-window.customCards.push({type:"cloudems-p1-card",name:"CloudEMS P1 Card",description:"P1 netbalans — fasevermogen, spanning, onbalans",preview:true});
+window.customCards.push({type:"cloudems-p1-card",name:"CloudEMS P1 Card",description:"P1 netbalans — fasevermogen, spanning, onbalans"});
 console.info(`%c CLOUDEMS-P1-CARD %c v${P1_VERSION} `,"background:#1D9E75;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#1D9E75;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

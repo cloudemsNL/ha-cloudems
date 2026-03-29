@@ -1,5 +1,5 @@
-// CloudEMS Circadian Nudge Card v1.0.0
-const CARD_CIRCADIAN_VERSION = '5.4.8';
+// CloudEMS Circadian Nudge Card v5.4.96
+const CARD_CIRCADIAN_VERSION = '5.4.96';
 
 class CloudemsCircadianCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }

@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Energy Demand Card  v1.0.0
+// CloudEMS Energy Demand Card  v5.4.96
 
-const DEMAND_CARD_VERSION = "5.3.56";
+const DEMAND_CARD_VERSION = "5.4.96";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -261,5 +261,5 @@ class CloudemsDemandCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-demand-card-editor')) customElements.define('cloudems-demand-card-editor', CloudemsDemandCardEditor);
 if (!customElements.get('cloudems-demand-card')) customElements.define('cloudems-demand-card', CloudemsDemandCard);
 window.customCards=window.customCards??[];
-window.customCards.push({type:'cloudems-demand-card',name:'CloudEMS Energiebehoefte',description:'Verwacht verbruik vandaag per systeem en apparaat',preview:true});
+window.customCards.push({type:'cloudems-demand-card',name:'CloudEMS Energiebehoefte',description:'Verwacht verbruik vandaag per systeem en apparaat'});
 console.info('%c CLOUDEMS-DEMAND-CARD %c v'+DEMAND_CARD_VERSION+' ','background:#6366f1;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#111318;color:#a78bfa;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

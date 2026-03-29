@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Control Card  v2.0.0  — alles-in-één interactieve beheerkaart
+// CloudEMS Control Card  v5.4.96  — alles-in-één interactieve beheerkaart
 
 const CTRL_VER = "2.0.0";
 

@@ -117,6 +117,8 @@ class CloudEMSVersionSensor(CoordinatorEntity, SensorEntity):
         perf = data.get("performance", {})
         uptime_s = g.get("uptime_s") or wd.get("uptime_s") or 0
         cycles = getattr(self.coordinator, "_health_cycle_count", None)
+        _guardian = getattr(self.coordinator, "_guardian", None)
+        _err_counts = _guardian.get_error_counts() if _guardian and hasattr(_guardian, "get_error_counts") else {"errors_since_uptime": 0, "errors_today": 0}
         return {
             "cloudems_version": VERSION,
             "uptime_s":         uptime_s,
@@ -124,7 +126,73 @@ class CloudEMSVersionSensor(CoordinatorEntity, SensorEntity):
             "total_failures":   wd.get("total_failures", 0),
             "total_restarts":   wd.get("total_restarts", 0),
             "avg_ms":           perf.get("avg_ms"),
+            "errors_7d_avg":       _err_counts.get("errors_7d_avg", 0),
+            "errors_7d_total":     _err_counts.get("errors_7d_total", 0),
+            "errors_since_uptime": _err_counts.get("errors_since_uptime", 0),
+            "errors_today":        _err_counts.get("errors_today", 0),
         }
+
+class CloudEMSOptimizerSensor(CoordinatorEntity, SensorEntity):
+    """Sensor met het 48-uurs kostengeoptimaliseerde batterijplan."""
+    _attr_name = "CloudEMS Battery Optimizer"
+    _attr_icon = "mdi:battery-charging-100"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_battery_optimizer"
+        self.entity_id = "sensor.cloudems_battery_optimizer"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self):
+        result = getattr(self.coordinator, "_opt_result", None)
+        if result is None:
+            return "unavailable"
+        slot = result.get_current_slot(
+            __import__("datetime").datetime.now().hour +
+            __import__("datetime").datetime.now().minute / 60.0
+        )
+        return slot.action if slot else "idle"
+
+    @property
+    def extra_state_attributes(self):
+        result = getattr(self.coordinator, "_opt_result", None)
+        if result is None:
+            return {}
+        slot = result.get_current_slot(
+            __import__("datetime").datetime.now().hour +
+            __import__("datetime").datetime.now().minute / 60.0
+        )
+        return {
+            "savings_vs_idle_eur": result.savings_vs_idle_eur,
+            "total_cost_eur":      result.total_cost_eur,
+            "charge_slots":        result.charge_slots,
+            "discharge_slots":     result.discharge_slots,
+            "pv_used_kwh":         result.pv_used_kwh,
+            "current_action":      slot.action if slot else "idle",
+            "current_soc_target":  slot.soc_end if slot else None,
+            "current_reason":      slot.reason if slot else "",
+            # Plan slots voor dashboard kaart (eerste 48 = 24 uur)
+            "plan_slots": [
+                {
+                    "slot":       s.slot_idx,
+                    "hour":       s.hour,
+                    "action":     s.action,
+                    "epex":       round(s.epex_eur, 4),
+                    "pv":         round(s.pv_kwh, 3),
+                    "charge_kwh": round(s.charge_kwh, 3),
+                    "discharge_kwh": round(s.discharge_kwh, 3),
+                    "soc_end":    round(s.soc_end, 1),
+                    "cost":       round(s.cost_eur, 5),
+                    "reason":     s.reason,
+                }
+                for s in result.slots[:48]  # eerste 24 uur
+            ],
+        }
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -271,6 +339,7 @@ async def async_setup_entry(
         CloudEMSWatchdogSensor(coordinator, entry),
         # v5.3.86: Versie info sensor — klein, nooit 16KB limiet issue
         CloudEMSVersionSensor(coordinator, entry),
+        CloudEMSOptimizerSensor(coordinator, entry),
         # v4.0.5: Zelfconsumptie & zelfvoorzieningsgraad
         CloudEMSSelfConsumptionSensor(coordinator, entry),
         CloudEMSEVTripPlannerSensor(coordinator, entry),
@@ -326,6 +395,8 @@ async def async_setup_entry(
         CloudEMSZonneplanKalibratieSensor(coordinator, entry),
         # v4.6.438: generator brandstofkosten sensor
         CloudEMSGeneratorKostenSensor(coordinator, entry),
+        CloudEMSProStatusSensor(coordinator, entry),
+        CloudEMSIsoSettingsSensor(coordinator, entry),
     ]
 
     phases = ["L1","L2","L3"] if phase_count == 3 else ["L1"]
@@ -974,6 +1045,8 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
             "climate_w":       round(climate, 1),
             "total_managed_w": round(total_hub, 1),
             "rest_w":          rest,
+            # v5.5.7: zelflerend huisverbruik forecast
+            **({k: v for k, v in d.get("house_forecast", {}).items()} if d.get("house_forecast") else {}),
         }
 
 
@@ -1124,6 +1197,7 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
             "cascade_active": len(groups) > 0,
             "weekly_budget":  data.get("boiler_weekly_budget", {}),
             "p1_direct_active": data.get("boiler_p1_active", False),
+            "shower_status":   data.get("shower_status", {}),
             "log":            [(d["ts"], d["message"]) for d in
                                data.get("decision_log", [])
                                if d.get("category") == "boiler"][:5],
@@ -2890,7 +2964,7 @@ class CloudEMSP1Sensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity
 # Grid Import / Export sensors (power + energy totals per tariff)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
+class CloudEMSGridNetPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
     """Current net grid power in Watt. Positive = import, negative = export.
 
     BUG FIX v1.13.0: This sensor was referenced in the dashboard as
@@ -2899,6 +2973,7 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
     as 'grid_power' regardless of whether the user configured a net sensor
     or separate import/export sensors.
     """
+    _force_update_priority = 1   # altijd force_update — grid is realtime kritiek
     _attr_name = "CloudEMS Grid · Net Power"
     _attr_device_class = SensorDeviceClass.POWER
     _attr_state_class  = SensorStateClass.MEASUREMENT
@@ -2915,13 +2990,13 @@ class CloudEMSGridNetPowerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        d  = self.coordinator.data or {}
-        p1 = d.get("p1_data", {})
-        # P1 net power takes priority; fall back to coordinator-computed grid_power
+        v = getattr(self.coordinator, "_last_grid_w", None)
+        if v is not None:
+            return v
+        v = (self.coordinator.data or {}).get("grid_power")
+        return v if v is not None else 0
         v = p1.get("net_power_w")
         if v is not None:
-            # Sanity check: waarden > 50kW zijn corrupt (P1 uitval artifact)
-            # Fallback: bereken uit fase-data van de limiter
             if abs(v) > 50000:
                 limiter = getattr(self.coordinator, "_limiter", None)
                 if limiter:
@@ -3733,10 +3808,12 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
                 "estimated_kwp": round(ai.get("solar_peak_w", 0) / 1000, 2),
             },
             # k-NN lokale AI — zichtbaar in dashboard AI kaart
-            "n_trained":     ai.get("n_trained", 0),
-            "buffer_size":   ai.get("buffer_size", 0),
-            "model_version": ai.get("model_version", "none"),
-            "ready":         ai.get("ready", False),
+            "n_trained":      ai.get("n_trained", 0),
+            "n_since_train":  ai.get("n_since_train", 0),
+            "retrain_at":     ai.get("retrain_at", 24),
+            "buffer_size":    ai.get("buffer_size", 0),
+            "model_version":  ai.get("model_version", "none"),
+            "ready":          ai.get("ready", False),
             "onnx_available": ai.get("onnx_available", False),
             "contract_version": ai.get("contract_version", ""),
         }
@@ -6195,6 +6272,19 @@ class CloudEMSBalancerSensor(CoordinatorEntity, SensorEntity):
             # Fast-ramp diagnostics
             "fast_ramp_active":          d.get("fast_ramp_active", False),
             "fast_ramp_battery_est_w":   d.get("fast_ramp_battery_est_w"),
+            # Kirchhoff berekend/gemeten
+            "battery_estimated":         d.get("battery_estimated", False),
+            "battery_age_s":             d.get("battery_age_s"),
+            "solar_age_s":               d.get("solar_age_s"),
+            "grid_age_s":                d.get("grid_age_s"),
+            "battery_raw_w":             d.get("battery_raw_w"),
+            "solar_raw_w":               d.get("solar_raw_w"),
+            "grid_raw_w":                d.get("grid_raw_w"),
+            # Geconfigureerde sensor entity_ids
+            "sensor_grid":     (self.coordinator._config or {}).get("grid_sensor") or
+                               (self.coordinator._config or {}).get("import_sensor",""),
+            "sensor_solar":    (self.coordinator._config or {}).get("solar_sensor",""),
+            "sensor_battery":  ((self.coordinator._config or {}).get("battery_configs") or [{}])[0].get("power_sensor",""),
         }
 
 
@@ -8264,7 +8354,7 @@ class CloudEMSBatterijSOCSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sen
 
 
 class CloudEMSNetVermogenSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity):
-    _force_update_priority = 2
+    _force_update_priority = 1
     """sensor.cloudems_net_vermogen — netlevering/afname (W, positief = afname)."""
     _attr_device_class  = SensorDeviceClass.POWER
     _attr_state_class   = SensorStateClass.MEASUREMENT
@@ -9476,3 +9566,68 @@ class CloudEMSAISensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return (self.coordinator.data or {}).get("ai_status", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CloudEMS Pro Status Sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSProStatusSensor(CoordinatorEntity, SensorEntity):
+    """sensor.cloudems_pro_status — Pro licentiestatus."""
+    _attr_name = "CloudEMS Pro Status"
+    _attr_icon = "mdi:shield-star"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pro_status"
+        self.entity_id = "sensor.cloudems_pro_status"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        mgr = getattr(self.coordinator, "_pro_license", None)
+        if mgr is None:
+            return "free"
+        return mgr.tier
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        mgr = getattr(self.coordinator, "_pro_license", None)
+        if mgr is None:
+            return {"tier": "free", "valid": False}
+        return mgr.status
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CloudEMS ISO Dashboard Settings Sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSIsoSettingsSensor(CoordinatorEntity, SensorEntity):
+    """sensor.cloudems_iso_settings — huistype en custom afbeelding voor iso kaart."""
+    _attr_name = "CloudEMS ISO Settings"
+    _attr_icon = "mdi:home-edit"
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_iso_settings"
+        self.entity_id = "sensor.cloudems_iso_settings"
+
+    @property
+    def device_info(self): return main_device_info(self._entry)
+
+    @property
+    def native_value(self) -> str:
+        cfg = getattr(self.coordinator, "_config", {})
+        return cfg.get("iso_house_type", "modern")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        cfg = getattr(self.coordinator, "_config", {})
+        return {
+            "house_type":       cfg.get("iso_house_type", "modern"),
+            "custom_image_url": cfg.get("iso_custom_image_url", ""),
+        }

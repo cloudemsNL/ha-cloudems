@@ -1,6 +1,6 @@
-// CloudEMS Self-Healing Dashboard Card v3.0.0
+// CloudEMS Self-Healing Dashboard Card v5.4.96
 
-const SHC_VERSION = '5.4.8';
+const SHC_VERSION = '5.4.96';
 
 const SHC_STYLES = `
   :host { display:block; }

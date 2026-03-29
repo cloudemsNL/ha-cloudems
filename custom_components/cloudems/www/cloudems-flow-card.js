@@ -1,3 +1,3 @@
-// CloudEMS Flow Card — v2.0.0
+// CloudEMS Flow Card — v5.4.96
 // Dit bestand is leeg. De flow card definitie zit in cloudems-cards.js.
 // Geregistreerd als Lovelace resource: NEE — alleen cloudems-cards.js wordt geladen.

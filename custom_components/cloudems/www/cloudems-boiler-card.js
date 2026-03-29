@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Boiler Card  v1.3.0
+// CloudEMS Boiler Card  v5.4.96
 
-const BOILER_CARD_VERSION = "5.3.56";
+const BOILER_CARD_VERSION = "5.4.96";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -686,6 +686,93 @@ class CloudemsBoilerCard extends HTMLElement {
     </div>`;
   }
 
+  _renderDoucheTab(b, showerStatus){
+    const eid = b.entity_id||'';
+    const ss  = showerStatus?.[eid]||{};
+    const active  = ss.active||{};
+    const last    = ss.last||null;
+    const stats   = ss.stats||{};
+    const hist    = ss.history||[];
+    const lff     = ss.last_fun_fact||null;
+    const fmtMin  = m=>m!=null?m.toFixed(1)+' min':'—';
+    const fmtL    = l=>l!=null?l.toFixed(0)+' L':'—';
+    const fmtEur  = e=>e!=null?'€'+e.toFixed(2):'—';
+    const fmtCO2  = c=>c!=null?c.toFixed(0)+' g':'—';
+    const fmtFlow = f=>f!=null?f.toFixed(1)+' L/min':'—';
+
+    // Actieve sessie banner
+    const activeBanner = active.running ? `
+      <div style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px;animation:pulse 1s infinite alternate">🚿</span>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#60a5fa">Douche bezig</div>
+          <div style="font-size:11px;color:#94a3b8">${fmtMin(active.duration_min)} · ${fmtL(active.liters_so_far)} · ${fmtFlow(active.flow_l_min)}</div>
+        </div>
+      </div>` : '';
+
+    // Laatste sessie
+    const lastHtml = last ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#64748b;margin-bottom:8px">Laatste douche</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          ${[
+            ['⏱ Duur',       fmtMin(last.duration_min)],
+            ['💧 Liters',     fmtL(last.liters)],
+            ['⚡ kWh',        last.energy_kwh?.toFixed(3)||'—'],
+            ['💶 Kosten',     fmtEur(last.cost_eur)],
+            ['🌱 CO₂',        fmtCO2(last.co2_gram)],
+            ['🚿 Flow',       fmtFlow(last.flow_l_min)],
+          ].map(([lbl,val])=>`
+            <div style="background:rgba(255,255,255,0.04);border-radius:7px;padding:8px 10px;border:1px solid rgba(255,255,255,0.06)">
+              <div style="font-size:10px;color:#64748b;margin-bottom:3px">${lbl}</div>
+              <div style="font-size:13px;font-weight:700;color:#e2e8f0;font-family:monospace">${val}</div>
+            </div>`).join('')}
+        </div>
+        ${lff ? `<div style="margin-top:8px;background:rgba(255,255,255,0.03);border-radius:8px;padding:10px 12px;border:1px solid rgba(255,255,255,0.06)">
+          <div style="font-size:13px">${lff.rating}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:3px">${lff.message}</div>
+        </div>` : ''}
+      </div>` : '<div style="font-size:12px;color:#475569;margin-bottom:12px">Nog geen douche-sessies geregistreerd.</div>';
+
+    // Statistieken
+    const statsHtml = stats.sessions_total > 0 ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#64748b;margin-bottom:8px">Gemiddelden (${stats.sessions_total} sessies)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+          ${[
+            ['⏱ Gem. duur', fmtMin(stats.avg_min)],
+            ['💧 Gem. liters', fmtL(stats.avg_liters)],
+            ['💶 Gem. kosten', fmtEur(stats.avg_cost_eur)],
+          ].map(([lbl,val])=>`
+            <div style="background:rgba(255,255,255,0.04);border-radius:7px;padding:8px 10px;border:1px solid rgba(255,255,255,0.06);text-align:center">
+              <div style="font-size:10px;color:#64748b;margin-bottom:3px">${lbl}</div>
+              <div style="font-size:12px;font-weight:700;color:#e2e8f0;font-family:monospace">${val}</div>
+            </div>`).join('')}
+        </div>
+        ${stats.total_liters>0?`<div style="margin-top:8px;font-size:11px;color:#475569;text-align:center">Totaal ${stats.total_liters.toFixed(0)}L · ${stats.olympic_pool_pct?.toFixed(4)||0}% van een olympisch zwembad</div>`:''}
+      </div>` : '';
+
+    // Geschiedenis grafiek (bars)
+    const histHtml = hist.length>1 ? `
+      <div>
+        <div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:#64748b;margin-bottom:8px">Geschiedenis</div>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:48px">
+          ${hist.slice(-20).map(s=>{
+            const maxM=Math.max(...hist.map(x=>x.duration_min));
+            const pct=maxM>0?s.duration_min/maxM:0;
+            const col=s.duration_min>15?'#f87171':s.duration_min>10?'#fb923c':'#4ade80';
+            return `<div title="${s.duration_min.toFixed(1)} min · ${s.liters?.toFixed(0)||'?'}L · €${s.cost_eur?.toFixed(2)||'?'}" style="flex:1;height:${Math.max(4,pct*100)}%;background:${col};border-radius:2px 2px 0 0;min-width:4px;cursor:default"></div>`;
+          }).join('')}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#475569;margin-top:2px"><span>oudst</span><span>nieuwst</span></div>
+      </div>` : '';
+
+    return `<style>@keyframes pulse{from{opacity:.6}to{opacity:1}}</style>
+      <div style="padding:2px 0">
+        ${activeBanner}${lastHtml}${statsHtml}${histHtml}
+      </div>`;
+  }
+
   _renderThermischTab(b, groups){
     // Thermisch verlies, seizoen, gebruikspatroon per uur
     const grp = groups?.find(g=>g.boilers?.some(gb=>gb.entity_id===b.entity_id));
@@ -751,6 +838,7 @@ class CloudemsBoilerCard extends HTMLElement {
     if(!st||st.state==='unavailable'){sh.innerHTML=`<style>${S}</style><div class="card"><div class="empty"><span class="empty-icon">🚿</span>Boiler sensor niet beschikbaar.</div></div>`;return;}
     const allB=st.attributes?.boilers??[];
     const groups=st.attributes?.groups??[];
+    const showerStatus=st.attributes?.shower_status??{};
     if(!allB.length){sh.innerHTML=`<style>${S}</style><div class="card"><div class="empty"><span class="empty-icon">🚿</span>Geen boilers geconfigureerd.</div></div>`;return;}
     const idx=Math.min(this._boilerTab,allB.length-1);
     const b=allB[idx];
@@ -784,8 +872,8 @@ class CloudemsBoilerCard extends HTMLElement {
     else if(isOn){badgeCls='badge-on';badgeLbl='🟢 AAN';}
 
     const boilerTabsHtml=allB.length>1?`<div class="boiler-tabs">${allB.map((bx,i)=>`<button class="boiler-tab ${i===idx?'active':''}" data-btab="${i}">${esc(bx.label||`Boiler ${i+1}`)}</button>`).join('')}</div>`:'';
-    const ctabs=['live','leren','gezondheid','thermisch','log'];
-    const ctabLabels={'live':'⚡ Live','leren':'📚 Leren','gezondheid':'🏥 Gezondheid','thermisch':'🌡️ Thermisch','log':'📋 Log'};
+    const ctabs=['live','leren','gezondheid','thermisch','douche','log'];
+    const ctabLabels={'live':'⚡ Live','leren':'📚 Leren','gezondheid':'🏥 Gezondheid','thermisch':'🌡️ Thermisch','douche':'🚿 Douche','log':'📋 Log'};
     const ct=this._contentTab;
 
     let contentHtml='';
@@ -793,6 +881,7 @@ class CloudemsBoilerCard extends HTMLElement {
     else if(ct==='leren')    contentHtml=this._renderLerenTab(b,groups);
     else if(ct==='gezondheid') contentHtml=this._renderGezondheidTab(b,groups);
     else if(ct==='thermisch') contentHtml=this._renderThermischTab(b,groups);
+    else if(ct==='douche')    contentHtml=this._renderDoucheTab(b,showerStatus);
     else contentHtml=`<div class="log-section">${buildDecisionsHtml(st.attributes?.log??[],b.label,b.entity_id)}</div>`;
 
     sh.innerHTML=`<style>${S}</style><div class="card"><div class="inner">
@@ -935,5 +1024,5 @@ class CloudemsBoilerCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-boiler-card-editor')) customElements.define('cloudems-boiler-card-editor',CloudemsBoilerCardEditor);
 if (!customElements.get('cloudems-boiler-card')) customElements.define('cloudems-boiler-card',CloudemsBoilerCard);
 window.customCards=window.customCards??[];
-window.customCards.push({type:'cloudems-boiler-card',name:'CloudEMS Boiler Card',description:'Warm water — live, leren, gezondheid, log',preview:true});
+window.customCards.push({type:'cloudems-boiler-card',name:'CloudEMS Boiler Card',description:'Warm water — live, leren, gezondheid, log'});
 console.info('%c CLOUDEMS-BOILER-CARD %c v'+BOILER_CARD_VERSION+' ','background:#ff8040;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#111318;color:#ff8040;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

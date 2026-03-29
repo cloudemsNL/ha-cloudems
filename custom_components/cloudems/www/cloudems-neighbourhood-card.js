@@ -1,5 +1,5 @@
-// CloudEMS neighbourhood Card v1.0.0
-const CARD_NEIGHBOURHOOD_VERSION = '5.4.8';
+// CloudEMS neighbourhood Card v5.4.96
+const CARD_NEIGHBOURHOOD_VERSION = '5.4.96';
 class CloudemsCardneighbourhood extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:"open"}); this._p=""; }
   setConfig(c){ this._cfg={title:"CloudEMS neighbourhood",  ...c}; this._r(); }

@@ -1,5 +1,5 @@
-// CloudEMS VvE Energy Split Card v1.0.0
-const CARD_VVE_VERSION = '5.4.8';
+// CloudEMS VvE Energy Split Card v5.4.96
+const CARD_VVE_VERSION = '5.4.96';
 
 class CloudemsVveCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
@@ -42,7 +42,7 @@ class CloudemsVveCard extends HTMLElement {
   .na{padding:20px;text-align:center;font-size:12px;color:rgba(163,163,163,.5)}
 </style>
 <div class="card">
-  <div class="hdr"><span>🏢</span>
+  <div class="hdr">
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     <span style="font-size:10px;color:rgba(163,163,163,.5)">${method}</span>
   </div>

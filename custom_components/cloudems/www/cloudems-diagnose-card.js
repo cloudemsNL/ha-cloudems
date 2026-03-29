@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Diagnose Card  v1.1.0
+// CloudEMS Diagnose Card  v5.4.96
 
-const DIAGNOSE_VERSION = "5.3.56";
+const DIAGNOSE_VERSION = "5.4.96";
 const _esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const _fmt = (v, dec=1) => v != null && !isNaN(v) ? parseFloat(v).toFixed(dec) : "—";
 const _st  = (hass, eid) => hass?.states?.[eid];
@@ -708,5 +708,5 @@ class CloudemsDiagnoseCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-diagnose-card-editor')) customElements.define("cloudems-diagnose-card-editor", CloudemsDiagnoseCardEditor);
 if (!customElements.get('cloudems-diagnose-card')) customElements.define("cloudems-diagnose-card", CloudemsDiagnoseCard);
 window.customCards = window.customCards ?? [];
-window.customCards.push({type:"cloudems-diagnose-card", name:"CloudEMS Diagnose Card", description:"Systeemgezondheid, watchdog, sensoren, NILM en prestaties", preview:true});
+window.customCards.push({type:"cloudems-diagnose-card", name:"CloudEMS Diagnose Card", description:"Systeemgezondheid, watchdog, sensoren, NILM en prestaties"});
 console.info(`%c CLOUDEMS-DIAGNOSE-CARD %c v${DIAGNOSE_VERSION} `,"background:#1D9E75;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#1D9E75;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

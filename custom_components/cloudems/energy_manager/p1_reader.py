@@ -881,12 +881,21 @@ class HAEntityFallbackReader:
 
         hass = self._hass
 
+        # Last-known-good cache: bewaar laatste geldige waarde per sensor key
+        # Zo geven we niet 0 terug als een sensor tijdelijk unavailable is
+        if not hasattr(self, "_lkg"):
+            self._lkg: dict = {}
+
         def _r(key: str, scale: float = 1.0) -> float:
             eid = self._resolved.get(key)
             if not eid:
                 return 0.0
             state = hass.states.get(eid)
             if not state or state.state in ("unavailable", "unknown", ""):
+                # Sensor tijdelijk niet beschikbaar → gebruik laatste bekende waarde
+                cached = self._lkg.get(key)
+                if cached is not None:
+                    return cached
                 return 0.0
             try:
                 val = float(state.state)
@@ -897,9 +906,13 @@ class HAEntityFallbackReader:
                     pass            # al in W, geen conversie nodig
                 else:
                     val *= scale    # geen unit bekend, gebruik scale als hint
+                # Sla geldige waarde op in cache (alleen reële waarden)
+                if abs(val) > 0 or key not in self._lkg:
+                    self._lkg[key] = val
                 return val
             except (ValueError, TypeError):
-                return 0.0
+                cached = self._lkg.get(key)
+                return cached if cached is not None else 0.0
 
         t.power_import_w   = _r("power_import_w", 1000.0)
         t.power_export_w   = _r("power_export_w", 1000.0)

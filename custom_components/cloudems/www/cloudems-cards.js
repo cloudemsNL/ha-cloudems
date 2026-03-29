@@ -487,20 +487,17 @@ window.CloudEMSTooltip = {
       const st  = hass.states;
       const ph  = st['sensor.cloudems_status']?.attributes?.phases || {};
       const e   = this._config.entities || {};
-      const sig = JSON.stringify([
-        st['sensor.cloudems_grid_net_power']?.state,
-        st['sensor.cloudems_solar_system']?.state,
-        st['sensor.cloudems_home_rest']?.state,
-        st['sensor.cloudems_status']?.state,
-        ph['L1']?.power_w, ph['L2']?.power_w, ph['L3']?.power_w,
-        ph['L1']?.current_a, ph['L2']?.current_a, ph['L3']?.current_a,
-        e.battery?.entity ? st[e.battery.entity]?.state : null,
-        e.grid?.entity    ? st[e.grid.entity]?.state    : null,
-        // Per-fase richting in sig zodat flip grid→hub / hub→grid direct een full render triggert
-        ph['L1']?.power_w > 0 ? 1 : -1,
-        ph['L2']?.power_w > 0 ? 1 : -1,
-        ph['L3']?.power_w > 0 ? 1 : -1,
-      ]);
+      // Snelle change-detection: string concat ipv JSON.stringify (3-5x sneller)
+      const _p = v => v == null ? '~' : v;
+      const sig = _p(st['sensor.cloudems_grid_net_power']?.state) + '|' +
+        _p(st['sensor.cloudems_solar_system']?.state) + '|' +
+        _p(st['sensor.cloudems_home_rest']?.state) + '|' +
+        _p(st['sensor.cloudems_status']?.state) + '|' +
+        _p(ph['L1']?.power_w) + '|' + _p(ph['L2']?.power_w) + '|' + _p(ph['L3']?.power_w) + '|' +
+        _p(ph['L1']?.current_a) + '|' + _p(ph['L2']?.current_a) + '|' + _p(ph['L3']?.current_a) + '|' +
+        (e.battery?.entity ? _p(st[e.battery.entity]?.state) : '~') + '|' +
+        (e.grid?.entity    ? _p(st[e.grid.entity]?.state)    : '~') + '|' +
+        (ph['L1']?.power_w > 0 ? 1 : -1) + (ph['L2']?.power_w > 0 ? 1 : -1) + (ph['L3']?.power_w > 0 ? 1 : -1);
       if (sig !== this._hassSig) {
         this._hassSig = sig;
         this._valuesChanged = true;
@@ -978,7 +975,7 @@ window.CloudEMSTooltip = {
         if (!this.isConnected || document.hidden) { this._animId = null; return; }
         this._tick++;
         try {
-          if (this._needsFullRender || (this._valuesChanged && this._tick % 30 === 0 && !this._activeNid)) {
+          if (this._needsFullRender || (this._valuesChanged && this._tick % 6 === 0 && !this._activeNid)) {
             this._needsFullRender = false;
             this._valuesChanged   = false;
             this._renderFull();
@@ -1626,10 +1623,25 @@ window.CloudEMSTooltip = {
         return node.isSub ? 'MF' : '?';
       };
 
-      // 5 vaste ankers: ?,L1,L2,L3,Σ — vaste X posities
-      const _ANC = { '?':55, 'L1':152, 'L2':250, 'L3':348, 'MF':445 };
+      // 5 ankers: Σ links, dan L1/L2/L3 gesorteerd op vermogen (hoogste links), ? rechts
+      // Zodat de fase met het meeste vermogen het dichtst bij zijn apparaten staat
       const _ANC_COL = { '?':C.sub, 'L1':C.L1, 'L2':C.L2, 'L3':C.L3, 'MF':'#fbbf24' };
       const _ANC_LBL = { '?':'?', 'L1':'L1', 'L2':'L2', 'L3':'L3', 'MF':'Σ' };
+
+      // Bereken totaal vermogen per fase op basis van actieve top-devices
+      const _phPwr = { L1:0, L2:0, L3:0 };
+      _topDevs.forEach(d => {
+        const pk = _phKey(d);
+        if (pk === 'L1' || pk === 'L2' || pk === 'L3')
+          _phPwr[pk] += (d.power_w || 0);
+      });
+      // Sorteer L1/L2/L3 aflopend op vermogen (hoogste vermogen = meest links = slot 1)
+      const _phSorted = ['L1','L2','L3'].sort((a,b) => _phPwr[b] - _phPwr[a]);
+      // Volgorde: Σ (links), dan L-fasen gesorteerd, dan ? (rechts)
+      const _ancOrder = ['MF', ..._phSorted, '?'];
+      const _ancXList = [45, 152, 250, 348, 455];
+      const _ANC = {};
+      _ancOrder.forEach((k, i) => { _ANC[k] = _ancXList[i]; });
 
       // 6 vaste device slots — gelijkmatig
       const _SLOTS = [45, 127, 209, 291, 373, 455];
@@ -1895,6 +1907,13 @@ window.CloudEMSTooltip = {
       const _fa = (eid, attr, def) => H_HASS?.states[eid]?.attributes?.[attr] ?? def;
       const _fv = (eid, def=0) => { const s=H_HASS?.states[eid]; if(!s||s.state==='unavailable'||s.state==='unknown') return def; return parseFloat(s.state)||def; };
 
+      // Balancer diagnostics voor tooltips
+      const _bal = H_HASS?.states['sensor.cloudems_energy_balancer']?.attributes || {};
+      const _fmtAge = s => s == null ? '—' : s < 2 ? '<2s' : Math.round(s)+'s';
+      const _fmtEid = e => e ? e.replace('sensor.','') : '—';
+      const _staleBadge = stale => stale ? ' ⚠ stale' : '';
+      const _kirchBadge = est => est ? ' 〜 berekend' : ' ✓ gemeten';
+
       this._nodeData = {
         grid: {
           title: 'Net · import/export', color: gc,
@@ -1904,8 +1923,12 @@ window.CloudEMSTooltip = {
             {l:'Export vandaag', v:this._fmt(_fv('sensor.cloudems_export_energy_today')*1000)},
             {l:'EPEX prijs', v:_fa('sensor.cloudems_price_current_hour',null,null) !== null ? (parseFloat(H_HASS?.states['sensor.cloudems_price_current_hour']?.state||0)*100).toFixed(1)+' ct' : '—'},
             {l:'Tarief', v:_fa('sensor.cloudems_batterij_epex_schema','zonneplan',{})?.tariff_group || '—'},
+            {l:'Interval', v:_fmtAge(_bal.grid_interval_s), sub:'update-frequentie'},
+            {l:'Leeftijd', v:_fmtAge(_bal.grid_age_s)+_staleBadge(_bal.grid_stale)},
+            {l:'Sensor', v:_fmtEid(_bal.sensor_grid)},
           ],
-          note: grid > T ? `Importeert ${this._fmt(grid)} van het net.` : `Exporteert ${this._fmt(Math.abs(grid))} naar het net.`,
+          note: (grid > T ? `Importeert ${this._fmt(grid)} van het net.` : `Exporteert ${this._fmt(Math.abs(grid))} naar het net.`) +
+                (_bal.grid_stale ? ' ⚠ Stale!' : ''),
         },
         solar: {
           title: 'Zonnepanelen', color: C.solar,
@@ -1916,17 +1939,30 @@ window.CloudEMSTooltip = {
             {l:'Piek 7d',       v: this._fmt(Math.max(...solarNodes.map(n=>n.peak_w||0)))},
             {l:'Zekerheid',     v: (() => { const s=H_HASS?.states['sensor.cloudems_pv_forecast_accuracy']; return s&&s.state!=='unavailable'?Math.round(parseFloat(s.state))+'%':'—'; })()},
             ...solarNodes.map(n => ({l: n.label, v: this._fmt(n.w), sub: n.peak_w?'piek: '+this._fmt(n.peak_w):''})),
+            {l:'Interval', v:_fmtAge(_bal.solar_interval_s), sub:'update-frequentie'},
+            {l:'Leeftijd', v:_fmtAge(_bal.solar_age_s)+_staleBadge(_bal.solar_stale)},
+            {l:'Sensor', v:_fmtEid(_bal.sensor_solar)},
           ],
-          note: `${solarNodes.length} omvormer${solarNodes.length>1?'s':''} · totaal ${this._fmt(totalSolar)}`,
+          note: `${solarNodes.length} omvormer${solarNodes.length>1?'s':''} · totaal ${this._fmt(totalSolar)}` +
+                (_bal.solar_stale ? ' ⚠ Stale!' : ''),
         },
         bat: {
           title: 'Batterijen', color: bfc,
-          metrics: battNodes.map(b => ({
-            l: b.label||'Batterij',
-            v: `${this._fmt(Math.abs(b.power_w))} · ${b.soc_pct!=null?b.soc_pct.toFixed(0)+'%':'—'}`,
-            sub: b.power_w<-T?'laden':b.power_w>T?'ontladen':'idle',
-          })),
-          note: `${battNodes.length} batter${battNodes.length>1?'ijen':'ij'} · totaal ${this._fmt(Math.abs(totalBattPw))}`,
+          metrics: [
+            ...battNodes.map(b => ({
+              l: b.label||'Batterij',
+              v: `${this._fmt(Math.abs(b.power_w))} · ${b.soc_pct!=null?b.soc_pct.toFixed(0)+'%':'—'}`,
+              sub: b.power_w<-T?'laden':b.power_w>T?'ontladen':'idle',
+            })),
+            {l:'Bron', v: _bal.battery_estimated ? '〜 Kirchhoff' : '✓ Sensor', sub: _bal.battery_estimated?'berekend':'gemeten'},
+            {l:'Ruw gemeten', v: _bal.battery_raw_w != null ? this._fmt(Math.abs(_bal.battery_raw_w)) : '—',
+             sub: (_bal.battery_raw_w||0) < -50 ? 'laden' : (_bal.battery_raw_w||0) > 50 ? 'ontladen' : 'idle'},
+            {l:'Interval', v:_fmtAge(_bal.battery_interval_s), sub:'update-frequentie'},
+            {l:'Leeftijd', v:_fmtAge(_bal.battery_age_s)+_staleBadge(_bal.battery_stale)},
+            {l:'Sensor', v:_fmtEid(_bal.sensor_battery)},
+          ],
+          note: `${battNodes.length} batter${battNodes.length>1?'ijen':'ij'} · totaal ${this._fmt(Math.abs(totalBattPw))}` +
+                _kirchBadge(_bal.battery_estimated),
         },
         boiler: {
           title: 'Warm water', color: C.boiler,
@@ -1939,17 +1975,28 @@ window.CloudEMSTooltip = {
         },
         ev: {
           title: 'EV & Mobiliteit', color: C.ev,
-          metrics: [{l:'Vermogen',v:this._fmt(ev)},{l:'Sessie',v:ev>T?'actief':'geen'},{l:'Geladen vandaag',v:this._fmt(_fv('sensor.cloudems_ev_charged_today')*1000)}],
+          metrics: [
+            {l:'Vermogen',v:this._fmt(ev)},
+            {l:'Sessie',v:ev>T?'actief':'geen'},
+            {l:'Geladen vandaag',v:this._fmt(_fv('sensor.cloudems_ev_charged_today')*1000)},
+            {l:'Sensor',v:_fmtEid((this._config.entities||{}).ev?.entity||'sensor.cloudems_ev_laad_power')},
+          ],
           note: ev > T ? `Laadt met ${this._fmt(ev)}.` : 'Geen actieve laadsessie.',
         },
         ebike: {
           title: 'E-bike & Scooter', color: C.ebike,
-          metrics: [{l:'Vermogen',v:this._fmt(ebike)},{l:'Status',v:ebike>T?'laden':'idle'}],
+          metrics: [
+            {l:'Vermogen',v:this._fmt(ebike)},
+            {l:'Status',v:ebike>T?'laden':'idle'},
+          ],
           note: ebike > T ? `Laadt met ${this._fmt(ebike)}.` : 'Niet actief.',
         },
         pool: {
           title: 'Zwembad', color: C.pool,
-          metrics: [{l:'Vermogen',v:this._fmt(pool)},{l:'Status',v:pool>T?'actief':'uit'}],
+          metrics: [
+            {l:'Vermogen',v:this._fmt(pool)},
+            {l:'Status',v:pool>T?'actief':'uit'},
+          ],
           note: pool > T ? `Verwarming actief: ${this._fmt(pool)}.` : 'Verwarming uit.',
         },
         home: {
@@ -1959,8 +2006,9 @@ window.CloudEMSTooltip = {
             {l:'Vandaag',v:(_fv('sensor.cloudems_energy_cost',null)!==null?_fv('sensor.cloudems_energie_vandaag_kwh')||'—':'-')+' kWh'},
             {l:'Zelfconsumptie',v:(_fv('sensor.cloudems_self_consumption')||0).toFixed(1)+'%'},
             {l:'Aanwezig',v:H_HASS?.states['binary_sensor.cloudems_aanwezigheid_op_basis_van_stroom']?.state==='on'?'Ja':'Nee'},
+            {l:'Trend', v:_bal.house_trend_w!=null?this._fmt(_bal.house_trend_w):'—', sub:'EMA'},
           ],
-          note: 'Huisverbruik inclusief alle NILM-herkende apparaten.',
+          note: 'Huisverbruik · berekend via Kirchhoff (solar + grid − battery).',
           nilm: true,
         },
       };
@@ -2433,6 +2481,12 @@ window.CloudEMSTooltip = {
             ? `<button class="na-btn" id="nb-include-${nid}" style="color:#86efac;border-color:rgba(134,239,172,.3)">✓ Opnemen in balans</button>`
             : `<button class="na-btn" id="nb-exclude-${nid}" style="color:#f87171;border-color:rgba(239,68,68,.25)">⊗ Uitsluiten van balans</button>`}
         </div>
+        <div style="margin-top:6px;font-size:10px;color:rgba(255,255,255,.35);margin-bottom:3px">Fase instellen</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <button class="na-btn" id="nb-phase-l1-${nid}" style="color:#06b6d4;border-color:rgba(6,182,212,.3);flex:1">L1</button>
+          <button class="na-btn" id="nb-phase-l2-${nid}" style="color:#f59e0b;border-color:rgba(245,158,11,.3);flex:1">L2</button>
+          <button class="na-btn" id="nb-phase-l3-${nid}" style="color:#34d399;border-color:rgba(52,211,153,.3);flex:1">L3</button>
+        </div>
         <div class="na-feedback" id="nf-${nid}" style="display:none"></div>
       </div>`;
 
@@ -2467,6 +2521,16 @@ window.CloudEMSTooltip = {
       det.querySelector(`#nb-include-${nid}`)?.addEventListener('click', () => {
         callSvc('set_balance_exclude', {device_name: name, exclude: false, reason: ''});
         feedback('✓ Opgenomen in balans — telt weer mee', '#86efac');
+      });
+
+      // Fase-knoppen — persistent via set_feedback met corrected_phase
+      ['L1','L2','L3'].forEach(ph => {
+        det.querySelector(`#nb-phase-${ph.toLowerCase()}-${nid}`)?.addEventListener('click', () => {
+          if(!this._hass) return;
+          this._hass.callService('cloudems', 'set_nilm_phase', {device_name: name, phase: ph});
+          const col = ph==='L1'?'#06b6d4':ph==='L2'?'#f59e0b':'#34d399';
+          feedback(`Fase ingesteld op ${ph} — wordt bewaard na herstart`, col);
+        });
       });
     }
 
@@ -5068,3 +5132,5 @@ window.CloudEMSTooltip = {
   );
 
 })();
+
+// v5.5.4: nieuwe kaarten dynamisch geladen via eigen bestanden

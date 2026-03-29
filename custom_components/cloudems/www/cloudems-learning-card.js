@@ -2,7 +2,7 @@
  * CloudEMS Learning Card  v1.0.0
  * Zelflerend — leervoortgang, anomalie, standby hunters, weerkalibratie, EV leermodel
  */
-const LEARNING_VERSION = '5.4.8';
+const LEARNING_VERSION = '5.4.96';
 
 const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -250,5 +250,5 @@ class CloudEMSLearningCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-learning-card')) customElements.define('cloudems-learning-card',CloudEMSLearningCard);
 if (!customElements.get('cloudems-learning-card-editor')) customElements.define('cloudems-learning-card-editor',CloudEMSLearningCardEditor);
 window.customCards=window.customCards||[];
-window.customCards.push({type:'cloudems-learning-card',name:'CloudEMS Learning Card',description:'Zelflerend — baseline, anomalie, standby hunters, weerkalibratie, EV',preview:true});
+window.customCards.push({type:'cloudems-learning-card',name:'CloudEMS Learning Card',description:'Zelflerend — baseline, anomalie, standby hunters, weerkalibratie, EV'});
 console.info('%c CLOUDEMS-LEARNING-CARD %c v'+LEARNING_VERSION+' ','background:#67e8f9;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#67e8f9;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

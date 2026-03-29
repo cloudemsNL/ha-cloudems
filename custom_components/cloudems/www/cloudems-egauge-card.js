@@ -1,5 +1,5 @@
-// CloudEMS eGauge Card v1.0.0
-const CARD_EGAUGE_VERSION = '5.4.8';
+// CloudEMS eGauge Card v5.4.96
+const CARD_EGAUGE_VERSION = '5.4.96';
 // eGauge smart meter — grid and phase data
 
 class CloudemsEgaugeCard extends HTMLElement {
@@ -42,7 +42,7 @@ class CloudemsEgaugeCard extends HTMLElement {
   .na { padding: 16px; text-align: center; font-size: 12px; color: rgba(163,163,163,.5); }
 </style>
 <div class="card">
-  <div class="hdr"><span>📊</span><span class="hdr-title">${c.title}</span></div>
+  <div class="hdr"><span class="hdr-title">${c.title}</span></div>
   ${!available ? `<div class="na">eGauge niet gevonden</div>` : `
   <div class="net" style="color:${col(net)}">${fmt(net)}</div>
   <div class="row"><span class="lbl">L1</span><span class="val" style="color:${col(l1)}">${fmt(l1)}</span></div>

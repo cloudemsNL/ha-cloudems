@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Shutter Card  v3.0.0
+// CloudEMS Shutter Card  v5.4.96
 
-const SHUTTER_VERSION = "5.3.56";
+const SHUTTER_VERSION = "5.4.96";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const CSS = `
@@ -438,5 +438,5 @@ input[type=checkbox]{width:16px;height:16px;accent-color:#1D9E75;cursor:pointer;
 if (!customElements.get('cloudems-shutter-card-editor')) customElements.define("cloudems-shutter-card-editor", CloudemsShutterCardEditor);
 if (!customElements.get('cloudems-shutter-card')) customElements.define("cloudems-shutter-card", CloudemsShutterCard);
 window.customCards=window.customCards??[];
-window.customCards.push({type:"cloudems-shutter-card",name:"CloudEMS Shutter Card",description:"Rolluiken overzicht, detail & leervoortgang",preview:true});
+window.customCards.push({type:"cloudems-shutter-card",name:"CloudEMS Shutter Card",description:"Rolluiken overzicht, detail & leervoortgang"});
 console.info(`%c CLOUDEMS-SHUTTER-CARD %c v${SHUTTER_VERSION} `,"background:#1D9E75;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#1D9E75;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

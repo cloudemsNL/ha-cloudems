@@ -47,7 +47,8 @@ STALE_FACTOR        = 2.5
 MIN_STALE_AGE_S     = 15.0
 MAX_STALE_AGE_S     = 600.0
 
-TREND_ALPHA         = 0.05   # 60s EMA voor langzame trend
+TREND_ALPHA         = 0.05   # fallback EMA (wordt overschreven door sensor-snelheid)
+REF_INTERVAL_S      = 5.0    # referentie-interval: sneller = alpha→1.0, trager = lage alpha
 
 LAG_WINDOW_MAX_S    = 300.0  # maximale te leren vertraging (5 min)
 LAG_RINGBUF_S       = 360.0  # hoe lang tijdreeksen bewaren
@@ -254,6 +255,16 @@ class _SensorTracker:
             return True
         return age > self.interval_ema * STALE_FACTOR
 
+    @property
+    def alpha(self) -> float:
+        """EMA alpha op basis van geleerd update-interval.
+
+        Snelle sensor (1s) → alpha=1.0 → ruwe waarde, geen smoothing.
+        Langzame sensor (45s) → alpha=0.11 → stevige smoothing.
+        Formule: min(1.0, REF_INTERVAL_S / interval_ema)
+        """
+        return min(1.0, REF_INTERVAL_S / max(self.interval_ema, 0.1))
+
 
 # ── Hoofdklasse ───────────────────────────────────────────────────────────────
 
@@ -436,25 +447,40 @@ class EnergyBalancer:
         # Opwarmguard (v4.6.548): bij een verse herstart is house_trend=0 of gebaseerd
         # op slechts enkele samples. De drift-correctie zou dan een lege trend als anker
         # gebruiken en een verkeerde battery-waarde berekenen (zie 5.30kW/6.80kW bug).
-        _trend_warm = self._house_trend_samples >= 30   # ~5 min bij 10s cyclus
-        if not b_stale and not b_est and self._house_trend > 0 and _trend_warm:
+        # Battery altijd via Kirchhoff als meting ouder is dan 10s en trend warm.
+        # Nexus is de traagste sensor (~45s) — bereken zodra de waarde niet meer vers is.
+        # Opwarmguard: >= 30 samples (~5 min) voorkomt opstartfouten met lege house_trend.
+        _trend_warm    = self._house_trend_samples >= 30
+        # last_change_ts = leeftijd van de waarde zelf (niet wanneer sensor voor het laatst leefde)
+        # Nexus stuurt ook updates als waarde niet verandert → last_update_ts is altijd jong
+        _battery_age_s = now - self._battery.last_change_ts
+
+        # Snelle export-detectie: als grid sterk negatief is (export) en solar bekend,
+        # kan extra export ALLEEN van de batterij komen — direct Kirchhoff zonder wachten.
+        # Bij laden is dit niet veilig (oven/inductie kan grid positief maken).
+        # Drempel: export > solar + 500W → verschil is te groot voor huis-variatie.
+        _large_export = g_val < -500.0 and not self._grid.is_stale()
+        _solar_known  = not self._solar.is_stale() and s_val >= 0.0
+        _export_exceeds_solar = _large_export and _solar_known and (-g_val) > (s_val + 500.0)
+        if not b_est and _trend_warm and _export_exceeds_solar:
             kirchhoff_battery = s_val + g_val - self._house_trend
-            drift = kirchhoff_battery - b_val
-            abs_drift = abs(drift)
+            _LOGGER.debug(
+                "EnergyBalancer: battery Kirchhoff EXPORT-DIRECT (grid=%.0fW solar=%.0fW kirchhoff=%.0fW)",
+                g_val, s_val, kirchhoff_battery,
+            )
+            b_val    = kirchhoff_battery
+            b_est    = True
+            lag_comp = True
 
-            # Battery-lag structureel groter dan grid (~10s)?
-            battery_lag = self._lag_battery.learned_lag_s or 30.0
-            grid_lag_assumed = 10.0  # P1 is altijd snel
-
-            if abs_drift > BATTERY_DRIFT_THRESHOLD_W and battery_lag > grid_lag_assumed:
-                _LOGGER.debug(
-                    "EnergyBalancer: battery drift %.0fW (sensor=%.0fW kirchhoff=%.0fW "
-                    "battery_lag=%.0fs) → volledig bijgesteld via Kirchhoff",
-                    abs_drift, b_val, kirchhoff_battery, battery_lag,
-                )
-                b_val    = kirchhoff_battery
-                b_est    = True
-                lag_comp = True
+        if not b_est and self._house_trend > 0 and _trend_warm and _battery_age_s > 10.0:
+            kirchhoff_battery = s_val + g_val - self._house_trend
+            _LOGGER.debug(
+                "EnergyBalancer: battery Kirchhoff (age=%.0fs sensor=%.0fW kirchhoff=%.0fW)",
+                _battery_age_s, b_val, kirchhoff_battery,
+            )
+            b_val    = kirchhoff_battery
+            b_est    = True
+            lag_comp = True
 
         # v4.5.61 Fix: solar sensor rapporteert 0 terwijl grid sterk negatief is
         # (teruglevering zonder solar is fysiek onmogelijk tenzij accu leeg is).
@@ -474,27 +500,37 @@ class EnergyBalancer:
         # 5. Kirchhoff → house (nooit negatief)
         house_w_raw = s_val + g_val - b_val
 
-        # Bug fix: Nexus transitie geeft kortdurend negatief of extreem hoge house_w
-        # Gebruik vorige trend als vangnet bij onrealistische waarden
+        # Spike-filter: onrealistische house_w afkappen maar som=0 bewaren
+        # door battery bij te stellen zodat solar + grid - battery = house altijd klopt.
         if self._house_trend and self._house_trend > 0:
-            # Negatief = sensor race-condition (bijv. grid nog oud bij batterij-mode wissel)
             if house_w_raw < 0:
-                house_w = max(0.0, self._house_trend)  # houd vorige waarde
-            # Extreme spike: > 5x trend is onrealistisch (max huis ~15kW)
+                # Negatief: race-condition — corrigeer battery zodat house = trend
+                house_w = max(0.0, self._house_trend)
+                b_val   = s_val + g_val - house_w   # som=0
+                b_est   = True
             elif house_w_raw > max(15000.0, self._house_trend * 5):
-                house_w = self._house_trend  # negeer spike
+                # Extreme spike: corrigeer battery zodat house = trend
+                house_w = self._house_trend
+                b_val   = s_val + g_val - house_w   # som=0
+                b_est   = True
                 _LOGGER.debug(
-                    "EnergyBalancer: house_w spike %.0fW genegeerd (trend=%.0fW)",
-                    house_w_raw, self._house_trend
+                    "EnergyBalancer: house_w spike %.0fW → trend %.0fW (battery bijgesteld naar %.0fW)",
+                    house_w_raw, house_w, b_val
                 )
             else:
                 house_w = max(0.0, house_w_raw)
         else:
             house_w = max(0.0, house_w_raw)
 
-        # House trend bijhouden
-        self._house_trend = (TREND_ALPHA * house_w +
-                             (1.0 - TREND_ALPHA) * self._house_trend
+        # House trend bijhouden — alpha = gemiddelde van input-sensor alpha's
+        # Snelle sensoren (P1, omvormer) trekken alpha omhoog → huis volgt sneller
+        # Trage sensoren (Nexus) trekken alpha omlaag → meer smoothing
+        _a_grid = self._grid.alpha
+        _a_solar = self._solar.alpha
+        _a_bat   = self._battery.alpha
+        _house_alpha = (_a_grid + _a_solar + _a_bat) / 3.0
+        self._house_trend = (_house_alpha * house_w +
+                             (1.0 - _house_alpha) * self._house_trend
                              if self._house_trend else house_w)
         self._house_trend_samples += 1
 
@@ -634,4 +670,12 @@ class EnergyBalancer:
             "lag_compensated":         self._last_balanced.lag_compensated if self._last_balanced else False,
             "fast_ramp_active":        self._fast_ramp_active,
             "fast_ramp_battery_est_w": round(self._fast_ramp_battery_est, 0) if self._fast_ramp_battery_est is not None else None,
+            # Tooltip data: raw sensor waarden + leeftijd + estimated flag
+            "battery_estimated":  self._last_balanced.battery_estimated if self._last_balanced else False,
+            "battery_raw_w":      round(self._battery.last_value, 1),
+            "solar_raw_w":        round(self._solar.last_value, 1),
+            "grid_raw_w":         round(self._grid.last_value, 1),
+            "battery_age_s":      round(time.time() - self._battery.last_update_ts, 1),
+            "solar_age_s":        round(time.time() - self._solar.last_update_ts, 1),
+            "grid_age_s":         round(time.time() - self._grid.last_update_ts, 1),
         }

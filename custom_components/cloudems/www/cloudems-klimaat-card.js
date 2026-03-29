@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Klimaat Card  v1.0.0
+// CloudEMS Klimaat Card  v5.4.96
 
-const KLIM_VERSION = '5.4.8';
+const KLIM_VERSION = '5.4.96';
 
 const KLIM_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -273,5 +273,5 @@ class CloudEMSKlimaatCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-klimaat-card')) customElements.define('cloudems-klimaat-card', CloudEMSKlimaatCard);
 if (!customElements.get('cloudems-klimaat-card-editor')) customElements.define('cloudems-klimaat-card-editor', CloudEMSKlimaatCardEditor);
 window.customCards = window.customCards||[];
-window.customCards.push({type:'cloudems-klimaat-card', name:'CloudEMS Klimaat Card', description:'Zones, CV-ketel, thermostaten en klimaatbeheer', preview:true});
+window.customCards.push({type:'cloudems-klimaat-card', name:'CloudEMS Klimaat Card', description:'Zones, CV-ketel, thermostaten en klimaatbeheer'});
 console.info('%c CLOUDEMS-KLIMAAT-CARD %c v'+KLIM_VERSION+' ','background:#80cbc4;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#80cbc4;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

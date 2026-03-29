@@ -1,5 +1,5 @@
 // CloudEMS Zelfconsumptie Card v1.1
-const CARD_ZELFCONSUMPTIE_VERSION = '5.4.8';
+const CARD_ZELFCONSUMPTIE_VERSION = '5.4.96';
 // Leest sensor.cloudems_self_consumption en toont altijd data, ook bij unavailable
 
 class CloudemsZelfconsumptieCard extends HTMLElement {

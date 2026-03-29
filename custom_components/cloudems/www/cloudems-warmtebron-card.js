@@ -1,5 +1,5 @@
-// CloudEMS Warmtebron Vergelijker Card v1.0.0 — Gas vs electricity heat cost
-const CARD_WARMTEBRON_VERSION = '5.4.8';
+// CloudEMS Warmtebron Vergelijker Card v5.4.96 — Gas vs electricity heat cost
+const CARD_WARMTEBRON_VERSION = '5.4.96';
 
 class CloudemsWarmtebronCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
@@ -34,7 +34,7 @@ class CloudemsWarmtebronCard extends HTMLElement {
     sh.innerHTML = `
 <style>:host{display:block;width:100%}.card{background:rgb(34,34,34);border:1px solid rgba(255,255,255,.06);border-radius:16px;overflow:hidden;font-family:var(--primary-font-family,sans-serif)}.hdr{display:flex;align-items:center;gap:10px;padding:14px 16px 12px;border-bottom:1px solid rgba(255,255,255,.07)}.badges{display:flex;gap:8px;padding:14px}.detail{padding:0 16px 12px}</style>
 <div class="card">
-  <div class="hdr"><span>🔥</span><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
+  <div class="hdr"><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
   ${!st ? `<div style="padding:16px;text-align:center;font-size:12px;color:rgba(163,163,163,.5)">Geen warmtebron-data</div>` : `
   <div class="badges">
     ${badge(isGas,  "🔥 Gas",    gasPerKwh*100,  "#fb923c")}

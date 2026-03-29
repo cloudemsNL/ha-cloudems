@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Battery Card  v3.0.0
+// CloudEMS Battery Card  v5.4.96
 
-const BAT_VERSION = "5.3.56";
+const BAT_VERSION = "5.4.96";
 const BAT_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -680,5 +680,5 @@ if (!customElements.get('cloudems-battery-card-editor')) customElements.define('
 if (!customElements.get('cloudems-battery-card')) customElements.define('cloudems-battery-card', CloudemsBatteryCard);
 window.customCards=window.customCards??[];
 if(!window.customCards.find(c=>c.type==='cloudems-battery-card'))
-  window.customCards.push({type:'cloudems-battery-card',name:'CloudEMS Battery Card v3',description:'Batterij SoC arc, 24u grafiek, schema-tijdlijn, providers & Zonneplan sturing',preview:true});
+  window.customCards.push({type:'cloudems-battery-card',name:'CloudEMS Battery Card v3',description:'Batterij SoC arc, 24u grafiek, schema-tijdlijn, providers & Zonneplan sturing'});
 console.info(`%c CLOUDEMS-BATTERY-CARD %c v${BAT_VERSION} `,'background:#3fb950;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0d1117;color:#3fb950;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

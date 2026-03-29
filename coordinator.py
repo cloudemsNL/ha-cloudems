@@ -756,6 +756,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._dynamic_loader    = None
         self._phase_balancer    = None
         self._actuator_watchdog = None   # ActuatorWatchdog — init in async_setup
+        self._dispatch_planner  = None   # EnergyDispatchPlanner — init in async_setup
+        self._dispatch_plan     = None   # Huidig dispatch-plan (DispatchPlan)
         self._phase_hist_t:  list = []  # timestamps
         self._phase_hist_l1: list = []  # L1 stroom A
         self._phase_hist_l2: list = []  # L2 stroom A
@@ -2123,6 +2125,20 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
     async def async_setup(self):
         self._session = async_get_clientsession(self.hass)
+        # Initialiseer EnergyDispatchPlanner
+        from .energy_manager.energy_dispatch_planner import EnergyDispatchPlanner
+        self._dispatch_planner = EnergyDispatchPlanner(
+            battery_kwh       = float(self._config.get("battery_capacity_kwh", 10.0) or 10.0),
+            charge_rate_kw    = float(self._config.get("battery_max_charge_w", 3000) or 3000) / 1000,
+            discharge_rate_kw = float(self._config.get("battery_max_discharge_w", 3000) or 3000) / 1000,
+            min_soc           = float(self._config.get("battery_min_soc_pct", 10) or 10),
+            max_soc           = float(self._config.get("battery_max_soc_pct", 90) or 90),
+        )
+
+        # Initialiseer FrozenSensorWatchdog
+        from .energy_manager.frozen_sensor_watchdog import FrozenSensorWatchdog
+        self._frozen_watchdog = FrozenSensorWatchdog(refresh_cb=self.async_refresh)
+
         # Initialiseer ActuatorWatchdog
         from .energy_manager.actuator_watchdog import ActuatorWatchdog
         self._actuator_watchdog = ActuatorWatchdog(self.hass)
@@ -4331,7 +4347,36 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "phase_currents":   status.phase_currents,
                 }
 
-            # ActuatorWatchdog — controleer feitelijke vs gewenste staat
+            # EnergyDispatchPlanner — herbereken plan elke slow_tick
+            if _slow_tick and getattr(self, "_dispatch_planner", None):
+                try:
+                    import datetime as _dt
+                    _cur_h = _dt.datetime.now().hour
+                    _soc   = data.get("battery_soc", data.get("battery_soc_pct", 50)) or 50
+                    _epex  = price_info.get("today_all_display", price_info.get("today_all", []))
+                    _epex_f = [{"hour": s.get("hour", 0), "price": s.get("price_display", s.get("price", 0.15))} for s in _epex]
+                    _pv_h  = data.get("pv_forecast_hourly", [])
+                    _pv_f  = [{"hour": p.get("hour", 0), "kwh": p.get("wh", p.get("kwh", 0)) / (1000 if "wh" in p else 1)} for p in _pv_h]
+                    self._dispatch_plan = self._dispatch_planner.plan(
+                        current_hour=_cur_h, current_soc=float(_soc),
+                        epex_forecast=_epex_f, pv_forecast=_pv_f, load_forecast=[],
+                    )
+                except Exception as _dp_err:
+                    _LOGGER.debug("DispatchPlanner fout: %s", _dp_err)
+
+            # FrozenSensorWatchdog — detecteer bevroren sensoren elke tick
+            if getattr(self, "_frozen_watchdog", None):
+                try:
+                    await self._frozen_watchdog.tick(
+                        home_w    = data.get("house_power") or data.get("house_load_w"),
+                        grid_w    = data.get("grid_power")  or data.get("grid_net_power"),
+                        solar_w   = data.get("solar_power"),
+                        battery_w = data.get("battery_power"),
+                    )
+                except Exception as _fw_err:
+                    _LOGGER.debug("FrozenSensorWatchdog tick fout: %s", _fw_err)
+
+            # ActuatorWatchdog — controleer feitelijke vs gewenste staat (elke 60s)
             if _slow_tick and getattr(self, "_actuator_watchdog", None):
                 try:
                     await self._actuator_watchdog.async_tick()
@@ -7050,6 +7095,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     # AI hint — local k-NN suggestion (only if ready + confident)
                     ai_hint_label            = (data.get("ai_suggestion") or {}).get("label"),
                     ai_hint_confidence       = float((data.get("ai_suggestion") or {}).get("confidence") or 0.0),
+                    # v5.4.5: dispatch planner suggestie
+                    dispatch_action          = (getattr(self._dispatch_plan, "get_slot", lambda h: None)(getattr(__import__("datetime"), "datetime").now().hour) or type("S", (), {"action": "", "target_soc": None})()).action if getattr(self, "_dispatch_plan", None) else "",
+                    dispatch_target_soc      = (getattr(self._dispatch_plan, "get_slot", lambda h: None)(getattr(__import__("datetime"), "datetime").now().hour) or type("S", (), {"target_soc": None})()).target_soc if getattr(self, "_dispatch_plan", None) else None,
                 )
                 # Refresh thresholds from AI registry before each evaluation
                 if getattr(self, '_ai_registry', None):
@@ -9741,12 +9789,22 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         
         Returns None if state is older than stale_threshold_s — prevents frozen sensor values
         from being used as if they are live readings (issue #31 battery freeze).
+        
+        Last-known-good: als sensor unavailable/unknown is, gebruik de laatste geldige waarde
+        zodat een tijdelijke sensor-timeout geen cascade van 0-waarden veroorzaakt.
         """
         if not entity_id:
             return None
         state = self._safe_state(entity_id)
         if state is None or state.state in ("unavailable", "unknown", ""):
-            return None
+            # Sensor tijdelijk niet beschikbaar — gebruik laatste bekende waarde
+            cached = getattr(self, "_lkg_cache", {}).get(entity_id)
+            if cached is not None:
+                _LOGGER.debug(
+                    "CloudEMS _read_state: %s unavailable — gebruik lkg=%.1f",
+                    entity_id, cached
+                )
+            return cached
         # Stale check: als de sensor al te lang niet geüpdatet is, beschouw als None
         # zodat de balancer de Kirchhoff-schatting gebruikt ipv de bevroren waarde
         try:
@@ -9757,7 +9815,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "CloudEMS _read_state: %s is stale (%.0fs oud) — gebruik balancer schatting",
                     entity_id, _age_s
                 )
-                return None
+                # Bij stale: geef lkg terug zodat we niet naar 0 vallen
+                return getattr(self, "_lkg_cache", {}).get(entity_id)
         except Exception:
             pass  # geen last_updated beschikbaar — ga door
         # Feed UOM to power calculator so kW/W is determined from metadata first

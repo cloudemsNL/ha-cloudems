@@ -214,6 +214,19 @@ THERMAL_MIN_DELTA = 0.3
 DIMMER_MIN_PCT  = 10.0
 DIMMER_UPDATE_S = 30
 
+# Demand-boost drempel grenzen (minuten)
+DEMAND_BOOST_THRESHOLD_MIN_S = 45.0   # ondergrens bij goede leerdata
+DEMAND_BOOST_THRESHOLD_MAX_S = 150.0  # bovengrens bij weinig leerdata
+DEMAND_BOOST_RATIO_HIGH      = 0.75   # ratio ≥ dit → min drempel
+DEMAND_BOOST_RATIO_LOW       = 0.40   # ratio ≤ dit → max drempel
+
+# Hardware deadband fallback voor warmtepompen/hybrid (°C)
+HP_HW_DEADBAND_DEFAULT_C = 2.0
+
+# Fallback setpoints als geen boiler config beschikbaar
+FALLBACK_SETPOINT_ON_C   = 60.0
+FALLBACK_SETPOINT_OFF_C  = 40.0
+
 
 @dataclass
 class BoilerDecision:
@@ -442,6 +455,38 @@ class BoilerState:
         if self._learned_tank_l > 20:
             return self._learned_tank_l
         return 80.0  # veilige fallback
+
+    @property
+    def shower_minutes_available(self) -> Optional[float]:
+        """
+        Bereken hoeveel minuten douchen beschikbaar is met het huidige warme water.
+
+        Formule: bruikbare energie = tank_vol × 4186 × (T_boiler - T_douche)
+                 benodigde energie per minuut = flow_l_min × 4186 × (T_douche - T_koud)
+                 minuten = bruikbaar / per_minuut
+
+        Standaard waarden:
+          T_douche  = 38°C, T_koud = 10°C, flow = 8 L/min (gemiddelde douchekop)
+        """
+        if self.current_temp_c is None:
+            return None
+        t_boiler = self.current_temp_c
+        t_shower = 38.0
+        t_cold   = 10.0
+        flow_l_min = 8.0   # L/min gemiddelde douchekop
+        tank_l   = self._effective_tank_liters
+
+        if t_boiler <= t_shower:
+            return 0.0  # water is al te koud voor douchen
+
+        # Energie beschikbaar boven douchetemperatuur (J)
+        energy_avail = tank_l * 4186 * (t_boiler - t_shower)
+        # Energie per minuut nodig om koud water op te warmen naar douchetemperatuur
+        energy_per_min = flow_l_min * 4186 * (t_shower - t_cold)
+
+        if energy_per_min <= 0:
+            return None
+        return round(energy_avail / energy_per_min, 1)
 
     @property
     def minutes_to_setpoint(self) -> Optional[float]:
@@ -793,13 +838,13 @@ class BoilerLearner:
         ratio = correct / total
         # Lineaire mapping: ratio 0.40→0.75 returns threshold 150→45 min
         if ratio >= 0.75:
-            threshold = 45.0
-        elif ratio <= 0.40:
-            threshold = 150.0
+            threshold = DEMAND_BOOST_THRESHOLD_MIN_S
+        elif ratio <= DEMAND_BOOST_RATIO_LOW:
+            threshold = DEMAND_BOOST_THRESHOLD_MAX_S
         else:
             # Interpoleer
-            threshold = 150.0 - (ratio - 0.40) / 0.35 * 105.0
-        threshold = round(max(45.0, min(150.0, threshold)), 0)
+            threshold = DEMAND_BOOST_THRESHOLD_MAX_S - (ratio - DEMAND_BOOST_RATIO_LOW) / (DEMAND_BOOST_RATIO_HIGH - DEMAND_BOOST_RATIO_LOW) * (DEMAND_BOOST_THRESHOLD_MAX_S - DEMAND_BOOST_THRESHOLD_MIN_S)
+        threshold = round(max(DEMAND_BOOST_THRESHOLD_MIN_S, min(DEMAND_BOOST_THRESHOLD_MAX_S, threshold)), 0)
         _LOGGER.debug(
             "BoilerLearner [%s]: demand_boost drempel %.0f min "
             "(correct=%d, incorrect=%d, ratio=%.2f)",
@@ -2246,7 +2291,7 @@ class BoilerController:
         # Auto-value: 2.0°C voor heat_pump/hybrid, 0.0 voor andere typen.
         _hw_deadband = b.hardware_deadband_c
         if _hw_deadband == 0.0 and btype in (BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_HYBRID):
-            _hw_deadband = 2.0
+            _hw_deadband = HP_HW_DEADBAND_DEFAULT_C
         if _hw_deadband > 0.0 and b.active_setpoint_c > 0:
             _compensated = min(b.active_setpoint_c + _hw_deadband, SAFETY_MAX_C - 1.0)
             if abs(_compensated - b.active_setpoint_c) > 0.1:
@@ -3321,7 +3366,7 @@ class BoilerController:
                     _preset_cap = boiler.hw_ceiling
                 target_sp = round(min(target_sp, _preset_cap, boiler.hw_ceiling), 1)
             else:
-                target_sp = 60.0 if on else 40.0
+                target_sp = FALLBACK_SETPOINT_ON_C if on else FALLBACK_SETPOINT_OFF_C
 
             if domain == "climate":
                 await self._hass.services.async_call("climate", "set_preset_mode",
@@ -3391,22 +3436,144 @@ class BoilerController:
                     "entity":   entity_id,
                 }
                 # executor: de volledige stuurvolgorde als async callable
+                #
+                # Ariston BOOST accepteert NOOIT directe temperatuurwijzigingen (v5.5.2).
+                # iMemory heeft geen setpoint-cap en BOOST erft altijd het iMemory setpoint over.
+                #
+                # Correcte volgorde voor BOOST (altijd, ongeacht setpoint):
+                #   1. iMemory activeren  (tenzij al in iMemory)
+                #   2. sleep 3s
+                #   3. set_temperature → gewenst setpoint (geen hardware cap)
+                #   4. sleep 3s
+                #   5. BOOST activeren → erft setpoint van iMemory automatisch over
+                #
+                # Ook 45°C via BOOST gaat via iMemory — BOOST accepteert geen set_temperature.
+                # GREEN-commando's: geen brug nodig, GREEN accepteert wel set_temperature.
+
+                # Zoek iMemory in de operation_list
+                _imemory_mode = None
+                for _om in _op_list:
+                    if _om.lower() == "imemory":
+                        _imemory_mode = _om
+                        break
+
+                # iMemory brug: altijd bij BOOST als iMemory beschikbaar is in operation_list
+                _use_imemory_bridge = (
+                    boiler is not None
+                    and _imemory_mode is not None
+                    and cmd["preset"].lower() == (boiler.preset_on or "boost").lower()
+                )
+
                 async def _ariston_executor(cmd: dict) -> None:
                     _ep  = cmd["preset"]
                     _esp = cmd["setpoint"]
                     _eid = cmd["entity"]
-                    # Stap 1: mode-switch
-                    if self._hass.services.has_service("water_heater", "set_operation_mode"):
-                        await self._hass.services.async_call("water_heater", "set_operation_mode",
-                            {"entity_id": _eid, "operation_mode": _ep}, blocking=True)
-                    elif self._hass.services.has_service("water_heater", "set_preset_mode"):
-                        await self._hass.services.async_call("water_heater", "set_preset_mode",
-                            {"entity_id": _eid, "preset_mode": _ep}, blocking=True)
-                    # Stap 2: pauze na mode-switch
-                    if boiler and _resolved_max_entity:
-                        await asyncio.sleep(2)
-                    # Stap 3 t/m 5: max_setpoint + setpoint (zie originele code hieronder)
-                    await self._send_setpoint_sequence(boiler, _eid, _ep, _esp, _resolved_max_entity)
+
+                    if _use_imemory_bridge and _imemory_mode:
+                        # Controleer of boiler al in iMemory zit → sla stap 1+2 over
+                        _current_state = self._hass.states.get(_eid)
+                        _current_mode  = ""
+                        if _current_state:
+                            _current_mode = (
+                                _current_state.attributes.get("operation_mode")
+                                or _current_state.attributes.get("current_operation")
+                                or _current_state.state or ""
+                            ).lower()
+
+                        _already_imemory = _current_mode == "imemory"
+
+                        if not _already_imemory:
+                            # Stap 1: iMemory activeren
+                            _LOGGER.info(
+                                "BoilerController [%s]: iMemory-brug → setpoint=%.1f°C",
+                                boiler.label if boiler else _eid, _esp,
+                            )
+                            if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                                await self._hass.services.async_call("water_heater", "set_operation_mode",
+                                    {"entity_id": _eid, "operation_mode": _imemory_mode}, blocking=True)
+                            elif self._hass.services.has_service("water_heater", "set_preset_mode"):
+                                await self._hass.services.async_call("water_heater", "set_preset_mode",
+                                    {"entity_id": _eid, "preset_mode": _imemory_mode}, blocking=True)
+                            # Stap 2: wacht tot iMemory actief is
+                            await asyncio.sleep(3)
+                        else:
+                            _LOGGER.info(
+                                "BoilerController [%s]: al in iMemory → stap 1 overgeslagen, setpoint=%.1f°C",
+                                boiler.label if boiler else _eid, _esp,
+                            )
+
+                        # Stap 3: max_setpoint op 75°C zetten zodat hogere temperaturen
+                        # geaccepteerd worden door de Ariston in iMemory
+                        _max_eid = _resolved_max_entity
+                        if _max_eid:
+                            _ms = self._hass.states.get(_max_eid)
+                            if _ms and _ms.state not in ("unavailable", "unknown"):
+                                try:
+                                    _hw_max  = float(_ms.attributes.get("max", 75.0))
+                                    _hw_min  = float(_ms.attributes.get("min", 40.0))
+                                    _want_max = min(75.0, _hw_max)
+                                    _cur_max  = float(_ms.state)
+                                    if abs(_cur_max - _want_max) > 0.5:
+                                        _dom_max = _max_eid.split(".")[0]
+                                        if self._hass.services.has_service(_dom_max, "set_value"):
+                                            await self._hass.services.async_call(
+                                                _dom_max, "set_value",
+                                                {"entity_id": _max_eid, "value": _want_max},
+                                                blocking=True,
+                                            )
+                                            _LOGGER.info(
+                                                "BoilerController [%s]: max_setpoint → %.0f°C (was %.0f°C)",
+                                                boiler.label if boiler else _eid, _want_max, _cur_max,
+                                            )
+                                            # Stap 3b: wacht op Ariston cloud bevestiging
+                                            await asyncio.sleep(2)
+                                            # Stap 3c: controleer of max_setpoint correct is
+                                            _ms2 = self._hass.states.get(_max_eid)
+                                            if _ms2 and _ms2.state not in ("unavailable", "unknown"):
+                                                try:
+                                                    _confirmed_max = float(_ms2.state)
+                                                    if abs(_confirmed_max - _want_max) > 1.0:
+                                                        _LOGGER.warning(
+                                                            "BoilerController [%s]: max_setpoint niet bevestigd"
+                                                            " (verwacht=%.0f actueel=%.0f) — toch doorgaan",
+                                                            boiler.label if boiler else _eid,
+                                                            _want_max, _confirmed_max,
+                                                        )
+                                                except (ValueError, TypeError):
+                                                    pass
+                                except (ValueError, TypeError):
+                                    pass
+
+                        # Stap 4: setpoint instellen in iMemory
+                        if self._hass.services.has_service("water_heater", "set_temperature"):
+                            await self._hass.services.async_call("water_heater", "set_temperature",
+                                {"entity_id": _eid, "temperature": _esp}, blocking=True)
+                        # Stap 5: wacht tot setpoint is overgenomen door Ariston cloud
+                        await asyncio.sleep(3)
+                        # Stap 6: BOOST activeren — erft iMemory setpoint automatisch over
+                        if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                            await self._hass.services.async_call("water_heater", "set_operation_mode",
+                                {"entity_id": _eid, "operation_mode": _ep}, blocking=True)
+                        elif self._hass.services.has_service("water_heater", "set_preset_mode"):
+                            await self._hass.services.async_call("water_heater", "set_preset_mode",
+                                {"entity_id": _eid, "preset_mode": _ep}, blocking=True)
+                        _LOGGER.info(
+                            "BoilerController [%s]: iMemory-brug voltooid → BOOST actief met %.1f°C",
+                            boiler.label if boiler else _eid, _esp,
+                        )
+                    else:
+                        # Normale flow: directe mode-switch
+                        if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                            await self._hass.services.async_call("water_heater", "set_operation_mode",
+                                {"entity_id": _eid, "operation_mode": _ep}, blocking=True)
+                        elif self._hass.services.has_service("water_heater", "set_preset_mode"):
+                            await self._hass.services.async_call("water_heater", "set_preset_mode",
+                                {"entity_id": _eid, "preset_mode": _ep}, blocking=True)
+                        # Pauze na mode-switch
+                        if boiler and _resolved_max_entity:
+                            await asyncio.sleep(2)
+                        # max_setpoint + setpoint
+                        await self._send_setpoint_sequence(boiler, _eid, _ep, _esp, _resolved_max_entity)
 
                 _sent = await self._cmd_queue.request(
                     device_id = entity_id,
@@ -3446,7 +3613,7 @@ class BoilerController:
                 return
 
         if ctrl in ("setpoint", "setpoint_boost"):
-            sp = ((boiler.active_setpoint_c or boiler.setpoint_c) if on else boiler.min_temp_c) if boiler else (60.0 if on else 40.0)
+            sp = ((boiler.active_setpoint_c or boiler.setpoint_c) if on else boiler.min_temp_c) if boiler else (FALLBACK_SETPOINT_ON_C if on else FALLBACK_SETPOINT_OFF_C)
             svc_domain = domain if domain in ("climate", "water_heater") else None
             if svc_domain:
                 # v4.6.16: water_heater met ON_OFF feature (bijv. Midea E2/E3) vereist
@@ -3804,26 +3971,34 @@ class BoilerController:
             # preset_off = GREEN = veilige standaard. preset_on = BOOST/GREEN verwarmen.
             _actual_now, _, _ = self._read_ariston_state(b)
             if _actual_now and _actual_now.lower() == "imemory":
-                # Always send preset_off (usually GREEN) to escape iMemory
-                _want = b.preset_off or b.preset_on or "GREEN"
-                if _want and _actual_now.lower() != _want.lower():
-                    if b._imemory_since == 0.0:
-                        b._imemory_since = now
-                        _LOGGER.warning(
-                            "BoilerController [%s]: iMemory gedetecteerd — bewaking gestart, "
-                            "gewenste preset=%s wordt over 30s opnieuw gestuurd",
-                            b.label, _want,
-                        )
-                    elif now - b._imemory_since >= 30.0:
-                        _LOGGER.warning(
-                            "BoilerController [%s]: iMemory watchdog — %.0fs in iMemory, "
-                            "stuur preset=%s opnieuw",
-                            b.label, now - b._imemory_since, _want,
-                        )
-                        b._imemory_since = now  # reset timer → herprobeert elke 30s
-                        b._pending_preset   = _want
-                        b._pending_retries  = 0
-                        b._next_verify_ts   = now + 5.0
+                # iMemory watchdog: alleen ingrijpen als CloudEMS zelf NIET in iMemory-brug zit
+                # (tijdens iMemory-brug is iMemory een bewuste tussenstap)
+                _in_imemory_bridge = (
+                    b._pending_preset
+                    and b._pending_preset.lower() not in ("imemory",)
+                    and b._pending_retries == 0
+                    and now - b._pending_since < 30.0
+                )
+                if not _in_imemory_bridge:
+                    _want = b.preset_off or b.preset_on or "GREEN"
+                    if _want and _actual_now.lower() != _want.lower():
+                        if b._imemory_since == 0.0:
+                            b._imemory_since = now
+                            _LOGGER.warning(
+                                "BoilerController [%s]: iMemory gedetecteerd (niet via brug) — "
+                                "bewaking gestart, gewenste preset=%s wordt over 30s opnieuw gestuurd",
+                                b.label, _want,
+                            )
+                        elif now - b._imemory_since >= 30.0:
+                            _LOGGER.warning(
+                                "BoilerController [%s]: iMemory watchdog — %.0fs in iMemory, "
+                                "stuur preset=%s opnieuw",
+                                b.label, now - b._imemory_since, _want,
+                            )
+                            b._imemory_since = now
+                            b._pending_preset   = _want
+                            b._pending_retries  = 0
+                            b._next_verify_ts   = now + 5.0
             else:
                 b._imemory_since = 0.0  # niet in iMemory → reset teller
 
@@ -4087,6 +4262,10 @@ class BoilerController:
                   "ramp_setpoint_c":     round(b._cheap_ramp_setpoint_c, 1) if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0 else None,
                   # FIX 2: demand boost statistieken
                   "demand_boost_stats":  g.learner.get_demand_boost_stats() if g.learner else None,
+                  # Douche-teller
+                  "shower_minutes":      b.shower_minutes_available,
+                  "shower_temp_c":       38.0,
+                  "cold_water_temp_c":   10.0,
                   }
                  for b in g.boilers
              ]}

@@ -1,5 +1,5 @@
-// CloudEMS Batterij Levensduur Card v1.0.0
-const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.4.8';
+// CloudEMS Batterij Levensduur Card v5.4.96
+const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.4.96';
 // Tracks battery cycles, DoD, estimated remaining capacity
 
 class CloudemsBatterijLevensduurCard extends HTMLElement {
@@ -17,7 +17,7 @@ class CloudemsBatterijLevensduurCard extends HTMLElement {
     const h = this._hass, c = this._cfg || {};
     const sh = this.shadowRoot; if (!sh || !h) return;
     const a   = h.states["sensor.cloudems_battery_savings"]?.attributes || {};
-    const soh = parseFloat(h.states["sensor.cloudems_battery_state_of_health"]?.state || 100);
+    const _sohRaw = parseFloat(h.states["sensor.cloudems_battery_state_of_health"]?.state); const soh = isNaN(_sohRaw) ? 100 : _sohRaw;
     const soc = parseFloat(h.states["sensor.cloudems_battery_so_c"]?.state || 0);
 
     const totalCycles  = parseInt(a.sessions_year || 0) + (a.history_years||[]).reduce((s,y)=>s+y.sessions,0);
@@ -68,7 +68,7 @@ class CloudemsBatterijLevensduurCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>🔋</span>
+    
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     <span style="font-size:11px;color:rgba(163,163,163,.5)">SOC ${soc.toFixed(0)}%</span>
   </div>

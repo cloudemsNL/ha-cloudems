@@ -1,4 +1,4 @@
-// CloudEMS Beheer Card v1.0.0 — vervangen door cloudems-config-card
+// CloudEMS Beheer Card v5.4.96 — vervangen door cloudems-config-card
 // Stub om compatibiliteit te behouden
 class CloudemsBeheerCard extends HTMLElement {
   setConfig(c) { this._cfg = c; }

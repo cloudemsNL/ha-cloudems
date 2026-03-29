@@ -1,7 +1,7 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-const CARD_VERSION_VERSION = '5.4.8';
+const CARD_VERSION_VERSION = '5.4.96';
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Version Card  v1.0.1
+// CloudEMS Version Card  v5.4.96
 
 class CloudEMSVersionCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }
@@ -22,14 +22,20 @@ class CloudEMSVersionCard extends HTMLElement {
     const fails_v  = vi.total_failures != null ? vi.total_failures : _wdg.total_failures;
     const restart_v= vi.total_restarts != null ? vi.total_restarts : _wdg.total_restarts;
     const avgms_v  = vi.avg_ms != null ? vi.avg_ms : _prf.avg_ms;
+    const err_up_v  = vi.errors_since_uptime ?? null;
+    const err_td_v  = vi.errors_today ?? null;
+    const err_7d_v  = vi.errors_7d_avg ?? null;
 
-    const sig = [ver, uptime_s, fails_v, restart_v, avgms_v].join('|');
+    const sig = [ver, uptime_s, restart_v, avgms_v, err_up_v, err_td_v, err_7d_v].join('|');
     if(sig === this._prev) return;
     this._prev = sig;
 
     const uptime  = uptime_s != null ? _fmtUp(uptime_s) : '—';
     const cycles  = cycles_v != null ? Number(cycles_v).toLocaleString('nl') : '—';
-    const errors  = fails_v  != null ? fails_v  : '—';
+    const errUptime  = err_up_v != null ? err_up_v : '—';
+    const errToday   = err_td_v != null ? err_td_v : '—';
+    const err7d      = err_7d_v != null ? err_7d_v : '—';
+    const err7dCol   = err_7d_v > 5 ? '#f87171' : err_7d_v > 0 ? '#fb923c' : '#4ade80';
     const restarts= restart_v != null ? restart_v : '—';
     const perf    = avgms_v  != null ? `${Math.round(avgms_v)} ms` : '—';
 
@@ -49,7 +55,9 @@ class CloudEMSVersionCard extends HTMLElement {
         <div class="row"><span class="lbl">Versie</span><span class="val ver">v${ver}</span></div>
         <div class="row"><span class="lbl">Uptime</span><span class="val">${uptime}</span></div>
         <div class="row"><span class="lbl">Update cycli</span><span class="val">${cycles}</span></div>
-        <div class="row"><span class="lbl">Fouten (ooit)</span><span class="val" style="color:${errors>0?'#f87171':'#4ade80'}">${errors}</span></div>
+        <div class="row"><span class="lbl">Fouten (gem. 7d)</span><span class="val" style="color:${err7dCol}">${err7d}</span></div>
+        <div class="row"><span class="lbl">Fouten (uptime)</span><span class="val" style="color:${errUptime>0?'#fb923c':'#4ade80'}">${errUptime}</span></div>
+        <div class="row"><span class="lbl">Fouten (vandaag)</span><span class="val" style="color:${errToday>0?'#fb923c':'#4ade80'}">${errToday}</span></div>
         <div class="row"><span class="lbl">Herstarts</span><span class="val" style="color:${restarts>0?'#fb923c':'#4ade80'}">${restarts}</span></div>
         <div class="row"><span class="lbl">Cyclustijd</span><span class="val">${perf}</span></div>
       </div>`;
@@ -76,5 +84,5 @@ class CloudEMSVersionCardEditor extends HTMLElement {
 if (!customElements.get('cloudems-version-card')) customElements.define('cloudems-version-card', CloudEMSVersionCard);
 if (!customElements.get('cloudems-version-card-editor')) customElements.define('cloudems-version-card-editor', CloudEMSVersionCardEditor);
 window.customCards = window.customCards || [];
-window.customCards.push({type:'cloudems-version-card', name:'CloudEMS Versie Card', description:'CloudEMS versie, uptime en systeem statistieken', preview:true});
+window.customCards.push({type:'cloudems-version-card', name:'CloudEMS Versie Card', description:'CloudEMS versie, uptime en systeem statistieken'});
 console.info('%c CLOUDEMS-VERSION-CARD %c v1.0.1 ','background:#4ade80;color:#000;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px','background:#0e1520;color:#4ade80;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0');

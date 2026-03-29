@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Appliance Card  v1.2.0
+// CloudEMS Appliance Card  v5.4.96
 
-const APPLIANCE_VERSION = "5.3.56";
+const APPLIANCE_VERSION = "5.4.96";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const DEVICE_ICONS = {
@@ -517,5 +517,5 @@ input{background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,
 if (!customElements.get('cloudems-appliance-card-editor')) customElements.define("cloudems-appliance-card-editor",CloudemsApplianceCardEditor);
 if (!customElements.get('cloudems-appliance-card')) customElements.define("cloudems-appliance-card",CloudemsApplianceCard);
 window.customCards=window.customCards??[];
-window.customCards.push({type:"cloudems-appliance-card",name:"CloudEMS Appliance Card",description:"Slimme schakelaars — vaatwasser, wasmachine, droger",preview:true});
+window.customCards.push({type:"cloudems-appliance-card",name:"CloudEMS Appliance Card",description:"Slimme schakelaars — vaatwasser, wasmachine, droger"});
 console.info(`%c CLOUDEMS-APPLIANCE-CARD %c v${APPLIANCE_VERSION} `,"background:#378ADD;color:#fff;font-weight:700;padding:2px 6px;border-radius:3px 0 0 3px","background:#0e1520;color:#378ADD;font-weight:700;padding:2px 6px;border-radius:0 3px 3px 0");

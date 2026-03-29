@@ -1,5 +1,5 @@
-// CloudEMS Vacation Mode Card v1.0.0
-const CARD_VACATION_VERSION = '5.4.8';
+// CloudEMS Vacation Mode Card v5.4.96
+const CARD_VACATION_VERSION = '5.4.96';
 
 class CloudemsVacationCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
@@ -39,7 +39,7 @@ class CloudemsVacationCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>🏖️</span>
+    
     <span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span>
     <span class="badge">${active ? "Actief" : "Inactief"}</span>
   </div>

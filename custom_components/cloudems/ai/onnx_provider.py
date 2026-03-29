@@ -317,10 +317,9 @@ class OnnxProvider(AIProvider):
                 len(self._buffer), self._n_since_train
             )
             return await self._retrain()
-        # Sla op na elke 2 batches (24 samples) zodat herstart de voortgang bewaart
-        # en we na herstart niet opnieuw bij n_since_train=0 beginnen
-        if self._n_since_train > 0 and self._n_since_train % 24 == 0:
-            await self._save()
+        # Sla op na elke batch zodat herstart de voortgang bewaart
+        # (was % 24 — bij herstart vóór 24 samples werd n_since_train gereset naar 0)
+        await self._save()
         return True
 
     async def async_explain(self, features: AIModelContract) -> str:

@@ -1,5 +1,5 @@
-// CloudEMS Lifecycle Arbitrage Card v1.0.0
-const CARD_LIFECYCLE_VERSION = '5.4.8';
+// CloudEMS Lifecycle Arbitrage Card v5.4.96
+const CARD_LIFECYCLE_VERSION = '5.4.96';
 // Shows whether running appliances is worth the wear cost
 
 class CloudemsLifecycleCard extends HTMLElement {
@@ -42,7 +42,7 @@ class CloudemsLifecycleCard extends HTMLElement {
   .na{padding:20px;text-align:center;font-size:12px;color:rgba(163,163,163,.5)}
 </style>
 <div class="card">
-  <div class="hdr"><span>⚙️</span><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
+  <div class="hdr"><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
   <div class="price-row"><span>Huidige EPEX prijs</span><span style="color:#fbbf24;font-weight:600">€${price.toFixed(3)}/kWh</span></div>
   ${apps.length === 0 ? `<div class="na">Geen slijtagedata beschikbaar</div>` :
     apps.map(a => `

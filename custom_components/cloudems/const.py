@@ -331,8 +331,8 @@ NILM_MAX_THRESHOLD_W          = 100.0    # never above 100W (would miss most dev
 NILM_NOISE_WINDOW             = 60       # samples for noise estimation
 
 # ── AI module thresholds (all learnable — these are starting defaults only) ──
-BATTERY_STALE_THRESHOLD_S    = 90.0     # seconds before battery data considered stale
-BATTERY_STALE_MIN_S          = 30.0     # minimum stale threshold (never go below)
+BATTERY_STALE_THRESHOLD_S    = 45.0     # seconds before battery data considered stale (Nexus bevriestypisch na 30-45s)
+BATTERY_STALE_MIN_S          = 20.0     # minimum stale threshold (never go below)
 P1_STALE_THRESHOLD_S         = 90.0     # seconds before P1 data considered stale
 AI_MIN_CONFIDENCE            = 0.65     # minimum confidence before AI hint is applied
 AI_BATTERY_MIN_CONFIDENCE    = 0.65     # battery charging/discharging AI hints
@@ -414,6 +414,11 @@ CONF_ESPHOME_REACTIVE_L3      = "esphome_reactive_l3"
 CONF_ESPHOME_THD_L1           = "esphome_thd_l1"
 CONF_ESPHOME_THD_L2           = "esphome_thd_l2"
 CONF_ESPHOME_THD_L3           = "esphome_thd_l3"
+CONF_ESPHOME_HIGHRES_HOST     = "esphome_highres_host"   # 1kHz TCP stream host
+CONF_DEMO_ENABLED             = "demo_mode_enabled"
+CONF_DEMO_SPEED               = "demo_speed"            # tijdversnelling: 1/10/48/96
+CONF_ESPHOME_HIGHRES_PORT     = "esphome_highres_port"   # standaard 6053
+CONF_ESPHOME_HIGHRES_MODE     = "esphome_highres_mode"   # "tcp" of "udp"
 # Bekende DSMR/P1 HA-integratie platforms voor auto-detectie
 DSMR_HA_PLATFORMS = [
     "dsmr",           # officiële DSMR integratie
@@ -1158,3 +1163,11 @@ CONF_TELEMETRY_ENABLED = "telemetry_enabled"
 # ── Climate EPEX Compensatie ──────────────────────────────────────────────────
 CONF_CLIMATE_EPEX_ENABLED  = "climate_epex_enabled"
 CONF_CLIMATE_EPEX_DEVICES  = "climate_epex_devices"   # list[dict]
+
+# ── CloudEMS Pro ──────────────────────────────────────────────────────────────
+CONF_LICENSE_KEY        = "license_key"
+PRO_TIER_FREE           = "free"
+PRO_TIER_PRO            = "pro"
+PRO_TIER_LIFETIME       = "lifetime"
+PRO_VALIDATE_URL        = "https://cloudems.eu/api/v1/license/validate"
+PRO_CACHE_TTL_H         = 24   # uur

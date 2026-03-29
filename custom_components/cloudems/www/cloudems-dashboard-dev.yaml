@@ -17,7 +17,8 @@ visible:
   - user: b2b43e2e5ec24c24816f29d2d268e1cf
   - user: cce385c9c49849a2ac756c3b1caea7aa
   - user: 4392905d12b9442b81a8b5dd7e348e5c
-cards: []
+cards:
+  - type: custom:cloudems-iso-card
 badges: []
 
 sections:

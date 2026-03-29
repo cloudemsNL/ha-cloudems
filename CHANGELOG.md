@@ -1,5 +1,220 @@
 # CloudEMS Changelog
 
+## v5.5.8 (2026-03-29)
+- CLAUDE_INSTRUCTIONS bijgewerkt: sessie 2026-03-29 volledig gedocumenteerd
+- Openstaande items bijgewerkt: HouseConsumptionLearner persistentie, Solar Clipping Forecast, Ghost Power Hunter UI
+
+## v5.5.7 (2026-03-29)
+- Nieuw: HouseConsumptionLearner — zelflerend huisverbruik per uurslot (7×24 EMA matrix)
+  - Leert weekdag/weekend patroon automatisch via coordinator tick
+  - Voorspelt: verwacht totaal vandaag, al verbruikt, nog nodig rest van dag
+  - Survival: op basis van geleerd patroon (veel nauwkeuriger dan statisch getal)
+    "bij grid uitval overleef je tot 12:50 op batterij + PV"
+  - Off-grid kaart toont geleerd forecast sectie zodra model voldoende data heeft
+  - sensor.cloudems_home_rest: remaining_kwh, consumed_kwh, total_kwh, survival attrs
+
+## v5.5.6 (2026-03-29)
+- Nieuw: cloudems-offgrid-card — Off-Grid Survival Calculator (4 scenario's, batterij + PV balk)
+- Nieuw: cloudems-fuse-monitor-card — Groepenkast Bewaking (fase stroom, vrije capaciteit, actieve apparaten)
+- Nieuw: cloudems-kosten-calculator-card — Kosten Calculator (tarief, dag/week/maand/jaar, PV besparing)
+- Alle 3 nieuwe kaarten in dashboard: Batterij view + Diagnose view
+- README volledig herschreven: Mermaid diagrammen, feature matrix, alle nieuwe modules, subtiele cloud roadmap hint
+
+## v5.5.6 (2026-03-29)
+- Nieuw: cloudems-offgrid-card — off-grid survival calculator (4 scenario's, batterij + PV)
+- Nieuw: cloudems-fuse-monitor-card — live fase-stroom bewaking met ruimte per fase
+- Nieuw: cloudems-kosten-calculator-card — vandaag/week/maand/jaar kosten + PV besparing
+- Dashboard: alle 5 nieuwe kaarten toegevoegd aan relevante views
+- README volledig herschreven: Mermaid architectuurdiagram, feature matrix,
+  collapsible secties per module, 18/18 nieuwe features gedocumenteerd
+
+## v5.5.5 (2026-03-29)
+- Dashboard: alerts ticker + energie potentieel toegevoegd aan Overzicht view
+- Dashboard: energie potentieel toegevoegd aan Warm Water view
+
+## v5.5.4 (2026-03-29)
+- Nieuw: cloudems-alerts-ticker-card — roterende meldingen ticker (kritiek→waarschuwing→info)
+- Nieuw: cloudems-energie-potentieel-card — batterij + PV als universele rekenmachine
+  koken, koffie, vaatwasser, lampen, airco, e-bike, douche, droger, magnetron...
+  Aparte sectie per bron (batterij / verwachte PV vandaag)
+- Nieuw: Boiler kaart 🚿 Douche tab
+  Live sessie, duur/liters/kWh/€/CO₂/flow, fun facts, geschiedenis grafiek
+- Beide nieuwe kaarten geregistreerd als Lovelace resource
+
+## v5.5.3 (2026-03-29)
+- Fix: Ariston iMemory-brug zet max_setpoint eerst op 75°C voor setpoint instellen
+  - Stap 3: max_setpoint → 75°C (of hw_max als lager)
+  - Stap 3b: sleep 2s + controleer of max_setpoint bevestigd is door Ariston cloud
+  - Stap 4: set_temperature → gewenst setpoint
+  - Stap 5: sleep 3s → BOOST
+  - Zonder max_setpoint op 75 accepteert Ariston geen setpoints boven de huidige max
+
+## v5.5.2 (2026-03-29)
+- Fix: Ariston BOOST accepteert nooit directe temperatuurwijzigingen
+  - iMemory-brug nu altijd actief bij BOOST (ook ≤53°C)
+  - Volgorde: iMemory → setpoint → sleep 3s → BOOST (erft setpoint over)
+  - Als boiler al in iMemory zit → stap 1 overgeslagen, direct setpoint + BOOST
+  - Van 58→63°C: iMemory 63°C instellen, dan BOOST → correcte temperatuur
+
+## v5.5.1 (2026-03-29)
+- Fix: Ariston BOOST setpoint boven 53°C via iMemory-brug
+  - Volgorde: iMemory activeren → setpoint instellen (geen cap) → wacht 3s → BOOST
+  - BOOST erft iMemory setpoint automatisch over → boiler verwarmt naar gewenste 58-75°C
+  - iMemory watchdog onderbroken zichzelf niet tijdens bewuste tussenstap
+- Nieuw: AI stap 2 — BDE._learner = bde_feedback (tariefdrempels zelflerend)
+- Nieuw: ShowerTracker — douche-sessie detectie via temperatuurdaling
+  - Duur, liters, kosten (€), CO₂, flow L/min
+  - Fun facts: militaire douche / prima / lang / erg lang
+  - Beschikbaar via sensor.cloudems_boiler_status shower_status attribuut
+
+## v5.5.0 (2026-03-29)
+- Fix: "Fouten (ooit)" vervangen door "Fouten (gem. 7d)" — gaat naar 0 na 7 schone dagen
+  - Intern blijft de volledige teller bewaard voor logging
+  - 7-daags rollend venster: groen=0, oranje=1-5/dag, rood=>5/dag
+  - Fouten (uptime) en Fouten (vandaag) blijven als aanvulling
+
+## v5.4.99 (2026-03-29)
+- Nieuw: errors_since_uptime en errors_today in versie-kaart
+  - LoggingHandler in guardian.py telt CloudEMS ERROR logs — reset bij herstart
+  - errors_today reset automatisch om middernacht
+  - Versie-kaart toont nu drie rijen: Fouten (ooit) / Fouten (uptime) / Fouten (vandaag)
+  - Direct zichtbaar of de huidige versie schoon draait
+
+## v5.4.98 (2026-03-29)
+- Fix: drift false positives bij koffiezetter en keukenaapparaten
+  - kitchen type naar DRIFT_SKIP_TYPES (koffiezetter, waterkoker, magnetron)
+  - baseline_max_w bijgehouden tijdens leren — melding alleen als BUITEN eerder gezien bereik
+  - baseline_max_w bevroren na freeze — groeit niet meer mee met drift
+  - Resultaat: koffiezetter die soms 1400W trekt terwijl baseline_max 1400W is = geen alert
+
+## v5.4.97 (2026-03-29)
+- Fix: zone_climate_manager crashte elke 30s op alle zones — data["heat_pump_cop"] is een dict maar werd direct naar float() gecast. Nu veilig cop_current eruit gelezen.
+
+## v5.4.96 (2026-03-29)
+- Fix: demo engine bug DEMO_GHOST_PV_W vs DEMO_GHOST_PV_DELAY_TICKS vergelijking
+- Fix: ghost detector dt_s gebruikt nu UPDATE_INTERVAL_FAST als default
+- Fix: alle JS kaart-versies gebumpt (67 kaarten) — waren nog op 5.3/5.4.25
+
+## v5.4.95 (2026-03-29)
+- Fix: omvormer correlatie per uur i.p.v. gemiddelde ratio
+  West/Oost oriëntaties worden correct afgehandeld: ratio op 10:00 ≠ ratio op 15:00
+  Growatt Oost piek 12:00 (96% van totaal), GoodWe West piek 15:00 (58% van totaal)
+  Schatting GoodWe West op uur 14: 1928W vs echt 1810W (86% confidence)
+
+## v5.4.94 (2026-03-29)
+- Uitbreiding StaleSensorEstimator: multi-omvormer correlatie en export inference
+  - Multi-omvormer: stale omvormer geschat via ratio t.o.v. werkende omvormer
+    (GoodWe West stale + Growatt werkt → GoodWe = totaal × geleerde ratio)
+  - Export inference: grid export > bekende productie → onverklaard vermogen berekend
+    (export 5kW, solar 2kW → "minstens 3kW onverklaard, waarschijnlijk stale omvormer")
+  - Confidence 88-100% bij voldoende correlatie-data
+
+## v5.4.93 (2026-03-29)
+- Nieuw: Stale Sensor Estimator — geconfigureerde sensor verliest communicatie → virtuele fallback
+  - PV omvormer offline: schatting via geleerd per-uur profiel + weercorrectie
+  - Batterij offline: Kirchhoff inference (solar + grid - house)
+  - Boiler offline: thermisch afkoelmodel
+  - Direct hersteld zodra sensor terugkomt — geen wachttijd
+  - Alert: "Omvormer communicatie verloren — schatting actief (X min)"
+  - Confidence daalt naarmate sensor langer offline is (max 1 uur)
+
+## v5.4.92 (2026-03-29)
+- Nieuw: Ghost Battery Detector — Reverse NILM detecteert onbekende batterijen en omvormers
+  - Onbekende omvormer: onverklaard productievermogen dat zonnecurve volgt
+  - Onbekende batterij: bidirectionele vermogensstappen gecorreleerd met solar/grid
+  - Virtuele SoC bijhouden voor onbekende batterij (integratie via Kirchhoff)
+  - Auto-correctie bij ≥68% confidence (min 50 observaties, 2+ dagen)
+  - Deactivatie in 3 ticks zodra gebruiker apparaat configureert
+  - Demo modus: vergeten 1.5kW omvormer verschijnt live en wordt gedetecteerd
+  - CLAUDE_INSTRUCTIONS: Reverse NILM + Edge Device architectuurnotities toegevoegd
+- Fix: Kirchhoff batterij triggert direct bij grote export (v5.4.91 doorgevoerd)
+- Fix: last_change_ts ipv last_update_ts voor batterij leeftijd (v5.4.90 doorgevoerd)
+
+## v5.4.91 (2026-03-29)
+- Fix: batterij Kirchhoff triggert nu direct bij grote export (grid < -500W én export > solar + 500W)
+  Export kan fysiek alleen van solar of batterij komen — geen 10s wachten nodig
+  Bij laden blijft de 10s drempel behouden (huis kan pieken door oven/inductie)
+
+## v5.4.90 (2026-03-29)
+- Fix: Kirchhoff batterij-correctie gebruikte last_update_ts (sensor leeft) in plaats van last_change_ts (waarde veranderd). Nexus stuurt ook updates zonder waarde-wijziging waardoor Kirchhoff nooit triggerde.
+
+## v5.4.89 (2026-03-29)
+- Fix: NILM fase na herstart altijd exact hersteld zoals opgeslagen — nooit meer ? als de fase voor herstart bekend was
+- Fix: phase_votes minimaal op 5 gezet voor bekende fases zodat relearn-logica niet snel overschrijft
+
+## v5.4.88 (2026-03-29)
+- Fix: NILM fase handmatig instelbaar via L1/L2/L3 knoppen in detail panel
+  - Persistent: fase_votes krijgt +10 zodat fase ook na herstart bewaard blijft
+  - Nieuwe HA service: cloudems.set_nilm_phase (device_name, phase)
+  - Voor apparaten die nooit schakelen (Proxmox, NAS, router)
+
+## v5.4.87 (2026-03-29)
+- CLAUDE_INSTRUCTIONS: weekend TODO's toegevoegd (AI stap 2, alerts-ticker-card, house_trend logs)
+
+## v5.4.86 (2026-03-29)
+- Boiler refactor stap 1: 5 inline magic numbers geëxtraheerd naar benoemde constanten (DEMAND_BOOST_THRESHOLD_MIN/MAX_S, HP_HW_DEADBAND_DEFAULT_C, FALLBACK_SETPOINT_ON/OFF_C). Geen logica gewijzigd.
+
+## v5.4.85 (2026-03-29)
+- CLAUDE_INSTRUCTIONS bijgewerkt met product roadmap: demo/multi-instance, cloud migratie, businessmodel (abonnement + no cure no pay), saldering-deadline 2027
+
+## v5.4.84 (2026-03-29)
+- Nieuw: Demo modus — simuleer een volledige energie-installatie zonder echte hardware
+  - Instelbare tijdversnelling: 1x / 10x / 48x (dag in 30 min) / 96x (dag in 15 min)
+  - Virtuele PV-curve, batterij, boiler, EV lader met realistische profielen
+  - AI learning gepauzeerd tijdens demo, echte geleerde data onaangetast
+  - Kirchhoff gegarandeerd (som = 0) voor alle simulatie-uren
+  - Activeren via: CloudEMS → Configureren → Systeem & Communicatie → Demo modus
+  - Alle virtuele sensoren verdwijnen automatisch bij uitzetten
+
+## v5.4.83 (2026-03-29)
+- Fix: Configuratiefout in alle custom cards door preview:true verwijderd — HA probeerde een preview te renderen zonder hass context wat crashte
+
+## v5.4.82 (2026-03-29)
+- Fix: dubbele iconen in alle losse kaarten — hardcoded <span>emoji</span> verwijderd uit 15 kaarten (icoon zat al in c.title)
+- Fix: NaN% SoH in batterij levensduur kaart — veilige isNaN check toegevoegd
+
+## v5.4.81 (2026-03-29)
+- Fix: Airco / Multisplit staat nu na Klimaatbeheer in het Verbruik & Comfort submenu
+
+## v5.4.80 (2026-03-29)
+- Fix: AI n_since_train werd niet opgeslagen bij elke batch — na herstart reset naar 0 waardoor 0/48 bleef staan ondanks groeiende buffer. Nu opgeslagen na elke batch.
+- Fix: BDE set_ai_thresholds() had undefined 'learner' variabele — silent crash elke cyclus. _learner wordt nu correct geïnitialiseerd.
+
+## v5.4.79 (2026-03-29)
+- ISO kaart verplaatst van hoofddashboard naar dev dashboard (nog niet productieklaar)
+
+## v5.4.78 (2026-03-28)
+- Fix: KirchhoffDriftMonitor overschreef data["grid_power"] waardoor NET op 11kW sprong bij grote batterij-ontlading (house_trend liep achter). Grid is altijd P1 — mag nooit overschreven worden.
+
+## v5.4.77 (2026-03-28)
+- Fix: Architectuur tab type sections→panel zodat arch card de volledige schermbreedte gebruikt (geen zwarte zijbalken)
+
+## v5.4.76 (2026-03-28)
+- Fix: arch card groter — getCardSize 10→14, viewBox hoogte +40px, min-height SVG, alle fonts vergroot (headers 10→12, blok-titels 10→12, sub-tekst 8.5→10, freq 8→9)
+
+## v5.4.75 (2026-03-28)
+- Fix: sensor.cloudems_grid_net_power en sensor.cloudems_net_vermogen krijgen _force_update_priority=1 — altijd force_update ongeacht performance mode, zodat de flow card direct na elke P1 update (~1s) de nieuwe gridwaarde toont
+
+## v5.4.74 (2026-03-28)
+- Fix: flow card re-rendert nu elke ~100ms bij gewijzigde sensordata (was ~500ms) — minder vertraging na sensorupdate
+
+## v5.4.73 (2026-03-28)
+- Fix: spike-filter bewaart nu som=0 — bij negatieve of extreme house_w wordt battery bijgesteld (niet house_trend zonder correctie)
+
+## v5.4.72 (2026-03-27)
+- Tooltips uitgebreid: alle nodes tonen nu raw sensorwaarde, update-interval, leeftijd, sensor entity_id, stale-indicator en Kirchhoff-badge (berekend/gemeten)
+- sensor.cloudems_energy_balancer: battery_raw_w, solar_raw_w, grid_raw_w, *_age_s, battery_estimated, sensor_* entity_ids toegevoegd
+
+## v5.4.71 (2026-03-27)
+- Fix: battery altijd via Kirchhoff berekend zodra meting ouder is dan 10s (was: 112s)
+- Fix: data["batteries"] wordt bijgewerkt met gecorrigeerde waarde → som = 0 in flow card
+- Nieuw: EMA alpha adapteert aan geleerd sensor-interval (P1 ~1s → alpha=1.0, Nexus ~45s → alpha=0.11)
+- Nieuw: house_trend alpha = gemiddelde van grid + solar + battery alpha
+- Nieuw: ESPHome 1kHz highres reader gekoppeld aan NILM via feed_highres_batch()
+
+## v5.4.70 (2026-03-27)
+- Fix: grid_power_w in coordinator altijd van geconfigureerde sensor (data["grid_power"]), niet meer overschreven door P1 ruwe net_power_w. Dit veroorzaakte onjuiste gridwaarden in de flow card en statuskaart.
+
 ## v5.4.7 (2026-03-26)
 - Nieuw: Micro-Cycle Prevention — _apply_anti_cycling() nu volledig geïmplementeerd in BDE; blokkeert actiewissels <2 min en richting-flips <anti_cycling_min (veiligheids-acties altijd doorgelaten)
 - Nieuw: Negative Price Dumping — BDE laag 2b: ontlaad batterij vóór negatief EPEX-uur zodat maximale laadruimte beschikbaar is bij betaald laden (lookahead 3 uur, drempel -0.5 ct/kWh)

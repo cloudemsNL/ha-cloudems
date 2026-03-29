@@ -108,8 +108,74 @@ class SystemGuardian:
         self._setup_ts:   float = time.time()   # voor uptime berekening
         # LogReporter — lazy import om circulaire imports te voorkomen
         self._log_reporter = None
+        # Error tellers — reset bij elke herstart
+        self._errors_since_uptime: int = 0
+        self._errors_today:        int = 0
+        self._errors_today_date:   str = ""   # YYYY-MM-DD voor dag-reset
+        # 7-daags rollend venster: {YYYY-MM-DD: count}
+        # Intern bewaard voor logging, display via gemiddelde
+        self._errors_daily: dict = {}  # max 7 entries
+        # Logging handler registreren
+        self._error_handler: "CloudEMSErrorCounter | None" = None
+        self._register_error_handler()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
+
+    # ── Error counting ────────────────────────────────────────────────────────
+
+    def _register_error_handler(self) -> None:
+        """Registreer een logging handler die CloudEMS ERROR logs telt."""
+        import logging
+        from datetime import date
+
+        guardian_ref = self
+
+        class CloudEMSErrorCounter(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                # Alleen cloudems ERROR/CRITICAL logs tellen
+                if record.levelno < logging.ERROR:
+                    return
+                if not record.name.startswith("custom_components.cloudems"):
+                    return
+                guardian_ref._errors_since_uptime += 1
+                today = date.today().isoformat()
+                if guardian_ref._errors_today_date != today:
+                    guardian_ref._errors_today = 0
+                    guardian_ref._errors_today_date = today
+                guardian_ref._errors_today += 1
+                # Rollend 7-daags venster bijwerken
+                guardian_ref._errors_daily[today] = guardian_ref._errors_daily.get(today, 0) + 1
+                # Max 7 dagen bewaren
+                if len(guardian_ref._errors_daily) > 7:
+                    oldest = min(guardian_ref._errors_daily.keys())
+                    del guardian_ref._errors_daily[oldest]
+
+        handler = CloudEMSErrorCounter()
+        handler.setLevel(logging.ERROR)
+        logging.getLogger("custom_components.cloudems").addHandler(handler)
+        self._error_handler = handler
+
+    def get_error_counts(self) -> dict:
+        """Geeft error tellers terug voor de versie-sensor."""
+        from datetime import date, timedelta
+        today = date.today().isoformat()
+        if self._errors_today_date != today:
+            self._errors_today = 0
+            self._errors_today_date = today
+
+        # 7-daags gemiddelde — toont 0 als systeem 7 dagen schoon draait
+        # Verouderde dagen (> 7 dagen geleden) tellen niet mee
+        cutoff = (date.today() - timedelta(days=7)).isoformat()
+        recent = {d: v for d, v in self._errors_daily.items() if d >= cutoff}
+        days_with_data = max(1, len(recent))
+        errors_7d_avg  = round(sum(recent.values()) / days_with_data, 1)
+
+        return {
+            "errors_since_uptime": self._errors_since_uptime,
+            "errors_today":        self._errors_today,
+            "errors_7d_avg":       errors_7d_avg,   # gaat naar 0 na 7 schone dagen
+            "errors_7d_total":     sum(recent.values()),
+        }
 
     async def async_setup(self) -> None:
         """Laad persistente staat."""

@@ -1210,6 +1210,8 @@ class NILMDetector:
         if self._store_devices:
             data = await self._store_devices.async_load() or {}
             for dev_data in data.get("devices", []):
+                _saved_phase = dev_data.get("phase", "?")
+                _saved_phase = _saved_phase if _saved_phase in ("L1","L2","L3","ALL","?") else "?"
                 dev = DetectedDevice(
                     device_id      = dev_data["device_id"],
                     device_type    = dev_data.get("device_type","unknown"),
@@ -1221,7 +1223,8 @@ class NILMDetector:
                     confirmed      = dev_data.get("confirmed", False),
                     detection_count= dev_data.get("detection_count", 1),
                     last_seen      = dev_data.get("last_seen", time.time()),
-                    phase          = dev_data.get("phase","L1") if dev_data.get("phase","L1") in ("L1","L2","L3","ALL") else "L1",
+                    # Fase altijd exact herstellen zoals opgeslagen — nooit overschrijven
+                    phase          = _saved_phase,
                     on_events      = dev_data.get("on_events", 0),
                     pending_confirmation = dev_data.get("pending", False),
                     user_feedback  = dev_data.get("user_feedback",""),
@@ -1238,6 +1241,25 @@ class NILMDetector:
                 )
                 dev.energy.device_id = dev.device_id
                 self._devices[dev.device_id] = dev
+                # Als fase bekend is uit storage, zet phase_votes zodat die niet
+                # overschreven wordt door de relearn-logica (v5.4.88)
+                if dev.phase in ("L1","L2","L3") and isinstance(dev.phase_votes, dict):
+                    _existing_votes = dev.phase_votes.get(dev.phase, 0)
+                    if _existing_votes < 5:
+                        dev.phase_votes[dev.phase] = 5  # minimale drempel zodat relearn niet snel overschrijft
+                # v5.4.24: herstel fase direct uit phase_votes als die sterk genoeg zijn
+                # Voorkomt dat "?" apparaten 20+ events nodig hebben na herstart
+                if dev.phase == "?" and isinstance(dev.phase_votes, dict):
+                    _total = sum(dev.phase_votes.values())
+                    if _total >= 3:
+                        _best = max(dev.phase_votes, key=dev.phase_votes.get)
+                        _pct  = dev.phase_votes[_best] / _total
+                        if _pct >= 0.6:  # 60% meerderheid voldoende bij herstart
+                            dev.phase = _best
+                            _LOGGER.debug(
+                                "NILM fase hersteld uit votes bij herstart: '%s' → %s (%.0f%% van %d)",
+                                dev.name, _best, _pct*100, _total
+                            )
 
         if self._store_energy:
             edata = await self._store_energy.async_load() or {}
@@ -1350,6 +1372,27 @@ class NILMDetector:
         await self._clusterer.async_save()
 
     # ── Power update ──────────────────────────────────────────────────────────
+
+    def feed_highres_batch(self, samples: list, phase: str = "L1") -> None:
+        """Verwerk een batch 1kHz samples van de ESPHome high-res reader.
+
+        Stuurt de samples als reeks naar update_power() zodat NILM
+        schakeldetectie kan profiteren van de hogere tijdresolutie.
+        Samples zijn floats (W). Timestamp wordt lineair geïnterpoleerd
+        over de batch op basis van de huidige tijd.
+
+        Gebruik: coordinator roept dit aan na get_power_array(1000) van
+        ESPhomeHighResReader — typisch ~1000 samples per seconde.
+        """
+        if not samples:
+            return
+        import time as _t
+        now = _t.time()
+        n   = len(samples)
+        dt  = 1.0 / max(n, 1)  # sample-interval in seconden
+        for i, pw in enumerate(samples):
+            ts = now - (n - 1 - i) * dt
+            self.update_power(phase, float(pw), timestamp=ts, source="highres_1khz")
 
     def update_power(self, phase: str, power_watt: float, timestamp: float = None,
                      source: str = "per_phase"):
@@ -2404,10 +2447,12 @@ class NILMDetector:
     # ── User feedback ─────────────────────────────────────────────────────────
 
     def set_feedback(self, device_id: str, feedback: str,
-                     corrected_name: str = "", corrected_type: str = "") -> None:
+                     corrected_name: str = "", corrected_type: str = "",
+                     corrected_phase: str = "") -> None:
         """
         feedback: 'correct' | 'incorrect' | 'maybe'
         When 'correct' or corrected type given, trains local AI.
+        corrected_phase: 'L1' | 'L2' | 'L3' — handmatige fase-override (persistent)
         """
         dev = self._devices.get(device_id)
         if not dev:
@@ -2423,6 +2468,11 @@ class NILMDetector:
             # v4.5: update device_type ook zodat display_type consistent is
             # en toekomstige relabeling het juiste oude type kent
             dev.device_type = corrected_type
+        if corrected_phase and corrected_phase in ("L1", "L2", "L3", "ALL"):
+            dev.phase = corrected_phase
+            # Versterk phase_votes zodat de fase na herstart ook hersteld wordt
+            dev.phase_votes[corrected_phase] = dev.phase_votes.get(corrected_phase, 0) + 10
+            _LOGGER.info("CloudEMS NILM: %s fase handmatig ingesteld op %s", device_id, corrected_phase)
 
         if feedback == NILM_FEEDBACK_CORRECT:
             dev.confirmed = True

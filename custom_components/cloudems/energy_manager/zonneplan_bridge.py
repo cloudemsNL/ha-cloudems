@@ -113,10 +113,11 @@ class ZPTariffGroup(str, Enum):
 
 # ── Beslissing-uitkomsten van decide_action() ──────────────────────────────
 class ZPAction(str, Enum):
-    CHARGE    = "charge"     # laden is aanbevolen
-    DISCHARGE = "discharge"  # ontladen is aanbevolen
-    HOLD      = "hold"       # niets doen / huisoptimalisatie
-    POWERPLAY = "powerplay"  # laat Zonneplan het zelf doen
+    CHARGE           = "charge"           # laden is aanbevolen
+    DISCHARGE        = "discharge"        # ontladen is aanbevolen
+    HOLD             = "hold"             # niets doen / huisoptimalisatie
+    POWERPLAY        = "powerplay"        # laat Zonneplan het zelf doen
+    SELF_CONSUMPTION = "self_consumption" # maximale zelfconsumptie zonnestroom
 
 
 _ENT_PATTERNS: dict[str, list[str]] = {
@@ -1291,18 +1292,36 @@ class ZonneplanProvider(BatteryProvider):
                         ),
                     )
 
-            reasons.append("NORMAL, geen duidelijke kans → Powerplay")
-            return DecisionResult(action=ZPAction.POWERPLAY, confidence=0.6,
+            # NORMAL tarief met veel PV surplus → self_consumption
+            # (maximale eigen zonnestroom opslaan, geen arbitrage nodig)
+            if pv.solar_surplus_w > 500 and soc < max_soc - 10:
+                reasons.append(
+                    f"NORMAL tarief + {pv.solar_surplus_w:.0f}W PV surplus → self_consumption"
+                )
+                return DecisionResult(
+                    action=ZPAction.SELF_CONSUMPTION,
+                    confidence=0.75,
+                    reasons=reasons,
+                    soc_target=max_soc,
+                    soc_reachable=soc,
+                    human_reason=(
+                        f"Er is {pv.solar_surplus_w:.0f}W PV-surplus. "
+                        f"Zelfconsumptie-modus: zoveel mogelijk eigen zonnestroom opslaan."
+                    ),
+                )
+
+            reasons.append("NORMAL, geen duidelijke kans → home_optimization")
+            return DecisionResult(action=ZPAction.HOLD, confidence=0.6,
                                   reasons=reasons, soc_target=soc_target,
                                   soc_reachable=soc,
-                                  human_reason="Normaal tarief, geen duidelijk voordeel — Zonneplan bepaalt zelf.")
+                                  human_reason="Normaal tarief, geen duidelijk voordeel — home_optimization (combineert powerplay + zelfconsumptie).")
 
         # Fallback
-        reasons.append(f"Onbekende tariefgroep '{tg}' → Powerplay")
-        return DecisionResult(action=ZPAction.POWERPLAY, confidence=0.5,
+        reasons.append(f"Onbekende tariefgroep '{tg}' → home_optimization")
+        return DecisionResult(action=ZPAction.HOLD, confidence=0.5,
                               reasons=reasons, soc_target=soc_target,
                               soc_reachable=soc,
-                              human_reason="Onbekende situatie — Zonneplan bepaalt zelf.")
+                              human_reason="Onbekende situatie — home_optimization als veilige standaard.")
 
     # ── Backwards-compat alias ─────────────────────────────────────────────────
 
@@ -1610,10 +1629,20 @@ class ZonneplanProvider(BatteryProvider):
             self._last_action_ts = __import__("time").time()
 
         elif result.action == ZPAction.POWERPLAY:
-            result.executed = "powerplay"  # ZP AI bepaalt, geen sturing
+            # Stuur powerplay modus naar Zonneplan — laat ZP AI bepalen
+            if self._last_state.active_mode != ZPControlMode.POWERPLAY.value:
+                ok = await self._send_control_mode(ZPControlMode.POWERPLAY.value)
+                if ok:
+                    result.executed = ZPControlMode.POWERPLAY.value
+                    _LOGGER.info("ZonneplanProvider: →powerplay (Zonneplan AI bepaalt)")
+            else:
+                result.executed = f"powerplay (al actief)"
+            self._last_expected_action = "powerplay"
+            self._last_action_ts = __import__("time").time()
+
+
         else:
             pass
-        # POWERPLAY: niets doen, Zonneplan AI bepaalt
 
         # ── PV-surplus slider optimalisatie met hysterese ──────────────────────────
         # Drempels: hoog-in = 700W surplus aanhoudend ≥ 60s, laag-uit = < 300W voor ≥ 120s

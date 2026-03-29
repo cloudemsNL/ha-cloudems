@@ -1,5 +1,5 @@
-// CloudEMS Phase Outlet Detector Card v1.0.0
-const CARD_PHASE_OUTLET_VERSION = '5.4.8';
+// CloudEMS Phase Outlet Detector Card v5.4.96
+const CARD_PHASE_OUTLET_VERSION = '5.4.96';
 // Auto-detected phase assignments for devices
 
 class CloudemsPhaseOutletCard extends HTMLElement {
@@ -56,7 +56,7 @@ class CloudemsPhaseOutletCard extends HTMLElement {
   .sum-lbl { font-size: 10px; color: rgba(163,163,163,.6); margin-top: 2px; }
 </style>
 <div class="card">
-  <div class="hdr"><span>⚡</span><span class="hdr-title">${c.title}</span></div>
+  <div class="hdr"><span class="hdr-title">${c.title}</span></div>
   ${total > 0 ? `
   <div class="progress">
     <div class="progress-row"><span>Detectievoortgang</span><span>${locked}/${total} apparaten</span></div>

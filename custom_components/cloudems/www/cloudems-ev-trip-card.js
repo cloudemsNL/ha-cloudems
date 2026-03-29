@@ -1,5 +1,5 @@
-// CloudEMS EV Trip Planner Card v1.0.0
-const CARD_EV_TRIP_VERSION = '5.4.8';
+// CloudEMS EV Trip Planner Card v5.4.96
+const CARD_EV_TRIP_VERSION = '5.4.96';
 // Calendar-based EV charging recommendations
 
 class CloudemsEvTripCard extends HTMLElement {
@@ -60,7 +60,7 @@ class CloudemsEvTripCard extends HTMLElement {
 </style>
 <div class="card">
   <div class="hdr">
-    <span>🗓️</span>
+    
     <span class="hdr-title">${c.title}</span>
     <span class="badge">${statusLabel}</span>
   </div>

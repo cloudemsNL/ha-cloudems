@@ -1,5 +1,5 @@
-// CloudEMS Atmospheric Heat Pump Card v1.0.0
-const CARD_ATMOSPHERIC_VERSION = '5.4.8';
+// CloudEMS Atmospheric Heat Pump Card v5.4.96
+const CARD_ATMOSPHERIC_VERSION = '5.4.96';
 
 class CloudemsAtmosphericCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
@@ -51,7 +51,7 @@ class CloudemsAtmosphericCard extends HTMLElement {
   .cond-item{font-size:11px;color:rgba(163,163,163,.7)}
 </style>
 <div class="card">
-  <div class="hdr"><span>🌡️</span><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
+  <div class="hdr"><span style="font-size:12px;font-weight:600;color:#fff;flex:1">${c.title}</span></div>
   <div class="risk-row">
     <div class="risk-num">${icing.toFixed(0)}%</div>
     <div class="risk-bar">

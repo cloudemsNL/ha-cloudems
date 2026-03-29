@@ -1,4 +1,4 @@
-// CloudEMS Energy Visual Card v1.0.0
+// CloudEMS Energy Visual Card v5.4.96
 // Animated energy flow with NILM device icons as nodes
 
 const EVC_VER = '1.0.0';
