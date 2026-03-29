@@ -10688,6 +10688,15 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
             if _bsl_result is not None:
                 # Capaciteit: geconfigureerd heeft voorrang, anders geleerd
+                # v5.5.12: feed span_cap_ema naar degradation tracker
+                if (_bsl_result.capacity_kwh and
+                        getattr(self, "_battery_degradation", None) and
+                        hasattr(self._battery_degradation, "record_measured_capacity")):
+                    try:
+                        self._battery_degradation.record_measured_capacity(_bsl_result.capacity_kwh)
+                    except Exception as _deg_err:
+                        _LOGGER.debug("CloudEMS: degradation measured cap fout: %s", _deg_err)
+
                 if not capacity_kwh and _bsl_result.capacity_kwh:
                     _learned = _bsl_result.capacity_kwh
                     # Sanity check: geleerde capaciteit moet realistisch zijn

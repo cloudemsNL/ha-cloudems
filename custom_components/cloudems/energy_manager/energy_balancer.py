@@ -529,6 +529,18 @@ class EnergyBalancer:
         _a_solar = self._solar.alpha
         _a_bat   = self._battery.alpha
         _house_alpha = (_a_grid + _a_solar + _a_bat) / 3.0
+
+        # v5.5.13: bij grote verandering in batterij of grid → house_alpha boosten
+        # Scenario 1: battery springt van 0 naar -9kW (Nexus ontladen gestart)
+        # Scenario 2: grid stopt opeens met exporteren (export → 0) terwijl battery nog -9kW toont
+        # Zonder boost: house_w spikt tijdelijk omdat trage battery.alpha nog niet bijgewerkt is
+        _bat_delta  = abs(self._battery.trend - (b_val or 0))
+        _grid_delta = abs(self._grid.trend    - (g_val or 0))
+        _max_delta  = max(_bat_delta, _grid_delta)
+        if _max_delta > 2000:
+            # Schaal: 2kW = +6%, 9kW = +27% boost op house_alpha
+            _boost = min(0.9, _max_delta / 10000.0)
+            _house_alpha = min(1.0, _house_alpha + _boost * 0.3)
         self._house_trend = (_house_alpha * house_w +
                              (1.0 - _house_alpha) * self._house_trend
                              if self._house_trend else house_w)

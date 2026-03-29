@@ -7857,7 +7857,16 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return (self.coordinator.data or {}).get("battery_savings", {})
+        data = self.coordinator.data or {}
+        attrs = dict(data.get("battery_savings", {}))
+        # v5.5.12: degradatie forecast vanuit BatteryDegradationTracker
+        _deg = getattr(self.coordinator, "_battery_degradation", None)
+        if _deg and hasattr(_deg, "get_forecast"):
+            try:
+                attrs["degradation_forecast"] = _deg.get_forecast()
+            except Exception:
+                pass
+        return attrs
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

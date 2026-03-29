@@ -1,5 +1,35 @@
 # CloudEMS Changelog
 
+## v5.5.14 (2026-03-29)
+- Fix: house_alpha boost ook bij grote grid-verandering
+  - Scenario: grid stopt exporteren maar battery toont nog -9kW → house spikt naar 11kW
+  - Fix: max(battery_delta, grid_delta) bepaalt de boost → beide triggers gedekt
+  - 2kW verandering = +6% boost, 9kW = +27% boost, normale situaties ongewijzigd
+
+## v5.5.13 (2026-03-29)
+- Fix: Kirchhoff huis-EMA te traag bij grote batterijverandering (Zonneplan Nexus)
+  - Nexus stuurt batterijdata traag → battery.alpha laag → house_alpha laag
+  - Bij vermogenssprong > 2kW: house_alpha tijdelijk geboosted (max +27% bij 9kW sprong)
+  - Kleine gerichte fix — normale situaties ongewijzigd
+
+## v5.5.12 (2026-03-29)
+- Nieuw: Batterij degradatie prognose op basis van gemeten capaciteit
+  - BatterySocLearner span-EMA koppelt aan BatteryDegradationTracker
+  - Maandelijkse capaciteits-snapshot bewaard (max 10 jaar / 120 maanden)
+  - Lineaire regressie op capaciteitsgeschiedenis → verlies kWh/jaar
+  - Prognose: over 5 jaar X kWh, over 10 jaar Y kWh, nog Z jaar tot 70% SoH
+  - 70% SoH = fabrikant "versleten" grens — accu werkt daarna nog jaren gewoon
+  - Batterij Levensduur kaart toont de prognose sectie zodra data beschikbaar is
+  - Eerste meting na één span (15%) al zichtbaar, betrouwbaarheid groeit met tijd
+
+## v5.5.11 (2026-03-29)
+- Fix: BatterySocLearner capaciteit fout geleerd (1.7 kWh ipv 10 kWh)
+  - Methode C toegevoegd: SoC-span EMA — elke span van X%→Y% + gemeten kWh = directe capaciteitsschatting
+  - Gewogen EMA: grote spans (40%) wegen zwaarder dan kleine spans (15%)
+  - 30%→70% + 3.8 kWh → capaciteit = 3.8/0.40 = 9.5 kWh, direct na eerste span correct
+  - Hoogste prioriteit boven methode A (Wh/SoC) en B (cyclus-mediaan)
+  - 0.0% afwijking getest op Zonneplan Nexus 10 kWh profiel
+
 ## v5.5.10 (2026-03-29)
 - Fix: batterij capaciteit 1.6 kWh ipv 10 kWh in Energie Potentieel kaart
   - BatterySocLearner soms verkeerde capaciteit leren bij Zonneplan Nexus

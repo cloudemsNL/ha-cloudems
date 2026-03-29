@@ -18,6 +18,7 @@ class CloudemsBatterijLevensduurCard extends HTMLElement {
     const sh = this.shadowRoot; if (!sh || !h) return;
     const a   = h.states["sensor.cloudems_battery_savings"]?.attributes || {};
     const _sohRaw = parseFloat(h.states["sensor.cloudems_battery_state_of_health"]?.state); const soh = isNaN(_sohRaw) ? 100 : _sohRaw;
+    const fc  = a.degradation_forecast || null;  // v5.5.12: gemeten degradatie prognose
     const soc = parseFloat(h.states["sensor.cloudems_battery_so_c"]?.state || 0);
 
     const totalCycles  = parseInt(a.sessions_year || 0) + (a.history_years||[]).reduce((s,y)=>s+y.sessions,0);
@@ -95,6 +96,45 @@ class CloudemsBatterijLevensduurCard extends HTMLElement {
 
   <div class="stats">
     ${yearsRemain != null ? `<div class="stat"><span class="stat-l">📅 Verwachte resterende levensduur</span><span class="stat-v" style="color:${colCycle}">~${yearsRemain} jaar</span></div>` : ""}
+    ${fc ? `
+    <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:10px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#64748b;margin-bottom:8px">
+        🔬 Gemeten degradatie ${fc.history_months > 1 ? '· '+fc.history_months+' maanden data' : '· eerste meting'}
+        ${fc.confidence < 0.5 ? '<span style="color:#475569"> (beperkte data)</span>' : ''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px;border:1px solid rgba(255,255,255,.06)">
+          <div style="font-size:9px;color:#64748b;margin-bottom:3px">Gemeten capaciteit</div>
+          <div style="font-size:14px;font-weight:700;font-family:monospace;color:#e2e8f0">${fc.current_kwh.toFixed(2)} kWh</div>
+          <div style="font-size:9px;color:#475569">${fc.current_soh_pct.toFixed(1)}% van ${fc.nominal_kwh} kWh</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px;border:1px solid rgba(255,255,255,.06)">
+          <div style="font-size:9px;color:#64748b;margin-bottom:3px">Verlies per jaar</div>
+          <div style="font-size:14px;font-weight:700;font-family:monospace;color:${fc.degradation_kwh_per_year>0.5?'#fb923c':'#4ade80'}">${fc.degradation_kwh_per_year.toFixed(2)} kWh</div>
+          <div style="font-size:9px;color:#475569">${fc.degradation_pct_per_year.toFixed(2)}% SoH/jaar</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px;border:1px solid rgba(255,255,255,.06)">
+          <div style="font-size:9px;color:#64748b;margin-bottom:3px">Tot 70% SoH</div>
+          <div style="font-size:14px;font-weight:700;font-family:monospace;color:${fc.years_to_eol<5?'#f87171':fc.years_to_eol<10?'#fbbf24':'#4ade80'}">${fc.years_to_eol >= 99 ? '20+ jaar' : fc.years_to_eol.toFixed(1)+' jaar'}</div>
+          <div style="font-size:9px;color:#475569">${fc.eol_kwh.toFixed(1)} kWh resteert</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px;border:1px solid rgba(255,255,255,.06)">
+          <div style="font-size:9px;color:#64748b;margin-bottom:3px">Over 5 jaar</div>
+          <div style="font-size:13px;font-weight:700;font-family:monospace;color:#94a3b8">${fc.projected_kwh_5y.toFixed(1)} kWh</div>
+          <div style="font-size:9px;color:#475569">${fc.projected_soh_5y.toFixed(0)}% SoH</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border-radius:7px;padding:8px;border:1px solid rgba(255,255,255,.06)">
+          <div style="font-size:9px;color:#64748b;margin-bottom:3px">Over 10 jaar</div>
+          <div style="font-size:13px;font-weight:700;font-family:monospace;color:#64748b">${fc.projected_kwh_10y.toFixed(1)} kWh</div>
+          <div style="font-size:9px;color:#475569">${fc.projected_soh_10y.toFixed(0)}% SoH — nog steeds bruikbaar</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#94a3b8;background:rgba(255,255,255,.03);border-radius:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.05)">
+        ${fc.life_message}
+      </div>
+    </div>` : ''}
     <div class="stat"><span class="stat-l">⚡ Gereden cycli totaal</span><span class="stat-v">${totalCycles.toLocaleString()}</span></div>
     <div class="stat"><span class="stat-l">🔌 Geladen dit jaar</span><span class="stat-v">${kwhYear.toFixed(0)} kWh</span></div>
     ${eff != null ? `<div class="stat"><span class="stat-l">♻️ Laad rendement</span><span class="stat-v" style="color:${eff>88?'#4ade80':eff>80?'#fbbf24':'#fb923c'}">${eff}%</span></div>` : ""}

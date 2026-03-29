@@ -62,6 +62,15 @@ class DegradationState:
     capacity_kwh_nominal:  float = 10.0
     capacity_kwh_current:  float = 10.0  # estimated remaining usable capacity
 
+    # ── Gemeten capaciteitsgeschiedenis (maandelijkse snapshots) ───────────────
+    # Elke entry: {"ts": unix_ts, "date": "YYYY-MM", "kwh": float, "soh_pct": float}
+    # Max 120 maanden (10 jaar)
+    capacity_history:      list  = field(default_factory=list)
+    last_snapshot_month:   str   = ""   # "YYYY-MM" van laatste snapshot
+    # Laatste gemeten capaciteit van BatterySocLearner span-EMA
+    measured_kwh:          Optional[float] = None
+    measured_kwh_ts:       float = 0.0
+
 
 @dataclass
 class DegradationResult:
@@ -116,6 +125,9 @@ class BatteryDegradationTracker:
             s.chemistry            = data.get("chemistry", self._chemistry)
             s.capacity_kwh_nominal = float(data.get("capacity_kwh_nominal", self._nominal_kwh))
             s.capacity_kwh_current = float(data.get("capacity_kwh_current", self._nominal_kwh))
+            s.capacity_history     = list(data.get("capacity_history", []))
+            s.last_snapshot_month  = str(data.get("last_snapshot_month", ""))
+            s.measured_kwh         = data.get("measured_kwh")
         _LOGGER.debug(
             "BatteryDegradationTracker ready — SoH=%.1f%% cycles=%.1f chemistry=%s",
             self._state.soh_pct, self._state.total_full_cycles, self._state.chemistry,
@@ -135,6 +147,9 @@ class BatteryDegradationTracker:
             "chemistry":            s.chemistry,
             "capacity_kwh_nominal": s.capacity_kwh_nominal,
             "capacity_kwh_current": s.capacity_kwh_current,
+            "capacity_history":     s.capacity_history[-120:],
+            "last_snapshot_month":  s.last_snapshot_month,
+            "measured_kwh":         s.measured_kwh,
         })
         self._dirty = False
 
@@ -210,6 +225,158 @@ class BatteryDegradationTracker:
             soc_high_events  = s.soc_high_events,
             days_tracked     = days_tracked,
         )
+
+    # ── Gemeten capaciteit koppelen ───────────────────────────────────────────
+
+    def record_measured_capacity(self, measured_kwh: float) -> None:
+        """
+        Koppel de gemeten capaciteit van BatterySocLearner span-EMA.
+        Wordt aangeroepen vanuit de coordinator als span_cap_ema update.
+        Maakt maandelijkse snapshot en herberekent SoH op basis van meting.
+        """
+        s = self._state
+        now = time.time()
+        month = datetime.fromtimestamp(now, tz=timezone.utc).strftime("%Y-%m")
+
+        # Update huidige meting
+        s.measured_kwh    = round(measured_kwh, 3)
+        s.measured_kwh_ts = now
+
+        # SoH herberekenen op basis van gemeten capaciteit
+        if s.capacity_kwh_nominal > 0:
+            measured_soh = (measured_kwh / s.capacity_kwh_nominal) * 100.0
+            # EMA met bestaande SoH — meting heeft hoog gewicht (0.3)
+            # want span-EMA is direct gemeten, niet geschat
+            if abs(measured_soh - s.soh_pct) > 0.5:
+                s.soh_pct = round(0.7 * s.soh_pct + 0.3 * measured_soh, 3)
+                s.capacity_kwh_current = round(s.capacity_kwh_nominal * s.soh_pct / 100.0, 2)
+                _LOGGER.info(
+                    "BatteryDegradation: gemeten cap=%.2f kWh → SoH=%.1f%%",
+                    measured_kwh, s.soh_pct,
+                )
+
+        # Maandelijkse snapshot
+        if month != s.last_snapshot_month:
+            s.capacity_history.append({
+                "ts":      round(now, 0),
+                "date":    month,
+                "kwh":     round(measured_kwh, 3),
+                "soh_pct": round(s.soh_pct, 2),
+            })
+            if len(s.capacity_history) > 120:
+                s.capacity_history = s.capacity_history[-120:]
+            s.last_snapshot_month = month
+            _LOGGER.info(
+                "BatteryDegradation: maandelijkse snapshot %s — %.2f kWh (SoH %.1f%%)",
+                month, measured_kwh, s.soh_pct,
+            )
+        self._dirty = True
+
+    def get_forecast(self) -> dict:
+        """
+        Berekent degradatieprognose op basis van historische capaciteitsmetingen.
+
+        Returns dict met:
+          degradation_kwh_per_year   — capaciteitsverlies per jaar
+          degradation_pct_per_year   — SoH verlies per jaar
+          years_to_eol               — jaren tot end-of-life (< eol_threshold)
+          years_to_80pct             — jaren tot 80% SoH (fabrikant-grens)
+          eol_kwh                    — capaciteit bij end-of-life
+          projected_soh_5y           — verwachte SoH over 5 jaar
+          projected_soh_10y          — verwachte SoH over 10 jaar
+          history_months             — aantal maanden data
+          confidence                 — 0-1 betrouwbaarheid
+          history                    — capaciteitsgeschiedenis
+        """
+        s = self._state
+        EOL_SOH_PCT = 70.0   # fabrikant-grens "versleten"
+        now = time.time()
+
+        # Minimaal 2 snapshots nodig voor trend
+        hist = s.capacity_history
+        if len(hist) < 2:
+            # Terugvallen op cyclus-gebaseerde schatting
+            days = max(1, (now - s.tracking_start_ts) / 86400)
+            years = days / 365.25
+            if years > 0.1 and s.soh_pct < 100.0:
+                deg_pct_yr = (100.0 - s.soh_pct) / years
+            else:
+                # Schat op basis van chemie en cycli/dag
+                cpd = s.total_full_cycles / max(1, days)
+                factor = CHEMISTRY_FACTORS.get(s.chemistry, 0.004)
+                deg_pct_yr = cpd * 365 * factor * 100
+            confidence = 0.2
+        else:
+            # Lineaire regressie op kapaciteitsgeschiedenis
+            # x = maanden geleden, y = kWh
+            times  = [e["ts"] for e in hist]
+            caps   = [e["kwh"] for e in hist]
+            n = len(times)
+            t0 = times[0]
+            xs = [(t - t0) / (365.25 * 24 * 3600) for t in times]  # in jaren
+
+            # Kleinste kwadraten regressie
+            mx = sum(xs) / n
+            my = sum(caps) / n
+            num = sum((x - mx) * (c - my) for x, c in zip(xs, caps))
+            den = sum((x - mx)**2 for x in xs)
+            if den > 0.001:
+                slope = num / den   # kWh per jaar (negatief = degradatie)
+            else:
+                slope = 0.0
+
+            deg_kwh_yr   = -slope   # positief getal = verlies per jaar
+            deg_pct_yr   = deg_kwh_yr / s.capacity_kwh_nominal * 100.0 if s.capacity_kwh_nominal > 0 else 0
+            # Meer data = hogere confidence
+            confidence   = min(0.95, 0.3 + len(hist) * 0.05)
+
+        # Huidige capaciteit
+        cur_kwh  = s.measured_kwh or s.capacity_kwh_current
+        cur_soh  = s.soh_pct
+        nom_kwh  = s.capacity_kwh_nominal
+
+        # Prognose
+        deg_kwh_yr = cur_soh / 100.0 * nom_kwh * (deg_pct_yr / 100.0) if 'deg_kwh_yr' not in dir() else deg_kwh_yr
+
+        eol_kwh    = nom_kwh * EOL_SOH_PCT / 100.0
+        kwh_to_eol = max(0.0, cur_kwh - eol_kwh)
+        yr_to_eol  = round(kwh_to_eol / deg_kwh_yr, 1) if deg_kwh_yr > 0.001 else 99.0
+        yr_to_80   = round(max(0.0, (cur_soh - 80.0) / max(deg_pct_yr, 0.001)), 1)
+
+        soh_5y  = round(max(0.0, cur_soh - deg_pct_yr * 5), 1)
+        soh_10y = round(max(0.0, cur_soh - deg_pct_yr * 10), 1)
+        kwh_5y  = round(nom_kwh * soh_5y / 100.0, 2)
+        kwh_10y = round(nom_kwh * soh_10y / 100.0, 2)
+
+        # Levensduur bericht
+        if yr_to_eol >= 20:
+            life_msg = f"Uitstekend — accu gaat nog zeker 20+ jaar mee"
+        elif yr_to_eol >= 10:
+            life_msg = f"Goed — verwachte resterende levensduur ~{yr_to_eol:.0f} jaar"
+        elif yr_to_eol >= 5:
+            life_msg = f"Normaal — accu verliest {deg_kwh_yr:.2f} kWh/jaar, ~{yr_to_eol:.0f} jaar tot fabrieksgrens"
+        else:
+            life_msg = f"Let op — accu nadert het einde bij ~{yr_to_eol:.1f} jaar"
+
+        return {
+            "degradation_kwh_per_year":  round(deg_kwh_yr, 3),
+            "degradation_pct_per_year":  round(deg_pct_yr, 2),
+            "years_to_eol":              yr_to_eol,
+            "years_to_80pct":            yr_to_80,
+            "eol_threshold_pct":         EOL_SOH_PCT,
+            "eol_kwh":                   round(eol_kwh, 2),
+            "projected_soh_5y":          soh_5y,
+            "projected_soh_10y":         soh_10y,
+            "projected_kwh_5y":          kwh_5y,
+            "projected_kwh_10y":         kwh_10y,
+            "current_kwh":               round(cur_kwh, 2),
+            "current_soh_pct":           round(cur_soh, 1),
+            "nominal_kwh":               nom_kwh,
+            "history_months":            len(hist),
+            "confidence":                round(confidence, 2),
+            "life_message":              life_msg,
+            "history":                   hist[-24:],  # laatste 2 jaar
+        }
 
     # ── Properties ────────────────────────────────────────────────────────────
 

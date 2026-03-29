@@ -158,6 +158,14 @@ class _State:
     # ── gecombineerde capaciteitsschatting ────────────────────────────────────
     est_capacity_kwh: Optional[float] = None
 
+    # ── SoC-span methode (methode C) ─────────────────────────────────────────
+    # Elke span van X%→Y% + gemeten kWh geeft directe capaciteitsschatting
+    # Grotere spans wegen zwaarder in de EMA
+    span_cap_ema:     Optional[float] = None   # gewogen EMA van alle span-metingen
+    span_cap_weight:  float = 0.0              # opgebouwde EMA-gewicht
+    _span_start_soc:  Optional[float] = None   # SoC bij start van huidige span
+    _span_wh_acc:     float = 0.0              # geaccumuleerde kWh in huidige span
+
     # ── serialisatie ──────────────────────────────────────────────────────────
     def to_dict(self) -> dict:
         return {
@@ -178,6 +186,8 @@ class _State:
             "cur_dir":         self.cur_dir,
             "dir_since_s":     self.dir_since_s,
             "est_capacity_kwh": self.est_capacity_kwh,
+            "span_cap_ema":     self.span_cap_ema,
+            "span_cap_weight":  self.span_cap_weight,
         }
 
     @classmethod
@@ -199,7 +209,9 @@ class _State:
         s.anchor_type     = d.get("anchor_type")
         s.cur_dir         = str(d.get("cur_dir", ""))
         s.dir_since_s     = float(d.get("dir_since_s", 0))
-        s.est_capacity_kwh = d.get("est_capacity_kwh")
+        s.est_capacity_kwh  = d.get("est_capacity_kwh")
+        s.span_cap_ema      = d.get("span_cap_ema")
+        s.span_cap_weight   = float(d.get("span_cap_weight", 0.0))
         return s
 
 
@@ -385,6 +397,66 @@ class BatterySocLearner:
                         if len(s.wh_per_pct) > 100:
                             s.wh_per_pct = s.wh_per_pct[-100:]
 
+        # ── Methode C: SoC-span capaciteitsschatting ─────────────────────────────
+        # Elke keer dat SoC over een meetbare span beweegt terwijl we het vermogen
+        # kennen, berekenen we de capaciteit direct:
+        #   capaciteit = kWh_delta / (soc_span / 100)
+        # Grotere spans geven nauwkeurigere schattingen en wegen zwaarder.
+        # EMA met span-grootte als gewicht → grote spans domineren, kleine spans
+        # corrigeren de waarde langzaam.
+        if (s.prev_soc is not None and power_w is not None):
+            # Gebruik dt_s direct (betrouwbaarder dan now - prev_ts bij simulaties/tests)
+            dt_h = dt_s / 3600.0
+            if 0 < dt_h < MAX_DT_H and abs(power_w) > MIN_POWER_W:
+                # Start of een nieuwe span als er nog geen actieve is
+                if s._span_start_soc is None:
+                    s._span_start_soc = s.prev_soc
+                    s._span_wh_acc    = 0.0
+
+                # Accumuleer kWh (altijd positief — spanning richtingsonafhankelijk)
+                s._span_wh_acc += abs(power_w) * dt_h
+
+                # Sluit span als SoC genoeg veranderd is (min 15% span)
+                span_pct = abs(soc_pct - s._span_start_soc)
+                if span_pct >= 15.0 and s._span_wh_acc > 200:  # min 200Wh
+                    # _span_wh_acc is in Wh → omrekenen naar kWh
+                    estimated = (s._span_wh_acc / 1000.0) / (span_pct / 100.0)
+                    # Sanity check: 2–30 kWh
+                    if 2.0 <= estimated <= 30.0:
+                        # Gewogen EMA: gewicht = span² (40% span weegt 4× meer dan 20% span)
+                        weight = (span_pct / 100.0) ** 2
+                        if s.span_cap_ema is None:
+                            s.span_cap_ema    = estimated
+                            s.span_cap_weight = weight
+                        else:
+                            # EMA: α = gewicht / (gewicht + opgebouwd_gewicht)
+                            # Groot gewicht (grote span) → α hoog → nieuwe meting weegt zwaar
+                            alpha = weight / (weight + s.span_cap_weight + 0.001)
+                            s.span_cap_ema    = (1 - alpha) * s.span_cap_ema + alpha * estimated
+                            s.span_cap_weight = min(s.span_cap_weight + weight, 50.0)
+                        _LOGGER.info(
+                            "BatterySocLearner: span %.0f%%→%.0f%% (%.0f%% span) "
+                            "%.2f kWh → cap=%.2f kWh (EMA=%.2f kWh, gewicht=%.2f)",
+                            s._span_start_soc, soc_pct, span_pct,
+                            s._span_wh_acc, estimated,
+                            s.span_cap_ema, s.span_cap_weight,
+                        )
+                    # Reset voor volgende span
+                    s._span_start_soc = soc_pct
+                    s._span_wh_acc    = 0.0
+
+                # Reset als richting wisselt (laden→ontladen of andersom)
+                # Kleine ruis in SoC accepteren we (< 2%)
+                elif s.prev_soc is not None and s._span_start_soc is not None:
+                    was_charging = power_w > 0
+                    direction_reversed = (
+                        (was_charging and soc_pct < s._span_start_soc - 2.0) or
+                        (not was_charging and soc_pct > s._span_start_soc + 2.0)
+                    )
+                    if direction_reversed:
+                        s._span_start_soc = soc_pct
+                        s._span_wh_acc    = 0.0
+
         s.prev_soc    = soc_pct
         s.prev_ts     = now
         s.inferred_soc = soc_pct   # sensor = ground truth
@@ -521,10 +593,18 @@ class BatterySocLearner:
     def _best_capacity(self, s: _State) -> Optional[float]:
         """
         Kies de beste capaciteitsschatting:
-          1. Cyclus-mediaan  (methode B, prioriteit als ≥ MIN_CAP_CYCLES)
+          0. SoC-span EMA    (methode C, hoogste prioriteit — directe meting)
+          1. Cyclus-mediaan  (methode B, als ≥ MIN_CAP_CYCLES)
           2. Wh/SoC%-mediaan (methode A, met sensor)
           3. Vorige schatting (cached)
+        Grotere spans en meer cycli geven meer gewicht aan methode C.
         """
+        # Methode C: SoC-span EMA — directe berekening, meest nauwkeurig
+        if s.span_cap_ema is not None and s.span_cap_weight >= 0.04:  # min 20% span gezien
+            if MIN_CAP_KWH <= s.span_cap_ema <= MAX_CAP_KWH:
+                s.est_capacity_kwh = round(s.span_cap_ema, 2)
+                return s.est_capacity_kwh
+
         # Methode B
         if len(s.cycle_kwh_hist) >= MIN_CAP_CYCLES:
             cap = median(s.cycle_kwh_hist)
