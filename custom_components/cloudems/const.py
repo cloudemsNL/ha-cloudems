@@ -64,6 +64,7 @@ CONF_WIZARD_MODE      = "wizard_mode"
 WIZARD_MODE_BASIC       = "basic"
 WIZARD_MODE_ADVANCED    = "advanced"
 WIZARD_MODE_ONBOARDING  = "onboarding"
+WIZARD_MODE_DEMO        = "demo"    # Demo modus — virtuele installatie, geen echte sensoren
 
 # ── v1.5: AI Provider ─────────────────────────────────────────────────────────
 CONF_AI_PROVIDER      = "ai_provider"

@@ -49,7 +49,7 @@ from .const import (
     GRID_SENSOR_KEYWORDS,
     PHASE_SENSOR_KEYWORDS_L1, PHASE_SENSOR_KEYWORDS_L2, PHASE_SENSOR_KEYWORDS_L3,
     GRID_EXCLUDE_KEYWORDS, PHASE_EXCLUDE_KEYWORDS, CURRENT_EXCLUDE_KEYWORDS, VOLTAGE_EXCLUDE_KEYWORDS,
-    CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED, WIZARD_MODE_ONBOARDING,
+    CONF_WIZARD_MODE, WIZARD_MODE_BASIC, WIZARD_MODE_ADVANCED, WIZARD_MODE_ONBOARDING, WIZARD_MODE_DEMO,
     CONF_AI_PROVIDER, AI_PROVIDER_NONE, AI_PROVIDER_CLOUDEMS,
     AI_PROVIDER_OPENAI, AI_PROVIDER_ANTHROPIC, AI_PROVIDER_OLLAMA,
     AI_PROVIDER_LABELS, AI_PROVIDERS_NEEDING_KEY,
@@ -110,6 +110,7 @@ def _wizard_mode_selector():
         selector.SelectOptionDict(value=WIZARD_MODE_BASIC,      label="🟢 Basic — quick setup, essential sensors only"),
         selector.SelectOptionDict(value=WIZARD_MODE_ADVANCED,   label="🔧 Advanced — full control over all sensors & features"),
         selector.SelectOptionDict(value=WIZARD_MODE_ONBOARDING, label="🚀 Interactieve wizard — sensoren kiezen via browser"),
+        selector.SelectOptionDict(value=WIZARD_MODE_DEMO,       label="🎮 Demo — virtuele installatie, geen echte sensoren nodig"),
     ]
     return selector.SelectSelector(selector.SelectSelectorConfig(options=opts, mode="list"))
 
@@ -531,6 +532,9 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Onboarding wizard modus: minimale setup + HA-notificatie met URL
             if user_input.get(CONF_WIZARD_MODE) == WIZARD_MODE_ONBOARDING:
                 return await self.async_step_onboarding_redirect()
+            # Demo modus: geen sensoren nodig, direct afronden met demo-config
+            if user_input.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+                return await self.async_step_demo_finish()
             # Auto-discover vanuit HA Energy dashboard
             from .energy_autodiscover import async_discover_from_energy_dashboard
             disc = await async_discover_from_energy_dashboard(self.hass)
@@ -555,6 +559,45 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "buy_me_coffee_url": BUY_ME_COFFEE_URL,
                 "website": "https://cloudems.eu",
             },
+        )
+
+    async def async_step_demo_finish(self, user_input=None):
+        """Demo modus: sla minimale config op en activeer demo engine direct.
+        Geen echte sensoren nodig — virtuele installatie met tijdversnelling."""
+        from .const import CONF_DEMO_ENABLED, CONF_DEMO_SPEED
+
+        # Demo config: minimale waarden, geen echte sensoren
+        self._config.update({
+            CONF_DEMO_ENABLED:    True,
+            CONF_DEMO_SPEED:      48,    # 48× tijdversnelling — dag in 30 min
+            CONF_WIZARD_MODE:     WIZARD_MODE_DEMO,
+            # Lege sensor-velden zodat coordinator niet crasht
+            "grid_sensor":        "",
+            "solar_sensor":       "",
+            "battery_sensor":     "",
+            "battery_soc_entity": "",
+        })
+
+        # Stuur HA-notificatie
+        try:
+            await self.hass.services.async_call(
+                "persistent_notification", "create", {
+                    "title": "CloudEMS Demo actief 🎮",
+                    "message": (
+                        "CloudEMS draait in demo modus.\n\n"
+                        "Een volledige dag wordt gesimuleerd in ~30 minuten (48× versnelling).\n"
+                        "Geen echte sensoren of apparaten worden aangestuurd.\n\n"
+                        "Activeer/deactiveer via: CloudEMS → Configureren → Systeem → Demo modus"
+                    ),
+                    "notification_id": "cloudems_demo_active",
+                }
+            )
+        except Exception:
+            pass
+
+        return self.async_create_entry(
+            title="CloudEMS Demo",
+            data=self._config,
         )
 
     async def async_step_onboarding_redirect(self, user_input=None):
@@ -2558,7 +2601,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(title=self._build_title(), data=self._config)
 
     def _build_title(self) -> str:
-        # v4.2.1: altijd "CloudEMS" — fasepresets in de titel zijn verwarrend
+        if self._config.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+            return "CloudEMS Demo"
         return "CloudEMS"
 
     # ── Reconfigure: re-run the full wizard on an existing entry ─────────────

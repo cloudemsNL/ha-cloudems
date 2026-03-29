@@ -100,7 +100,7 @@ class CloudEMSVersionSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_version_info"
-        self.entity_id = "sensor.cloudems_version_info"
+        self.entity_id = _eid(entry, "sensor.cloudems_version_info")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -141,7 +141,7 @@ class CloudEMSOptimizerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_optimizer"
-        self.entity_id = "sensor.cloudems_battery_optimizer"
+        self.entity_id = _eid(entry, "sensor.cloudems_battery_optimizer")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -192,6 +192,21 @@ class CloudEMSOptimizerSensor(CoordinatorEntity, SensorEntity):
                 for s in result.slots[:48]  # eerste 24 uur
             ],
         }
+
+
+def _eid(entry, entity_id: str) -> str:
+    """Geef de juiste entity_id terug op basis van de entry configuratie.
+    Demo-instantie: sensor.cloudems_X → sensor.cloudems_demo_X
+    Normale instantie: ongewijzigd.
+    """
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        return entity_id.replace("sensor.cloudems_", "sensor.cloudems_demo_", 1) \
+                        .replace("switch.cloudems_", "switch.cloudems_demo_", 1) \
+                        .replace("number.cloudems_", "number.cloudems_demo_", 1) \
+                        .replace("button.cloudems_", "button.cloudems_demo_", 1)
+    return entity_id
 
 
 async def async_setup_entry(
@@ -450,6 +465,23 @@ async def async_setup_entry(
     # een aparte unique_id-cache bijhoudt die niet gereset wordt.
     from homeassistant.helpers import entity_registry as _er_mod
     _er_fix = _er_mod.async_get(hass)
+
+    # Cleanup: verwijder verouderde demo entries met _2/_3 suffix
+    # die ontstaan zijn door entity_id conflicten bij eerdere installaties
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    _is_demo_entry = ({**entry.data, **entry.options}.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO)
+    if _is_demo_entry:
+        import re as _re
+        _stale = [
+            e for e in _er_fix.entities.values()
+            if e.config_entry_id == entry.entry_id
+            and _re.search(r"_\d+$", e.entity_id)
+        ]
+        for _stale_e in _stale:
+            try:
+                _er_fix.async_remove(_stale_e.entity_id)
+            except Exception:
+                pass
     _fixed = 0
     for _entity in entities:
         if not (hasattr(_entity, 'entity_id') and _entity.entity_id
@@ -459,6 +491,11 @@ async def async_setup_entry(
         _uid = _entity._attr_unique_id
         _existing_eid = _er_fix.async_get_entity_id("sensor", "cloudems", _uid)
         if _existing_eid and _existing_eid != _wanted_eid:
+            # Controleer dat dit registry-entry bij DEZE config entry hoort
+            # Nooit entries van een andere instantie aanraken
+            _reg_entry = _er_fix.async_get(_existing_eid)
+            if _reg_entry and _reg_entry.config_entry_id != entry.entry_id:
+                continue  # andere instantie — skip
             # Hernoem: pas de entity_id aan naar de gewenste waarde
             try:
                 _er_fix.async_update_entity(_existing_eid, new_entity_id=_wanted_eid)
@@ -479,28 +516,28 @@ async def async_setup_entry(
 
     # Check DIRECT na registratie welke sensoren er al in hass.states staan
     _WATCH = [
-        "sensor.cloudems_solar_system",
-        "sensor.cloudems_battery_so_c",
-        "sensor.cloudems_price_current_hour",
-        "sensor.cloudems_self_consumption",
+        _eid(entry, "sensor.cloudems_solar_system"),
+        _eid(entry, "sensor.cloudems_battery_so_c"),
+        _eid(entry, "sensor.cloudems_price_current_hour"),
+        _eid(entry, "sensor.cloudems_self_consumption"),
     ]
     async def _post_add_check():
         import asyncio as _asyncio
         await _asyncio.sleep(2)
         from homeassistant.helpers import entity_registry as _er2
         _er2_inst = _er2.async_get(hass)
-        for _eid in _WATCH:
-            _st = hass.states.get(_eid)
-            _reg2 = _er2_inst.async_get(_eid)
+        for _watch_eid in _WATCH:
+            _st = hass.states.get(_watch_eid)
+            _reg2 = _er2_inst.async_get(_watch_eid)
             # Zoek ook via unique_id
-            _uid = f"{entry.entry_id}_{_eid.split('cloudems_')[1]}"
-            _by_uid = _er2_inst.async_get_entity_id("sensor", "cloudems", _uid)
+            _uid2 = f"{entry.entry_id}_{_watch_eid.split('cloudems_')[-1]}"
+            _by_uid = _er2_inst.async_get_entity_id("sensor", "cloudems", _uid2)
             _LOG_TMP.warning(
                 "CloudEMS post-add: %s → hass.states=%s | registry=%s | by_uid(%s)=%s",
-                _eid,
+                _watch_eid,
                 _st.state if _st else "LEEG",
                 f"entry={_reg2.config_entry_id[:8]} uid={_reg2.unique_id} dis={_reg2.disabled_by}" if _reg2 else "LEEG",
-                _uid[:20],
+                _uid2[:20],
                 _by_uid or "NIET GEVONDEN"
             )
     hass.async_create_task(_post_add_check())
@@ -943,7 +980,7 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_home_rest"
-        self.entity_id = "sensor.cloudems_home_rest"
+        self.entity_id = _eid(entry, "sensor.cloudems_home_rest")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_HOUSE)
@@ -1169,6 +1206,7 @@ class CloudEMSBoilerStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_boiler_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_boiler_status")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
@@ -1214,7 +1252,7 @@ class CloudEMSEnergyDemandSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_energy_demand"
-        self.entity_id = "sensor.cloudems_energy_demand"
+        self.entity_id = _eid(entry, "sensor.cloudems_energy_demand")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1243,7 +1281,7 @@ class CloudEMSClimateEpexStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_climate_epex_status"
-        self.entity_id = "sensor.cloudems_climate_epex_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_climate_epex_status")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -1295,7 +1333,7 @@ class CloudEMSBoilerTempSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sens
         slug = re.sub(r"[^a-z0-9]+", "_", boiler_label.lower()).strip("_")
         self._attr_name       = f"CloudEMS Boiler · {boiler_label} · Temperatuur"
         self._attr_unique_id  = f"{entry.entry_id}_boiler_temp_{slug}"
-        self.entity_id        = f"sensor.cloudems_boiler_{slug}_temp"
+        self.entity_id = _eid(entry, f"sensor.cloudems_boiler_{slug}_temp")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
@@ -1335,7 +1373,7 @@ class CloudEMSBoilerPowerSensor(CoordinatorEntity, SensorEntity):
         slug = re.sub(r"[^a-z0-9]+", "_", boiler_label.lower()).strip("_")
         self._attr_name       = f"CloudEMS Boiler · {boiler_label} · Vermogen"
         self._attr_unique_id  = f"{entry.entry_id}_boiler_power_{slug}"
-        self.entity_id        = f"sensor.cloudems_boiler_{slug}_power"
+        self.entity_id = _eid(entry, f"sensor.cloudems_boiler_{slug}_power")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
@@ -1679,7 +1717,7 @@ class CloudEMSPhaseCurrentSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = f"CloudEMS Grid · Phase {phase} Current"
         self._attr_unique_id = f"{entry.entry_id}_current_{phase.lower()}"
         # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_current_l1/l2/l3
-        self.entity_id = f"sensor.cloudems_current_{phase.lower()}"
+        self.entity_id = _eid(entry, f"sensor.cloudems_current_{phase.lower()}")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -1726,7 +1764,7 @@ class CloudEMSPhaseSignedCurrentSensor(CoordinatorEntity, SensorEntity):
         self._phase = phase
         self._attr_name = f"CloudEMS Grid · Phase {phase} Signed Current"
         self._attr_unique_id = f"{entry.entry_id}_signed_current_{phase.lower()}"
-        self.entity_id = f"sensor.cloudems_signed_current_{phase.lower()}"
+        self.entity_id = _eid(entry, f"sensor.cloudems_signed_current_{phase.lower()}")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -1829,6 +1867,7 @@ class CloudEMSPhaseBalanceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_phase_balance"
+        self.entity_id = _eid(entry, "sensor.cloudems_grid_phase_imbalance")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -1915,6 +1954,7 @@ class CloudEMSForecastSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_pv_forecast_today"
+        self.entity_id = _eid(entry, "sensor.cloudems_pv_forecast_today")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SOLAR)
@@ -1948,6 +1988,7 @@ class CloudEMSForecastTomorrowSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_pv_forecast_tomorrow"
+        self.entity_id = _eid(entry, "sensor.cloudems_pv_forecast_tomorrow")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SOLAR)
@@ -2087,7 +2128,7 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_soc"
         # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_battery_so_c
-        self.entity_id = "sensor.cloudems_battery_so_c"
+        self.entity_id = _eid(entry, "sensor.cloudems_battery_so_c")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
@@ -2159,7 +2200,7 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry             = entry
         self._attr_unique_id    = f"{entry.entry_id}_battery_power_total"
-        self.entity_id          = "sensor.cloudems_battery_power"
+        self.entity_id = _eid(entry, "sensor.cloudems_battery_power")
         self._charge_kwh        = 0.0
         self._discharge_kwh     = 0.0
         self._last_day: int | None = None
@@ -2441,7 +2482,7 @@ class CloudEMSNilmGroupsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_groups"
-        self.entity_id = "sensor.cloudems_nilm_groups"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_groups")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -2472,7 +2513,7 @@ class CloudEMSNILMStatsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_stats"
-        self.entity_id = "sensor.cloudems_nilm_devices"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_devices")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -2691,7 +2732,7 @@ class CloudEMSCostSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_energy_cost"
-        self.entity_id = "sensor.cloudems_energy_cost"
+        self.entity_id = _eid(entry, "sensor.cloudems_energy_cost")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -2732,7 +2773,7 @@ class CloudEMSDagkostenSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_dagkosten_stroom"
-        self.entity_id = "sensor.cloudems_dagkosten_stroom"
+        self.entity_id = _eid(entry, "sensor.cloudems_dagkosten_stroom")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -2831,7 +2872,7 @@ class CloudEMSComfortScoreSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_comfort_score"
-        self.entity_id = "sensor.cloudems_comfort_score"
+        self.entity_id = _eid(entry, "sensor.cloudems_comfort_score")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_HOUSE)
@@ -2947,6 +2988,7 @@ class CloudEMSP1Sensor(AdaptiveForceUpdateMixin, CoordinatorEntity, SensorEntity
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_p1_power"
+        self.entity_id = _eid(entry, "sensor.cloudems_p1_power")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -2984,6 +3026,7 @@ class CloudEMSGridNetPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Se
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_grid_net_power"
+        self.entity_id = _eid(entry, "sensor.cloudems_grid_net_power")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -3052,6 +3095,7 @@ class CloudEMSGridImportPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity,
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_grid_import_power"
+        self.entity_id = _eid(entry, "sensor.cloudems_grid_import_power")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -3322,7 +3366,7 @@ class CloudEMSPriceCurrentSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_price_current_hour"
         # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_price_current_hour
-        self.entity_id = "sensor.cloudems_price_current_hour"
+        self.entity_id = _eid(entry, "sensor.cloudems_price_current_hour")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_PRICE)
@@ -3445,7 +3489,7 @@ class CloudEMSNILMReviewCurrentSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_current"
-        self.entity_id       = "sensor.cloudems_nilm_review_current"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_review_current")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -3491,7 +3535,7 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_running"
-        self.entity_id = "sensor.cloudems_nilm_running_devices"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_running_devices")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -3574,7 +3618,7 @@ class CloudEMSNILMRunningDevicesPowerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_running_power"
-        self.entity_id = "sensor.cloudems_nilm_running_devices_power"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_running_devices_power")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -3657,7 +3701,7 @@ class CloudEMSNILMTopDeviceSensor(CoordinatorEntity, SensorEntity):
         self._rank  = rank
         self._attr_unique_id = f"{entry.entry_id}_nilm_top_{rank}"
         # entity_id expliciet zodat de YAML ernaar kan verwijzen
-        self.entity_id = f"sensor.cloudems_nilm_top_{rank}_device"
+        self.entity_id = _eid(entry, f"sensor.cloudems_nilm_top_{rank}_device")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -3774,7 +3818,7 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_ai_status"
-        self.entity_id = "sensor.cloudems_ai_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_ai_status")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -4071,7 +4115,7 @@ class CloudEMSNILMDiagSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_diag"
-        self.entity_id = "sensor.cloudems_nilm_diagnostics"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_diagnostics")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -4210,7 +4254,7 @@ class CloudEMSNILMInputSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_input"
-        self.entity_id = "sensor.cloudems_nilm_sensor_input"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_sensor_input")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -4659,7 +4703,7 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_solar_system"
         # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_solar_system
-        self.entity_id = "sensor.cloudems_solar_system"
+        self.entity_id = _eid(entry, "sensor.cloudems_solar_system")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SOLAR)
@@ -5391,7 +5435,7 @@ class CloudEMSFlexScoreSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_flex_score"
-        self.entity_id = "sensor.cloudems_flexibel_vermogen"
+        self.entity_id = _eid(entry, "sensor.cloudems_flexibel_vermogen")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -5719,7 +5763,7 @@ class CloudEMSSelfConsumptionSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_self_consumption"
         # v4.5.4: explicit entity_id — dashboard uses sensor.cloudems_self_consumption
-        self.entity_id = "sensor.cloudems_self_consumption"
+        self.entity_id = _eid(entry, "sensor.cloudems_self_consumption")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SOLAR)
@@ -6232,6 +6276,7 @@ class CloudEMSBalancerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_energy_balancer"
+        self.entity_id = _eid(entry, "sensor.cloudems_energy_balancer")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -6532,7 +6577,7 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_hybrid_nilm"
-        self.entity_id = "sensor.cloudems_nilm_hybride_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_nilm_hybride_status")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -6710,7 +6755,7 @@ class CloudEMSWatchdogSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_watchdog"
-        self.entity_id = "sensor.cloudems_watchdog"
+        self.entity_id = _eid(entry, "sensor.cloudems_watchdog")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7012,7 +7057,7 @@ class CloudEMSWarmtepompCOPSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_warmtepomp_cop"
-        self.entity_id = "sensor.cloudems_warmtepomp_cop"
+        self.entity_id = _eid(entry, "sensor.cloudems_warmtepomp_cop")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GAS)
@@ -7095,7 +7140,7 @@ class CloudEMSSystemHealthSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_system_health"
         # Explicit entity_id — cards use sensor.cloudems_system_health
-        self.entity_id = "sensor.cloudems_system_health"
+        self.entity_id = _eid(entry, "sensor.cloudems_system_health")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7124,7 +7169,7 @@ class CloudEMSCardHealthSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_card_health"
-        self.entity_id = "sensor.cloudems_card_health"
+        self.entity_id = _eid(entry, "sensor.cloudems_card_health")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7269,7 +7314,7 @@ class CloudEMSGeneratorKostenSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_generator_kosten"
-        self.entity_id = "sensor.cloudems_generator_kosten_eur"
+        self.entity_id = _eid(entry, "sensor.cloudems_generator_kosten_eur")
         self._session_kwh:   float = 0.0
         self._session_cost:  float = 0.0
         self._total_cost:    float = 0.0
@@ -7337,7 +7382,7 @@ class CloudEMSMailStatusSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_mail_status"
         self._attr_name = "CloudEMS Mail Status"
-        self.entity_id = "sensor.cloudems_mail_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_mail_status")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7371,7 +7416,7 @@ class CloudEMSReportURLSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_last_report_url"
-        self.entity_id = "sensor.cloudems_last_report_url"
+        self.entity_id = _eid(entry, "sensor.cloudems_last_report_url")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -7408,7 +7453,7 @@ class CloudEMSSlaapstandSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_slaapstand"
-        self.entity_id = "sensor.cloudems_slaapstand"
+        self.entity_id = _eid(entry, "sensor.cloudems_slaapstand")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_HOUSE)
@@ -7439,7 +7484,7 @@ class CloudEMSKwartierPiekSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_kwartier_piek"
-        self.entity_id = "sensor.cloudems_kwartier_piek"
+        self.entity_id = _eid(entry, "sensor.cloudems_kwartier_piek")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -7467,7 +7512,7 @@ class CloudEMSWekelijkseVergelijkingSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_weekly_comparison"
-        self.entity_id = "sensor.cloudems_weekly_comparison"
+        self.entity_id = _eid(entry, "sensor.cloudems_weekly_comparison")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GAS)
@@ -7528,7 +7573,7 @@ class CloudEMSZoneClimateCostSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry           = entry
         self._attr_unique_id  = f"{entry.entry_id}_zone_climate_cost_today"
-        self.entity_id        = "sensor.cloudems_zone_klimaat_kosten_vandaag"
+        self.entity_id = _eid(entry, "sensor.cloudems_zone_klimaat_kosten_vandaag")
         self._attr_name       = "CloudEMS Klimaatkosten Vandaag"
         self._attr_icon       = "mdi:currency-eur"
         self._attr_native_unit_of_measurement = "EUR"
@@ -7577,6 +7622,7 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_status")
 
     @property
     def device_info(self): return _device_info(self._entry)
@@ -7656,7 +7702,7 @@ class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_standby_intelligence"
-        self.entity_id = "sensor.cloudems_standby_intelligence"
+        self.entity_id = _eid(entry, "sensor.cloudems_standby_intelligence")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -7679,7 +7725,7 @@ class CloudEMSVacationModeSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_vacation_mode"
-        self.entity_id = "sensor.cloudems_vacation_mode"
+        self.entity_id = _eid(entry, "sensor.cloudems_vacation_mode")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7702,7 +7748,7 @@ class CloudEMSApplianceDoneSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_appliance_done"
-        self.entity_id = "sensor.cloudems_appliance_done"
+        self.entity_id = _eid(entry, "sensor.cloudems_appliance_done")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_NILM)
@@ -7727,7 +7773,7 @@ class CloudEMSStandbyKillerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_standby_killer"
-        self.entity_id = "sensor.cloudems_standby_killer"
+        self.entity_id = _eid(entry, "sensor.cloudems_standby_killer")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -7755,7 +7801,7 @@ class CloudEMSEVTripPlannerSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_ev_trip_planner"
-        self.entity_id = "sensor.cloudems_ev_trip_planner"
+        self.entity_id = _eid(entry, "sensor.cloudems_ev_trip_planner")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_EV)
@@ -7784,7 +7830,7 @@ class CloudEMSPhaseOutletSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_phase_outlet_detector"
-        self.entity_id = "sensor.cloudems_phase_outlet_detector"
+        self.entity_id = _eid(entry, "sensor.cloudems_phase_outlet_detector")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -7844,7 +7890,7 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_savings"
-        self.entity_id = "sensor.cloudems_battery_savings"
+        self.entity_id = _eid(entry, "sensor.cloudems_battery_savings")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
@@ -8106,6 +8152,7 @@ class CloudEMSMeterTopologySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_meter_topology"
+        self.entity_id = _eid(entry, "sensor.cloudems_meter_topology")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -8299,7 +8346,7 @@ class CloudEMSDecisionsHistorySensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Beslissingen Geschiedenis"
         self._attr_unique_id = f"{entry.entry_id}_decisions_history"
-        self.entity_id       = "sensor.cloudems_decisions_history"
+        self.entity_id = _eid(entry, "sensor.cloudems_decisions_history")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8339,7 +8386,7 @@ class CloudEMSBatterijSOCSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sen
         self._entry          = entry
         self._attr_name      = "CloudEMS Batterij SOC"
         self._attr_unique_id = f"{entry.entry_id}_batterij_soc"
-        self.entity_id       = "sensor.cloudems_batterij_soc"
+        self.entity_id = _eid(entry, "sensor.cloudems_batterij_soc")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8376,7 +8423,7 @@ class CloudEMSNetVermogenSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sen
         self._entry          = entry
         self._attr_name      = "CloudEMS Net Vermogen"
         self._attr_unique_id = f"{entry.entry_id}_net_vermogen"
-        self.entity_id       = "sensor.cloudems_net_vermogen"
+        self.entity_id = _eid(entry, "sensor.cloudems_net_vermogen")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8401,7 +8448,7 @@ class CloudEMSZonVermogenSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Sen
         self._entry          = entry
         self._attr_name      = "CloudEMS Zon Vermogen"
         self._attr_unique_id = f"{entry.entry_id}_zon_vermogen"
-        self.entity_id       = "sensor.cloudems_zon_vermogen"
+        self.entity_id = _eid(entry, "sensor.cloudems_zon_vermogen")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SOLAR)
@@ -8426,7 +8473,7 @@ class CloudEMSBoilerSetpointSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, 
         self._entry          = entry
         self._attr_name      = "CloudEMS Boiler Setpoint"
         self._attr_unique_id = f"{entry.entry_id}_boiler_setpoint"
-        self.entity_id       = "sensor.cloudems_boiler_setpoint"
+        self.entity_id = _eid(entry, "sensor.cloudems_boiler_setpoint")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
@@ -8475,7 +8522,7 @@ class CloudEMSSliderLeverenSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Slider Leveren aan Huis"
         self._attr_unique_id = f"{entry.entry_id}_slider_leveren"
-        self.entity_id       = "sensor.cloudems_slider_leveren"
+        self.entity_id = _eid(entry, "sensor.cloudems_slider_leveren")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8501,7 +8548,7 @@ class CloudEMSSliderZonladenSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Slider Zonneladen"
         self._attr_unique_id = f"{entry.entry_id}_slider_zonladen"
-        self.entity_id       = "sensor.cloudems_slider_zonladen"
+        self.entity_id = _eid(entry, "sensor.cloudems_slider_zonladen")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8535,7 +8582,7 @@ class CloudEMSBoilerEfficiencySensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Boiler Efficiëntie"
         self._attr_unique_id = f"{entry.entry_id}_boiler_efficiency"
-        self.entity_id       = "sensor.cloudems_boiler_efficiency"
+        self.entity_id = _eid(entry, "sensor.cloudems_boiler_efficiency")
         self._samples: list[dict] = []  # rolling window van heating cycles
 
     @property
@@ -8624,7 +8671,7 @@ class CloudEMSGoedkoopstelaadmomentSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Goedkoopste Laadmoment"
         self._attr_unique_id = f"{entry.entry_id}_goedkoopste_laadmoment"
-        self.entity_id       = "sensor.cloudems_goedkoopste_laadmoment"
+        self.entity_id = _eid(entry, "sensor.cloudems_goedkoopste_laadmoment")
         self._last_notify_ts = 0.0
 
     @property
@@ -8717,7 +8764,7 @@ class CloudEMSSeizoensvergelijkingSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Seizoensvergelijking"
         self._attr_unique_id = f"{entry.entry_id}_seizoensvergelijking"
-        self.entity_id       = "sensor.cloudems_seizoensvergelijking"
+        self.entity_id = _eid(entry, "sensor.cloudems_seizoensvergelijking")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -8808,7 +8855,7 @@ class CloudEMSBoilerPlanningsSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Boiler Planning"
         self._attr_unique_id = f"{entry.entry_id}_boiler_planning"
-        self.entity_id       = "sensor.cloudems_boiler_planning"
+        self.entity_id = _eid(entry, "sensor.cloudems_boiler_planning")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BOILER)
@@ -8895,7 +8942,7 @@ class CloudEMSAnomalieGridSensor(CoordinatorEntity, SensorEntity):
         self._entry              = entry
         self._attr_name          = "CloudEMS Anomalie Netverbruik"
         self._attr_unique_id     = f"{entry.entry_id}_anomalie_grid"
-        self.entity_id           = "sensor.cloudems_anomalie_grid"
+        self.entity_id = _eid(entry, "sensor.cloudems_anomalie_grid")
         self._anomaly_start_ts   = 0.0
         self._last_notify_ts     = 0.0
         self._notify_threshold_s = 15 * 60  # 15 minuten aanhoudend
@@ -8982,7 +9029,7 @@ class CloudEMSBoilerEfficiencyV2Sensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Boiler Efficiëntie Gemiddeld"
         self._attr_unique_id = f"{entry.entry_id}_boiler_efficiency_avg"
-        self.entity_id       = "sensor.cloudems_boiler_efficiency_avg"
+        self.entity_id = _eid(entry, "sensor.cloudems_boiler_efficiency_avg")
         self._samples:   list[float] = []   # laatste 10 cyclus-efficiënties
         self._last_cycle_kwh = 0.0
         self._last_temp_c    = None
@@ -9073,7 +9120,7 @@ class CloudEMSTelemetrySensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Telemetrie"
         self._attr_unique_id = f"{entry.entry_id}_telemetry"
-        self.entity_id       = "sensor.cloudems_telemetry"
+        self.entity_id = _eid(entry, "sensor.cloudems_telemetry")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9120,7 +9167,7 @@ class CloudEMSPerformanceSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Performance"
         self._attr_unique_id = f"{entry.entry_id}_performance"
-        self.entity_id       = "sensor.cloudems_performance"
+        self.entity_id = _eid(entry, "sensor.cloudems_performance")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9176,7 +9223,7 @@ class CloudEMSShutterLearnProgressSensor(CoordinatorEntity, SensorEntity):
         safe             = self._shutter_id.split(".")[-1].replace("-", "_")
         self._attr_name      = f"CloudEMS Tijdleren Voortgang {label}"
         self._attr_unique_id = f"{entry.entry_id}_shutter_learn_progress_{safe}"
-        self.entity_id       = f"sensor.cloudems_rolluik_{safe}_leer_voortgang"
+        self.entity_id = _eid(entry, f"sensor.cloudems_rolluik_{safe}_leer_voortgang")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SHUTTER)
@@ -9241,7 +9288,7 @@ class CloudEMSWindsnelheidSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_windsnelheid"
-        self.entity_id       = "sensor.cloudems_windsnelheid"
+        self.entity_id = _eid(entry, "sensor.cloudems_windsnelheid")
 
     @property
     def device_info(self):
@@ -9290,7 +9337,7 @@ class CloudEMSDecisionLearnerSensor(CoordinatorEntity, SensorEntity):
         self._entry          = entry
         self._attr_name      = "CloudEMS Decision Outcome Learner"
         self._attr_unique_id = f"{entry.entry_id}_decision_learner"
-        self.entity_id       = "sensor.cloudems_decision_learner"
+        self.entity_id = _eid(entry, "sensor.cloudems_decision_learner")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -9320,7 +9367,7 @@ class CloudEMSCircadianNudgeSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_circadian_nudge"
-        self.entity_id = "sensor.cloudems_circadian_nudge"
+        self.entity_id = _eid(entry, "sensor.cloudems_circadian_nudge")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9344,7 +9391,7 @@ class CloudEMSGeofencingSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_geofencing"
-        self.entity_id = "sensor.cloudems_geofencing"
+        self.entity_id = _eid(entry, "sensor.cloudems_geofencing")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9367,7 +9414,7 @@ class CloudEMSSleepGroupSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_sleep_group"
-        self.entity_id = "sensor.cloudems_sleep_group"
+        self.entity_id = _eid(entry, "sensor.cloudems_sleep_group")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9391,7 +9438,7 @@ class CloudEMSNeighbourhoodSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_neighbourhood"
-        self.entity_id = "sensor.cloudems_neighbourhood"
+        self.entity_id = _eid(entry, "sensor.cloudems_neighbourhood")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -9415,7 +9462,7 @@ class CloudEMSPowerQualitySensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_power_quality"
-        self.entity_id = "sensor.cloudems_power_quality"
+        self.entity_id = _eid(entry, "sensor.cloudems_power_quality")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -9439,7 +9486,7 @@ class CloudEMSBlackoutGuardSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_blackout_guard"
-        self.entity_id = "sensor.cloudems_blackout_guard"
+        self.entity_id = _eid(entry, "sensor.cloudems_blackout_guard")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -9462,7 +9509,7 @@ class CloudEMSLifecycleArbitrageSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_lifecycle_arbitrage"
-        self.entity_id = "sensor.cloudems_lifecycle_arbitrage"
+        self.entity_id = _eid(entry, "sensor.cloudems_lifecycle_arbitrage")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
@@ -9486,7 +9533,7 @@ class CloudEMSAtmosphericHPSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_atmospheric_hp"
-        self.entity_id = "sensor.cloudems_atmospheric_hp"
+        self.entity_id = _eid(entry, "sensor.cloudems_atmospheric_hp")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_ZONE_CLIMATE)
@@ -9509,7 +9556,7 @@ class CloudEMSVvESensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_vve"
-        self.entity_id = "sensor.cloudems_vve"
+        self.entity_id = _eid(entry, "sensor.cloudems_vve")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -9532,7 +9579,7 @@ class CloudEMSFCRAFRRSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_fcr_afrr"
-        self.entity_id = "sensor.cloudems_fcr_afrr"
+        self.entity_id = _eid(entry, "sensor.cloudems_fcr_afrr")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
@@ -9560,7 +9607,7 @@ class CloudEMSAISensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_ai_status"
-        self.entity_id = "sensor.cloudems_ai_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_ai_status")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_ZELFLEREND)
@@ -9590,7 +9637,7 @@ class CloudEMSProStatusSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_pro_status"
-        self.entity_id = "sensor.cloudems_pro_status"
+        self.entity_id = _eid(entry, "sensor.cloudems_pro_status")
 
     @property
     def device_info(self): return main_device_info(self._entry)
@@ -9623,7 +9670,7 @@ class CloudEMSIsoSettingsSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_iso_settings"
-        self.entity_id = "sensor.cloudems_iso_settings"
+        self.entity_id = _eid(entry, "sensor.cloudems_iso_settings")
 
     @property
     def device_info(self): return main_device_info(self._entry)

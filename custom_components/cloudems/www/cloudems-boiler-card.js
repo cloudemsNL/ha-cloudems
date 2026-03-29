@@ -325,8 +325,8 @@ class CloudemsBoilerCard extends HTMLElement {
       }).catch(()=>{});
     }
   }
-  _adjustSetpoint(eid,delta){if(!this._hass||!eid)return;const st=this._hass.states[eid];const cur=parseFloat(st?.attributes?.temperature??53);this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:Math.max(35,Math.min(80,cur+delta))});}
-  _setSetpoint(eid,temp){if(!this._hass||!eid)return;this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:temp});}
+  _adjustSetpoint(eid,delta){if(!this._hass||!eid)return;const st=this._hass.states[eid];const cur=parseFloat(st?.attributes?.temperature??53);const t=Math.max(35,Math.min(80,cur+delta));this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:t}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:t}));}
+  _setSetpoint(eid,temp){if(!this._hass||!eid)return;this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:temp}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:temp}));}
 
   _renderLiveTab(b,cfg,hass,statusSensor){
     const labelSlug=(b.label||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/,'');
@@ -383,7 +383,7 @@ class CloudemsBoilerCard extends HTMLElement {
         <button onclick="this.getRootNode().host._adjustSetpoint('${vbSt.entity_id}', +1)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
       </div>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        ${[{l:'Nacht',v:45},{l:'Normaal',v:vbSp||53},{l:'PV-boost',v:Math.round(maxSp)}].map(p=>`<button onclick="this.getRootNode().host._setSetpoint('${vbSt.entity_id}',${p.v})" style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:${vbSp!=null&&Math.round(vbSp)===p.v?'rgba(255,214,0,.15)':'rgba(255,255,255,.04)'};color:${vbSp!=null&&Math.round(vbSp)===p.v?'#ffd600':'rgba(255,255,255,.5)'};font-size:10px;cursor:pointer">${p.l}<br><span style="font-size:9px;opacity:.7">${p.v}°</span></button>`).join('')}
+        ${[{l:'Nacht',v:45},{l:'Normaal',v:b.max_setpoint_green_c||53},{l:'PV-boost',v:Math.round(maxSp)}].map(p=>`<button onclick="this.getRootNode().host._setSetpoint('${vbSt.entity_id}',${p.v})" style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:${vbSp!=null&&Math.round(vbSp)===p.v?'rgba(255,214,0,.15)':'rgba(255,255,255,.04)'};color:${vbSp!=null&&Math.round(vbSp)===p.v?'#ffd600':'rgba(255,255,255,.5)'};font-size:10px;cursor:pointer">${p.l}<br><span style="font-size:9px;opacity:.7">${p.v}°</span></button>`).join('')}
       </div></div>`:'';
 
     return `

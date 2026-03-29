@@ -23,6 +23,19 @@ from .diagnostics import build_markdown_report
 _LOGGER = logging.getLogger(__name__)
 
 
+def _eid(entry, entity_id: str) -> str:
+    """Demo-aware entity_id helper."""
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        for prefix in ("sensor.", "switch.", "number.", "button.", "climate.", "water_heater."):
+            if entity_id.startswith(prefix + "cloudems_"):
+                return entity_id.replace(
+                    prefix + "cloudems_",
+                    prefix + "cloudems_demo_", 1)
+    return entity_id
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -102,7 +115,8 @@ class CloudEMSForceUpdateButton(CoordinatorEntity, ButtonEntity):
 
     def __init__(self, coordinator: CloudEMSCoordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_force_update"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_force_update"
+        self.entity_id = _eid(coordinator.config_entry, "button.cloudems_bijwerken")
         self._attr_name = "CloudEMS Bijwerken"
         self._attr_device_info = _device_info(coordinator)
 
@@ -122,7 +136,7 @@ class CloudEMSDiagnosticsButton(CoordinatorEntity, ButtonEntity):
 
     def __init__(self, coordinator: CloudEMSCoordinator, entry: ConfigEntry):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_diagnostics"
+        self._attr_unique_id = f"{entry.entry_id}_diagnostics"
         self._attr_name = "CloudEMS Diagnoserapport"
         self._attr_device_info = _device_info(coordinator)
         self._entry = entry
@@ -147,7 +161,7 @@ class CloudEMSBuyMeCoffeeButton(CoordinatorEntity, ButtonEntity):
 
     def __init__(self, coordinator: CloudEMSCoordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_buy_me_coffee"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_buy_me_coffee"
         self._attr_name = "CloudEMS ☕ Buy Me a Coffee"
         self._attr_device_info = _device_info(coordinator)
         self._attr_extra_state_attributes = {"url": BUY_ME_COFFEE_URL}
@@ -200,7 +214,7 @@ class CloudEMSNILMCleanupFullButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_full"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_full"
         self._attr_name = "CloudEMS NILM Volledig opruimen"
 
 
@@ -212,7 +226,7 @@ class CloudEMSNILMCleanup7DaysButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_7d"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_7d"
         self._attr_name = "CloudEMS NILM Opruimen (laatste 7 dagen)"
 
 
@@ -224,7 +238,7 @@ class CloudEMSNILMCleanup30DaysButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_30d"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_30d"
         self._attr_name = "CloudEMS NILM Opruimen (laatste 30 dagen)"
 
 
@@ -235,7 +249,7 @@ class CloudEMSNILMCleanupEnergyButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_energy"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_energy"
         self._attr_name = "CloudEMS NILM Energietellers resetten"
 
 
@@ -246,7 +260,7 @@ class CloudEMSNILMCleanupWeekButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_week"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_week"
         self._attr_name = "CloudEMS NILM Week resetten"
 
 
@@ -257,7 +271,7 @@ class CloudEMSNILMCleanupMonthButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_month"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_month"
         self._attr_name = "CloudEMS NILM Maand resetten"
 
 
@@ -268,7 +282,7 @@ class CloudEMSNILMCleanupYearButton(_NILMCleanupBase):
 
     def __init__(self, coordinator):
         super().__init__(coordinator)
-        self._attr_unique_id = f"{DOMAIN}_nilm_cleanup_year"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_nilm_cleanup_year"
         self._attr_name = "CloudEMS NILM Jaar resetten"
 
 
@@ -349,7 +363,7 @@ class CloudEMSNILMReviewConfirmButton(_NILMReviewQueueBase):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_confirm"
-        self.entity_id       = "button.cloudems_nilm_review_confirm"
+        self.entity_id = _eid(entry, "button.cloudems_nilm_review_confirm")
 
     @property
     def name(self) -> str:
@@ -371,7 +385,7 @@ class CloudEMSNILMReviewDismissButton(_NILMReviewQueueBase):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_dismiss"
-        self.entity_id       = "button.cloudems_nilm_review_dismiss"
+        self.entity_id = _eid(entry, "button.cloudems_nilm_review_dismiss")
 
     @property
     def name(self) -> str:
@@ -393,7 +407,7 @@ class CloudEMSNILMReviewMaybeButton(_NILMReviewQueueBase):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_maybe"
-        self.entity_id       = "button.cloudems_nilm_review_maybe"
+        self.entity_id = _eid(entry, "button.cloudems_nilm_review_maybe")
         self._attr_name      = "❓ Weet ik niet"
 
     async def async_press(self) -> None:
@@ -410,7 +424,7 @@ class CloudEMSNILMReviewSkipButton(_NILMReviewQueueBase):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_skip"
-        self.entity_id       = "button.cloudems_nilm_review_skip"
+        self.entity_id = _eid(entry, "button.cloudems_nilm_review_skip")
         self._attr_name      = "⏭ Volgende"
 
     async def async_press(self) -> None:
@@ -427,7 +441,7 @@ class CloudEMSNILMReviewPreviousButton(_NILMReviewQueueBase):
     def __init__(self, coordinator, entry) -> None:
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_nilm_review_previous"
-        self.entity_id       = "button.cloudems_nilm_review_previous"
+        self.entity_id = _eid(entry, "button.cloudems_nilm_review_previous")
         self._attr_name      = "⏮ Vorige"
 
     @property
@@ -480,7 +494,7 @@ class CloudEMSShutterButton(CoordinatorEntity, ButtonEntity):
         self._entry_id        = entry.entry_id
         safe_id               = cover_entity_id.split(".")[-1].replace("-", "_")
         self._attr_unique_id  = f"{entry.entry_id}_shutter_{safe_id}_{action}"
-        self.entity_id        = f"button.cloudems_shutter_{safe_id}_{action}"
+        self.entity_id = _eid(entry, f"button.cloudems_shutter_{safe_id}_{action}")
         self._attr_name       = f"{label} — {action_label}"
         self._attr_icon       = {
             "open":      "mdi:arrow-up-box",
@@ -522,11 +536,15 @@ class CloudEMSSliderCalibrateButton(CoordinatorEntity, ButtonEntity):
 
     _attr_name       = "CloudEMS Slider kalibratie"
     _attr_icon       = "mdi:tune-variant"
-    _attr_unique_id  = f"{DOMAIN}_slider_kalibratie"
+    # unique_id set in __init__ for multi-instance support
+    # # unique_id via __init__: f"{entry_id}_slider_kalibratie"
     entity_id        = "button.cloudems_slider_kalibratie"
 
     def __init__(self, coordinator: CloudEMSCoordinator) -> None:
         super().__init__(coordinator)
+        _eid_sfx = "slider_kalibratie"
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{_eid_sfx}"
+        self.entity_id = _eid(coordinator.config_entry, "button.cloudems_slider_kalibratie")
 
     @property
     def device_info(self):
@@ -571,11 +589,11 @@ class CloudEMSSliderMaxProbeButton(CoordinatorEntity, ButtonEntity):
 
     _attr_name      = "CloudEMS Slider max vernieuwen"
     _attr_icon      = "mdi:refresh"
-    _attr_unique_id = f"{DOMAIN}_slider_max_probe"
-    entity_id       = "button.cloudems_slider_max_probe"
 
     def __init__(self, coordinator: CloudEMSCoordinator) -> None:
         super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_slider_max_probe"
+        self.entity_id = _eid(coordinator.config_entry, "button.cloudems_slider_max_probe")
 
     @property
     def device_info(self):

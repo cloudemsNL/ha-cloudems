@@ -1,5 +1,212 @@
 # CloudEMS Changelog
 
+## v5.5.44 (2026-03-29)
+- Fix: has_gas_heating was nooit True — geen wizard knop beschikbaar
+  - Alle gas-checks (v5.5.32-5.5.43) faalden omdat has_gas_heating altijd "" was
+  - Fix: coordinator detecteert automatisch of gas geconfigureerd is
+  - Als gas_sensor of gas_price_sensor aanwezig → has_gas_heating="yes" voor alle boilers
+  - Gebruiker hoeft niets in te stellen — gas config = gas aanwezig
+
+## v5.5.40 (2026-03-29)
+- Fix: mismatch correctie werd geskipped als pending_preset gevuld was
+  - Na elk turn_on commando: pending_preset = "boost" 
+  - _do_mismatch_correction: if pending_preset → return (skip)
+  - Maar als force_green verandert, klopt pending_preset ook niet meer
+  - Fix: als pending_preset ≠ gewenste preset → reset pending → correctie gaat door
+  - Gecombineerd met v5.5.39 all-in prijs fix: nu beide pijlen in dezelfde richting
+
+## v5.5.39 (2026-03-29)
+- Fix: gas-check gebruikte EPEX raw prijs ipv all-in prijs
+  - EPEX raw = 7.1 ct/kWh, gas thermisch = 14.2 ct/kWh → 7.1 < 14.2 → GEEN force_green
+  - All-in prijs = 21.7 ct/kWh → 21.7 > 14.2 → force_green=True (correct)
+  - Oorzaak: price_info["current"] = EPEX raw, price_info["current_all_in"] = all-in incl. belasting
+  - Fix: gebruik current_all_in in alle gas-checks in boiler_controller
+  - Gesimuleerd: alle waarden uit echte log, alle edge cases OK
+
+## v5.5.38 (2026-03-29)
+- Refactor: gas-check en mismatch correctie in helper methoden
+  - _apply_gas_check_and_mismatch() en _do_mismatch_correction()
+  - Alle 3 paden gebruiken dezelfde helper: _evaluate_single, _group_sequential, _group_parallel
+  - Toekomstige paden hoeven alleen de helper aan te roepen
+  - Getest: alle 3 paden + edge cases gesimuleerd voor release
+
+## v5.5.37 (2026-03-29)
+- Fix: BOOST bleef actief in cascade/seq pad (definitieve fix)
+  - Eerdere fixes zaten in _evaluate_single, niet in _group_sequential
+  - Cascade boilers gaan via _group_sequential → mismatch correctie miste daar
+  - Nu: gas-check + mismatch correctie ook in _group_sequential
+  - Getest: alle paden gesimuleerd incl. edge cases
+
+## v5.5.37 (2026-03-29)
+- Fix: gas-check zat in _evaluate_single maar seq pad loopt via _group_sequential
+  - _evaluate_single en _evaluate_group zijn twee aparte functies
+  - Gas-check op verkeerde plek → nooit uitgevoerd bij cascade/seq boilers
+  - Fix: gas-check toegevoegd in _group_sequential direct voor active=None block
+  - Gesimuleerd en geverifieerd: 24.6ct > 14.2ct gas → force_green=True → GREEN
+
+## v5.5.36 (2026-03-29)
+- Fix: BOOST bleef actief bij hold_on ondanks gas goedkoper
+  - _switch_smart gas-check werkt alleen bij nieuwe turn_on commando's
+  - Bij hold_on komt geen nieuw commando → gas-check werd nooit uitgevoerd
+  - force_green werd ook niet gezet via seq-pad → mismatch check zag geen verschil
+  - Fix: gas-check zet force_green direct vóór de mismatch correctie
+  - Elke cyclus: als gas goedkoper → force_green=True → mismatch BOOST≠GREEN → correctie
+
+## v5.5.35 (2026-03-29)
+- Refactor: centrale gas-check in _switch_smart (vervangt v5.5.32 + v5.5.34)
+  - Gas-check zat op losse plekken (demand boost, seq levering) — elk nieuw pad zou
+    opnieuw vergeten worden
+  - Nu: één centrale blokkade in _switch_smart() — de enige plek die altijd
+    doorlopen wordt bij elk BOOST commando, ongeacht welk pad het triggert
+  - Alle toekomstige paden zijn automatisch gedekt
+  - Losse gas-checks uit v5.5.32 en v5.5.34 verwijderd
+
+## v5.5.34 (2026-03-29)
+- Fix: BOOST via seq [levering [geleerd]] pad ondanks goedkoper gas
+  - v5.5.32 gas-check zat alleen in demand boost pad, niet in seq/levering pad
+  - Levering-learner stuurde turn_on zonder force_green → altijd BOOST
+  - Nu: seq pad checkt ook gas prijs voor hybrid boilers met has_gas_heating=yes
+  - Zelfde logica: stroom duurder dan gas → force_green=True → GREEN (WP)
+
+## v5.5.33 (2026-03-29)
+- CLAUDE_INSTRUCTIONS bijgewerkt: ontwikkelregels toegevoegd
+  - Bij twijfel overleggen voor coderen
+  - Logisch denken: gebruikerscontext meenemen (gas, cascade, multi-instantie)
+  - Code controleren: statische analyse, scope fouten, baseline vergelijking
+  - Web search bij twijfel over externe APIs of hardware gedrag
+  - Releaseproces: nooit dubbele versienummers, CHANGELOG altijd bijwerken
+
+## v5.5.32 (2026-03-29)
+- Fix: demand boost werd actief terwijl gas goedkoper is
+  - Gebruiker heeft gas + CV cascade → gas pakt het tekort op als WP te traag is
+  - BOOST (weerstandselement) is nooit goedkoper dan gas in dit scenario
+  - Demand boost geblokkeerd als: has_gas_heating=yes EN gas goedkoper dan BOOST
+  - Alleen BOOST als stroom écht goedkoper dan gas (>10% marge)
+
+## v5.5.31 (2026-03-29)
+Schone release — werkmap gesynchroniseerd. Bevat alle fixes van deze sessie:
+- BatterySocLearner: span-EMA capaciteitsmeting (Methode C)
+- Capaciteit sanity check werkt ook direct na herstart
+- Boiler: BOOST→GREEN modus-correctie elke cyclus na herstart
+- Boiler: setpoint verlagen tijdens accu-ontlading + geen surplus
+- Boiler: cmd→_desired_cmd fix (NameError bij iMemory brug)
+- Dashboard sensors: 19 kritieke sensors met expliciete entity_id
+- Sensor setup: _eid naam conflict opgelost (for _watch_eid in _WATCH)
+- Button unique_ids: coordinator.config_entry.entry_id ipv DOMAIN
+- Demo wizard: 🎮 Demo optie in installatie wizard
+- Kirchhoff: house_alpha boost bij grote batterij/grid-verandering
+- Ariston debounce: 600s → 30s, back-off reset bij iMemory brug
+
+## v5.5.29 (2026-03-29)
+- Fix: Ariston blijft in BOOST na herstart terwijl CloudEMS GREEN zou kiezen
+  - hold_on actie controleerde niet of de huidige modus correct was
+  - Bij hold_on + preset mismatch (bijv. BOOST terwijl GREEN gewenst) → stuur correctie
+  - Treedt op na herstart: Ariston onthoudt modus, CloudEMS zag "al aan" → geen actie
+  - Nu: binnen één cyclus gecorrigeerd van BOOST naar GREEN als prijs dit vraagt
+
+## v5.5.28 (2026-03-29)
+- Fix: demo dashboard toont 0W voor alles
+  - Demo engine startte correct maar coordinator las lege sensor config (grid="", solar="")
+  - Demo engine get_sensor_config() wordt nu geïnjecteerd in coordinator config bij start
+  - Geldt voor zowel auto-start bij herstart als handmatig aanzetten via set_demo_mode()
+
+## v5.5.27 (2026-03-29)
+- Fix: pieksturing/flow kaart en andere dashboard sensors ontbraken na crashes
+  - 94 sensors hadden geen expliciete entity_id → kwetsbaar voor registry drift
+  - Alle 19 dashboard-kritieke sensors hebben nu expliciete entity_id via _eid()
+  - Gerepareerd: grid_net_power, pv_forecast_today/tomorrow, grid_phase_imbalance,
+    energy_balancer, meter_topology, solar_system_intelligence, grid_import_power,
+    p1_power (+ eerder: status, boiler_status)
+  - Registry fix kan alle sensors nu herstellen bij orphaned entries
+
+## v5.5.26 (2026-03-29)
+- Fix: flow kaart blijft "Energiestroom laden..."
+  - sensor.cloudems_status had geen expliciete entity_id
+  - Na crashes/herstarts kon HA de entity_id anders toewijzen
+  - Alle kritieke sensoren (status, boiler_status) krijgen nu expliciete entity_id via _eid()
+  - Registry fix kan ze nu ook herstellen bij orphaned entries
+
+## v5.5.25 (2026-03-29)
+- Fix: boiler schakelcommando "name 'cmd' is not defined"
+  - cmd["preset"] → _desired_cmd["preset"] in _switch() iMemory brug check
+  - Bug bestond al vóór onze wijzigingen (ook in v5.5.18), nu opgelost
+- Verificatie: alle 289 Python bestanden syntax OK, geen nieuwe bugs geïntroduceerd
+  vs v5.5.18 baseline
+
+## v5.5.24 (2026-03-29)
+- Fix: crash door naam conflict _eid in sensor.py
+  - _eid is onze helper functie maar werd ook als loop variabele gebruikt
+    in _post_add_check: "for _eid in _WATCH" overschreef de functie definitie
+  - Loop variabele hernoemd naar _watch_eid
+  - Dit veroorzaakte crashes bij normale (niet-demo) setup na v5.5.19
+
+## v5.5.23 (2026-03-29)
+- Fix: alle resterende entry.entry_id scope fouten in button.py
+  - Statische analyse uitgevoerd op alle 6 entity files
+  - Alle __init__ zonder entry param gebruiken nu coordinator.config_entry.entry_id
+  - Geen hardcoded entity_ids meer, geen DOMAIN-based unique_ids meer
+  - Volledig schoon — 0 problemen in statische analyse
+
+## v5.5.22 (2026-03-29)
+- Fix: NameError 'entry' is not defined in button.py
+  - CloudEMSForceUpdateButton en CloudEMSBuyMeCoffeeButton hadden geen entry param
+  - maar gebruikten wel f"{entry.entry_id}" → NameError bij setup
+  - Fix: coordinator.config_entry.entry_id voor coordinator-only __init__ methods
+
+## v5.5.21 (2026-03-29)
+- Fix: crash echte instantie door button unique_id conflicten met demo instantie
+  - cloudems_force_update/diagnostics/buy_me_coffee/nilm_cleanup/* gebruikten DOMAIN prefix
+  - Allemaal omgezet naar entry.entry_id prefix zodat elke instantie unieke IDs heeft
+  - Slider buttons (coordinator-only) lezen entry_id via coordinator.config_entry
+  - entity_id via _eid() helper voor demo-awareness
+
+## v5.5.20 (2026-03-29)
+- Fix: demo dashboard toont zelfde data als echte instantie
+  - Registry fix beperkt tot eigen config entry (nooit andere instantie aanraken)
+  - Cleanup van verouderde demo entities met _2/_3 suffix bij setup
+  - _post_add_check watchers via _eid() zodat demo de juiste entities monitort
+  - Na installatie v5.5.20: demo entry verwijderen en opnieuw toevoegen voor clean slate
+
+## v5.5.19 (2026-03-29)
+- Nieuw: Multi-instantie + Demo volledig afgebouwd
+  - Entity_id refactor: _eid(entry, entity_id) helper in sensor.py, switch.py, button.py,
+    number.py, climate.py, virtual_boiler.py (117 entity_ids totaal)
+  - Demo instantie: sensor.cloudems_demo_*, switch.cloudems_demo_* etc.
+  - Normale instantie: ongewijzigd sensor.cloudems_*
+  - cloudems-dashboard-demo.yaml aangemaakt (kopie normaal, alle entities vervangen)
+  - Demo dashboard geregistreerd in _DASHBOARDS + sidebar "🎮 CloudEMS Demo"
+  - Demo dashboard YAML gekopieerd naar /config/ bij setup
+  - CLOUDEMS_SLUGS bijgewerkt voor live reload
+
+## v5.5.18 (2026-03-29)
+- Nieuw: Demo modus optie bij installatie wizard
+  - Kies "🎮 Demo — virtuele installatie, geen echte sensoren nodig"
+  - Tweede CloudEMS instantie als Demo zonder conflict met eerste
+  - Titel "CloudEMS Demo" ipv "CloudEMS" zodat ze te onderscheiden zijn
+  - Demo engine direct actief op 48× tijdversnelling (dag in 30 min)
+  - HA-notificatie bij activatie met uitleg
+
+## v5.5.17 (2026-03-29)
+- Fix: Normaal knop toonde 75°C ipv 53°C (green_max)
+  - Normaal = max_setpoint_green_c (53°C), niet huidige setpoint
+- Fix: Nacht/Normaal/PV-boost/+/- knoppen gaan nu via cloudems boiler_send_now
+  - Zet manual_override 2 uur → CloudEMS overschrijft niet direct terug
+  - Fallback naar water_heater.set_temperature als service niet beschikbaar is
+
+## v5.5.16 (2026-03-29)
+- Fix: BOOST knop in virtuele thermostaat werkte niet
+  - Bug 1: send_now zette geen manual_override_until → coordinator overschreef direct terug
+  - Bug 2: comment zei "altijd GREEN" maar logica koos al BOOST boven 53°C — nu expliciet
+  - Fix: manual_override_until = 2 uur na handmatige BOOST → CloudEMS respecteert dit
+  - Fix: setpoint > green_max → BOOST via iMemory brug, setpoint <= green_max → GREEN
+  - Debounce gereset zodat commando meteen verstuurd wordt
+
+## v5.5.15 (2026-03-29)
+- Fix: capaciteit sanity check werkt nu ook direct na herstart
+  - Vóór fix: check vereiste max_discharge_w > 2000W maar na herstart is die 0
+  - Nu: als geleerde cap < 2 kWh én config battery_capacity_kwh aanwezig → gebruik config direct
+  - Batterij kaart toont nu meteen 10 kWh na herstart ipv 1.7 kWh
+
 ## v5.5.14 (2026-03-29)
 - Fix: house_alpha boost ook bij grote grid-verandering
   - Scenario: grid stopt exporteren maar battery toont nog -9kW → house spikt naar 11kW

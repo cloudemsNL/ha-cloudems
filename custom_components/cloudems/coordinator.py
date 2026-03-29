@@ -1946,6 +1946,9 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 self._demo_engine.set_speed(speed)
             if not self._demo_engine.running:
                 await self._demo_engine.async_start()
+            # Injecteer demo sensor config zodat coordinator demo data leest
+            _demo_sensor_cfg = self._demo_engine.get_sensor_config()
+            self._config.update(_demo_sensor_cfg)
             # Sla demo config op
             self._config[CONF_DEMO_ENABLED] = True
             self._config[CONF_DEMO_SPEED]   = speed
@@ -2978,6 +2981,8 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             _demo_speed = int(cfg.get(CONF_DEMO_SPEED, 48))
             self._demo_engine = DemoEngine(self.hass, speed=_demo_speed)
             await self._demo_engine.async_start()
+            # Injecteer demo sensor config zodat coordinator demo data leest ipv lege strings
+            self._config.update(self._demo_engine.get_sensor_config())
             _LOGGER.info("CloudEMS Demo: automatisch gestart op %dx na herstart", _demo_speed)
 
         _highres_host = cfg.get("esphome_highres_host", "")
@@ -3005,6 +3010,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         boiler_enabled = cfg.get("boiler_groups_enabled", True) or bool(boiler_groups)
         # Combineer: cascade-groepen (v2.0) + enkelvoudige configs (v1.x backwards-compat)
         combined_configs = (boiler_groups if boiler_enabled else []) + boiler_configs
+        # v5.5.43: auto-injecteer has_gas_heating als gas geconfigureerd is
+        # De wizard heeft geen has_gas_heating knop — afleiden uit gas config
+        _has_gas = "yes" if (cfg.get("gas_sensor") or cfg.get("gas_price_sensor")) else ""
+        for _bc in combined_configs:
+            if isinstance(_bc, dict) and not _bc.get("has_gas_heating"):
+                _bc["has_gas_heating"] = _has_gas
+            # Ook in cascade groepen
+            for _bu in _bc.get("units", []) if isinstance(_bc, dict) else []:
+                if isinstance(_bu, dict) and not _bu.get("has_gas_heating"):
+                    _bu["has_gas_heating"] = _has_gas
         if combined_configs:
             from .energy_manager.boiler_controller import BoilerController
             self._boiler_ctrl = BoilerController(self.hass, combined_configs)
@@ -5488,6 +5503,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         ph: self._limiter._phases[ph].max_ampere
                         for ph in self._limiter._phases
                     },
+                    battery_w          =float(data.get("battery_power", 0) or 0),
                 )
                 # v4.6.60: controleer of Ariston cloud settings zijn aangekomen, retry indien niet
                 try:
@@ -10700,10 +10716,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 if not capacity_kwh and _bsl_result.capacity_kwh:
                     _learned = _bsl_result.capacity_kwh
                     # Sanity check: geleerde capaciteit moet realistisch zijn
-                    # Als max_discharge_w > 2000W maar capaciteit < 2 kWh → learner heeft fout geleerd
-                    # Gebruik dan battery_capacity_kwh uit hoofdconfig als fallback
+                    # Als capaciteit < 2 kWh maar er is een config waarde → gebruik config
+                    # Ook na herstart (max_discharge=0) direct corrigeren
                     _max_disch = max_discharge_w or (_bsl_result.max_discharge_w or 0)
-                    if _learned < 2.0 and _max_disch > 2000:
+                    _cfg_kwh_check = float(self._config.get("battery_capacity_kwh", 0) or 0)
+                    if _learned < 2.0 and (_max_disch > 2000 or _cfg_kwh_check >= 2.0):
                         _cfg_kwh = float(self._config.get("battery_capacity_kwh", 0) or 0)
                         if _cfg_kwh > 0:
                             _LOGGER.info(

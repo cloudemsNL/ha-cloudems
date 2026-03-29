@@ -25,6 +25,19 @@ from .coordinator import CloudEMSCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
+def _eid(entry, entity_id: str) -> str:
+    """Demo-aware entity_id helper."""
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        for prefix in ("sensor.", "switch.", "number.", "button.", "climate.", "water_heater."):
+            if entity_id.startswith(prefix + "cloudems_"):
+                return entity_id.replace(
+                    prefix + "cloudems_",
+                    prefix + "cloudems_demo_", 1)
+    return entity_id
+
+
 class CloudEMSPhaseCurrentLimiter(CoordinatorEntity, NumberEntity):
     """Instelbare stroom-limiet per fase."""
     _attr_attribution = ATTRIBUTION
@@ -323,7 +336,7 @@ class CloudEMSInverterDimSlider(CoordinatorEntity, NumberEntity):
         label = inv_cfg.get("label", f"Omvormer {slot}") if inv_cfg else f"Omvormer {slot}"
         self._attr_unique_id = f"{entry.entry_id}_inv_dim_slider_{slot}"
         self._attr_name      = f"CloudEMS PV Dimmer {label}"
-        self.entity_id       = f"number.cloudems_zonnedimmer_{slot}"
+        self.entity_id = _eid(entry, f"number.cloudems_zonnedimmer_{slot}")
         self._entry = entry
         # Verberg lege slots in de entity registry totdat ze geconfigureerd worden
         if not self._inv_eid:

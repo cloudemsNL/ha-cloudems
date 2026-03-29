@@ -1554,7 +1554,13 @@ class BoilerController:
         phase_max_currents:  Optional[dict] = None,
         surplus_threshold_w: float = DEFAULT_SURPLUS_THRESHOLD_W,
         export_threshold_a:  float = DEFAULT_EXPORT_THRESHOLD_A,
+        battery_w:           float = 0.0,
     ) -> list[BoilerDecision]:
+        # v5.5.30: battery_w < 0 = ontladen, > 0 = laden
+        # Sla op voor gebruik in setpoint logica
+        self._battery_w = battery_w
+        # v5.5.35: sla price_info op voor gebruik in _switch_smart
+        self._last_price_info = price_info
         phase_currents = phase_currents or {}
         decisions: list[BoilerDecision] = []
 
@@ -1576,6 +1582,33 @@ class BoilerController:
         _max_charge  = _is_neg or _big_surplus
 
         for b in self._boilers:
+            # v5.5.30: tijdens accu-ontlading + duur tarief → verlaag setpoint
+            # Logica: accu ontlaadt (battery_w < -500W) + stroom duurder dan gas
+            # → gebruik nacht-setpoint om accu-energie te sparen
+            # Niet van toepassing bij: negatieve prijs, PV-surplus, manual override
+            _bat_discharging = getattr(self, "_battery_w", 0.0) < -500.0
+            _is_neg_price = bool(price_info.get("is_negative", False))
+            _has_surplus = solar_surplus_w >= surplus_threshold_w
+            if (_bat_discharging
+                    and not _is_neg_price
+                    and not _has_surplus
+                    and b._manual_override_until <= time.time()
+                    and b.boiler_type in (BOILER_TYPE_HYBRID, BOILER_TYPE_HEAT_PUMP, BOILER_TYPE_RESISTIVE)
+                    and b.min_temp_c > 0
+                    and b.active_setpoint_c > b.min_temp_c + 5.0):
+                # Gebruik nacht-setpoint (laagste comfortabele temp)
+                # Standaard: max(min_temp_c, max_setpoint_green_c × 0.85) → bijv. 45°C
+                _discharge_sp = max(
+                    b.min_temp_c,
+                    (b.max_setpoint_green_c * 0.85) if b.max_setpoint_green_c > 0 else 45.0
+                )
+                if b.active_setpoint_c > _discharge_sp + 1.0:
+                    b.active_setpoint_c = round(_discharge_sp, 1)
+                    _LOGGER.debug(
+                        "BoilerController [%s]: accu ontlaadt (%.0fW) → setpoint verlaagd naar %.0f°C",
+                        b.label, getattr(self, "_battery_w", 0.0), _discharge_sp
+                    )
+
             # v4.6.42: manuale override active → setpoint niet overschrijven
             if b._manual_override_until > time.time():
                 pass
@@ -1731,6 +1764,30 @@ class BoilerController:
                     except Exception:
                         pass
 
+            # v5.5.43: directe gas-correctie VOOR evaluate_group
+            _cp43 = float(price_info.get("current_all_in") or price_info.get("current", 0.25) or 0.25)
+            _gp43 = float(price_info.get("gas_price_eur_m3", 1.25) or 1.25)
+            _gt43 = _gp43 / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
+            for _b43 in group.boilers:
+                if (_b43.control_mode == "preset"
+                        and _b43.has_gas_heating == "yes"
+                        and _b43._manual_override_until <= time.time()
+                        and _cp43 > _gt43):
+                    _b43.force_green = True
+                    _wh43 = self._hass.states.get(_b43.entity_id)
+                    if _wh43 and _wh43.state not in ("unavailable", "unknown"):
+                        _cur43 = (_wh43.attributes.get("operation_mode") or
+                                  _wh43.attributes.get("current_operation") or
+                                  _wh43.attributes.get("preset_mode") or "").lower()
+                        _want43 = _b43.preset_off.lower()
+                        if _cur43 and _cur43 != _want43 and _cur43 not in ("imemory", ""):
+                            _b43._pending_preset = ""
+                            _b43._next_verify_ts = 0.0
+                            _LOGGER.warning(
+                                "BoilerController [%s]: GAS CORRECTIE %s->%s (%.1fct > %.1fct gas)",
+                                _b43.label, _cur43, _want43, _cp43*100, _gt43*100,
+                            )
+                            await self._switch_smart(_b43.entity_id, True, _b43, effective_surplus)
             decisions.extend(await self._evaluate_group(group, price_info, effective_surplus, surplus_threshold_w))
 
         # Weekbudget bijwerken
@@ -2338,6 +2395,14 @@ class BoilerController:
                 reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
         if action == "turn_off":
             await self._switch_smart(b.entity_id, False, b, solar_surplus_w); b.last_off_ts = now
+        # v5.5.38: gas-check via helper (ook voor standalone boilers)
+        self._apply_gas_check_and_mismatch(b, is_on, "single", solar_surplus_w)
+
+        # v5.5.30: preset mismatch correctie — altijd, niet alleen bij hold_on
+        # Vergelijk actuele preset met wat CloudEMS wil. Als ze afwijken:
+        # zet _pending_preset zodat de verify loop het oppakt én stuur direct.
+        # Dit vangt ook gevallen op na herstart, iMemory drift, etc.
+        await self._do_mismatch_correction(b, is_on, action, solar_surplus_w)
         return BoilerDecision(entity_id=b.entity_id, label=b.label,
                               action=action, reason=reason, current_state=is_on)
 
@@ -2387,6 +2452,77 @@ class BoilerController:
                 return True
 
         return False
+
+    def _apply_gas_check_and_mismatch(self, b, is_on: bool, action: str, solar_surplus_w: float) -> None:
+        """v5.5.38: Centrale gas-check + mismatch correctie voor alle group paden.
+        
+        Als has_gas_heating=yes en gas goedkoper dan stroom → force_green=True.
+        Als boiler aan is in de verkeerde preset → stuur correctie.
+        Asynchroon commando via _switch_smart wordt als coroutine teruggegeven.
+        """
+        now = time.time()
+        if b._manual_override_until > now:
+            return None
+        # Gas-check: zet force_green als gas goedkoper dan stroom
+        if b.control_mode == "preset" and b.has_gas_heating == "yes":
+            _pi = getattr(self, "_last_price_info", {})
+            # v5.5.39: gebruik all-in prijs, niet EPEX raw
+            _cp = float(_pi.get("current_all_in") or _pi.get("current", 0.25) or 0.25)
+            _gp = float(_pi.get("gas_price_eur_m3", 1.25) or 1.25)
+            _gt = _gp / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
+            if _cp > _gt:
+                b.force_green = True
+                _LOGGER.info(
+                    "BoilerController [%s]: gas-check → force_green=True (all_in=%.1fct > gas=%.1fct/kWh_th)",
+                    b.label, _cp * 100, _gt * 100,
+                )
+            else:
+                _LOGGER.debug(
+                    "BoilerController [%s]: gas-check → stroom goedkoper (all_in=%.1fct < gas=%.1fct/kWh_th)",
+                    b.label, _cp * 100, _gt * 100,
+                )
+        return None  # mismatch correctie via _do_mismatch_correction
+
+    async def _do_mismatch_correction(self, b, is_on: bool, action: str, solar_surplus_w: float) -> None:
+        """v5.5.40: Mismatch correctie — stuur commando als preset verkeerd is.
+        Ook als pending_preset gevuld is: als force_green de gewenste preset verandert,
+        reset pending_preset zodat de correctie wél doorgaat.
+        """
+        _LOGGER.info(
+            "BoilerController [%s]: _do_mismatch_correction aangeroepen — control=%s is_on=%s force_green=%s pending=%s",
+            b.label, b.control_mode, is_on, b.force_green, b._pending_preset or "(leeg)",
+        )
+        if not (b.control_mode == "preset" and is_on):
+            return
+        # v5.5.40: als force_green de gewenste preset verandert tov pending_preset → reset
+        if b._pending_preset:
+            _wanted = (b.preset_on if not b.force_green else b.preset_off).lower()
+            if b._pending_preset.lower() != _wanted:
+                _LOGGER.info(
+                    "BoilerController [%s]: pending_preset=%s maar gewenst=%s → reset (gas goedkoper)",
+                    b.label, b._pending_preset, _wanted,
+                )
+                b._pending_preset = ""
+                b._next_verify_ts = 0.0
+        if b._pending_preset:
+            return  # correct commando al onderweg
+        _wh_st = self._hass.states.get(b.entity_id)
+        if not _wh_st or _wh_st.state in ("unavailable", "unknown"):
+            return
+        _cur = (_wh_st.attributes.get("operation_mode") or
+                _wh_st.attributes.get("current_operation") or
+                _wh_st.attributes.get("preset_mode") or "").lower()
+        _want = (b.preset_on if not b.force_green else b.preset_off).lower()
+        _LOGGER.warning(
+            "BoilerController [%s]: mismatch check — cur=%s want=%s force_green=%s pending=%s",
+            b.label, _cur, _want, b.force_green, b._pending_preset or "(leeg)",
+        )
+        if _cur and _want and _cur != _want and _cur != "imemory":
+            _LOGGER.warning(
+                "BoilerController [%s]: preset mismatch %s → %s CORRIGEREN",
+                b.label, _cur, _want,
+            )
+            await self._switch_smart(b.entity_id, True, b, solar_surplus_w)
 
     async def _group_sequential(self, group: CascadeGroup, solar_surplus_w: float = 0.0) -> list[BoilerDecision]:
         now   = time.time()
@@ -2438,6 +2574,8 @@ class BoilerController:
                 continue
 
             if active is None:
+                # v5.5.38: gas-check via helper
+                self._apply_gas_check_and_mismatch(b, is_on, "seq", solar_surplus_w)
                 tag    = " [geleerd]" if delivery_eid else " [standaard]"
                 suffix = f" [levering{tag}]" if b.is_delivery else ""
                 # v4.5.15: toon duidelijke reden als temperaturesensor ontbreekt
@@ -2445,7 +2583,8 @@ class BoilerController:
                 if b.current_temp_c is None:
                     reason = f"seq{suffix}: geen temperatuursensor (ook geen climate/vermogen) — trigger actief"
                 else:
-                    reason = f"seq{suffix}: {b.temp_deficit_c:.1f}°C onder setpoint"
+                    _fg_str = f" [force_green={b.force_green}]"
+                    reason = f"seq{suffix}: {b.temp_deficit_c:.1f}°C onder setpoint{_fg_str}"
                 action = self._apply_timers(b, True, is_on, now, reason)
                 if action == "turn_on":
                     # v4.6.507: back-off bij herhaalde no-response
@@ -2454,6 +2593,7 @@ class BoilerController:
                     else:
                         action = "hold_off"
                         reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
+                await self._do_mismatch_correction(b, is_on, action, solar_surplus_w)
                 decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, 100.0))
                 active = b
             else:
@@ -2491,6 +2631,7 @@ class BoilerController:
                 continue
             pct    = round(b.temp_deficit_c / total * 100, 1)
             reason = f"parallel: {pct:.0f}% (tekort {b.temp_deficit_c:.1f}°C)"
+            self._apply_gas_check_and_mismatch(b, is_on, "parallel", solar_surplus_w)
             action = self._apply_timers(b, True, is_on, now, reason)
             if action == "turn_on":
                 # v4.6.507: back-off bij herhaalde no-response
@@ -2499,6 +2640,7 @@ class BoilerController:
                 else:
                     action = "hold_off"
                     reason = f"back-off: {b._no_response_count}x geen respons op turn_on"
+            await self._do_mismatch_correction(b, is_on, action, solar_surplus_w)
             decisions.append(BoilerDecision(b.entity_id, b.label, action, reason, is_on, group.id, pct))
         return decisions
 
@@ -3123,6 +3265,26 @@ class BoilerController:
             if on and boiler and boiler.control_mode == "dimmer" and boiler.dimmer_proportional:
                 await self._switch_dimmer_prop(entity_id, boiler, solar_surplus_w)
                 return
+            # v5.5.35: centrale gas-check — één plek voor alle BOOST paden
+            # Als boiler AAN wordt gezet (on=True) en force_green=False (→ BOOST)
+            # én gebruiker heeft gas én gas goedkoper dan stroom → forceer GREEN
+            # Dit vangt elk pad op: demand boost, seq levering, direct hybrid, etc.
+            if (on and boiler
+                    and boiler.control_mode == "preset"
+                    and not boiler.force_green
+                    and boiler.has_gas_heating == "yes"
+                    and boiler._manual_override_until <= 0.0):
+                _price_info = getattr(self, "_last_price_info", {})
+                # v5.5.39: gebruik all-in prijs, niet EPEX raw
+                _cp = float(_price_info.get("current_all_in") or _price_info.get("current", 0.25) or 0.25)
+                _gp = float(_price_info.get("gas_price_eur_m3", 1.25) or 1.25)
+                _gt = _gp / (GAS_KWH_PER_M3_BOILER * GAS_BOILER_EFF_BOILER)
+                if _cp > _gt:  # stroom duurder dan gas → geen BOOST
+                    _LOGGER.info(
+                        "BoilerController [%s]: BOOST geblokkeerd — gas (%.1fct) goedkoper dan stroom (%.1fct/kWh_th)",
+                        boiler.label, _gt * 100, _cp * 100,
+                    )
+                    boiler.force_green = True
             await self._switch(entity_id, on, boiler)
         except Exception as _sw_exc:
             # v4.6.186: vang cloud-erroren op (bijv. Ariston 429) zodat de coordinator
@@ -3461,7 +3623,7 @@ class BoilerController:
                 _use_imemory_bridge = (
                     boiler is not None
                     and _imemory_mode is not None
-                    and cmd["preset"].lower() == (boiler.preset_on or "boost").lower()
+                    and _desired_cmd["preset"].lower() == (boiler.preset_on or "boost").lower()
                 )
 
                 async def _ariston_executor(cmd: dict) -> None:
@@ -3785,8 +3947,12 @@ class BoilerController:
     async def send_now(self, entity_id: str, on: bool, setpoint_c: float | None = None) -> bool:
         """Stuur direct een commando naar de echte boiler-entity, zonder te wachten op de
         volgende evaluatiecyclus. Gebruikt door de virtual boiler bij handmatige bediening.
-        Bij preset-boilers (Ariston) wordt altijd GREEN + gebruikerssetpoint gestuurd,
-        nooit BOOST — dat is de taak van CloudEMS, niet van de handmatige override."""
+
+        v5.5.16 fix:
+          - Zet manual_override_until zodat CloudEMS niet direct terugschrijft
+          - Bij preset-boilers met setpoint > green_max → BOOST via iMemory-brug
+          - Bij preset-boilers met setpoint <= green_max → GREEN
+        """
         all_b = list(self._boilers) + [b for g in self._groups for b in g.boilers]
         boiler = next((b for b in all_b if b.entity_id == entity_id), None)
         if boiler is None:
@@ -3795,18 +3961,32 @@ class BoilerController:
         if setpoint_c is not None:
             boiler.setpoint_c        = float(setpoint_c)
             boiler.active_setpoint_c = min(float(setpoint_c), boiler.hw_ceiling)
-        # v4.6.48: voor preset-boilers: kies GREEN of BOOST op basis van het setpoint.
-        # Als het setpoint binnen de GREEN-grens valt → GREEN (zuiniger, stiller).
-        # Als het setpoint boven de GREEN-grens ligt → BOOST (enige manier om het te halen).
+
+        # Manual override 2 uur zodat CloudEMS niet direct terugschrijft
+        # Gebruiker heeft bewust op BOOST geklikt — respecteer dat
+        boiler._manual_override_until = time.time() + 7200.0
+        self._cmd_queue.reset_debounce(entity_id)
+
+        # Voor preset-boilers: kies GREEN of BOOST op basis van setpoint
         _prev_force_green = boiler.force_green
         if boiler.control_mode == "preset":
             green_max = boiler.max_setpoint_green_c if boiler.max_setpoint_green_c > 0 else 53.0
             target = boiler.active_setpoint_c or boiler.setpoint_c
+            # Setpoint > green_max → BOOST nodig (iMemory-brug activeert automatisch in _switch)
+            # Setpoint <= green_max → GREEN volstaat
             boiler.force_green = (target <= green_max)
-        _LOGGER.info(
-            "BoilerController [%s]: send_now on=%s setpoint=%.1f°C (handmatig)",
-            boiler.label, on, boiler.active_setpoint_c or boiler.setpoint_c,
-        )
+            _LOGGER.info(
+                "BoilerController [%s]: send_now on=%s setpoint=%.1f°C → %s "
+                "(green_max=%.0f°C, manual override 2u)",
+                boiler.label, on, target,
+                "GREEN" if boiler.force_green else "BOOST via iMemory",
+                green_max,
+            )
+        else:
+            _LOGGER.info(
+                "BoilerController [%s]: send_now on=%s setpoint=%.1f°C (handmatig, override 2u)",
+                boiler.label, on, boiler.active_setpoint_c or boiler.setpoint_c,
+            )
         await self._switch(entity_id, on, boiler)
         boiler.force_green = _prev_force_green
         return True

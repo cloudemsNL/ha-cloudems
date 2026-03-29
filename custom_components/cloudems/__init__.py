@@ -758,6 +758,13 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
             "yaml_file": "cloudems-dashboard-dev.yaml",
             "admin":     True,   # alleen admins — dev-omgeving
         },
+        {
+            "slug":      "cloudems-demo",
+            "title":     "🎮 CloudEMS Demo",
+            "icon":      "mdi:play-circle-outline",
+            "yaml_file": "cloudems-dashboard-demo.yaml",
+            "admin":     False,
+        },
     ]
 
     def _do_storage_work():
@@ -929,6 +936,14 @@ async def _async_inject_dashboards(hass: HomeAssistant, slugs: list) -> None:
             "show_in_sidebar": True,
             "mode": "storage",
         },
+        "cloudems-demo": {
+            "url_path": "cloudems-demo",
+            "require_admin": False,
+            "title": "🎮 CloudEMS Demo",
+            "icon": "mdi:play-circle-outline",
+            "show_in_sidebar": True,
+            "mode": "storage",
+        },
     }
     try:
         from homeassistant.components import lovelace as _ll
@@ -977,7 +992,7 @@ async def _async_reload_cloudems_dashboards(hass: HomeAssistant) -> None:
     Werkt via de officiële lovelace storage API.  Bij YAML-modus of als het
     dashboard nog niet bestaat wordt de reload stil overgeslagen.
     """
-    CLOUDEMS_SLUGS = {"cloudems-lovelace", "cloudems-dev"}
+    CLOUDEMS_SLUGS = {"cloudems-lovelace", "cloudems-dev", "cloudems-demo"}
 
     try:
         from homeassistant.components import lovelace as _ll  # noqa: PLC0415
@@ -1145,6 +1160,20 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
                     _LOGGER.info("CloudEMS: cloudems-dashboard.yaml bijgewerkt in /config/")
         except Exception as _err:
             _LOGGER.warning("CloudEMS: kon cloudems-dashboard.yaml niet kopiëren naar /config/: %s", _err)
+
+        # Kopieer ook demo dashboard
+        demo_src = src / "cloudems-dashboard-demo.yaml"
+        demo_dst = pathlib.Path(hass.config.config_dir) / "cloudems-dashboard-demo.yaml"
+        try:
+            if demo_src.exists():
+                import hashlib
+                s_hash = hashlib.md5(demo_src.read_bytes()).hexdigest()
+                d_hash = hashlib.md5(demo_dst.read_bytes()).hexdigest() if demo_dst.exists() else ""
+                if s_hash != d_hash:
+                    shutil.copy2(demo_src, demo_dst)
+                    _LOGGER.info("CloudEMS: cloudems-dashboard-demo.yaml bijgewerkt in /config/")
+        except Exception as _err:
+            _LOGGER.warning("CloudEMS: kon cloudems-dashboard-demo.yaml niet kopiëren: %s", _err)
 
     await hass.async_add_executor_job(_copy_www)
 

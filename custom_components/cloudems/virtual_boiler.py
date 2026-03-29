@@ -55,6 +55,19 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
+def _eid(entry, entity_id: str) -> str:
+    """Demo-aware entity_id helper."""
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        for prefix in ("sensor.", "switch.", "number.", "button.", "climate.", "water_heater."):
+            if entity_id.startswith(prefix + "cloudems_"):
+                return entity_id.replace(
+                    prefix + "cloudems_",
+                    prefix + "cloudems_demo_", 1)
+    return entity_id
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -132,7 +145,7 @@ class CloudEMSBoilerWaterHeater(CoordinatorEntity, WaterHeaterEntity):
         slug          = _slugify(boiler.label or boiler.entity_id.split(".")[-1])
         self._attr_unique_id = f"{entry.entry_id}_vboiler_{boiler.entity_id}"
         self._attr_name      = f"CloudEMS \u00b7 {boiler.label}"
-        self.entity_id       = f"water_heater.cloudems_boiler_{slug}"
+        self.entity_id = _eid(entry, f"water_heater.cloudems_boiler_{slug}")
 
         self._override_until:    float        = 0.0
         self._override_setpoint: float | None = None

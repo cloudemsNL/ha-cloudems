@@ -111,6 +111,19 @@ def _zone_slug(area_name: str, area_entry=None) -> str:
     return room_slug
 
 
+def _eid(entry, entity_id: str) -> str:
+    """Demo-aware entity_id helper."""
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        for prefix in ("sensor.", "switch.", "number.", "button.", "climate.", "water_heater."):
+            if entity_id.startswith(prefix + "cloudems_"):
+                return entity_id.replace(
+                    prefix + "cloudems_",
+                    prefix + "cloudems_demo_", 1)
+    return entity_id
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -185,7 +198,7 @@ class CloudEMSClimateHub(CoordinatorEntity, ClimateEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_climate_hub"
-        self.entity_id       = "climate.cloudems_hub"
+        self.entity_id = _eid(entry, "climate.cloudems_hub")
 
     @property
     def device_info(self):
@@ -265,7 +278,7 @@ class CloudEMSClimateEntity(CoordinatorEntity, ClimateEntity):
         slug             = _zone_slug(self._area_name, area_entry)
         self._attr_unique_id     = f"{entry.entry_id}_climate_{self._area_id}"
         self._attr_name          = f"CloudEMS · {self._area_name}"
-        self.entity_id           = f"climate.cloudems_{slug}"
+        self.entity_id = _eid(entry, f"climate.cloudems_{slug}")
         self._pending_preset: str | None = None
         self._pending_temp:   float | None = None
 

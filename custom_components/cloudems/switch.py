@@ -20,6 +20,19 @@ from .sub_devices import sub_device_info, SUB_PV_DIMMER, SUB_SHUTTER, SUB_LAMP, 
 from .coordinator import CloudEMSCoordinator
 
 
+def _eid(entry, entity_id: str) -> str:
+    """Demo-aware entity_id helper."""
+    from .const import WIZARD_MODE_DEMO, CONF_WIZARD_MODE
+    data = {**entry.data, **entry.options}
+    if data.get(CONF_WIZARD_MODE) == WIZARD_MODE_DEMO:
+        for prefix in ("sensor.", "switch.", "number.", "button.", "climate.", "water_heater."):
+            if entity_id.startswith(prefix + "cloudems_"):
+                return entity_id.replace(
+                    prefix + "cloudems_",
+                    prefix + "cloudems_demo_", 1)
+    return entity_id
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -90,7 +103,7 @@ class CloudEMSSmartEVSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_smart_ev"
         self._attr_name = "CloudEMS Slim EV Laden"
-        self.entity_id = "switch.cloudems_slim_ev_laden"
+        self.entity_id = _eid(entry, "switch.cloudems_slim_ev_laden")
         self._smart_ev_enabled = False
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -137,7 +150,7 @@ class CloudEMSNILMSwitch(CoordinatorEntity, SwitchEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_active"
         self._attr_name = "CloudEMS NILM Actief"
-        self.entity_id = "switch.cloudems_nilm_actief"
+        self.entity_id = _eid(entry, "switch.cloudems_nilm_actief")
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "manufacturer": MANUFACTURER,
@@ -190,7 +203,7 @@ class CloudEMSHybridNILMSwitch(CoordinatorEntity, SwitchEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_hybrid_nilm_active"
         self._attr_name = "CloudEMS HybridNILM Actief"
-        self.entity_id = "switch.cloudems_hybridnilm_actief"
+        self.entity_id = _eid(entry, "switch.cloudems_hybridnilm_actief")
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "manufacturer": MANUFACTURER,
@@ -251,7 +264,7 @@ class CloudEMSNILMHMMSwitch(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_hmm_active"
-        self.entity_id = "switch.cloudems_nilm_sessietracking_hmm"
+        self.entity_id = _eid(entry, "switch.cloudems_nilm_sessietracking_hmm")
         self._attr_name = "CloudEMS NILM Sessietracking (HMM)"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -314,7 +327,7 @@ class CloudEMSNILMBayesSwitch(CoordinatorEntity, SwitchEntity):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_nilm_bayes_active"
-        self.entity_id = "switch.cloudems_nilm_bayesian_classifier"
+        self.entity_id = _eid(entry, "switch.cloudems_nilm_bayesian_classifier")
         self._attr_name = "CloudEMS NILM Bayesian Classifier"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
@@ -386,7 +399,7 @@ class CloudEMSInverterDimmerSwitch(CoordinatorEntity, SwitchEntity):
         self._label = inv_cfg.get("label", f"Omvormer {slot}") if inv_cfg else f"Omvormer {slot}"
         self._attr_unique_id = f"{entry.entry_id}_inv_dimmer_sw_{slot}"
         self._attr_name      = f"CloudEMS PV Dimmer {self._label}"
-        self.entity_id       = f"switch.cloudems_zonnedimmer_{slot}"
+        self.entity_id = _eid(entry, f"switch.cloudems_zonnedimmer_{slot}")
         self._entry = entry
         # Verberg lege slots
         if not self._inv_eid:
@@ -508,7 +521,7 @@ class CloudEMSSlaapstandSwitch(_CloudEMSModuleSwitch):
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_sleep_detector_enabled"
-        self.entity_id = "switch.cloudems_slaapstand_actief"
+        self.entity_id = _eid(entry, "switch.cloudems_slaapstand_actief")
 
     @property
     def is_on(self) -> bool:
@@ -542,7 +555,7 @@ class CloudEMSNILMModuleSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_nilm"
+        self.entity_id = _eid(entry, "switch.cloudems_module_nilm")
 
 
 class CloudEMSPeakShavingSwitch(_CloudEMSModuleSwitch):
@@ -553,7 +566,7 @@ class CloudEMSPeakShavingSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_piekbeperking"
+        self.entity_id = _eid(entry, "switch.cloudems_module_piekbeperking")
 
 
 class CloudEMSPhaseBalancingSwitch(_CloudEMSModuleSwitch):
@@ -564,7 +577,7 @@ class CloudEMSPhaseBalancingSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_faseverdeling"
+        self.entity_id = _eid(entry, "switch.cloudems_module_faseverdeling")
 
 
 class CloudEMSCheapSwitchModule(_CloudEMSModuleSwitch):
@@ -575,7 +588,7 @@ class CloudEMSCheapSwitchModule(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_goedkope_uren"
+        self.entity_id = _eid(entry, "switch.cloudems_module_goedkope_uren")
 
 
 class CloudEMSBudgetSwitch(_CloudEMSModuleSwitch):
@@ -586,7 +599,7 @@ class CloudEMSBudgetSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_budget"
+        self.entity_id = _eid(entry, "switch.cloudems_module_budget")
 
 
 class CloudEMSNILMLoadShiftSwitch(_CloudEMSModuleSwitch):
@@ -597,7 +610,7 @@ class CloudEMSNILMLoadShiftSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_nilm_load_shift"
+        self.entity_id = _eid(entry, "switch.cloudems_module_nilm_load_shift")
 
 
 class CloudEMSPVForecastSwitch(_CloudEMSModuleSwitch):
@@ -608,7 +621,7 @@ class CloudEMSPVForecastSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_pv_forecast"
+        self.entity_id = _eid(entry, "switch.cloudems_module_pv_forecast")
 
 
 class CloudEMSShadowDetectorSwitch(_CloudEMSModuleSwitch):
@@ -619,7 +632,7 @@ class CloudEMSShadowDetectorSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_schaduw"
+        self.entity_id = _eid(entry, "switch.cloudems_module_schaduw")
 
 
 class CloudEMSSolarLearnerSwitch(_CloudEMSModuleSwitch):
@@ -630,7 +643,7 @@ class CloudEMSSolarLearnerSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_solar_learner"
+        self.entity_id = _eid(entry, "switch.cloudems_module_solar_learner")
 
 
 class CloudEMSClimateMgrSwitch(_CloudEMSModuleSwitch):
@@ -641,7 +654,7 @@ class CloudEMSClimateMgrSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_klimaat"
+        self.entity_id = _eid(entry, "switch.cloudems_module_klimaat")
 
     @property
     def is_on(self) -> bool:
@@ -660,7 +673,7 @@ class CloudEMSBoilerSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_ketel"
+        self.entity_id = _eid(entry, "switch.cloudems_module_ketel")
 
 
 class CloudEMSEVChargerSwitch(_CloudEMSModuleSwitch):
@@ -671,7 +684,7 @@ class CloudEMSEVChargerSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_ev_lader"
+        self.entity_id = _eid(entry, "switch.cloudems_module_ev_lader")
 
 
 class CloudEMSBatterySchedulerSwitch(_CloudEMSModuleSwitch):
@@ -682,7 +695,7 @@ class CloudEMSBatterySchedulerSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_batterij"
+        self.entity_id = _eid(entry, "switch.cloudems_module_batterij")
 
 
 
@@ -702,7 +715,7 @@ class CloudEMSZonneplanAutoForecastSwitch(CoordinatorEntity, SwitchEntity, Resto
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_zonneplan_auto_forecast"
-        self.entity_id = "switch.cloudems_zonneplan_auto_sturing"
+        self.entity_id = _eid(entry, "switch.cloudems_zonneplan_auto_sturing")
 
     @property
     def device_info(self):
@@ -769,7 +782,7 @@ class CloudEMSERESwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_ere"
+        self.entity_id = _eid(entry, "switch.cloudems_module_ere")
 
 
 class CloudEMSWeeklyInsightsSwitch(_CloudEMSModuleSwitch):
@@ -780,7 +793,7 @@ class CloudEMSWeeklyInsightsSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_inzichten"
+        self.entity_id = _eid(entry, "switch.cloudems_module_inzichten")
 
 
 class CloudEMSNotificationsSwitch(_CloudEMSModuleSwitch):
@@ -791,7 +804,7 @@ class CloudEMSNotificationsSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_notificaties"
+        self.entity_id = _eid(entry, "switch.cloudems_module_notificaties")
 
 
 class CloudEMSLampCirculationSwitch(_CloudEMSModuleSwitch):
@@ -803,7 +816,7 @@ class CloudEMSLampCirculationSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_lampcirculatie"
+        self.entity_id = _eid(entry, "switch.cloudems_module_lampcirculatie")
 
     async def async_turn_off(self, **kwargs):
         setattr(self.coordinator, self._coordinator_attr, False)
@@ -833,7 +846,7 @@ class CloudEMSEBikeSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_ebike"
+        self.entity_id = _eid(entry, "switch.cloudems_module_ebike")
 
 
 class CloudEMSZwembadSwitch(_CloudEMSModuleSwitch):
@@ -845,7 +858,7 @@ class CloudEMSZwembadSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_zwembad"
+        self.entity_id = _eid(entry, "switch.cloudems_module_zwembad")
 
 
 class CloudEMSRolluikenSwitch(_CloudEMSModuleSwitch):
@@ -862,7 +875,7 @@ class CloudEMSRolluikenSwitch(_CloudEMSModuleSwitch):
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
-        self.entity_id = "switch.cloudems_module_rolluiken"
+        self.entity_id = _eid(entry, "switch.cloudems_module_rolluiken")
 
 
 class CloudEMSShutterAutoSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
@@ -877,7 +890,7 @@ class CloudEMSShutterAutoSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         safe = cover_entity_id.split(".")[-1].replace("-", "_")
         self._attr_unique_id = f"{entry.entry_id}_shutter_{safe}_auto"
         self._attr_name = f"CloudEMS Automaat {label}"
-        self.entity_id = f"switch.cloudems_shutter_{safe}_auto"
+        self.entity_id = _eid(entry, f"switch.cloudems_shutter_{safe}_auto")
 
     @property
     def device_info(self):
@@ -926,7 +939,7 @@ class CloudEMSShutterLearnSwitch(CoordinatorEntity, SwitchEntity):
         safe = cover_entity_id.split(".")[-1].replace("-", "_")
         self._attr_unique_id = f"{entry.entry_id}_shutter_{safe}_learning"
         self._attr_name = f"CloudEMS Tijdleren {label}"
-        self.entity_id = f"switch.cloudems_shutter_{safe}_learning"
+        self.entity_id = _eid(entry, f"switch.cloudems_shutter_{safe}_learning")
 
     @property
     def device_info(self):
