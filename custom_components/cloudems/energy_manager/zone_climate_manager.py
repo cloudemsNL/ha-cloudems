@@ -459,7 +459,10 @@ class VirtualZone:
         surplus_w    = float(data.get("solar_surplus_w", 0) or 0)
         outside_t    = data.get("outside_temp_c")
         _cop_raw     = data.get("heat_pump_cop", DEFAULT_COP)
-        cop          = float(_cop_raw.get("cop_current", DEFAULT_COP) if isinstance(_cop_raw, dict) else (_cop_raw or DEFAULT_COP))
+        cop          = float(
+            (_cop_raw.get("cop_current") or DEFAULT_COP) if isinstance(_cop_raw, dict)
+            else (_cop_raw or DEFAULT_COP)
+        )
 
         has_cv       = bool(data.get("cv_available", False))
         has_hp       = any(r == DeviceRole.AIRCO for r in self._entities.values())

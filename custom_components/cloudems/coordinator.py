@@ -10689,7 +10689,31 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             if _bsl_result is not None:
                 # Capaciteit: geconfigureerd heeft voorrang, anders geleerd
                 if not capacity_kwh and _bsl_result.capacity_kwh:
-                    capacity_kwh = _bsl_result.capacity_kwh
+                    _learned = _bsl_result.capacity_kwh
+                    # Sanity check: geleerde capaciteit moet realistisch zijn
+                    # Als max_discharge_w > 2000W maar capaciteit < 2 kWh → learner heeft fout geleerd
+                    # Gebruik dan battery_capacity_kwh uit hoofdconfig als fallback
+                    _max_disch = max_discharge_w or (_bsl_result.max_discharge_w or 0)
+                    if _learned < 2.0 and _max_disch > 2000:
+                        _cfg_kwh = float(self._config.get("battery_capacity_kwh", 0) or 0)
+                        if _cfg_kwh > 0:
+                            _LOGGER.info(
+                                "CloudEMS: BatterySocLearner capaciteit %.1f kWh verworpen "
+                                "(max_discharge=%.0fW suggereert grotere accu) — "
+                                "gebruik config battery_capacity_kwh=%.1f kWh",
+                                _learned, _max_disch, _cfg_kwh,
+                            )
+                            capacity_kwh = _cfg_kwh
+                        else:
+                            capacity_kwh = _learned
+                    else:
+                        capacity_kwh = _learned
+
+            # Laatste fallback: battery_capacity_kwh uit hoofdconfig
+            if not capacity_kwh:
+                _cfg_kwh = float(self._config.get("battery_capacity_kwh", 0) or 0)
+                if _cfg_kwh > 0:
+                    capacity_kwh = _cfg_kwh
                 # Power: geconfigureerd heeft voorrang, anders geleerd
                 if not max_charge_w and _bsl_result.max_charge_w:
                     max_charge_w = _bsl_result.max_charge_w

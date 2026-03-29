@@ -164,7 +164,7 @@ ARISTON_TEMP_TOLERANCE    = 1.0    # setpoint mag ±1°C afwijken (float compare
 # v4.6.550: debounce — send commando pas als gewenste state 10 min stable is.
 # Voorkomt 429-errors bij Ariston cloud door te frequente API-aanroepen.
 # Het laatste gewenste commando wint altijd (geen stale commands).
-ARISTON_CMD_DEBOUNCE_S    = 600    # 10 minuten wachten voor versturen
+ARISTON_CMD_DEBOUNCE_S    = 30     # 30s debounce — iMemory brug vereist snel reageren
 
 # ─── Thermisch model: learnede opwarmsnelheid ────────────────────────────────
 HEAT_RATE_ALPHA           = 0.10   # EMA-factor voor g_heat_rate bijwerking
@@ -3470,6 +3470,10 @@ class BoilerController:
                     _eid = cmd["entity"]
 
                     if _use_imemory_bridge and _imemory_mode:
+                        # Reset back-off teller — iMemory brug is een bewuste actie, geen fout
+                        if boiler:
+                            boiler._no_response_count = 0
+                            boiler._no_response_backoff_until = 0.0
                         # Controleer of boiler al in iMemory zit → sla stap 1+2 over
                         _current_state = self._hass.states.get(_eid)
                         _current_mode  = ""

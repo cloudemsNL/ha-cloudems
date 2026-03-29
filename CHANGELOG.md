@@ -1,5 +1,23 @@
 # CloudEMS Changelog
 
+## v5.5.10 (2026-03-29)
+- Fix: batterij capaciteit 1.6 kWh ipv 10 kWh in Energie Potentieel kaart
+  - BatterySocLearner soms verkeerde capaciteit leren bij Zonneplan Nexus
+  - Sanity check: als geleerde capaciteit <2 kWh maar max_discharge >2000W → verwerp
+  - Fallback naar battery_capacity_kwh uit hoofdconfig (die staat wel correct op 10 kWh)
+  - Energie Potentieel kaart toont nu correcte kWh berekeningen
+
+## v5.5.9 (2026-03-29)
+- Fix: Ariston back-off "3x geen respons op turn_on"
+  - ARISTON_CMD_DEBOUNCE_S: 600s → 30s (10 minuten wachten was te lang voor boiler sturing)
+  - iMemory brug reset back-off teller voor sturen (geen fout, bewuste actie)
+  - Op v5.4.97 liep back-off op omdat debounce commando's te lang vasthield
+
+## v5.5.9 (2026-03-29)
+- Fix: zone_climate_manager crashte elke seconde op alle zones (1217 fouten in 21 min)
+  cop_current is None als warmtepomp nog geen data heeft → float(None) → crash
+  Fix: (_cop_raw.get("cop_current") or DEFAULT_COP) vangt ook None en 0 op
+
 ## v5.5.8 (2026-03-29)
 - CLAUDE_INSTRUCTIONS bijgewerkt: sessie 2026-03-29 volledig gedocumenteerd
 - Openstaande items bijgewerkt: HouseConsumptionLearner persistentie, Solar Clipping Forecast, Ghost Power Hunter UI
