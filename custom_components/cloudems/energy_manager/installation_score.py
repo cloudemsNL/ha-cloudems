@@ -137,16 +137,26 @@ class InstallationScoreCalculator:
             _LOGGER.warning("InstallationScoreCalculator: opslaan mislukt: %s", exc)
 
     def get_trend_alert(self) -> str | None:
-        """Geeft waarschuwingstekst als score > _DROP_ALERT punten daalde in _TREND_DAYS dagen."""
+        """Geeft waarschuwingstekst als score > _DROP_ALERT punten daalde in _TREND_DAYS dagen.
+
+        v5.5.76 fix: cooldown 1x per dag — was runaway log spam bij meerdere
+        parallelle coordinator instanties.
+        """
+        import time
+        now = time.time()
+        last = getattr(self, "_trend_alert_last_ts", 0.0)
+        if now - last < 86400:   # max 1x per dag
+            return None
         if len(self._trend) < 2:
             return None
         oldest = self._trend[0]["score"]
         newest = self._trend[-1]["score"]
         drop = oldest - newest
         if drop >= self._DROP_ALERT:
+            self._trend_alert_last_ts = now
             return (
                 f"CloudEMS installatie-score daalde {drop} punten in {len(self._trend)} dag(en) "
-                f"({oldest} → {newest}). Mogelijk is een sensor offline gegaan."
+                f"({oldest} \u2192 {newest}). Mogelijk is een sensor offline gegaan."
             )
         return None
 

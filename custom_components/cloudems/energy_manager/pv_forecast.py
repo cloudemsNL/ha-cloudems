@@ -207,6 +207,10 @@ class PVForecast:
         # Cloud cover correctie (Ecowitt / weather entity)
         self._live_cloud_cover_pct:  float | None = None
         self._live_cloud_cover_hour: int | None   = None
+        self._wind_cache:            dict         = {}  # {iso_hour: {speed_ms, dir_deg}}
+        self._current_cloud_pct:    float        = 0.0  # real-time cloud cover %
+        self._current_wind_ms:      float        = 0.0  # real-time wind m/s
+        self._current_wind_dir:     float        = 0.0  # real-time wind richting °
         # v1.5.0: Forecast.Solar cache — dict[hour_key] = watts
         self._fcsolar_cache:    dict = {}   # "YYYY-MM-DDTHH:00" → W
         self._fcsolar_ts:       float = 0.0  # timestamp laatste fetch
@@ -462,6 +466,49 @@ class PVForecast:
                 # Insufficient hourly diversity — keep previous or use safe default
                 learned_tilt = p.learned_tilt if p.learned_tilt is not None else _DEFAULT_TILT
 
+            # v5.5.82: Peak-power tilt correction.
+            #
+            # The yield-width formula (productive_hours) underestimates flatness for
+            # non-south orientations: a nearly-flat west panel may only show 4-5
+            # productive afternoon hours → formula gives 40°, but panel is really 5-10°.
+            #
+            # Fix: blend yield-width tilt with a tilt derived from the panel's best
+            # observed fraction of its rated Wp (peak_frac).  A flat panel delivers
+            # a low fraction of its rated Wp even on its best days; a steep, well-aimed
+            # panel comes close to rated Wp.  This mirrors the phase-detection approach
+            # where measurements near peak power carry more diagnostic weight.
+            #
+            # Azimuth correction: non-south panels are inherently limited in peak output.
+            # West/East at 52°N can achieve ~80% of rated Wp at best; north-facing ~60%.
+            # We normalise peak_frac by this ceiling before mapping to tilt.
+            #
+            # Calibration (NL 52°N):
+            #   eff_ratio 0.90 → steep ~55°; 0.75 → typical ~30°; 0.40 → flat ~5°
+            if n_hours >= 4:  # need at least some spread to trust peak_frac
+                # Azimuth ceiling factor
+                if p.learned_azimuth is not None:
+                    az_diff_norm = abs(p.learned_azimuth - 180.0) / 180.0  # 0@S → 1@N
+                    az_ceiling   = 1.0 - 0.40 * az_diff_norm               # 1.0@S, 0.80@E/W, 0.60@N
+                else:
+                    az_ceiling = 0.90  # conservative default while azimuth is still learning
+
+                # Effective peak ratio: what fraction of the azimuth-limited ceiling is reached?
+                eff_peak_ratio = min(1.0, peak_frac / az_ceiling) if az_ceiling > 0 else peak_frac
+
+                # Map effective ratio to implied tilt
+                # (0.35 → 5°, 0.57 → 27°, 0.90 → 55°) — linear
+                tilt_from_peak = max(5.0, min(55.0, (eff_peak_ratio - 0.35) / 0.55 * 55.0))
+
+                # Blend weight: more weight to peak signal when ratio is low (flat panel evidence)
+                # eff_ratio 0.40 → 70% peak signal; eff_ratio 0.80 → 15% peak signal
+                peak_weight  = max(0.15, min(0.70, (0.80 - eff_peak_ratio) / 0.45))
+                width_weight = 1.0 - peak_weight
+
+                learned_tilt = round(
+                    max(5.0, min(60.0, width_weight * learned_tilt + peak_weight * tilt_from_peak)),
+                    1,
+                )
+
             new_az   = round(learned_az, 1)
             new_tilt = learned_tilt
 
@@ -651,6 +698,27 @@ class PVForecast:
         except Exception as exc:
             _LOGGER.debug("CloudEMS PVForecast: Forecast.Solar fetch mislukt: %s", exc)
 
+
+    def get_current_wind(self) -> dict:
+        """Geef meest recente winddata terug (speed_ms, dir_deg, cloud_cover_pct).
+        Primaire bron: Open-Meteo current= (real-time satelliet/radar).
+        Fallback: hourly forecast voor het huidige uur.
+        """
+        # Primair: current= real-time waarden
+        if self._current_wind_ms > 0:
+            return {
+                "speed_ms":      self._current_wind_ms,
+                "dir_deg":       self._current_wind_dir,
+                "cloud_pct":     self._current_cloud_pct,
+                "source":        "realtime",
+            }
+        # Fallback: hourly cache
+        if not self._wind_cache:
+            return {"speed_ms": 0.0, "dir_deg": 0.0, "cloud_pct": 0.0, "source": "none"}
+        now_key = __import__("datetime").datetime.now().strftime("%Y-%m-%dT%H:00")
+        w = self._wind_cache.get(now_key, list(self._wind_cache.values())[-1])
+        return {**w, "cloud_pct": self._current_cloud_pct, "source": "hourly"}
+
     async def async_refresh_weather(self) -> None:
         """Fetch Open-Meteo irradiance forecast (hourly, 2 days). No API key needed."""
         if not self._session:
@@ -685,6 +753,9 @@ class PVForecast:
                 f"{OPEN_METEO_URL_BASE}"
                 f"&latitude={self._lat}&longitude={self._lon}"
                 f"&hourly=global_tilted_irradiance,direct_radiation,shortwave_radiation"
+                f",wind_speed_10m,wind_direction_10m,cloud_cover"
+                # current= geeft real-time waarden (elk uur bijgewerkt via satelliet/radar)
+                f"&current=cloud_cover,wind_speed_10m,wind_direction_10m"
                 f"&tilt={_tilt:.0f}&azimuth={_azom:.0f}"
             )
 
@@ -707,6 +778,21 @@ class PVForecast:
                         )
                     self._weather_cache = dict(zip(hours, irradiances))
                     self._weather_ts    = time.time()
+                    # v5.5.64: winddata opslaan voor PV dip detector
+                    _wsp = data.get("hourly", {}).get("wind_speed_10m", [])
+                    _wdr = data.get("hourly", {}).get("wind_direction_10m", [])
+                    self._wind_cache = {
+                        t: {"speed_ms": round((_wsp[i] or 0) / 3.6, 2),
+                            "dir_deg":  round(_wdr[i] or 0, 1)}
+                        for i, t in enumerate(hours)
+                        if i < len(_wsp) and i < len(_wdr)
+                    }
+                    # Real-time current= waarden (betrouwbaarder dan hourly voor nu)
+                    _cur = data.get("current", {})
+                    if _cur:
+                        self._current_cloud_pct  = float(_cur.get("cloud_cover", 0) or 0)
+                        self._current_wind_ms    = round(float(_cur.get("wind_speed_10m", 0) or 0) / 3.6, 2)
+                        self._current_wind_dir   = round(float(_cur.get("wind_direction_10m", 0) or 0), 1)
                     _LOGGER.debug(
                         "CloudEMS PVForecast: weather updated (%d hours, tilt=%.0f° az=%.0f°)",
                         len(hours), _tilt, _azom + 180.0

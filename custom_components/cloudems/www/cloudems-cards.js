@@ -1574,7 +1574,7 @@ window.CloudEMSTooltip = {
         [-5,0,5].forEach((off, pi) => {
           const col = C[_gPhKeys[pi]];
           const pw  = Math.abs(_gPhPows[pi]);
-          const on  = pw > 10;
+          const on  = pw > 1;
           h += pipe(COL_LEFT+44+off, R_GRID, _heGrid_x+off, _heGrid_y, col, on || gridActive, pw);
         });
       } else {
@@ -1628,17 +1628,24 @@ window.CloudEMSTooltip = {
       const _ANC_COL = { '?':C.sub, 'L1':C.L1, 'L2':C.L2, 'L3':C.L3, 'MF':'#fbbf24' };
       const _ANC_LBL = { '?':'?', 'L1':'L1', 'L2':'L2', 'L3':'L3', 'MF':'Σ' };
 
-      // Bereken totaal vermogen per fase op basis van actieve top-devices
-      const _phPwr = { L1:0, L2:0, L3:0 };
-      _topDevs.forEach(d => {
+      // Bereken centroid slot-index per anker op basis van actieve top-devices.
+      // Alle 5 ankers (MF, L1, L2, L3, ?) sorteren mee — geen enkel anker staat vast.
+      // Centroid = gemiddelde positie van de devices die aan dit anker hangen.
+      // Ankers zonder devices krijgen centroid 99 → zakken naar rechts.
+      const _allAncs = ['MF', 'L1', 'L2', 'L3', '?'];
+      const _phCentroidSum = {}, _phCentroidCnt = {};
+      _topDevs.forEach((d, i) => {
         const pk = _phKey(d);
-        if (pk === 'L1' || pk === 'L2' || pk === 'L3')
-          _phPwr[pk] += (d.power_w || 0);
+        _phCentroidSum[pk] = (_phCentroidSum[pk] || 0) + i;
+        _phCentroidCnt[pk] = (_phCentroidCnt[pk] || 0) + 1;
       });
-      // Sorteer L1/L2/L3 aflopend op vermogen (hoogste vermogen = meest links = slot 1)
-      const _phSorted = ['L1','L2','L3'].sort((a,b) => _phPwr[b] - _phPwr[a]);
-      // Volgorde: Σ (links), dan L-fasen gesorteerd, dan ? (rechts)
-      const _ancOrder = ['MF', ..._phSorted, '?'];
+      const _phCentroid = {};
+      _allAncs.forEach(k => {
+        _phCentroid[k] = _phCentroidCnt[k]
+          ? _phCentroidSum[k] / _phCentroidCnt[k]
+          : 99;  // geen devices → helemaal rechts
+      });
+      const _ancOrder = [..._allAncs].sort((a, b) => _phCentroid[a] - _phCentroid[b]);
       const _ancXList = [45, 152, 250, 348, 455];
       const _ANC = {};
       _ancOrder.forEach((k, i) => { _ANC[k] = _ancXList[i]; });
@@ -2559,7 +2566,7 @@ window.CloudEMSTooltip = {
       const isExcluded  = fullDev.exclude_from_balance || false;
       const excReason   = fullDev.balance_exclude_reason || '';
       const confirmed   = fullDev.confirmed || false;
-      const isOn        = pw > 10;
+      const isOn        = pw > 1;
       const phCol = p => p==='L1'?'#06b6d4':p==='L2'?'#f59e0b':p==='L3'?'#34d399':'#94a3b8';
       const confCol = conf>=70?'#34d399':conf>=50?'#fbbf24':'#f87171';
 

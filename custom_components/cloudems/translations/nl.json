@@ -2157,6 +2157,16 @@
         "data_description": {
           "presence_entities": ""
         }
+      },
+      "data_consent": {
+        "title": "Data & Privacy",
+        "description": "CloudEMS werkt volledig lokaal. De opties hieronder zijn **volledig vrijwillig** en hebben geen invloed op de werking van CloudEMS.\n\n**Wat wordt gedeeld als je opt-in:**\n- Weerobservaties (temperatuur, wind, PV-bewolking) — anoniem, GPS ±1km\n- PV-dip events voor wolkradar netwerk — anoniem\n- Netspanningsanomalieën — anoniem\n\n**Buurtwaakzaamheid:** meld je aan op [cloudems.eu/buurtwaakzaamheid]({neighbourhood_url}) om push-meldingen te ontvangen bij verdachte activiteit in jouw buurt.\n\n[Privacy beleid]({privacy_url})",
+        "data": {
+          "share_observations": "Deel weerobservaties & PV-data voor meteo-netwerk (anoniem)",
+          "share_neighbourhood": "Doe mee aan buurtwaakzaamheid netwerk",
+          "adaptivehome_token": "AdaptiveHome token (optioneel, voor cloud-sync)",
+          "partner_slug": "Partner slug (optioneel, voor white-label installaties)"
+        }
       }
     },
     "abort": {

@@ -56,7 +56,11 @@ class CloudemsSankeyCard extends HTMLElement {
     const sh = this.shadowRoot;
 
     // Read power values
-    const solar_w   = this._w('sensor.cloudems_zon_vermogen') || this._w('sensor.cloudems_solar_power');
+    // Lees solar via inverter-som (zelfde bron als flow card) voor consistentie
+    const _sankeyInvs = (h.states['sensor.cloudems_solar_system']?.attributes?.inverters || []);
+    const solar_w = _sankeyInvs.length > 0
+      ? _sankeyInvs.reduce((s, i) => s + (parseFloat(i.current_w) || 0), 0)
+      : (this._w('sensor.cloudems_zon_vermogen') || this._w('sensor.cloudems_solar_power'));
     const grid_imp  = Math.max(0, parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0));
     const grid_exp  = Math.max(0, -(parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0)));
     const bat_w     = parseFloat(h.states['sensor.cloudems_battery_power']?.state || 0);

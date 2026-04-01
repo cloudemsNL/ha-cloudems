@@ -2172,6 +2172,16 @@
         "data_description": {
           "presence_entities": ""
         }
+      },
+      "data_consent": {
+        "title": "Data & Privacy",
+        "description": "CloudEMS runs entirely local. The options below are **fully voluntary** and do not affect CloudEMS functionality.\n\n**What is shared if you opt in:**\n- Weather observations (temperature, wind, PV cloud cover) — anonymous, GPS ±1km\n- PV dip events for cloud radar network — anonymous\n- Grid voltage anomalies — anonymous\n\n[cloudems.eu/buurtwaakzaamheid]({neighbourhood_url})\n\n[Privacy policy]({privacy_url})",
+        "data": {
+          "share_observations": "Share weather observations & PV data for meteo network (anonymous)",
+          "share_neighbourhood": "Join neighbourhood watch network",
+          "adaptivehome_token": "AdaptiveHome token (optional, for cloud sync)",
+          "partner_slug": "Partner slug (optional, for white-label installations)"
+        }
       }
     },
     "abort": {

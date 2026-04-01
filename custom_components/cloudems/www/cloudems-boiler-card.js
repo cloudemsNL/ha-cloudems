@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Boiler Card  v5.4.96
 
-const BOILER_CARD_VERSION = "5.4.96";
+const BOILER_CARD_VERSION = "5.5.63";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -346,6 +346,9 @@ class CloudemsBoilerCard extends HTMLElement {
     const safeT=tempC??setpoint;
     const usableL=calcUsableWater(safeT,showerT,coldT,tankL);
     const showers=calcShowers(usableL,durMin,flowLpm);
+    // Beschikbare thermische energie in kWh
+    const storedKwh = tempC!=null ? Math.max(0, (tankL*(tempC-coldT)*1.163)/1000) : null;
+    const usableKwh = storedKwh!=null ? Math.max(0, (usableL*(Math.max(0,safeT-coldT))*1.163)/1000) : null;
     const fillPct=tempC!=null?clamp((tempC-coldT)/(maxSp-coldT),.05,1):.5;
     const spPct=clamp((setpoint-coldT)/(maxSp-coldT),0,1);
     const usablePct=clamp(usableL/(tankL*2),0,1);
@@ -388,7 +391,7 @@ class CloudemsBoilerCard extends HTMLElement {
 
     return `
       <div class="hero">
-        <div class="tank-wrap">${buildTankSVG(fillPct,tempC)}<span class="tank-label">${tankL}L</span></div>
+        <div class="tank-wrap">${buildTankSVG(fillPct,tempC)}<span class="tank-label">${tankL}L</span>${storedKwh!=null?`<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.45);">${storedKwh.toFixed(2)} kWh</span>`:''}</div>
         <div class="stats-col">
           <div><div class="temp-label">Huidige temperatuur</div>
             <div class="temp-big"><span class="temp-val" id="tv">${tempC!=null?tempC.toFixed(1):'—'}</span>${tempC!=null?'<span class="temp-unit">°C</span>':''}</div></div>

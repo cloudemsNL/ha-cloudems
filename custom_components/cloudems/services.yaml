@@ -1041,3 +1041,28 @@ dump_probe_log:
     (/config/cloudems_probe_log.txt) én als persistent notificatie in HA.
     Gebruik dit om problemen met de slider max-leren te debuggen.
   fields: {}
+
+confirm_inverter_phase:
+  name: Bevestig omvormer fase
+  description: >
+    Bevestigt handmatig de elektrische fase van een omvormer.
+    Na bevestiging wordt de automatische cross-validatie permanent
+    overgeslagen voor deze omvormer — het systeem zal niet meer resetten.
+    Gebruik dit als CloudEMS de fase correct heeft maar blijft twijfelen
+    (bijv. west-omvormer die in de ochtend nauwelijks produceert).
+  fields:
+    inverter_label:
+      name: Omvormer label
+      description: Label van de omvormer zoals ingesteld in CloudEMS (bijv. "Goodwe West")
+      required: true
+      example: "Goodwe West"
+      selector:
+        text:
+    phase:
+      name: Fase
+      description: De correcte fase (L1, L2, L3, of 3F voor drie-fasig)
+      required: true
+      example: "L3"
+      selector:
+        select:
+          options: ["L1", "L2", "L3", "3F"]

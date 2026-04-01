@@ -105,14 +105,9 @@ views:
       show_confidence: true
     - type: custom:cloudems-zelfconsumptie-card
       title: ♻ Zelfconsumptie
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_pv_forecast_today
-        state_not: unavailable
-      card:
-        type: custom:cloudems-pv-forecast-card
-        title: ☀ PV Voorspelling
+    - type: custom:cloudems-energie-potentieel-card
+      show_bat: false
+      show_pv: true
     - type: custom:cloudems-version-card
 - title: Batterij
   path: cloudems-batterij
@@ -161,14 +156,6 @@ views:
     - type: conditional
       conditions:
       - condition: state
-        entity: sensor.cloudems_lifecycle_arbitrage
-        state_not: unavailable
-      card:
-        type: custom:cloudems-lifecycle-card
-        title: ⚙ Slijtage Arbitrage
-    - type: conditional
-      conditions:
-      - condition: state
         entity: sensor.cloudems_fcr_afrr
         state_not: not_eligible
       card:
@@ -198,6 +185,9 @@ views:
     cards:
     - type: custom:cloudems-offgrid-card
     - type: custom:cloudems-kosten-calculator-card
+    - type: custom:cloudems-energie-potentieel-card
+      show_bat: true
+      show_pv: false
     - type: custom:cloudems-version-card
 - title: Warm Water
   path: cloudems-boiler
@@ -251,9 +241,6 @@ views:
   - type: grid
     column_span: 1
     cards:
-    - type: custom:cloudems-energie-potentieel-card
-      show_bat: true
-      show_pv: true
     - type: custom:cloudems-version-card
 - title: EV & Mobiliteit
   path: cloudems-mobiliteit
@@ -624,6 +611,14 @@ views:
       card:
         type: custom:cloudems-appliance-card
         title: 🔌 Apparaten EPEX
+    - type: conditional
+      conditions:
+      - condition: state
+        entity: sensor.cloudems_lifecycle_arbitrage
+        state_not: unavailable
+      card:
+        type: custom:cloudems-lifecycle-card
+        title: ⚙ Slijtage Arbitrage
     - type: custom:cloudems-version-card
 - title: Beslissingen
   path: cloudems-beslissingen

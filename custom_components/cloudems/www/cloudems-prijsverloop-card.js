@@ -211,10 +211,14 @@ TPL.innerHTML = `
       <span>📊</span>
       <span class="hdr-title">Prijsverloop</span>
     </div>
-    <div class="tabs">
-      <button class="tab past disabled" data-day="yesterday" id="tab-yest">Gisteren</button>
-      <button class="tab active" data-day="today">Vandaag</button>
-      <button class="tab" data-day="tomorrow" id="tab-tmr">Morgen</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="tabs">
+        <button class="tab past disabled" data-day="yesterday" id="tab-yest">Gisteren</button>
+        <button class="tab active" data-day="today">Vandaag</button>
+        <button class="tab" data-day="tomorrow" id="tab-tmr">Morgen</button>
+      </div>
+      <!-- kwartier toggle -->
+      <button id="btn-gran" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:rgba(255,255,255,.6);font-size:9px;font-weight:700;padding:3px 7px;cursor:pointer;letter-spacing:.05em" title="Schakel uur/kwartier">1H</button>
     </div>
   </div>
 
@@ -318,6 +322,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
     this._lastHash = '';
     this._showOpbouw = false;
     try { this._showOpbouw = localStorage.getItem('cloudems_prijsopbouw') === '1'; } catch(e) {}
+    try { this._gran = localStorage.getItem('cloudems_gran') || 'hour'; } catch(e) { this._gran = 'hour'; }
 
     this.shadowRoot.querySelectorAll('.tab').forEach(t => {
       t.addEventListener('click', () => {
@@ -325,6 +330,16 @@ class CloudemsPrijsverloopCard extends HTMLElement {
         this._switchDay(t.dataset.day);
       });
     });
+
+    // 1H/15M granularity toggle — los van opbouw, één keer registreren
+    const btnGran = this.shadowRoot.getElementById('btn-gran');
+    if (btnGran) {
+      btnGran.addEventListener('click', () => {
+        this._gran = this._gran === 'quarter' ? 'hour' : 'quarter';
+        try { localStorage.setItem('cloudems_gran', this._gran); } catch(e) {}
+        this._render(this._hass);
+      });
+    }
 
     this.shadowRoot.getElementById('opbouw-toggle').addEventListener('click', () => {
       this._showOpbouw = !this._showOpbouw;
@@ -367,6 +382,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
   }
 
   _render(hass) {
+    this._hass = hass;
     const ep   = hass.states['sensor.cloudems_energy_epex_today'];
     const bat  = hass.states['sensor.cloudems_batterij_epex_schema'];
     const sol  = hass.states['sensor.cloudems_solar_system'];
@@ -376,6 +392,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
 
     const attr      = ep.attributes;
     const today     = attr.today_prices     || [];
+    const todayQ    = attr.today_quarter_prices || [];  // 15-min data
     const tomorrow  = attr.tomorrow_prices  || [];
     const yesterday = attr.yesterday_prices || [];
     const tAvail    = attr.tomorrow_available || false;
@@ -450,9 +467,20 @@ class CloudemsPrijsverloopCard extends HTMLElement {
     const planOpts  = { chargeHours, dischargeHours, solarByHour, maxSolar, evOptStart, boilerTrigger, modBat, modEV, modBoil, modPool, nowH };
     const emptyOpts = { chargeHours:[], dischargeHours:[], solarByHour:{}, maxSolar:500, evOptStart:-1, boilerTrigger:-1, modBat:false, modEV:false, modBoil:false, modPool:false, nowH:-1 };
 
-    this._buildRows('today',     today,     'today',     planOpts);
-    this._buildRows('tomorrow',  tomorrow,  'tomorrow',  emptyOpts);
-    this._buildRows('yesterday', yesterday, 'yesterday', emptyOpts);
+    const useQ = this._gran === 'quarter' && todayQ.length > 0;
+    this._buildRows('today',     useQ ? todayQ : today,     'today',     planOpts,     useQ);
+    this._buildRows('tomorrow',  tomorrow,                   'tomorrow',  emptyOpts,    false);
+    this._buildRows('yesterday', yesterday,                  'yesterday', emptyOpts,    false);
+    // Update toggle knop: toon '15M' als kwartier actief, '1H' als uurmodus
+    // Knop is gedempt als kwartierdata niet beschikbaar is (todayQ leeg)
+    const b = this.shadowRoot.getElementById('btn-gran');
+    if (b) {
+      const hasQ = todayQ.length > 0;
+      b.textContent = useQ ? '15M' : '1H';
+      b.style.color = useQ ? '#60a5fa' : hasQ ? 'rgba(255,255,255,.8)' : 'rgba(255,255,255,.35)';
+      b.style.borderColor = useQ ? '#60a5fa' : hasQ ? 'rgba(255,255,255,.25)' : 'rgba(255,255,255,.08)';
+      b.title = hasQ ? 'Schakel uur/kwartier' : 'Kwartierdata nog niet beschikbaar';
+    }
 
     this._buildSummary('today',     today,     attr);
     this._buildSummary('tomorrow',  tomorrow,  null);
@@ -489,7 +517,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
     `;
   }
 
-  _buildRows(dayId, slots, dayType, opts) {
+  _buildRows(dayId, slots, dayType, opts, isQuarter=false) {
     const container = this.shadowRoot.getElementById('rows-' + dayId);
     if (!container || !slots.length) { if (container) container.innerHTML = ''; return; }
 
@@ -525,7 +553,10 @@ class CloudemsPrijsverloopCard extends HTMLElement {
       const hour  = slot.hour;
       const price = slot.price;
       const isNeg     = price < 0;
-      const isCurrent = dayType === 'today' && hour === nowH;
+      const nowM = new Date().getMinutes();
+      const nowQ = Math.floor(nowM / 15);
+      const isCurrent = dayType === 'today' && hour === nowH
+        && (!isQuarter || slot.quarter === nowQ);
       const isExp     = idx === expIdx;
       const in4 = idx >= b4s && idx < b4s+4;
       const in3 = idx >= b3s && idx < b3s+3;
@@ -585,7 +616,11 @@ class CloudemsPrijsverloopCard extends HTMLElement {
       const btwPct  = Math.max(0, Math.abs(btwV) / absT * 100);
 
       const row = document.createElement('div');
-      row.className = 'row' + (isCurrent ? ' current' : '');
+      const isNewHour = isQuarter && slot.quarter === 0;
+      row.className = 'row'
+        + (isCurrent ? ' current' : '')
+        + (isQuarter ? ' row-q' : '')
+        + (isNewHour ? ' row-q-hour' : '');
       row.innerHTML = `
         <div class="block-strips">
           <div class="strip s4${in4 ? ' on' : ''}"></div>
@@ -593,14 +628,20 @@ class CloudemsPrijsverloopCard extends HTMLElement {
           <div class="strip s2${in2 ? ' on' : ''}"></div>
           <div class="strip s1${in1 ? ' on' : ''}"></div>
         </div>
-        <div class="row-hour">${String(hour).padStart(2,'0')}:00</div>
+        <div class="row-hour">
+          ${isQuarter
+            ? (slot.quarter === 0 ? `<strong>${String(hour).padStart(2,'0')}</strong>:00` : ':' + String(slot.quarter*15).padStart(2,'0'))
+            : String(hour).padStart(2,'0') + ':00'
+          }
+        </div>
+        ${(!isQuarter || slot.quarter === 0) ? `
         <div class="row-icons">
           <span class="ico" style="color:${hasBatCharge?'#aaddff':hasBatDisch?'#ff8040':'transparent'}">${hasBatCharge?'▲':hasBatDisch?'▼':'▲'}</span>
           <span class="ico">${hasEV?'🔌':''}</span>
           <span class="ico">${hasBoiler?'🔥':''}</span>
           <span class="ico">${hasPool?'🏊':''}</span>
           <span class="ico" style="color:${hasSurplus?'#ffd700':'transparent'}">☀</span>
-        </div>
+        </div>` : '<div class="row-icons"></div>'}
         <div class="bar-col">
           <div class="bar-area">
             <div class="bar-track"></div>

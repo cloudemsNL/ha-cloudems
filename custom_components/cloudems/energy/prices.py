@@ -83,8 +83,10 @@ class EnergyPriceFetcher:
         self._source    = "none"
         self._local_tz  = _get_tz(time_zone)
         # Rolling 30-daags daggemiddelden voor ROI-berekening
-        # Formaat: list van floats (kale EPEX daggemiddelde), max 30 entries
         self._daily_avg_history: list[float] = []
+        # v5.5.77: kwartierdata (15-min)
+        self.quarter_prices: list[dict] = []
+        self._last_quarter_fetch: float = 0.0
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -255,6 +257,20 @@ class EnergyPriceFetcher:
 
         if prices:
             self._prices = prices
+            # v5.5.77: ook kwartierdata ophalen (max 1x per 15 min)
+            import time as _time
+            if _time.time() - self._last_quarter_fetch > 900:
+                try:
+                    q = await self._fetch_quarter_prices()
+                    if q:
+                        self.quarter_prices = q
+                        self._last_quarter_fetch = _time.time()
+                        _LOGGER.debug("Kwartierdata: %d slots", len(q))
+                    elif self._prices:
+                        self.quarter_prices = self._interpolate_to_quarters(self._prices)
+                except Exception as _qe:
+                    _LOGGER.debug("Kwartierdata fout: %s", _qe)
+                    self.quarter_prices = self._interpolate_to_quarters(self._prices)
             # Log eerste en laatste slot + actueel uur als referentie
             first = prices[0]
             last  = prices[-1]
@@ -499,6 +515,38 @@ class EnergyPriceFetcher:
         except Exception as err:
             _LOGGER.warning("ENTSO-E XML parse fout: %s", err)
         return sorted(prices, key=lambda x: x["start"])
+
+
+    # ── Quarter prices (15-min) ───────────────────────────────────────────────
+
+    async def _fetch_quarter_prices(self) -> list:
+        """Fetch 15-minute price data.
+
+        No free public API currently provides quarter-hour EPEX data for all
+        supported countries, so this returns an empty list — triggering the
+        fallback to _interpolate_to_quarters().
+        """
+        return []
+
+    @staticmethod
+    def _interpolate_to_quarters(hourly_slots: list) -> list:
+        """Interpolate hourly price slots into 15-minute slots.
+
+        Each hourly slot is split into 4 equal quarter-hour slots carrying the
+        same price.  This is used when no native quarter-hour data is available.
+        """
+        quarters = []
+        for slot in hourly_slots:
+            start = EnergyPriceFetcher._aware(slot["start"])
+            price = float(slot["price"])
+            for q in range(4):
+                qs = start + timedelta(minutes=15 * q)
+                quarters.append({
+                    "start": qs,
+                    "end":   qs + timedelta(minutes=15),
+                    "price": price,
+                })
+        return quarters
 
 
 def _find_cheapest_window(hours: list, window: int) -> Optional[int]:

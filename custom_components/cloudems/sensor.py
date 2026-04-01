@@ -296,6 +296,12 @@ async def async_setup_entry(
         CloudEMSDecisionLearnerSensor(coordinator, entry),    # v4.6.498: decision outcome learner
         # v4.6.104: energie & batterij recorder-sensoren
         CloudEMSBatterijSOCSensor(coordinator, entry),
+        CloudEMSPvDipSensor(coordinator, entry),        # v5.5.64
+        CloudEMSWeatherObservationSensor(coordinator, entry),  # v5.5.66
+        CloudEMSLightningSensor(coordinator, entry),           # v5.5.67
+        CloudEMSGridVoltageSensor(coordinator, entry),         # v5.5.69
+        CloudEMSThermalLeakSensor(coordinator, entry),         # v5.5.69
+        CloudEMSKnmiCalibrationSensor(coordinator, entry),     # v5.5.69
         CloudEMSNetVermogenSensor(coordinator, entry),
         CloudEMSZonVermogenSensor(coordinator, entry),
         CloudEMSBoilerSetpointSensor(coordinator, entry),
@@ -1969,6 +1975,7 @@ class CloudEMSForecastSensor(CoordinatorEntity, SensorEntity):
         return _trim_attrs({
             "hourly":   d.get("pv_forecast_hourly", []),
             "actual_hourly_kwh": d.get("pv_today_hourly_kwh", [0.0] * 24),  # v4.6.492
+            "surplus_forecast_hourly": d.get("surplus_forecast_hourly", []),  # v5.5.61
             "minutes_into_hour": __import__("datetime").datetime.now().minute,  # v4.6.506
             "profiles": [
                 {k: v for k, v in p.items() if k in {"entity_id", "label", "peak_w", "today_kwh"}}
@@ -3867,6 +3874,47 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
 # v1.6.0 — EPEX today all-hours price sensor (for dashboard charts)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+def _quarter_prices_for_sensor(coordinator) -> list:
+    """Convert coordinator quarter_prices to sensor attribute format.
+
+    Returns a list of 15-min slots: [{slot, hour, quarter, price, interpolated}]
+    where slot = 0-95 (0 = 00:00, 95 = 23:45), quarter = 0-3 within the hour.
+    Returns [] if no data available.
+    """
+    try:
+        prices_obj = getattr(coordinator, "_prices", None)
+        if prices_obj is None:
+            return []
+        qp = getattr(prices_obj, "quarter_prices", [])
+        if not qp:
+            return []
+        result = []
+        for i, slot in enumerate(qp):
+            try:
+                from datetime import timezone
+                start = slot["start"]
+                if hasattr(start, "astimezone"):
+                    local_h = start.astimezone().hour
+                    local_m = start.astimezone().minute
+                else:
+                    local_h = 0
+                    local_m = 0
+                q = local_m // 15
+                result.append({
+                    "slot":          i,
+                    "hour":          local_h,
+                    "quarter":       q,
+                    "price":         round(float(slot["price"]), 5),
+                    "interpolated":  True,  # native quarter data not yet available
+                })
+            except Exception:
+                continue
+        return result
+    except Exception:
+        return []
+
+
 class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
     """
     State  = current EPEX spot price (EUR/kWh).
@@ -3968,9 +4016,11 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
 
         return {
             "current_price_display": cur_display,  # altijd de display-prijs voor dashboard
-            "today_prices":       today_prices,   # .price = display-prijs (all-in of EPEX)
-            "today_prices_base":  today_all,       # altijd kale EPEX (voor debugging)
-            "tomorrow_prices":    tomorrow_prices,
+            "today_prices":         today_prices,
+            "today_prices_base":    today_all,
+            "tomorrow_prices":      tomorrow_prices,
+            # v5.5.77: kwartierdata — [{slot, hour, quarter, price, interpolated}]
+            "today_quarter_prices": _quarter_prices_for_sensor(self.coordinator),
             "yesterday_prices":   ep.get("yesterday_prices", []),
             "tomorrow_available": ep.get("tomorrow_available", False),
             "next_hours":         _next_hours_display,
@@ -4671,8 +4721,193 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
             ] if bats else None,
             "zonneplan":            zonneplan_info,
             "battery_providers":    bp,  # volledige registry info incl. providers list & warnings
+            "soc_forecast_curve":   (self.coordinator.data or {}).get("soc_forecast_curve", []),
             "_seq":           getattr(self.coordinator, "_coordinator_tick", 0),
         }
+
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.5.69 — Data Platform sensoren: voltage, thermal leak, KNMI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSGridVoltageSensor(CoordinatorEntity, SensorEntity):
+    _attr_name = "CloudEMS Grid Voltage"
+    _attr_icon = "mdi:lightning-bolt-circle"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_grid_voltage"
+        self.entity_id = _eid(entry, "sensor.cloudems_grid_voltage")
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("voltage_monitor", {})
+        return d.get("voltage_l1_avg")
+    @property
+    def native_unit_of_measurement(self): return "V"
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("voltage_monitor", {})
+
+
+class CloudEMSThermalLeakSensor(CoordinatorEntity, SensorEntity):
+    _attr_name = "CloudEMS Thermal Leak"
+    _attr_icon = "mdi:home-thermometer"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_thermal_leak"
+        self.entity_id = _eid(entry, "sensor.cloudems_thermal_leak")
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("thermal_leak", {})
+        return d.get("trend_pct_14d")
+    @property
+    def native_unit_of_measurement(self): return "%"
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("thermal_leak", {})
+
+
+class CloudEMSKnmiCalibrationSensor(CoordinatorEntity, SensorEntity):
+    _attr_name = "CloudEMS KNMI Calibration"
+    _attr_icon = "mdi:thermometer-check"
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_knmi_calibration"
+        self.entity_id = _eid(entry, "sensor.cloudems_knmi_calibration")
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("knmi_calibration", {})
+        return d.get("temp_offset_c", 0)
+    @property
+    def native_unit_of_measurement(self): return "°C"
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("knmi_calibration", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.5.67 — Lightning Detector sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSLightningSensor(CoordinatorEntity, SensorEntity):
+    """Exposeert bliksemdetectie events voor dashboard en cloud upload."""
+    _attr_name        = "CloudEMS Lightning Events"
+    _attr_icon        = "mdi:lightning-bolt"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_lightning_events"
+        self.entity_id = _eid(entry, "sensor.cloudems_lightning_events")
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("lightning_detector", {})
+        return d.get("total_detected", 0)
+
+    @property
+    def native_unit_of_measurement(self): return "events"
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("lightning_detector", {})
+        return {
+            "installation_id": d.get("installation_id"),
+            "total_detected":  d.get("total_detected", 0),
+            "recent_events":   d.get("recent_events", []),
+            "upload_pending":  d.get("upload_pending", 0),
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.5.66 — Weerobservatie sensor (microklimaat dataset)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSWeatherObservationSensor(CoordinatorEntity, SensorEntity):
+    """Exposeert weerobservaties voor dashboard en commerciële API."""
+    _attr_name        = "CloudEMS Weather Observations"
+    _attr_icon        = "mdi:weather-partly-cloudy"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_weather_observations"
+        self.entity_id = _eid(entry, "sensor.cloudems_weather_observations")
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("weather_observation", {})
+        return d.get("total_records", 0)
+
+    @property
+    def native_unit_of_measurement(self): return "records"
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("weather_observation", {})
+        return {
+            "installation_id":     d.get("installation_id"),
+            "lat_rounded":         d.get("lat_rounded"),
+            "lon_rounded":         d.get("lon_rounded"),
+            "total_records":       d.get("total_records", 0),
+            "available_variables": d.get("available_variables", []),
+            "wind_coverage_pct":   d.get("wind_coverage_pct", 0),
+            "temp_coverage_pct":   d.get("temp_coverage_pct", 0),
+            "knmi_calibrated":     d.get("knmi_calibrated", False),
+            "knmi_station":        d.get("knmi_station"),
+            "knmi_temp_offset_c":  d.get("knmi_temp_offset_c", 0),
+            "upload_pending":      d.get("upload_pending", 0),
+            # Meest recente observatie voor dashboard
+            "latest":              d.get("recent", [{}])[-1] if d.get("recent") else {},
+        }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.5.64 — PV Dip Detector sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSPvDipSensor(CoordinatorEntity, SensorEntity):
+    """Exposeert PV dip detectie data voor dashboard en cloud upload."""
+    _attr_name       = "CloudEMS PV Dip Events"
+    _attr_icon       = "mdi:weather-lightning"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_pv_dip_events"
+        self.entity_id = _eid(entry, "sensor.cloudems_pv_dip_events")
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("pv_dip_detector", {})
+        return d.get("total_detected", 0)
+
+    @property
+    def extra_state_attributes(self):
+        d = (self.coordinator.data or {}).get("pv_dip_detector", {})
+        return {
+            "lat_rounded":       d.get("lat_rounded"),
+            "lon_rounded":       d.get("lon_rounded"),
+            "installation_id":   d.get("installation_id"),
+            "total_detected":    d.get("total_detected", 0),
+            "recent_events":     d.get("recent_events", []),
+            "active_prediction": d.get("active_prediction"),
+            "dip_risk":          (self.coordinator.data or {}).get("pv_dip_risk", {}),
+            # Cloud upload batch — AdaptiveHome leest dit attribuut
+            "upload_pending":    len([e for e in d.get("recent_events", [])
+                                     if not e.get("uploaded", True)]),
+        }
+
+    @property
+    def native_unit_of_measurement(self): return "events"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # v1.10.2 — Solar Intelligence: per-inverter profile + system overview
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4745,6 +4980,10 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
             "orientation_progress_pct": avg_orient_pct,
             "phases_detected":        phases_known,
             "over_setpoint":          (self.coordinator.data or {}).get("inverter_dimmer", {}).get("over_setpoint", {}),
+            # v5.5.90: pv_today_kwh als fallback voor solar card na herstart
+            "pv_today_kwh":           round(sum(
+                getattr(self.coordinator, "_pv_today_hourly_kwh", None) or []
+            ), 3) or None,
             "inverters": [
                 {
                     "label":                    i.get("label"),
@@ -6256,6 +6495,7 @@ class CloudEMSPVForecastAccuracySensor(CoordinatorEntity, SensorEntity):
             "samples":             a.get("samples", 0),
             "last_day_mape":       a.get("last_day_mape"),
             "yesterday_hourly_kwh": yesterday_kwh,
+            "daily_history":        (self.coordinator.data or {}).get("pv_daily_history", []),
         }
 
 
@@ -6775,6 +7015,10 @@ class CloudEMSWatchdogSensor(CoordinatorEntity, SensorEntity):
             attrs["audit"] = get_audit_log().get_summary()
         except Exception:
             pass
+        # v5.5.75: gisteren dagrapport voor dagrapport-kaart
+        _yst = (self.coordinator.data or {}).get("daily_summary_yesterday")
+        if _yst:
+            attrs["daily_summary_yesterday"] = _yst
         return _trim_attrs(attrs)
 
 

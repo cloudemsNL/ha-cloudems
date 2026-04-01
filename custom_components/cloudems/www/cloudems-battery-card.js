@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Battery Card  v5.4.96
 
-const BAT_VERSION = "5.4.96";
+const BAT_VERSION = "5.5.63";
 const BAT_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -472,6 +472,7 @@ class CloudemsBatteryCard extends HTMLElement {
       ${provHtml}
       ${zpHtml}
       ${reason?`<div class="reason" style="position:relative;cursor:default" ${_ttDec.wrap}><span>💡</span><span>${esc(reason)}</span>${_ttDec.tip}</div>`:''}
+      ${this._renderSocCurve(schS?.attributes?.soc_forecast_curve||[], soc, capKwh)}
     </div>`;
 
     // Bind events
@@ -657,6 +658,82 @@ class CloudemsBatteryCard extends HTMLElement {
   }
 
   disconnectedCallback(){ if(this._intervalTick) clearInterval(this._intervalTick); }
+
+
+  _renderSocCurve(curve, socNow, capKwh) {
+    if (!curve || curve.length < 2) return '';
+    const W = 100, H = 60, PAD = 4;
+    const CW = W - PAD * 2, CH = H - PAD * 2;
+    // Scheid vandaag/morgen
+    const todayPts  = curve.filter(p => p.day === 0);
+    const tomPts    = curve.filter(p => p.day === 1);
+    const minSoc    = Math.max(0,  Math.min(...curve.map(p => p.soc_pct)) - 5);
+    const maxSoc    = Math.min(100, Math.max(...curve.map(p => p.soc_pct)) + 5);
+    const range     = maxSoc - minSoc || 10;
+    const totalPts  = curve.length;
+
+    const toX = i => PAD + (i / (totalPts - 1)) * CW;
+    const toY = v => PAD + CH - ((v - minSoc) / range) * CH;
+
+    const makePath = (pts, offset) => {
+      if (!pts.length) return '';
+      return pts.map((p, i) => {
+        const xi = curve.indexOf(p);
+        return `${i === 0 ? 'M' : 'L'}${toX(xi).toFixed(1)},${toY(p.soc_pct).toFixed(1)}`;
+      }).join(' ');
+    };
+
+    const todayPath = makePath(todayPts, 0);
+    const tomPath   = makePath(tomPts, todayPts.length);
+
+    // Scheidingslijn vandaag/morgen
+    const splitX = todayPts.length > 0 ? toX(todayPts.length - 1).toFixed(1) : null;
+
+    // Min/max labels
+    const minPt = curve.reduce((a,b) => b.soc_pct < a.soc_pct ? b : a);
+    const maxPt = curve.reduce((a,b) => b.soc_pct > a.soc_pct ? b : a);
+
+    const socColor = s => s >= 60 ? '#3fb950' : s >= 30 ? '#d29922' : '#f85149';
+
+    return `<div style="padding:10px 14px 12px;border-top:1px solid rgba(255,255,255,0.06);">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.3);margin-bottom:6px;">
+        🔮 SoC prognose — vandaag + morgen
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible">
+        <!-- Zones -->
+        <rect x="${PAD}" y="${PAD}" width="${CW}" height="${CH}" rx="2" fill="rgba(255,255,255,.02)"/>
+        <!-- 20% lijn -->
+        <line x1="${PAD}" y1="${toY(20).toFixed(1)}" x2="${PAD+CW}" y2="${toY(20).toFixed(1)}"
+              stroke="rgba(248,81,73,.2)" stroke-width=".5" stroke-dasharray="2 2"/>
+        <!-- 80% lijn -->
+        <line x1="${PAD}" y1="${toY(80).toFixed(1)}" x2="${PAD+CW}" y2="${toY(80).toFixed(1)}"
+              stroke="rgba(63,185,80,.15)" stroke-width=".5" stroke-dasharray="2 2"/>
+        ${splitX ? `<line x1="${splitX}" y1="${PAD}" x2="${splitX}" y2="${PAD+CH}"
+              stroke="rgba(255,255,255,.15)" stroke-width=".8" stroke-dasharray="3 2"/>` : ''}
+        <!-- Vandaag -->
+        ${todayPath ? `<path d="${todayPath}" fill="none" stroke="#3fb950" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+        <!-- Morgen gestippeld -->
+        ${tomPath ? `<path d="${tomPath}" fill="none" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 2"/>` : ''}
+        <!-- Min punt -->
+        <circle cx="${toX(curve.indexOf(minPt)).toFixed(1)}" cy="${toY(minPt.soc_pct).toFixed(1)}" r="2.5" fill="${socColor(minPt.soc_pct)}"/>
+        <text x="${toX(curve.indexOf(minPt)).toFixed(1)}" y="${(toY(minPt.soc_pct)+9).toFixed(1)}"
+              text-anchor="middle" font-size="7" fill="${socColor(minPt.soc_pct)}">${minPt.soc_pct.toFixed(0)}%</text>
+        <!-- Max punt -->
+        <circle cx="${toX(curve.indexOf(maxPt)).toFixed(1)}" cy="${toY(maxPt.soc_pct).toFixed(1)}" r="2.5" fill="${socColor(maxPt.soc_pct)}"/>
+        <text x="${toX(curve.indexOf(maxPt)).toFixed(1)}" y="${(toY(maxPt.soc_pct)-4).toFixed(1)}"
+              text-anchor="middle" font-size="7" fill="${socColor(maxPt.soc_pct)}">${maxPt.soc_pct.toFixed(0)}%</text>
+      </svg>
+      <div style="display:flex;gap:12px;margin-top:4px;">
+        <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.4);">
+          <div style="width:12px;height:2px;background:#3fb950;border-radius:1px"></div>Vandaag
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:rgba(255,255,255,.4);">
+          <div style="width:12px;height:2px;background:#60a5fa;border-radius:1px;"></div>Morgen
+        </div>
+        ${capKwh ? `<span style="margin-left:auto;font-size:9px;color:rgba(255,255,255,.3);">${capKwh.toFixed(1)} kWh capaciteit</span>` : ''}
+      </div>
+    </div>`;
+  }
 
   static getConfigElement(){ return document.createElement('cloudems-battery-card-editor'); }
   static getStubConfig(){ return {type:'cloudems-battery-card',title:'Batterij'}; }

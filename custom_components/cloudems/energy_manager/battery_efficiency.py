@@ -51,6 +51,7 @@ class BatteryEfficiencyStatus:
     cycle_count:          int     = 0
     warn:                 bool    = False
     cycles_sample:        list    = field(default_factory=list)
+    roi_advice:           dict    = field(default_factory=dict)  # v5.5.77
 
     def to_dict(self) -> dict:
         return {
@@ -63,6 +64,7 @@ class BatteryEfficiencyStatus:
             "cycle_count":          self.cycle_count,
             "warn":                 self.warn,
             "cycles_sample":        self.cycles_sample[-5:],
+            "roi_advice":           self.roi_advice,
         }
 
 
@@ -167,6 +169,75 @@ class BatteryEfficiencyTracker:
         )
         return CycleRecord(**rec)
 
+
+    def _calc_roi_advice(
+        self,
+        avg_eff: float,
+        total_charged_kwh: float,
+        total_discharged_kwh: float,
+    ) -> dict:
+        """Bereken vervangingsadvies op basis van gemeten efficiëntieverlies.
+
+        Vergelijkt huidige gemeten efficiëntie met moderne Li-Ion standaard (94%).
+        Berekent jaarlijks verlies in kWh en €, en terugverdientijd voor vervanging.
+        """
+        if total_charged_kwh < 10 or avg_eff <= 0:
+            return {}
+
+        # Moderne Li-Ion benchmark (bijv. Zonneplan Nexus, Huawei LUNA)
+        MODERN_EFF       = 0.94
+        MODERN_COST_EUR  = 4500.0   # Typische prijs inclusief installatie
+        AVG_PRICE_EUR_KWH = 0.28    # Gemiddelde stroomprijs NL 2026
+
+        # Jaarlijks verlies tov moderne accu
+        # Stel dagelijks X kWh door de accu gaat
+        days_measured = max(len(self._cycles), 1)
+        daily_kwh = total_charged_kwh / days_measured
+
+        # Verlies per kWh cyclus = (modern_eff - current_eff)
+        loss_per_kwh = max(0.0, MODERN_EFF - avg_eff)
+        annual_loss_kwh = daily_kwh * 365 * loss_per_kwh
+        annual_loss_eur = round(annual_loss_kwh * AVG_PRICE_EUR_KWH, 2)
+
+        if annual_loss_kwh < 5:
+            # Minder dan 5 kWh/jaar verschil — geen advies nodig
+            return {
+                "status": "ok",
+                "avg_efficiency_pct": round(avg_eff * 100, 1),
+                "message": f"Accu presteert goed ({avg_eff*100:.1f}% round-trip efficiency).",
+            }
+
+        payback_years = round(MODERN_COST_EUR / annual_loss_eur, 1) if annual_loss_eur > 0 else None
+
+        result = {
+            "status":              "degraded" if avg_eff < WARN_THRESHOLD else "suboptimal",
+            "avg_efficiency_pct":  round(avg_eff * 100, 1),
+            "annual_loss_kwh":     round(annual_loss_kwh, 1),
+            "annual_loss_eur":     annual_loss_eur,
+            "modern_efficiency_pct": MODERN_EFF * 100,
+            "modern_cost_eur":     MODERN_COST_EUR,
+            "payback_years":       payback_years,
+        }
+
+        if payback_years and payback_years <= 5:
+            result["message"] = (
+                f"Je accu verliest ~{annual_loss_kwh:.0f} kWh/jaar door inefficiëntie "
+                f"(€{annual_loss_eur:.0f}/jaar). Een moderne accu verdient zich in "
+                f"±{payback_years} jaar terug."
+            )
+            result["recommend_replacement"] = True
+        elif payback_years:
+            result["message"] = (
+                f"Je accu verliest ~{annual_loss_kwh:.0f} kWh/jaar t.o.v. moderne accu "
+                f"(€{annual_loss_eur:.0f}/jaar). Terugverdientijd ±{payback_years} jaar — "
+                f"afwachten tot garantie-einde."
+            )
+            result["recommend_replacement"] = False
+        else:
+            result["message"] = "Onvoldoende data voor terugverdienberekening."
+
+        return result
+
     def get_status(self, days: int = 30) -> BatteryEfficiencyStatus:
         recent = self._cycles[-days:] if len(self._cycles) > days else self._cycles
         if not recent:
@@ -181,7 +252,7 @@ class BatteryEfficiencyTracker:
         total_d = sum(r.get("discharged_kwh", 0) for r in self._cycles)
         degradation = round((NOMINAL_EFFICIENCY - avg_eff) * 100, 1)
 
-        return BatteryEfficiencyStatus(
+        status = BatteryEfficiencyStatus(
             avg_efficiency_pct   = round(avg_eff * 100, 1),
             last_efficiency_pct  = round(last_eff * 100, 1),
             degradation_pct      = degradation,
@@ -191,3 +262,6 @@ class BatteryEfficiencyTracker:
             warn                 = avg_eff < WARN_THRESHOLD,
             cycles_sample        = recent[-5:],
         )
+        # v5.5.77: ROI-advies op basis van gemeten efficiëntieverlies
+        status.roi_advice = self._calc_roi_advice(avg_eff, total_c, total_d)
+        return status

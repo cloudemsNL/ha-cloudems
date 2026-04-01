@@ -59,6 +59,32 @@ class DailySummaryGenerator:
     async def send_now(self, data: dict, date_override: str = "") -> None:
         """Stuur samenvatting direct (ook handmatig aanroepbaar)."""
         try:
+            # v5.5.75: sla gisteren-snapshot op voor dagrapport-kaart
+            p1  = (data.get("p1_data") or {})
+            sc  = (data.get("self_consumption") or {})
+            nilm = sorted(
+                [d for d in (data.get("nilm_devices") or [])
+                 if float((d.get("energy") or {}).get("today_kwh") or
+                          d.get("energy_today_kwh") or 0) > 0.01],
+                key=lambda d: float((d.get("energy") or {}).get("today_kwh")
+                              or d.get("energy_today_kwh") or 0), reverse=True
+            )[:5]
+            self._yesterday = {
+                "date":            date_override or _yesterday_label(),
+                "pv_kwh":          round(float(data.get("pv_forecast_today_kwh") or 0), 1),
+                "import_kwh":      round(float(p1.get("electricity_import_today_kwh") or 0), 1),
+                "export_kwh":      round(float(p1.get("electricity_export_today_kwh") or 0), 1),
+                "self_cons_pct":   round(float(data.get("self_consumption_pct") or
+                                              sc.get("self_consumption_pct") or 0), 1),
+                "cost_eur":        round(float(data.get("cost_today_eur") or 0), 2),
+                "cost_month_eur":  round(float(data.get("cost_month_eur") or 0), 2),
+                "top_devices":     [
+                    {"name": d.get("name", d.get("label", "?")),
+                     "kwh":  round(float((d.get("energy") or {}).get("today_kwh")
+                                   or d.get("energy_today_kwh") or 0), 2)}
+                    for d in nilm
+                ],
+            }
             msg = self._build_message(data, date_override=date_override)
             title = f"☀️ CloudEMS dagrapport {date_override or _yesterday_label()}"
 
@@ -80,6 +106,10 @@ class DailySummaryGenerator:
             _LOGGER.debug("DailySummary send fout: %s", err)
 
     # ── Privé helpers ─────────────────────────────────────────────────────────
+
+    def get_yesterday(self) -> dict:
+        """Geef gisteren-snapshot terug voor dagrapport-kaart."""
+        return self._yesterday
 
     def _build_message(self, data: dict, date_override: str = "") -> str:
         label = date_override or _yesterday_label()

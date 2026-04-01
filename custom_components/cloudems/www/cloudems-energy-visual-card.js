@@ -106,9 +106,16 @@ class CloudemsEnergyVisualCard extends HTMLElement {
     const sh = this.shadowRoot; if (!sh || !h) return;
 
     const st  = h.states['sensor.cloudems_status']?.attributes || {};
-    const pvW   = parseFloat(st.solar_power_w || h.states['sensor.cloudems_solar_system_intelligence']?.state || 0);
+    // Lees solar via ruwe inverter-som (zelfde bron als flow card) voor consistentie.
+    // Fallback 1: solar_system inverters[], Fallback 2: status-attribuut (EMA), Fallback 3: intelligence sensor
+    const _solarInvs = (h.states['sensor.cloudems_solar_system']?.attributes?.inverters || []);
+    const _pvRaw = _solarInvs.length > 0
+      ? _solarInvs.reduce((s, i) => s + (parseFloat(i.current_w) || 0), 0)
+      : null;
+    const pvW   = _pvRaw !== null ? _pvRaw
+      : parseFloat(st.solar_power_w || h.states['sensor.cloudems_solar_system_intelligence']?.state || 0);
     const gridW = parseFloat(st.grid_power_w || h.states['sensor.cloudems_grid_net_power']?.state || 0);
-    const batW  = parseFloat(st.battery_power_w || h.states['sensor.thuisbatterij_power']?.state || 0);
+    const batW  = parseFloat(st.battery_power_w || h.states['sensor.cloudems_battery_power']?.state || h.states['sensor.thuisbatterij_power']?.state || 0);
     const soc   = parseFloat(h.states['sensor.thuisbatterij_percentage']?.state || 0);
     const houseW = parseFloat(st.house_load_w || h.states['sensor.cloudems_home_rest']?.state || 0);
     const imp = gridW > 50, exp = gridW < -50;

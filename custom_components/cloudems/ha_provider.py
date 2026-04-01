@@ -87,15 +87,33 @@ class HAEntityProvider(EntityProvider):
         entity_id: str,
         data: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Roep een HA service aan."""
-        service_data = {"entity_id": entity_id}
-        if data:
-            service_data.update(data)
+        """Roep een HA service aan.
+
+        Gebruikt target= voor entity_id zodat HA 2024.x+ geen validatiefout
+        gooit ('Entity ID entity_id is an invalid entity ID').
+        Vóór HA 2021.x bestond target nog niet — de except vangt dat op en
+        valt terug op de oude service_data stijl.
+        """
+        service_data = dict(data) if data else {}
+        target = {"entity_id": entity_id}
         try:
             await self._hass.services.async_call(
-                domain, service, service_data, blocking=False
+                domain, service, service_data, target=target, blocking=False
             )
             return True
+        except TypeError:
+            # HA < 2021.x: target parameter bestaat niet — fallback op oude stijl
+            try:
+                legacy_data = {"entity_id": entity_id}
+                if data:
+                    legacy_data.update(data)
+                await self._hass.services.async_call(
+                    domain, service, legacy_data, blocking=False
+                )
+                return True
+            except Exception as exc2:
+                logger.error("HA service call mislukt (%s.%s → %s): %s", domain, service, entity_id, exc2)
+                return False
         except Exception as exc:
             logger.error("HA service call mislukt (%s.%s → %s): %s", domain, service, entity_id, exc)
             return False

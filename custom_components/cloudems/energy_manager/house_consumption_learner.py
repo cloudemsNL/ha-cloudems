@@ -46,7 +46,7 @@ class HouseConsumptionLearner:
         forecast = learner.forecast_today()
     """
 
-    def __init__(self) -> None:
+    def __init__(self, hass=None) -> None:
         # [weekday_0_6][hour_0_23] — 0=maandag, 6=zondag
         self._slots: list[list[HourSlot]] = [
             [HourSlot() for _ in range(24)]
@@ -54,6 +54,13 @@ class HouseConsumptionLearner:
         ]
         self._last_hour: int  = -1
         self._hour_acc_w: list[float] = []   # accumuleer binnen het uur
+        self._hass = hass
+        self._store = None
+        self._dirty = False       # True als er nieuwe data is die opgeslagen moet worden
+        self._last_save_ts: float = 0.0
+        if hass is not None:
+            from homeassistant.helpers.storage import Store
+            self._store = Store(hass, 1, "cloudems_house_consumption_learner_v1")
 
     def _now_slot(self) -> tuple[int, int]:
         """Geeft (weekday, hour) voor het huidige moment."""
@@ -87,6 +94,55 @@ class HouseConsumptionLearner:
         slot.ema_w   = avg_w if n == 0 else slot.ema_w * (1 - alpha) + avg_w * alpha
         slot.samples = min(n + 1, 9999)
         slot.last_ts = time.time()
+        self._dirty  = True
+
+    async def async_load(self) -> None:
+        """Laad geleerd model van HA Store na herstart."""
+        if not self._store:
+            return
+        try:
+            saved = await self._store.async_load()
+            if not saved or "slots" not in saved:
+                return
+            for wd in range(7):
+                for h in range(24):
+                    s = saved["slots"][wd][h]
+                    if s.get("samples", 0) >= 1:
+                        self._slots[wd][h].ema_w   = float(s.get("ema_w", 0))
+                        self._slots[wd][h].samples = int(s.get("samples", 0))
+                        self._slots[wd][h].last_ts = float(s.get("last_ts", 0))
+            self._dirty = False
+            _LOGGER.debug("HouseConsumptionLearner: model geladen (%d slots actief)",
+                          sum(self._slots[wd][h].samples > 0 for wd in range(7) for h in range(24)))
+        except Exception as e:
+            _LOGGER.debug("HouseConsumptionLearner load fout: %s", e)
+
+    async def async_maybe_save(self) -> None:
+        """Sla model op als er nieuwe data is (max 1x per uur)."""
+        if not self._store or not self._dirty:
+            return
+        if time.time() - self._last_save_ts < 3600:
+            return
+        await self.async_save()
+
+    async def async_save(self) -> None:
+        """Sla huidig model op naar HA Store."""
+        if not self._store:
+            return
+        try:
+            data = {"slots": [
+                [{"ema_w": round(self._slots[wd][h].ema_w, 1),
+                  "samples": self._slots[wd][h].samples,
+                  "last_ts": round(self._slots[wd][h].last_ts, 0)}
+                 for h in range(24)]
+                for wd in range(7)
+            ]}
+            await self._store.async_save(data)
+            self._dirty = False
+            self._last_save_ts = time.time()
+            _LOGGER.debug("HouseConsumptionLearner: model opgeslagen")
+        except Exception as e:
+            _LOGGER.debug("HouseConsumptionLearner save fout: %s", e)
 
     def expected_w(self, weekday: int, hour: int) -> Optional[float]:
         """Geleerd verwacht vermogen voor dit uurslot (W)."""

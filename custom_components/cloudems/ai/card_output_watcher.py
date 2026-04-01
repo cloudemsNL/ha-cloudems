@@ -92,9 +92,15 @@ class CardOutputWatcher:
             self._resolve("zelfconsumptie-card:ratio_pct", resolved)
 
         # ── 2. Self-healing card solar ────────────────────────────────────────
-        # solar_power in coordinator.data moet zichtbaar zijn in de kaart
-        if solar_w < 50 and pv_today > 0.5:
-            # PV data accumuleert maar solar_power = 0 - sensor levert geen live waarde
+        # solar_power in coordinator.data moet zichtbaar zijn in de kaart.
+        # Vuur alleen als solar_w PRECIES 0 is (sensor niet gevuld) én pv_today
+        # substantieel is (>1 kWh) én het primaire zonne-uren zijn (9-17u).
+        # Dit voorkomt false positives bij zonsop-/ondergang (legitiem <50W)
+        # en bij de eerste cyclus na herstart.
+        _solar_check_hour = __import__('datetime').datetime.now().hour
+        _solar_zero = solar_w == 0 and pv_today > 1.0 and 9 <= _solar_check_hour <= 17
+        if _solar_zero:
+            # PV data accumuleert maar solar_power = 0 — sensor levert geen live waarde
             self._raise("self-healing-card", "solar_power",
                         f">0W want pv_today={pv_today:.2f}kWh",
                         f"{solar_w:.0f}W — coordinator solar_power niet gevuld", "error", new_issues)

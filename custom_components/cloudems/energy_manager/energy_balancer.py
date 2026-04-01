@@ -77,10 +77,96 @@ BATTERY_RAMP_FRAC   = 0.7     # grid-sprong moet voor >= 70% van battery komen
 FAST_RAMP_CONF_MIN  = 0.3     # minimale lag-confidence voor fast-ramp inference
 
 
+
+# ── Sprong-toedeling constanten (v5.5.48) ─────────────────────────────────────
+JUMP_SIGMOID_THRESHOLD = 4000.0   # W: midden sigmoid (leerbaar)
+JUMP_SIGMOID_SCALE     = 2000.0   # W: steilheid (leerbaar)
+JUMP_MIN_BAT_FRAC      = 0.08     # minimale fractie naar accu
+JUMP_MAX_BAT_FRAC      = 0.96     # maximale fractie naar accu
+JUMP_LEARN_RATE        = 0.05     # hoe snel threshold leert
+JUMP_MIN_LEARN_W       = 500.0    # minimale sprong om van te leren
+
+
+class JumpAttribution:
+    """Leert hoe grid-sprongen verdeeld worden over accu vs huis.
+
+    Model: battery_fraction = sigmoid((|jump| - threshold) / scale)
+    - Klein (500W):  ~20% accu — waarschijnlijk huis (koelkast, lamp)
+    - Middel (3kW):  ~40% accu — kan inductie OF accu zijn
+    - Groot (7kW):   ~80% accu — vrijwel zeker accu (Nexus cloud-lag)
+    - Enorm (10kW):  ~92% accu — zeker accu
+
+    Leerbaar: als Nexus na ~45s de echte waarde levert, vergelijken we
+    de voorspelde verdeling met de werkelijkheid en passen threshold aan.
+    """
+
+    def __init__(self) -> None:
+        self._threshold = JUMP_SIGMOID_THRESHOLD
+        self._scale     = JUMP_SIGMOID_SCALE
+        self._obs: list = []   # [(jump_w, predicted_frac, actual_frac)]
+        self._n_learned = 0
+
+    def battery_fraction(self, jump_w: float) -> float:
+        """Fractie van grid-sprong toe te kennen aan accu (0.08-0.96)."""
+        j = abs(jump_w)
+        if j < 200:
+            return 0.05
+        import math
+        x = (j - self._threshold) / max(self._scale, 100.0)
+        sigmoid = 1.0 / (1.0 + math.exp(-x))
+        return max(JUMP_MIN_BAT_FRAC, min(JUMP_MAX_BAT_FRAC,
+               JUMP_MIN_BAT_FRAC + sigmoid * (JUMP_MAX_BAT_FRAC - JUMP_MIN_BAT_FRAC)))
+
+    def house_alpha_factor(self, jump_w: float) -> float:
+        """Hoe veel house_alpha reduceren bij deze sprong (0=geen reductie, 1=volledig)."""
+        return self.battery_fraction(jump_w)
+
+    def learn(self, jump_w: float, predicted_bat_frac: float, actual_bat_delta_w: float) -> None:
+        """Update threshold op basis van werkelijke verdeling na Nexus-aankomst.
+
+        jump_w: grootte van de grid-sprong
+        predicted_bat_frac: wat we voorspelden
+        actual_bat_delta_w: hoeveel de accu werkelijk veranderde
+        """
+        if abs(jump_w) < JUMP_MIN_LEARN_W or abs(jump_w) < 1:
+            return
+        actual_frac = min(0.99, max(0.01, abs(actual_bat_delta_w) / abs(jump_w)))
+        self._obs.append((abs(jump_w), predicted_bat_frac, actual_frac))
+        self._obs = self._obs[-50:]  # bewaar laatste 50
+
+        # Stuur threshold bij: als we te veel naar accu wezen → threshold omhoog
+        error = actual_frac - predicted_bat_frac
+        self._threshold -= error * JUMP_LEARN_RATE * abs(jump_w) / 1000.0
+        self._threshold = max(1000.0, min(8000.0, self._threshold))
+        self._n_learned += 1
+        _LOGGER.debug(
+            "JumpAttribution: geleerd jump=%.0fW pred=%.2f actual=%.2f "
+            "error=%.2f → threshold=%.0fW",
+            jump_w, predicted_bat_frac, actual_frac, error, self._threshold,
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "threshold_w": round(self._threshold, 0),
+            "scale_w":     round(self._scale, 0),
+            "n_learned":   self._n_learned,
+        }
+
+    def from_dict(self, d: dict) -> None:
+        self._threshold = float(d.get("threshold_w", JUMP_SIGMOID_THRESHOLD))
+        self._scale     = float(d.get("scale_w",     JUMP_SIGMOID_SCALE))
+        self._n_learned = int(d.get("n_learned", 0))
+
 # ── Dataklassen ───────────────────────────────────────────────────────────────
 
 @dataclass
 class BalancedReading:
+    """Kirchhoff-consistente energiebalans op één tijdstip.
+
+    v5.5.49: twee sets waarden:
+      *_w     — ruwe/gecorrigeerde waarden voor display
+      *_ema_w — EMA-gefilterde waarden (~20s) voor beslissingen
+    """
     grid_w:    float
     solar_w:   float
     battery_w: float   # positief=laden, negatief=ontladen
@@ -93,6 +179,18 @@ class BalancedReading:
     imbalance_w:    float = 0.0
     stale_sensors:  list  = field(default_factory=list)
     lag_compensated: bool = False
+
+    # v5.5.49: EMA waarden
+    # display_*  (~5s)  — nauwelijks filter, geen geflicker
+    # *_ema_w    (~20s) — beslissingen, pieken gesmoothed
+    grid_display_w:    float = 0.0
+    solar_display_w:   float = 0.0
+    battery_display_w: float = 0.0
+    house_display_w:   float = 0.0
+    grid_ema_w:    float = 0.0
+    solar_ema_w:   float = 0.0
+    battery_ema_w: float = 0.0
+    house_ema_w:   float = 0.0
 
     @property
     def import_w(self) -> float:
@@ -212,26 +310,43 @@ class _LagLearner:
         self._observations = deque(obs[-LAG_HISTORY_N:], maxlen=LAG_HISTORY_N)
 
 
+# ── EMA tijdconstantes (v5.5.49) ────────────────────────────────────────────
+EMA_TAU_DISPLAY_S  =  5.0  # display: lichte filter, nauwelijks merkbaar
+EMA_TAU_DECISION_S = 20.0  # beslissingen: stabiel, geen pieken
+                           # alpha = dt / (tau + dt)
+                           # display:   dt=10s, tau=5s  → alpha=0.67
+                           # beslissen: dt=10s, tau=20s → alpha=0.33
+
 class _SensorTracker:
-    """Volgt één sensor: ruwe waarde, interval, trend, staleness, ringbuffer."""
+    """Volgt één sensor: ruwe waarde, interval, EMA, trend, staleness, ringbuffer.
+
+    v5.5.49: Twee waarden per sensor:
+      last_value  — ruwe meting, voor display en lag-compensatie
+      ema_value   — gefilterde EMA (~20s tijdconstante), voor beslissingen
+    Beslissingen op EMA: stabieler, piekwaardes tellen minder mee.
+    """
 
     __slots__ = ("last_value", "last_update_ts", "last_change_ts", "interval_ema",
-                 "trend", "sample_count", "prev_value", "buf")
+                 "trend", "sample_count", "prev_value", "buf",
+                 "ema_value", "display_ema", "_ema_init")
 
     def __init__(self, initial: float = 0.0) -> None:
         now = time.time()
         self.last_value:     float       = initial
-        self.last_update_ts: float       = now   # versheid: elke update()
-        self.last_change_ts: float       = now   # interval-leren: alleen bij waarde-wijziging
+        self.last_update_ts: float       = now
+        self.last_change_ts: float       = now
         self.interval_ema:   float       = 10.0
         self.trend:          float       = initial
+        self.ema_value:      float       = initial   # v5.5.49: beslissingen (~20s)
+        self.display_ema:    float       = initial   # v5.5.49: display (~5s)
+        self._ema_init:      bool        = False     # False = eerste sample
         self.sample_count:   int         = 0
         self.prev_value:     float       = initial
         self.buf:            _RingBuffer = _RingBuffer()
 
     def update(self, value: float) -> None:
         now = time.time()
-        self.last_update_ts = now   # sensor leeft: altijd bijwerken
+        self.last_update_ts = now
         if abs(value - self.prev_value) > 5.0:
             elapsed = now - self.last_change_ts
             if 0.5 < elapsed < MAX_STALE_AGE_S:
@@ -243,6 +358,17 @@ class _SensorTracker:
         self.buf.push(value, now)
         self.trend = (TREND_ALPHA * value + (1.0 - TREND_ALPHA) * self.trend
                       if self.sample_count > 1 else value)
+        # v5.5.49: twee EMA's — display (5s) en beslissingen (20s)
+        _dt = max(1.0, self.interval_ema)
+        _alpha_disp = _dt / (EMA_TAU_DISPLAY_S  + _dt)  # snel, nauwelijks merkbaar
+        _alpha_decs = _dt / (EMA_TAU_DECISION_S + _dt)  # traag, pieken gesmoothed
+        if not self._ema_init:
+            self.ema_value   = value
+            self.display_ema = value
+            self._ema_init   = True
+        else:
+            self.ema_value   = _alpha_decs * value + (1.0 - _alpha_decs) * self.ema_value
+            self.display_ema = _alpha_disp * value + (1.0 - _alpha_disp) * self.display_ema
 
     def is_stale(self) -> bool:
         # last_update_ts: elke update() → sensor is actief zolang updates binnenkomen
@@ -299,6 +425,11 @@ class EnergyBalancer:
         self._house_trend:         float = 0.0
         self._house_trend_samples: int   = 0   # v4.6.548: teller voor opwarmperiode
         self._prev_grid_w:         float = 0.0
+        self._last_grid_jump_w:    float = 0.0  # v5.5.47: laatste grid sprong
+        self._last_grid_jump_ts:   float = 0.0  # timestamp van sprong
+        self._bat_blend_ts:        float = 0.0  # timestamp Nexus waarde arriveert
+        self._jump_attr = JumpAttribution()     # v5.5.48: leerbare sprong-toedeling
+        self._pending_learn: list  = []         # [(ts, jump_w, pred_frac, bat_before)]
         self._last_balanced:       Optional[BalancedReading] = None
         self._imbalance_log_ts:    float = 0.0
         self._start_ts:            float = time.time()  # v4.6.548: voor opwarmguard
@@ -327,6 +458,19 @@ class EnergyBalancer:
         if abs(g_jump) >= LAG_JUMP_THRESHOLD:
             self._lag_battery.observe(self._grid.buf, self._battery.buf, now, g_jump)
             self._lag_solar.observe(self._grid.buf, self._solar.buf, now, g_jump)
+            # v5.5.48: onthoud sprong voor leerbare toedeling
+            if abs(g_jump) >= 200.0:
+                self._last_grid_jump_w  = g_jump
+                self._last_grid_jump_ts = now
+                # Plan een learn-check in na ~60s (als Nexus waarde arriveert)
+                pred_frac = self._jump_attr.battery_fraction(g_jump)
+                self._pending_learn.append({
+                    "ts":       now,
+                    "jump_w":   g_jump,
+                    "pred_frac": pred_frac,
+                    "bat_before": self._battery.last_value,
+                })
+                self._pending_learn = self._pending_learn[-10:]
 
             # v4.5.66: battery-vs-PV discriminatie via ramp-rate
             # PV verandert langzaam (wolken/hoek: typisch <100 W/s).
@@ -462,17 +606,42 @@ class EnergyBalancer:
         _large_export = g_val < -500.0 and not self._grid.is_stale()
         _solar_known  = not self._solar.is_stale() and s_val >= 0.0
         _export_exceeds_solar = _large_export and _solar_known and (-g_val) > (s_val + 500.0)
-        if not b_est and _trend_warm and _export_exceeds_solar:
+
+        # v5.5.46: EXPORT-DIRECT fix
+        # Vroegere versie: vervang batterij door Kirchhoff-van-house_trend bij export.
+        # Bug: als house_trend verouderd is (bijv. 8840W terwijl huis nu 2572W is)
+        # geeft dat een onmogelijke batterijwaarde (-15898W) → circulaire fout.
+        # Correct: als batterijsensor vers is EN export > solar → vertrouw sensor,
+        # bereken house via Kirchhoff vanuit sensor (niet andersom).
+        if not b_est and _export_exceeds_solar and _battery_age_s < 30.0:
+            # Batterij vers + grote export → sensor is leidend, house volgt
+            _house_kirchhoff = s_val + g_val - b_val
+            if _house_kirchhoff >= 0:
+                # Plausibel: gebruik sensor b_val, house via Kirchhoff
+                _LOGGER.debug(
+                    "EnergyBalancer: EXPORT-DIRECT sensor-leidend "
+                    "(grid=%.0fW solar=%.0fW bat=%.0fW → house=%.0fW)",
+                    g_val, s_val, b_val, _house_kirchhoff,
+                )
+                # b_val blijft ongewijzigd, house_w wordt via Kirchhoff berekend
+                pass  # geen b_est — sensor is leidend
+            # Anders (negatief huis): val door naar trend-gebaseerde schatting
+
+        if not b_est and _trend_warm and _export_exceeds_solar and _battery_age_s >= 30.0:
+            # Batterij oud (stale) + grote export → schat via Kirchhoff van trend
             kirchhoff_battery = s_val + g_val - self._house_trend
             _LOGGER.debug(
-                "EnergyBalancer: battery Kirchhoff EXPORT-DIRECT (grid=%.0fW solar=%.0fW kirchhoff=%.0fW)",
+                "EnergyBalancer: battery Kirchhoff EXPORT-STALE (grid=%.0fW solar=%.0fW kirchhoff=%.0fW)",
                 g_val, s_val, kirchhoff_battery,
             )
             b_val    = kirchhoff_battery
             b_est    = True
             lag_comp = True
 
-        if not b_est and self._house_trend > 0 and _trend_warm and _battery_age_s > 10.0:
+        if not b_est and self._house_trend > 0 and _trend_warm and _battery_age_s > 30.0:
+            # v5.5.47: Batterij stale → schat via stabiele house_trend
+            # house_trend is nu bewust NIET geboost bij sprongen →
+            # betrouwbaar anker voor battery-schatting
             kirchhoff_battery = s_val + g_val - self._house_trend
             _LOGGER.debug(
                 "EnergyBalancer: battery Kirchhoff (age=%.0fs sensor=%.0fW kirchhoff=%.0fW)",
@@ -522,25 +691,52 @@ class EnergyBalancer:
         else:
             house_w = max(0.0, house_w_raw)
 
-        # House trend bijhouden — alpha = gemiddelde van input-sensor alpha's
-        # Snelle sensoren (P1, omvormer) trekken alpha omhoog → huis volgt sneller
-        # Trage sensoren (Nexus) trekken alpha omlaag → meer smoothing
-        _a_grid = self._grid.alpha
+        # v5.5.47: House trend — altijd langzame EMA, nooit boosten bij sprongen.
+        # Principe: huis (thermische lasten) kan nooit 7kW+ springen in 10s.
+        # Een grote grid-sprong is bijna altijd de accu (Nexus cloud-lag ~45s).
+        # Bij boosten van house_alpha volgt huis de sprong → Kirchhoff geeft fout beeld.
+        # Fix: bij grote grid sprong → house_alpha minimaliseren zodat huis EMA stabiel blijft.
+        # Battery = solar + grid - house_ema → altijd Kirchhoff=0, accu krijgt de sprong.
+        _a_grid  = self._grid.alpha
         _a_solar = self._solar.alpha
         _a_bat   = self._battery.alpha
         _house_alpha = (_a_grid + _a_solar + _a_bat) / 3.0
 
-        # v5.5.13: bij grote verandering in batterij of grid → house_alpha boosten
-        # Scenario 1: battery springt van 0 naar -9kW (Nexus ontladen gestart)
-        # Scenario 2: grid stopt opeens met exporteren (export → 0) terwijl battery nog -9kW toont
-        # Zonder boost: house_w spikt tijdelijk omdat trage battery.alpha nog niet bijgewerkt is
-        _bat_delta  = abs(self._battery.trend - (b_val or 0))
-        _grid_delta = abs(self._grid.trend    - (g_val or 0))
-        _max_delta  = max(_bat_delta, _grid_delta)
-        if _max_delta > 2000:
-            # Schaal: 2kW = +6%, 9kW = +27% boost op house_alpha
-            _boost = min(0.9, _max_delta / 10000.0)
-            _house_alpha = min(1.0, _house_alpha + _boost * 0.3)
+        # v5.5.48: leerbare sprong-toedeling via JumpAttribution sigmoid
+        # Hoe groter de sprong, hoe meer naar accu, hoe minder house_alpha
+        _jump_age_s = now - self._last_grid_jump_ts
+        _bat_delta  = abs(b_val - self._prev_battery_w)
+        _jump_w = self._last_grid_jump_w
+        # Gebruik de grootste recente stimulus: grid-sprong of accu-delta
+        _dominant_jump = max(abs(_jump_w) if _jump_age_s < 60.0 else 0.0, _bat_delta)
+        if _dominant_jump >= 200.0:
+            # Reduceer house_alpha proportioneel met battery_fraction
+            _bat_frac = self._jump_attr.battery_fraction(_dominant_jump)
+            # house_alpha = base_alpha × (1 - battery_fraction)
+            # Grote sprong → battery_fraction hoog → house_alpha laag → huis EMA stabiel
+            _house_alpha = _house_alpha * (1.0 - _bat_frac)
+            _LOGGER.debug(
+                "EnergyBalancer: jump=%.0fW bat_frac=%.2f → house_alpha=%.3f",
+                _dominant_jump, _bat_frac, _house_alpha,
+            )
+
+        # Leer van Nexus aankomst: als pending observaties > 60s oud zijn
+        # en accu-sensor veranderd is → vergelijk met voorspelling
+        _still_pending = []
+        for _obs in self._pending_learn:
+            _obs_age = now - _obs["ts"]
+            if _obs_age > 45.0 and _obs_age < 120.0:
+                # Nexus waarde is nu beschikbaar — leer van de werkelijke delta
+                _actual_bat_delta = abs(self._battery.last_value - _obs["bat_before"])
+                if _actual_bat_delta > 100.0:
+                    self._jump_attr.learn(
+                        _obs["jump_w"],
+                        _obs["pred_frac"],
+                        _actual_bat_delta,
+                    )
+            elif _obs_age <= 45.0:
+                _still_pending.append(_obs)
+        self._pending_learn = _still_pending
         self._house_trend = (_house_alpha * house_w +
                              (1.0 - _house_alpha) * self._house_trend
                              if self._house_trend else house_w)
@@ -559,6 +755,25 @@ class EnergyBalancer:
                 )
                 self._imbalance_log_ts = now
 
+        # v5.5.49: twee EMA sets
+        # Display (~5s): nauwelijks filter, geen geflicker in UI
+        _g_disp = self._grid.display_ema
+        _s_disp = max(0.0, self._solar.display_ema)
+        if b_est:
+            # Battery geschat (Nexus laat) → gebruik house_trend als anker
+            # display_house = house_trend (stabiel, geen sprong)
+            # display_battery = Kirchhoff van display waarden
+            _h_disp = max(0.0, self._house_trend)
+            _b_disp = _s_disp + _g_disp - _h_disp
+        else:
+            _b_disp = self._battery.display_ema
+            _h_disp = max(0.0, _s_disp + _g_disp - _b_disp)
+        # Beslissingen (~20s): stabiel, pieken gesmoothed
+        _g_ema = self._grid.ema_value
+        _s_ema = max(0.0, self._solar.ema_value)
+        _b_ema = b_val if b_est else self._battery.ema_value
+        _h_ema = max(0.0, _s_ema + _g_ema - _b_ema)
+
         result = BalancedReading(
             grid_w    = g_val,
             solar_w   = max(0.0, s_val),
@@ -570,6 +785,14 @@ class EnergyBalancer:
             imbalance_w       = round(imbalance, 1),
             stale_sensors     = stale,
             lag_compensated   = lag_comp,
+            grid_display_w    = round(_g_disp, 1),
+            solar_display_w   = round(_s_disp, 1),
+            battery_display_w = round(_b_disp, 1),
+            house_display_w   = round(_h_disp, 1),
+            grid_ema_w    = round(_g_ema, 1),
+            solar_ema_w   = round(_s_ema, 1),
+            battery_ema_w = round(_b_ema, 1),
+            house_ema_w   = round(_h_ema, 1),
         )
         self._last_balanced = result
         return result
@@ -665,6 +888,7 @@ class EnergyBalancer:
             "grid_stale":              self._grid.is_stale(),
             "solar_stale":             self._solar.is_stale(),
             "battery_stale":           self._battery.is_stale(),
+            "jump_attribution":        self._jump_attr.to_dict(),
             "house_trend_w":           round(self._house_trend, 1),
             "house_trend_samples":     self._house_trend_samples,
             "drift_correction_active": self._house_trend_samples >= 30,

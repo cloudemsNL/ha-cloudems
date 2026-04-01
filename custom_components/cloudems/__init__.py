@@ -73,6 +73,7 @@ LOVELACE_LIFECYCLE_URL      = f"/local/cloudems/cloudems-lifecycle-card.js?v={VE
 LOVELACE_ATMOSPHERIC_URL    = f"/local/cloudems/cloudems-atmospheric-card.js?v={VERSION}"
 LOVELACE_VVE_URL            = f"/local/cloudems/cloudems-vve-card.js?v={VERSION}"
 LOVELACE_FCR_URL            = f"/local/cloudems/cloudems-fcr-card.js?v={VERSION}"
+LOVELACE_DAGRAPPORT_URL     = f"/local/cloudems/cloudems-dagrapport-card.js?v={VERSION}"
 LOVELACE_AI_URL             = f"/local/cloudems/cloudems-ai-card.js?v={VERSION}"
 LOVELACE_AIRCO_URL          = f"/local/cloudems/cloudems-airco-card.js?v={VERSION}"
 LOVELACE_EBIKE_URL          = f"/local/cloudems/cloudems-ebike-card.js?v={VERSION}"
@@ -163,6 +164,7 @@ _ALL_JS_RESOURCES = [
     (LOVELACE_ATMOSPHERIC_URL,   "cloudems-atmospheric-card.js"),
     (LOVELACE_VVE_URL,           "cloudems-vve-card.js"),
     (LOVELACE_FCR_URL,           "cloudems-fcr-card.js"),
+    (LOVELACE_DAGRAPPORT_URL,    "cloudems-dagrapport-card.js"),
     (LOVELACE_AI_URL,            "cloudems-ai-card.js"),
     (LOVELACE_AIRCO_URL,         "cloudems-airco-card.js"),
     (LOVELACE_EBIKE_URL,         "cloudems-ebike-card.js"),

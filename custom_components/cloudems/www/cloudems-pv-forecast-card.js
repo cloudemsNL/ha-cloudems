@@ -224,8 +224,31 @@ class CloudemsPvForecastCard extends HTMLElement {
     const measuredKwh    = parseFloat(scSensor?.attributes?.pv_today_kwh ?? 0) || 0;
     const todayKwh       = parseFloat(todaySensor?.state ?? 0) || measuredKwh || 0;
     const tomorrowKwh = parseFloat(tomorrowSensor?.state ?? 0) || 0;
-    const hourlyToday    = todaySensor?.attributes?.hourly ?? [];
-    const hourlyTomorrow = tomorrowSensor?.attributes?.hourly_tomorrow ?? [];
+    // Aggregeer per uur over alle omvormers (som van forecast_w)
+    const _aggHourly = (raw) => {
+      const byHour = {};
+      (raw || []).forEach(h => {
+        const hr = h.hour;
+        if (!byHour[hr]) byHour[hr] = {...h, forecast_w: 0, low_w: 0, high_w: 0};
+        byHour[hr].forecast_w += (h.forecast_w || 0);
+        byHour[hr].low_w      += (h.low_w      || 0);
+        byHour[hr].high_w     += (h.high_w     || 0);
+        if (h.solcast_w != null) byHour[hr].solcast_w = (byHour[hr].solcast_w || 0) + h.solcast_w;
+        // confidence = gemiddelde over omvormers
+        byHour[hr]._conf_sum  = (byHour[hr]._conf_sum  || 0) + (h.confidence || 0);
+        byHour[hr]._conf_n    = (byHour[hr]._conf_n    || 0) + 1;
+      });
+      return Object.values(byHour)
+        .map(h => ({...h, confidence: h._conf_n ? h._conf_sum / h._conf_n : 0}))
+        .sort((a, b) => a.hour - b.hour);
+    };
+    const hourlyToday    = _aggHourly(todaySensor?.attributes?.hourly);
+    const hourlyTomorrow = _aggHourly(tomorrowSensor?.attributes?.hourly_tomorrow);
+    // Ruwe data per omvormer voor gestapelde balken
+    const hourlyRawToday    = todaySensor?.attributes?.hourly    || [];
+    const hourlyRawTomorrow = tomorrowSensor?.attributes?.hourly_tomorrow || [];
+    // Surplus forecast per uur (backend berekend: PV - huisverbruik)
+    const surplusHourly = todaySensor?.attributes?.surplus_forecast_hourly || [];
     const epexToday      = epexSensor?.attributes?.today_prices ?? [];
     const epexTomorrow   = epexSensor?.attributes?.tomorrow_prices ?? [];
     const currentPrice   = parseFloat(priceSensor?.state ?? 0) || null;
@@ -315,10 +338,11 @@ class CloudemsPvForecastCard extends HTMLElement {
     });
 
     // ── Draw chart ──
-    requestAnimationFrame(() => this._drawChart(hourlyActive, epexActive, nowH));
+    const hourlyRawActive = this._activeDay === "today" ? hourlyRawToday : hourlyRawTomorrow;
+    requestAnimationFrame(() => this._drawChart(hourlyActive, epexActive, nowH, hourlyRawActive, surplusHourly));
   }
 
-  _drawChart(hourly, epex, nowH) {
+  _drawChart(hourly, epex, nowH, hourlyRaw = [], surplusHourly = []) {
     const sh     = this.shadowRoot;
     const canvas = sh.getElementById("pvChart");
     if (!canvas) return;
@@ -406,22 +430,70 @@ class CloudemsPvForecastCard extends HTMLElement {
       }
     }
 
-    // ── Bar chart voor forecast ──
+    // ── Bar chart — gestapeld per omvormer ──
     const barW = chartW / nHours * 0.65;
+    // Groepeer ruwe data per uur, bewaar volgorde van omvormers
+    const invColors = [
+      ["rgba(74,222,128,0.85)",  "rgba(74,222,128,0.12)"],   // omvormer 1: groen
+      ["rgba(34,197,164,0.80)",  "rgba(34,197,164,0.10)"],   // omvormer 2: teal
+      ["rgba(16,185,129,0.75)",  "rgba(16,185,129,0.08)"],   // omvormer 3
+      ["rgba(52,211,153,0.70)",  "rgba(52,211,153,0.08)"],   // omvormer 4
+    ];
+    // Bouw gestapelde data per uur
+    const stackByHour = {};
+    hourlyRaw.forEach(h => {
+      if (!stackByHour[h.hour]) stackByHour[h.hour] = [];
+      stackByHour[h.hour].push(h);
+    });
+    const hasStack = Object.values(stackByHour).some(s => s.length > 1);
+
     hourly.forEach(h => {
       const x  = xScale(h.hour);
-      const y  = yScale(h.forecast_w);
-      const bh = chartH - (y - PADT);
       const isNow = h.hour === nowH && this._activeDay === "today";
+      const stack = stackByHour[h.hour] || [];
 
-      // Bar gradient
-      const grad = ctx.createLinearGradient(0, y, 0, PADT + chartH);
-      grad.addColorStop(0,   isNow ? "rgba(74,222,128,0.9)"  : "rgba(74,222,128,0.65)");
-      grad.addColorStop(1,   isNow ? "rgba(74,222,128,0.15)" : "rgba(74,222,128,0.08)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.roundRect(x - barW/2, y, barW, bh, [3, 3, 0, 0]);
-      ctx.fill();
+      if (hasStack && stack.length > 1) {
+        // Gestapelde balken: teken van onder naar boven
+        let baseY = PADT + chartH; // bodem canvas
+        stack.forEach((inv, idx) => {
+          const invH = (inv.forecast_w / maxW) * chartH;
+          const topY  = baseY - invH;
+          const colors = invColors[idx % invColors.length];
+          const grad = ctx.createLinearGradient(0, topY, 0, baseY);
+          grad.addColorStop(0, isNow ? colors[0].replace(/[0-9.]+\)$/, "1)") : colors[0]);
+          grad.addColorStop(1, colors[1]);
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          // Alleen de bovenste balk krijgt afgeronde hoeken
+          if (idx === stack.length - 1) {
+            ctx.roundRect(x - barW/2, topY, barW, invH, [3, 3, 0, 0]);
+          } else {
+            ctx.rect(x - barW/2, topY, barW, invH);
+          }
+          ctx.fill();
+          // Dunne scheidingslijn tussen omvormers
+          if (idx < stack.length - 1 && invH > 3) {
+            ctx.strokeStyle = "rgba(0,0,0,0.25)";
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(x - barW/2, topY);
+            ctx.lineTo(x + barW/2, topY);
+            ctx.stroke();
+          }
+          baseY = topY;
+        });
+      } else {
+        // Enkelvoudige balk (1 omvormer of geen raw data)
+        const y  = yScale(h.forecast_w);
+        const bh = chartH - (y - PADT);
+        const grad = ctx.createLinearGradient(0, y, 0, PADT + chartH);
+        grad.addColorStop(0,   isNow ? "rgba(74,222,128,0.9)"  : "rgba(74,222,128,0.65)");
+        grad.addColorStop(1,   isNow ? "rgba(74,222,128,0.15)" : "rgba(74,222,128,0.08)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        if (bh > 0) ctx.roundRect(x - barW/2, y, barW, bh, [3, 3, 0, 0]);
+        ctx.fill();
+      }
 
       // Solcast dot
       if (h.solcast_w != null) {
@@ -443,6 +515,60 @@ class CloudemsPvForecastCard extends HTMLElement {
         ctx.setLineDash([]);
       }
     });
+
+    // ── Surplus balken naar beneden (teruglevering verwacht) ──
+    if (surplusHourly.length > 0) {
+      const surplusByHour = {};
+      surplusHourly.forEach(s => { surplusByHour[s.hour] = s; });
+      const maxSurplus = Math.max(...surplusHourly.map(s => s.surplus_w), 1);
+      const maxRevenue = Math.max(...surplusHourly.map(s => s.revenue_eur), 0.001);
+      // Surplus zone hoogte: 25% van chartH
+      const surplusH = chartH * 0.28;
+      const surplusBase = PADT + chartH; // bodem van PV grafiek = top surplus zone
+
+      // Achtergrond surplus zone
+      ctx.fillStyle = "rgba(251,146,60,0.04)";
+      ctx.fillRect(PADL, surplusBase, chartW, surplusH);
+      // Scheidingslijn
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(PADL, surplusBase);
+      ctx.lineTo(PADL + chartW, surplusBase);
+      ctx.stroke();
+
+      hourly.forEach(h => {
+        const s = surplusByHour[h.hour];
+        if (!s || s.surplus_w <= 0) return;
+        const x = xScale(h.hour);
+        const barH = (s.surplus_w / maxSurplus) * surplusH * 0.85;
+        // Kleur op basis van opbrengst: meer € = meer oranje
+        const revRatio = Math.min(1, s.revenue_eur / maxRevenue);
+        const alpha = 0.4 + revRatio * 0.45;
+        const grad = ctx.createLinearGradient(0, surplusBase, 0, surplusBase + barH);
+        grad.addColorStop(0, `rgba(251,146,60,${alpha})`);
+        grad.addColorStop(1, `rgba(251,146,60,0.08)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(x - barW/2, surplusBase, barW, barH, [0, 0, 3, 3]);
+        ctx.fill();
+      });
+
+      // Label surplus zone
+      ctx.fillStyle = "rgba(251,146,60,0.5)";
+      ctx.font = `${Math.round(canvas.width * 0.03)}px system-ui`;
+      ctx.fillText("↓ verwacht surplus (excl. sturing)", PADL + 4, surplusBase + 11);
+
+      // Totaal verwachte opbrengst rechtsonder
+      const totalRevenue = surplusHourly.reduce((a, s) => a + s.revenue_eur, 0);
+      if (totalRevenue > 0) {
+        ctx.fillStyle = "rgba(251,146,60,0.8)";
+        ctx.font = `bold ${Math.round(canvas.width * 0.035)}px system-ui`;
+        ctx.textAlign = "right";
+        ctx.fillText(`€${totalRevenue.toFixed(2)}`, PADL + chartW, surplusBase + 11);
+        ctx.textAlign = "left";
+      }
+    }
 
     // ── EPEX lijn ──
     if (cfg.show_epex && epex.length >= 2 && maxEpex > 0) {

@@ -1,5 +1,287 @@
 # CloudEMS Changelog
 
+## v5.5.78 (2026-03-31)
+- Fix: Fase-conflict blijft herstarten bij west-omvormer (issue gemeld door Roedie84)
+
+  Root cause: cross-validatie telde elke meting even zwaar mee, ook ruis-stemmen
+  bij lage vermogens. Een west-omvormer produceert 's ochtends <100W — op dat moment
+  is fasecorrelatie mathematisch onbetrouwbaar (signaal-ruis ratio te laag).
+  Die ruis-stemmen wegstemden de correcte L3-stemmen van de middag.
+
+  Fix: vermogensdrempel voor crossval-stemmen.
+    CROSSVAL_MIN_POWER_PCT = 0.20 (20% van 7-daags piek)
+    CROSSVAL_MIN_POWER_ABS = 300W (absoluut minimum)
+  Stem alleen als omvormer echt produceert. West-omvormer ochtend = automatisch
+  uitgesloten. Piek bekend na ~7 dagen normaal gebruik.
+
+  Tevens toegevoegd:
+    - user_confirmed_phase veld: als gebruiker ooit handmatig bevestigt,
+      wordt crossval permanent overgeslagen
+    - HA service cloudems.confirm_inverter_phase (label, phase)
+    - services.yaml bijgewerkt
+
+## v5.5.77 (2026-03-31)
+- Crash fix #46: _nexus_p90 UnboundLocalError
+  Root cause: variabele alleen gedefinieerd in else-tak maar gebruikt buiten if/else.
+  Als _ai_registry aanwezig was sloeg Python de else over → UnboundLocalError elke cyclus.
+  Fix: _nexus_p90 = 90.0 altijd initialiseren vóór de if/else.
+
+- Performance fix #46: score_trend_alert runaway log spam
+  Root cause: get_trend_alert() had geen cooldown — bij parallelle coordinator
+  instanties (coordinator crasht → herstart → overlap) logde hij tientallen keren
+  per seconde hetzelfde alert. Dit verklaart avg_ms 1700-3000 en mode: CRITICAL.
+  Fix: 24u cooldown in get_trend_alert() via _trend_alert_last_ts.
+
+## v5.5.75 (2026-03-31)
+- Fix: partner_slug toegevoegd aan data_consent config flow stap
+- Fix: voltage_v van P1 (voltage_l1) doorgegeven aan lightning detector
+- Nieuw: dagrapport-kaart toont gisteren vergelijking
+  - DailySummaryGenerator.get_yesterday() snapshot bij dagelijkse notificatie
+  - Watchdog sensor exposeert daily_summary_yesterday attribuut
+  - Kaart: zelfconsumptie/opgewekt/kosten vandaag vs gisteren naast elkaar
+- Fix: Kirchhoff-gecorrigeerde batterijwaarde geborgd in v5.5.74
+
+## v5.5.75 (2026-03-31)
+- Fix: spanning (voltage_v) nu doorgegeven vanuit P1 naar LightningDetector
+- Fix: HA persistent_notification bij bliksemevent (⚡ CloudEMS — Blikseminslag gedetecteerd)
+- Nieuw: ApiClient model (AdaptiveHome) — betalende data-API afnemers
+  - Tiers: tier1 (€500/mnd) t/m tier4 (claim-verificatie)
+  - Rate limiting per dag/maand, automatische reset
+  - API key met dak_ prefix
+- Nieuw: Data API publieke endpoints (AdaptiveHome /api/v1/data/*)
+  - GET /data/pv_cloud_proxy — PV-bewolking proxy per locatie
+  - GET /data/weather — weerobservaties per locatie
+  - GET /data/voltage — netspanningsanomalieën per straat
+  - POST /data/verify_event — claim-verificatie (Tier 4)
+  - GET /data/my_usage — API verbruik voor huidige client
+- Nieuw: Admin dashboard "Data API Clients" view
+  - MRR/ARR van data API
+  - Client aanmaken met tier, datasets en contract
+  - Inline API key generatie
+
+## v5.5.74 (2026-03-31)
+- Fix: Kirchhoff-gecorrigeerde batterijwaarde ging verloren in finale data dict
+  Root cause: self._data wordt op regel ~9673 volledig opnieuw gebouwd.
+  _collect_multi_battery_data() las de ruwe sensorwaarde (+445W stale) opnieuw,
+  ongeacht de eerdere Kirchhoff-correctie op data["batteries"].
+  Gevolg: display toonde +445W laden terwijl batterij -11kW aan het ontladen was.
+  House (2.8kW) was WEL correct want die leest uit _bal.house_w.
+  Fix: _kirchhoff_battery_w/_kirchhoff_battery_data opslaan als class attribuut.
+  Nieuwe methode _collect_multi_battery_data_kirchhoff() past correctie toe
+  in de finale self._data dict. Reset na één cyclus.
+
+## v5.5.66 (2026-03-30)
+- Nieuw: WeatherObservationCollector — microklimaat dataset (weather_observation.py)
+  Verzamelt per 5 minuten alle beschikbare meteorologische data:
+  - Direct: temperatuur, wind, neerslag, luchtdruk, vochtigheid via weather entity
+  - PV-proxy: bewolking via forecast vs werkelijk (altijd aanwezig)
+  - Rolluik-proxy: windstoot detectie via wind-beveiliging activatie
+  - Thermisch: isolatiewaarde berekening uit binnen/buitentemperatuur delta
+  - KNMI-kalibratie infrastructuur: correctie-offset via EMA
+  - SensorMeta: kwaliteitsscore 0-100 per variabele, hoogte, oriëntatie
+  - Cloud-ready schema: ObservationRecord klaar voor AdaptiveHome upload
+  - sensor.cloudems_weather_observations: totaal records + statistieken
+
+Commercieel fundament:
+  - Elke installatie = microklimaat-meetstation met 10-seconden PV-proxy
+  - KNMI-kalibratie maakt data vergelijkbaar met officiële stations
+  - Upload schema klaar voor verkoop aan meteo/verzekeraars/netbeheerders
+  - Variabelen aanwezig afhankelijk van gekoppelde HA-sensoren
+
+## v5.5.65 (2026-03-30)
+- Nieuw: Real-time wolkradar via Open-Meteo current= API
+  - pv_forecast.py: haalt nu ook current=cloud_cover,wind_speed_10m,wind_direction_10m op
+  - Elk uur bijgewerkt vanuit satelliet + grondradar (geen scraping, CC BY 4.0)
+  - get_current_wind() geeft nu real-time waarden ipv hourly forecast
+- Nieuw: PV dip risico berekening (assess_dip_risk)
+  - cloud_pct >40% + wind >2m/s → stijgend risico (0.0-1.0 score)
+  - Geeft geschatte minuten tot impact (5-30 min)
+  - Volledig standalone — werkt zonder cloud-netwerk
+- Nieuw: Boiler reageert op verwachte PV dip
+  - Bij risico >50%: effectief surplus verlaagd (risico × 50%)
+  - Bij 80% dip risico: boiler ziet 40% minder surplus → start geen nieuwe cyclus
+  - Niet actief bij negatieve prijs (dan wel gewoon laden)
+  - sensor.cloudems_pv_dip_events.attributes.dip_risk toont actuele status
+
+## v5.5.64 (2026-03-30)
+- Nieuw: PV Dip Detector — gedistribueerd wolkradar netwerk (laag 1 van 3)
+  - Open-Meteo uitgebreid: wind_speed_10m + wind_direction_10m + cloud_cover per uur
+  - pv_dip_detector.py: detecteert 20%+ onverwachte PV-dalingen
+  - Privacy: GPS afgerond op 0.01° (~1km), installation_id als SHA-256 hash
+  - PvDipEvent schema: cloud-ready voor AdaptiveHome upload
+  - Haversine + kompasrichting berekening voor wolkreistijd
+  - receive_cloud_event(): klaar voor events van andere installaties
+  - Sensor: sensor.cloudems_pv_dip_events (state=aantal events)
+  - Attributen: recent_events, active_prediction, upload_pending (voor cloud)
+
+## v5.5.63 (2026-03-30)
+- Nieuw: Batterij SoC prognose curve (vandaag groen + morgen blauw gestippeld)
+  - Backend: soc_forecast_curve berekend per uur op basis van PV forecast - huisverbruik
+  - Vandaag: vanaf huidig uur, morgen: volledige dag
+  - Min/max SoC punten gemarkeerd, 20%/80% referentielijnen
+  - Scheiding vandaag/morgen via verticale lijn
+- Nieuw: Solar analyse tab verbeterd met SVG staafgrafiek (30 dagen)
+  - Vandaag goud, eerdere dagen groen, datumlabels automatisch
+  - Detailrijen onder de grafiek voor exacte waarden
+- Nieuw: Boiler kWh display naast tankvisualisatie
+  - Berekening: tankL × (T_water - T_koud) × 1.163 / 1000
+  - Toont opgeslagen thermische energie in kWh
+- Nieuw: Dagrapport kaart (cloudems-dagrapport-card)
+  - Zelfconsumptie score groot weergegeven
+  - KPI grid: opgewekt / kosten vandaag / kosten maand
+  - Energiebalans bars: opgewekt / geïmporteerd / teruggeleverd / opbrengst
+  - Top 5 verbruikers vandaag via NILM
+  - Vergelijkingsrij met kleurcodering
+  - Automatisch geregistreerd als lovelace resource
+
+## v5.5.62 (2026-03-30)
+- Nieuw: verwachte teruglevering per uur in pv-forecast-card
+  - Backend: surplus_forecast_hourly berekend in coordinator
+    PV forecast per uur − verwacht huisverbruik (HouseConsumptionLearner)
+    + EPEX prijs per uur → verwachte opbrengst in €
+  - Frontend: oranje balken naar beneden onder de PV grafiek
+    Kleurintensiteit op basis van opbrengst per uur (meer € = dieper oranje)
+    Totaal verwachte opbrengst rechtsboven surplus zone
+  - Label "↓ verwacht surplus (excl. sturing)" — eerlijk: zonder boiler/EV correctie
+
+## v5.5.61 (2026-03-30)
+- Nieuw: pv-forecast-card toont gestapelde balken per omvormer
+  - Omvormer 1: groen, omvormer 2: teal, samen = totaal forecast
+  - Dunne scheidingslijn tussen omvormers voor leesbaarheid
+  - Fallback naar enkelvoudige balk bij 1 omvormer
+
+## v5.5.60 (2026-03-30)
+- Fix: pv-forecast-card toonde dubbele balken bij 2 omvormers
+  - Oorzaak: sensor.hourly bevat per omvormer een entry per uur
+  - Bij 2 omvormers: uur 12 stond 2× in de array → 2 balken naast elkaar
+  - Fix: aggregeer per uur (som forecast_w/low_w/high_w, gemiddelde confidence)
+  - Resultaat: één balk per uur = totaal van alle omvormers
+
+## v5.5.59 (2026-03-30)
+- Fix: alle dagen toonden exact dezelfde forecast grafiek
+  - Gisteren: had geen aparte forecast → nu arr24() (lege lijn), alleen werkelijk zichtbaar
+  - Vandaag: fcHourly correct
+  - Morgen: fcTomHourly correct (vandaag forecast als referentie)
+- Fix: "Verwacht tot nu" label aangepast per dag
+  - Gisteren: "Totaal verwacht → —" (geen forecast beschikbaar)
+  - Vandaag: "Verwacht tot nu"
+  - Morgen: "Totaal verwacht"
+
+## v5.5.58 (2026-03-30)
+- Fix: solar card inverter chips toonden verkeerde of lege waarden
+  - Oriëntatie (kompas) was leeg: inv.learned_azimuth bestaat niet → inv.azimuth_compass
+  - Piek vermogen was leeg: inv.peak_wp bestaat niet → inv.estimated_wp / peak_w
+  - Fase was leeg: inv.detected_phase bestaat niet → inv.phase_display
+  - Benutting % was handmatig berekend → nu inv.utilisation_pct (backend berekend)
+  - Benut chip toont nu ook max vermogen: "0% benut · 10.21 kW max"
+
+## v5.5.56 (2026-03-30)
+- Fix: solar card crash "fcExpected.toFixed is not a function"
+  - Root cause: fcA.hourly is [{hour, forecast_w, ...}] objecten, niet array van getallen
+  - _toArr24() helper: converteert object-array correct naar 24-waarden getal-array
+  - Detecteert automatisch beide formaten (object-stijl en getal-stijl)
+  - forecast_w in Watt → kWh per uur voor grafiek
+  - Getest met echte sensor data structuur
+
+## v5.5.53 (2026-03-30)
+- Fix: drempelwaarden voor display verwijderd/verlaagd
+  - Boiler kWh sensor: current_power_w altijd gezet (ook bij 10W, 50W, 180W)
+  - is_heating badge: drempel 50W → 5W
+  - NILM power toewijzen: 50W → 1W
+  - Apparaat actief check: 50W → 1W
+  - Infra_pw dict (flow card): solar/grid/ev/hp/boiler drempel 50-200W → 1W
+  - Flow card JS: pw > 10 → pw > 1 voor is_on check
+  - Leer-drempels (nominaal vermogen) ongewijzigd (> 50W) — ruis niet leren
+
+## v5.5.52 (2026-03-30)
+- Fix: alle sensor outputs gebruiken nu display EMA (5s tau)
+  - solar_power, grid_power (import/export), battery_power, house_power
+  - Vloeiende UI zonder geflicker, altijd Kirchhoff=0 wat de gebruiker ziet
+  - Beslissingen (boiler, EV, accu) blijven op 20s EMA
+  - P1 grid blijft leidend voor beslissingen, display EMA alleen voor weergave
+  - Getest: 6 scenario's, display altijd sluitend
+
+## v5.5.51 (2026-03-30)
+- Fix: display EMA gebruikte fout anker bij geschatte battery (Nexus vertraging)
+  - house_trend als anker voor display bij battery_estimated=True
+  - huis_display blijft stabiel bij grote grid sprong
+- Getest: Kirchhoff=0 op raw, display én EMA in 11 scenario's
+  - Nacht, dag, accu laden/ontladen, inductie, zelfvoorzienend, max export
+  - Grid sprong met Nexus vertraging, magnetron piek
+  - Alle drie lagen exact 0W imbalans
+
+## v5.5.50 (2026-03-30)
+- Nieuw: Twee EMA lagen voor alle sensoren
+  - Display (~5s tau):   nauwelijks filter, geen geflicker in UI maar wel vloeiend
+  - Beslissingen (~20s): pieken gesmoothed, stabiele sturing
+  - alpha_display = dt/(5+dt) ≈ 0.67 bij 10s interval
+  - alpha_decision = dt/(20+dt) ≈ 0.33 bij 10s interval
+  - Magnetron piek: display toont max 333W, beslissing max 167W
+  - Kirchhoff gewaarborgd op beide EMA niveaus
+  - house_power sensor gebruikt display EMA → geen flikkerende getallen
+
+## v5.5.49 (2026-03-30)
+- Nieuw: Leerbare sprong-toedeling via JumpAttribution sigmoid
+  - Kleine sprong (500W): ~21% accu, ~79% huis (waarschijnlijk koelkast/lamp)
+  - Middel (3kW): ~41% accu — kan inductie OF accu zijn
+  - Groot (7kW): ~83% accu — vrijwel zeker Nexus cloud-lag
+  - Enorm (10kW): ~91% accu — zeker accu
+  - house_alpha = base_alpha × (1 - battery_fraction) — proportioneel gereduceerd
+  - Zelflerend: na ~45s arriveert echte Nexus waarde → threshold bijgesteld
+  - Diagnostics: jump_attribution.threshold_w en n_learned zichtbaar
+
+## v5.5.48 (2026-03-30)
+- Fix: Kirchhoff imbalans door foute house_alpha boost bij grid/accu sprongen
+  - Eerder: bij grote delta → house_alpha boosten zodat huis de sprong volgt
+  - Bug: huis (thermische lasten) kan nooit 7kW+ springen in 10s — dat is altijd de accu
+  - Bij boosten: house_trend = 8840W (sprong), battery = solar+grid-8840 = onmogelijk
+  - Fix: bij grote grid sprong (>1kW) → house_alpha clippen naar max 0.05
+  - Huis EMA blijft stabiel, accu krijgt de sprong via Kirchhoff
+  - battery = solar + grid - house_ema → altijd Kirchhoff=0
+  - Na ~45s arriveert echte Nexus waarde → systeem convergeert naar werkelijke waarden
+  - Threshold stale battery: 10s → 30s (Nexus P90 latency ~45s)
+
+## v5.5.47 (2026-03-30)
+- Fix: Kirchhoff imbalans bij grote export + accu ontladen
+  - Bug: bij export > solar + 500W werd batterij VERVANGEN door Kirchhoff-van-house_trend
+  - Als house_trend verouderd (8840W, trend van eerder) → battery = 412-7470-8840 = -15898W (onmogelijk)
+  - Circulaire fout: house_w = house_trend = 8840W, dashboard toont bat=9630W → 6268W mismatch
+  - Fix: als batterijsensor vers is (< 30s) → sensor is leidend, house volgt via Kirchhoff
+  - Resultaat: solar=412W, bat=9630W ontladen, grid=7470W export → huis=2572W (correct)
+  - Threshold verhoogd: 10s → 30s voor Kirchhoff-override (Nexus P90 latency ~45s)
+
+## v5.5.46 (2026-03-29)
+- Nieuw: Solar card volledig herbouwd naar Solcast-stijl
+  - Header: omvormers + piek + huidig vermogen
+  - Top strip: Nu / Vandaag gemeten / Morgen verwacht
+  - Tabs: Live, Analyse, Advies
+  - Grafiek: SVG met 3 lijnen (verwacht/werkelijk/gisteren) + tijdlijn nu
+  - Navigatie: gisteren ← vandaag → morgen
+  - Stats: verwacht tot nu / werkelijk / afwijking %
+  - Per omvormer: naam, vermogen, benutting bar, oriëntatie, fase
+  - Analyse tab: rolling 14-daagse productie + nauwkeurigheid 14d/30d
+  - Advies tab: automatische tips op basis van forecast en clipping
+- Nieuw: Backend rolling 30-daagse uurdata opslag
+  - Elke dag bij middernacht opgeslagen in _pv_daily_history
+  - Persistent via storage (overleeft herstart)
+  - Beschikbaar in accuracy sensor als daily_history attribuut
+
+## v5.5.45 (2026-03-29)
+- Nieuw: TRV/airco throttling — voorkomt te frequent sturen
+  - TRV: max 1x per 5 minuten (batterij spaarzaam)
+  - Airco: max 1x per 3 minuten (voorkomt piepen bij elke bevestiging)
+  - Alleen sturen bij mode-wijziging OF significante temperatuurverandering (>0.4°C)
+- Nieuw: CV-ketel wizard configuratie
+  - Entity: switch.* / climate.* / OpenTherm
+  - Stooklijn parameters: slope, min/max aanvoertemperatuur, zomer cutoff
+  - Minimaal aantal zones dat warmte vraagt voor ketel aan
+- Nieuw: OpenTherm stooklijn berekening
+  - T_aanvoer = T_pivot + slope × (T_setpoint - T_buiten)
+  - Beter dan VTherm vaste hoog/laag: berekent optimale aanvoertemperatuur
+  - Max 55°C → condensatieketel altijd in condensatiemodus
+  - Extra correctie op basis van gewogen warmtevraag per zone
+  - Slope is leerbaar (toekomst)
+
 ## v5.5.44 (2026-03-29)
 - Fix: has_gas_heating was nooit True — geen wizard knop beschikbaar
   - Alle gas-checks (v5.5.32-5.5.43) faalden omdat has_gas_heating altijd "" was

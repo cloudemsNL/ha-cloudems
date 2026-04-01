@@ -793,6 +793,87 @@ class BoilerLearner:
         margin = boiler.current_temp_c - boiler.comfort_floor_c
         return None if margin < 0 else (margin / boiler.thermal_loss_c_h) * 60.0
 
+    # ── 3b. Boiler thermische kwaliteit + vervangingsadvies ─────────────────
+
+    def boiler_thermal_quality(self, boiler) -> dict:
+        """Bereken boilerkwaliteit en vervangingsadvies op basis van thermisch verlies.
+
+        Methode:
+          thermal_loss_c_h = gemeten afkoelsnelheid in °C/uur bij stand-by
+          → kWh/dag verlies = (cap_L × verlies_c_h × 24) × 1.163 / 1000
+          → jaarkosten verlies = kWh/dag × 365 × stroomprijs
+          → terugverdientijd = (nieuwe_boiler_prijs - huidige_restwaarde) / jaarkosten
+
+        Benchmark:
+          Slechte boiler (jaren 80): 5-8 °C/uur verlies
+          Gemiddeld (2000s):         2-4 °C/uur
+          Modern A-label:            0.5-1.5 °C/uur
+        """
+        loss_c_h = getattr(boiler, "thermal_loss_c_h", 0.0)
+        cap_l    = getattr(boiler, "tank_volume_l", None) or 80.0
+        if loss_c_h <= 0:
+            return {"status": "no_data",
+                    "message": "Thermisch verlies nog niet gemeten (wacht op afkoelperiode)."}
+
+        # kWh verlies per dag via stand-by verlies
+        # q_kwh = cap_l × verlies_c × 1.163/1000  (1.163 = Wh/L/°C)
+        daily_loss_kwh = round(cap_l * loss_c_h * 24 * 1.163 / 1000, 2)
+        AVG_PRICE_EUR_KWH = 0.28
+        annual_loss_eur  = round(daily_loss_kwh * 365 * AVG_PRICE_EUR_KWH, 1)
+
+        # Benchmark score
+        if loss_c_h < 1.5:
+            grade, label = "A", "uitstekend"
+        elif loss_c_h < 3.0:
+            grade, label = "B", "goed"
+        elif loss_c_h < 5.0:
+            grade, label = "C", "matig"
+        else:
+            grade, label = "D", "slecht"
+
+        result = {
+            "status":            "ok" if grade in ("A", "B") else "suboptimal",
+            "thermal_loss_c_h":  round(loss_c_h, 2),
+            "daily_loss_kwh":    daily_loss_kwh,
+            "annual_loss_eur":   annual_loss_eur,
+            "grade":             grade,
+            "label":             label,
+            "tank_volume_l":     cap_l,
+        }
+
+        if grade in ("C", "D"):
+            # Terugverdientijd bij vervanging door A-label
+            MODERN_LOSS_C_H   = 1.0   # A-label boiler
+            modern_daily_kwh  = cap_l * MODERN_LOSS_C_H * 24 * 1.163 / 1000
+            saving_eur_year   = round((daily_loss_kwh - modern_daily_kwh) * 365 * AVG_PRICE_EUR_KWH, 1)
+            NEW_BOILER_EUR    = 1200.0  # Inclusief installatie
+            payback_years     = round(NEW_BOILER_EUR / saving_eur_year, 1) if saving_eur_year > 0 else None
+            result["saving_eur_year"]   = saving_eur_year
+            result["new_boiler_cost_eur"] = NEW_BOILER_EUR
+            result["payback_years"]      = payback_years
+            if payback_years and payback_years <= 8:
+                result["recommend_replacement"] = True
+                result["message"] = (
+                    f"Boiler verliest {loss_c_h:.1f}°C/uur (label {grade} — {label}). "
+                    f"Jaarlijkse standby-kosten: €{annual_loss_eur:.0f}. "
+                    f"Een A-label boiler bespaart €{saving_eur_year:.0f}/jaar "
+                    f"en verdient zich in ±{payback_years} jaar terug."
+                )
+            else:
+                result["recommend_replacement"] = False
+                result["message"] = (
+                    f"Boiler verliest {loss_c_h:.1f}°C/uur (label {grade}). "
+                    f"Vervanging verdient zich in {payback_years} jaar terug "
+                    f"— wacht op einde technische levensduur."
+                )
+        else:
+            result["message"] = (
+                f"Boiler presteert goed: {loss_c_h:.1f}°C/uur verlies (label {grade})."
+            )
+            result["recommend_replacement"] = False
+
+        return result
+
     # ── 4. Seizoenspatroon ────────────────────────────────────────────────────
 
     def update_season(self, outside_temp_c: Optional[float]) -> str:
@@ -2786,11 +2867,12 @@ class BoilerController:
                                 dt_h  = (now - prev_ts) / 3600
                                 b.cycle_kwh += delta
                                 measured_w = (delta / dt_h * 1000) if dt_h > 0 else 0
+                                # v5.5.52: altijd current_power_w zetten (ook laag vermogen)
+                                # Leren alleen bij > 50W (voorkomt leren van standby)
+                                b.current_power_w = measured_w
                                 if measured_w > 50:
-                                    # Leer het power als exponentieel voortschrijdend gemiddelde
                                     b.power_w = round(b.power_w * 0.85 + measured_w * 0.15, 0)
                                     self._power_dirty = True
-                                b.current_power_w = measured_w
                                 # ── Anode-slijtage bijwerken ─────────────────
                                 # Zoek de learner van de groep waartoe deze boiler behoort
                                 for _g in self._groups:
@@ -2899,7 +2981,7 @@ class BoilerController:
                                 )
                                 if _match and _nd.get("is_on"):
                                     _nilm_w = float(_nd.get("power_w") or 0.0)
-                                    if _nilm_w > 50:
+                                    if _nilm_w > 1:
                                         b.current_power_w = _nilm_w
                                         # Leer via EMA — NILM is minder nauwkeurig dan directe sensor
                                         b.power_w = round(b.power_w * 0.95 + _nilm_w * 0.05, 0)
@@ -3877,7 +3959,7 @@ class BoilerController:
                 b_name = b.label.lower()
                 if (dev_eid and dev_eid == eid) or (b_name and b_name in dev_name) or (dev_name and dev_name in b_name):
                     power_w = float(dev.get("current_power") or dev.get("power_w") or 0)
-                    if power_w > 50 and dev.get("is_on"):
+                    if power_w > 1 and dev.get("is_on"):
                         # EMA-update van learned power via NILM
                         b.power_w = round(b.power_w * 0.90 + power_w * 0.10, 0)
                         b.current_power_w = power_w
@@ -4368,7 +4450,7 @@ class BoilerController:
              "pending_preset": b._pending_preset or "",
              "preset_on":      b.preset_on or "BOOST",
              "preset_off":     b.preset_off or "GREEN",
-             "is_heating": (b.current_power_w or 0.0) > 50.0,
+             "is_heating": (b.current_power_w or 0.0) > 5.0,
              "stall_active": b._stall_active,
              "boost_paused_until": b._boost_paused_until if b._boost_paused_until > time.time() else 0.0,
              "boost_paused_remaining_s": max(0.0, round(b._boost_paused_until - time.time(), 0)) if b._boost_paused_until > time.time() else 0.0,

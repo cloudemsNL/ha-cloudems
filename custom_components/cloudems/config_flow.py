@@ -2030,7 +2030,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_CLIMATE_EPEX_ENABLED] = False
             if suggested and "climate_zones" not in self._config:
                 self._config["climate_zones"] = suggested
-            return await self.async_step_boiler_groups()
+            return await self.async_step_cv_boiler_config()
 
         if suggested and "climate_zones" not in self._config:
             self._config["climate_zones"] = suggested
@@ -2070,6 +2070,55 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                              "aanmaakt. Alleen kamers met een fysieke thermostaat of TRV worden getoond.",
             },
         )
+
+
+    async def async_step_cv_boiler_config(self, user_input=None):
+        """CV-ketel configuratie: entity, type en stooklijn."""
+        if user_input is not None:
+            if user_input.get("cv_boiler_entity"):
+                self._config["cv_boiler_entity"]   = user_input["cv_boiler_entity"]
+                self._config["cv_control_type"]    = user_input.get("cv_control_type", "switch")
+                self._config["cv_curve_slope"]     = float(user_input.get("cv_curve_slope", 1.5))
+                self._config["cv_min_supply_c"]    = float(user_input.get("cv_min_supply_c", 25.0))
+                self._config["cv_max_supply_c"]    = float(user_input.get("cv_max_supply_c", 55.0))
+                self._config["cv_min_zones_calling"] = int(user_input.get("cv_min_zones_calling", 1))
+                self._config["cv_summer_cutoff_c"] = float(user_input.get("cv_summer_cutoff_c", 18.0))
+            return await self.async_step_boiler_groups()
+
+        return self.async_show_form(
+            step_id="cv_boiler_config",
+            data_schema=vol.Schema({
+                vol.Optional("cv_boiler_entity", default=self._config.get("cv_boiler_entity", "")): str,
+                vol.Optional("cv_control_type", default=self._config.get("cv_control_type", "switch")):
+                    selector.SelectSelector(selector.SelectSelectorConfig(options=[
+                        selector.SelectOptionDict(value="switch",     label="Switch / input_boolean (aan/uit)"),
+                        selector.SelectOptionDict(value="climate",    label="Climate (aan/uit via hvac_mode)"),
+                        selector.SelectOptionDict(value="opentherm",  label="OpenTherm (aanvoertemperatuur via stooklijn)"),
+                    ], mode="list")),
+                vol.Optional("cv_curve_slope", default=self._config.get("cv_curve_slope", 1.5)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(min=0.5, max=3.0, step=0.1)),
+                vol.Optional("cv_min_supply_c", default=self._config.get("cv_min_supply_c", 25.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(min=20.0, max=40.0, step=1.0)),
+                vol.Optional("cv_max_supply_c", default=self._config.get("cv_max_supply_c", 55.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(min=40.0, max=80.0, step=1.0)),
+                vol.Optional("cv_min_zones_calling", default=self._config.get("cv_min_zones_calling", 1)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(min=1, max=10, step=1)),
+                vol.Optional("cv_summer_cutoff_c", default=self._config.get("cv_summer_cutoff_c", 18.0)):
+                    selector.NumberSelector(selector.NumberSelectorConfig(min=12.0, max=25.0, step=0.5)),
+            }),
+            description_placeholders={
+                "info": (
+                    "**CV-ketel aansturing**\n\n"
+                    "- **Switch/climate**: aan/uit sturing\n"
+                    "- **OpenTherm**: berekent aanvoertemperatuur via stooklijn\n"
+                    "  *Beter dan VTherm vaste hoog/laag: CloudEMS berekent de optimale "
+                    "aanvoertemperatuur op basis van buitentemperatuur en warmtevraag. "
+                    "Max 55°C zodat condensatieketel altijd in condensatiemodus blijft.*\n\n"
+                    "Laat leeg om CV-ketel niet via CloudEMS aan te sturen."
+                ),
+            },
+        )
+
 
     async def async_step_climate_epex_count(self, user_input=None):
         """Airco/WP EPEX stap 1: hoeveel apparaten?"""
@@ -2562,7 +2611,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Optionele stap: GitHub log reporting instellen."""
         if user_input is not None:
             self._config.update(user_input)
-            return self._create()
+            return await self.async_step_data_consent()
 
         existing = self._config
         return self.async_show_form(
@@ -2586,6 +2635,46 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     "Voer ook de naam van je HA mobiele app notify service in voor push-meldingen, "
                     "bijv. 'mobile_app_mijn_telefoon'."
                 ),
+            },
+        )
+
+    async def async_step_data_consent(self, user_input=None):
+        """Opt-in voor data-deling en buurtwaakzaamheid.
+
+        Volledig vrijwillig — geen impact op CloudEMS functionaliteit.
+        Transparant: gebruiker weet precies wat er gedeeld wordt.
+        """
+        if user_input is not None:
+            self._config["share_observations"]      = user_input.get("share_observations", False)
+            self._config["share_neighbourhood"]     = user_input.get("share_neighbourhood", False)
+            self._config["adaptivehome_token"]      = user_input.get("adaptivehome_token", "").strip()
+            self._config["partner_slug"]            = user_input.get("partner_slug", "").strip().lower()
+            return self._create()
+
+        existing = self._config
+        return self.async_show_form(
+            step_id="data_consent",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "share_observations",
+                    default=existing.get("share_observations", False),
+                ): bool,
+                vol.Optional(
+                    "share_neighbourhood",
+                    default=existing.get("share_neighbourhood", False),
+                ): bool,
+                vol.Optional(
+                    "adaptivehome_token",
+                    default=existing.get("adaptivehome_token", ""),
+                ): str,
+                vol.Optional(
+                    "partner_slug",
+                    default=existing.get("partner_slug", ""),
+                ): str,
+            }),
+            description_placeholders={
+                "privacy_url":        "https://cloudems.eu/privacy",
+                "neighbourhood_url":  "https://cloudems.eu/buurtwaakzaamheid",
             },
         )
 

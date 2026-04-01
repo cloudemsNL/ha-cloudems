@@ -76,6 +76,9 @@ class EPEXPriceFetcher:
         self._id_prices:   list[dict] = []   # ruwe intraday
         self._country      = self.config.get(CONF_EPEX_COUNTRY, DEFAULT_EPEX_COUNTRY)
         self._last_intraday_fetch: float = 0.0
+        self._id_quarter_prices: list[dict] = []  # v5.5.77: 15-min EPEX data
+        self._last_quarter_fetch: float = 0.0
+        self.quarter_prices: list[dict] = []      # [{slot, hour, quarter, price, start, end}]
 
     async def async_setup(self) -> None:
         source = "Nord Pool" if self._country in NORDPOOL_COUNTRIES else "EPEX/ENTSO-E"
@@ -111,6 +114,18 @@ class EPEXPriceFetcher:
                 self._id_prices = id_prices
                 self._last_intraday_fetch = time.time()
                 _LOGGER.debug("Intraday: %d slots geladen (%s)", len(id_prices), self._country)
+
+        # v5.5.77: kwartierdata (15-min) — elke 15 minuten ophalen
+        if time.time() - self._last_quarter_fetch > 900:
+            try:
+                q_prices = await self._fetch_quarter_prices()
+                if q_prices:
+                    self._id_quarter_prices = q_prices
+                    self.quarter_prices = q_prices
+                    self._last_quarter_fetch = time.time()
+                    _LOGGER.debug("Kwartierdata: %d slots geladen", len(q_prices))
+            except Exception as _qe:
+                _LOGGER.debug("Kwartierdata fetch fout: %s", _qe)
 
         # Stap 3: merge
         self.prices = self._merge_prices(self._da_prices, self._id_prices)
@@ -286,6 +301,172 @@ class EPEXPriceFetcher:
         except Exception as err:
             _LOGGER.debug("Nord Pool legacy parse fout: %s", err)
         return prices
+
+    async def _fetch_quarter_prices(self) -> list[dict]:
+        """Haal 15-minuten EPEX kwartierdata op.
+
+        Probeert achtereenvolgens:
+          1. ENTSO-E A44 met PTU 15-min resolutie (als token beschikbaar)
+          2. EPEX SPOT publieke API met product=15
+          3. Fallback: interpoleer uurprijzen naar kwartieren
+        """
+        # Methode 1: ENTSO-E 15-min via A63 of A44
+        area  = EPEX_AREAS.get(self._country)
+        token = self.hass.data.get("cloudems_entsoe_token")
+        if area and token:
+            try:
+                result = await self._fetch_entsoe_quarter(area, token)
+                if result:
+                    return result
+            except Exception as e:
+                _LOGGER.debug("ENTSO-E kwartier: %s", e)
+
+        # Methode 2: EPEX SPOT publiek product=15
+        epex_area = EPEX_INTRADAY_AREAS.get(self._country)
+        if epex_area:
+            try:
+                result = await self._fetch_epex_quarter(epex_area)
+                if result:
+                    return result
+            except Exception as e:
+                _LOGGER.debug("EPEX kwartier: %s", e)
+
+        # Methode 3: Interpoleer uurprijzen → kwartieren
+        # Gebruik huidige uurprijzen en maak 4 kwartiersloten per uur
+        if self.prices:
+            return self._interpolate_to_quarters(self.prices)
+        return []
+
+    async def _fetch_entsoe_quarter(self, area: str, token: str) -> list[dict]:
+        """ENTSO-E 15-min kwartierdata via A44 met MTU=PT15M."""
+        now = datetime.now(timezone.utc)
+        params = {
+            "securityToken": token,
+            "documentType":  "A44",
+            "in_Domain":     area,
+            "out_Domain":    area,
+            "periodStart":   now.strftime("%Y%m%d0000"),
+            "periodEnd":     (now + timedelta(days=1)).strftime("%Y%m%d0000"),
+        }
+        session = async_get_clientsession(self.hass)
+        async with session.get(
+            ENTSOE_BASE, params=params,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status != 200:
+                return []
+            xml = await resp.text()
+        # Parse — zoek TimeSeries met resolution PT15M
+        import xml.etree.ElementTree as ET
+        try:
+            root = ET.fromstring(xml)
+            ns = {"ns": "urn:iec62325.351:tc57wg16:451-3:publicationdocument:7:3"}
+            results = []
+            for ts in root.findall(".//ns:TimeSeries", ns):
+                period = ts.find("ns:Period", ns)
+                if period is None:
+                    continue
+                res = period.findtext("ns:resolution", namespaces=ns)
+                if res != "PT15M":
+                    continue
+                start_str = period.findtext("ns:timeInterval/ns:start", namespaces=ns)
+                if not start_str:
+                    continue
+                from datetime import datetime as _dt
+                slot_start = _dt.fromisoformat(start_str.replace("Z", "+00:00"))
+                for pt in period.findall("ns:Point", ns):
+                    pos = int(pt.findtext("ns:position", "0", ns))
+                    price_mwh = float(pt.findtext("ns:price.amount", "0", ns))
+                    t = slot_start + timedelta(minutes=15 * (pos - 1))
+                    results.append({
+                        "start":   t,
+                        "end":     t + timedelta(minutes=15),
+                        "price":   round(price_mwh / 1000, 6),
+                        "hour":    t.hour,
+                        "quarter": t.minute // 15,
+                        "slot":    t.hour * 4 + t.minute // 15,
+                        "intraday": False,
+                    })
+            return sorted(results, key=lambda x: x["start"])
+        except Exception as e:
+            _LOGGER.debug("ENTSO-E kwartier parse: %s", e)
+            return []
+
+    async def _fetch_epex_quarter(self, epex_area: str) -> list[dict]:
+        """EPEX SPOT publieke kwartierdata product=15."""
+        now      = datetime.now(timezone.utc)
+        date_str = now.strftime("%Y-%m-%d")
+        params = {
+            "market_area":   epex_area,
+            "trading_date":  date_str,
+            "delivery_date": date_str,
+            "modality":      "Auction",
+            "sub_modality":  "QuarterHourlyAuction",
+            "product":       "15",
+            "data_mode":     "table",
+        }
+        session = async_get_clientsession(self.hass)
+        async with session.get(
+            EPEX_INTRADAY_BASE, params=params,
+            headers={"Accept": "application/json"},
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json(content_type=None)
+        results = []
+        try:
+            for row in data.get("data", {}).get("rows", []):
+                time_str = row.get("hour") or row.get("quarter") or row.get("time")
+                price    = row.get("price") or row.get("last") or row.get("close")
+                if not time_str or price is None:
+                    continue
+                # "08:15 - 08:30" of "08:15"
+                t_part = str(time_str).split(" - ")[0].strip()
+                h, m   = int(t_part.split(":")[0]), int(t_part.split(":")[1])
+                t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                if t < now - timedelta(hours=1):
+                    t += timedelta(days=1)
+                results.append({
+                    "start":   t,
+                    "end":     t + timedelta(minutes=15),
+                    "price":   float(price) / 1000.0,
+                    "hour":    h,
+                    "quarter": m // 15,
+                    "slot":    h * 4 + m // 15,
+                    "intraday": True,
+                })
+        except Exception as e:
+            _LOGGER.debug("EPEX kwartier parse: %s", e)
+        return sorted(results, key=lambda x: x["start"])
+
+    def _interpolate_to_quarters(self, hour_prices: list[dict]) -> list[dict]:
+        """Fallback: interpoleer uurprijzen naar 4 kwartieren per uur.
+
+        Lineaire interpolatie tussen opeenvolgende uurprijzen.
+        Geeft realistischer beeld dan platte uurblokken.
+        """
+        results = []
+        for i, slot in enumerate(hour_prices):
+            start = slot.get("start")
+            price = slot.get("price", 0)
+            if start is None:
+                continue
+            next_price = hour_prices[i + 1]["price"] if i + 1 < len(hour_prices) else price
+            for q in range(4):
+                frac      = q / 4
+                q_price   = price + frac * (next_price - price)
+                t         = start + timedelta(minutes=15 * q)
+                results.append({
+                    "start":       t,
+                    "end":         t + timedelta(minutes=15),
+                    "price":       round(q_price, 6),
+                    "hour":        t.hour,
+                    "quarter":     q,
+                    "slot":        t.hour * 4 + q,
+                    "interpolated": True,
+                })
+        return results
 
     async def _fetch_intraday(self) -> list[dict]:
         """

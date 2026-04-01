@@ -61,8 +61,12 @@ PHASE_CONFIRM_RATIO      = 0.80
 LEARNING_SAVE_INTERVAL_S = 120
 
 # Cross-validatie
-CROSSVAL_MIN_VOTES = 20
-CROSSVAL_MIN_RATIO = 0.50
+CROSSVAL_MIN_VOTES    = 20
+CROSSVAL_MIN_RATIO    = 0.50
+# v5.5.77: Minimaal vermogen als % van 7-daags piek voor betrouwbare stem
+# Onder deze drempel = ruis (west-omvormer ochtend, bewolkte dag, opstarten)
+CROSSVAL_MIN_POWER_PCT = 0.20  # 20% van 7-daags piek
+CROSSVAL_MIN_POWER_ABS = 300   # Absoluut minimum 300W (als piek onbekend)
 
 # Nieuwe-panelen-detectie
 NEW_PANEL_RATIO         = 1.20
@@ -132,6 +136,8 @@ class InverterProfile:
     three_phase_votes: int      = 0      # teller 3F-stemmen (v1.5.0)
     _peak_over_single_phase_s: float = field(default=0.0, repr=False)  # seconden boven 1F-max
     hourly_peak_w: dict         = field(default_factory=dict)
+    # Gebruiker bevestigde fase — overrulet cross-validatie voorgoed
+    user_confirmed_phase: str | None = None  # v5.5.77: "L1"/"L2"/"L3"/"3F"
     # Cross-validatie — persistent
     phase_post_votes: dict      = field(default_factory=dict)
     phase_relearn_events: int   = 0
@@ -207,6 +213,7 @@ class SolarPowerLearner:
                 confident=bool(d.get("confident", False)),
                 detected_phase=d.get("detected_phase"),
                 phase_certain=bool(d.get("phase_certain", False)),
+                user_confirmed_phase=d.get("user_confirmed_phase"),  # v5.5.77
                 phase_votes=votes_d,
                 is_three_phase=bool(d.get("is_three_phase", False)),
                 three_phase_votes=int(d.get("three_phase_votes", 0)),
@@ -361,6 +368,16 @@ class SolarPowerLearner:
             if phase_currents and len(phase_currents) >= 2:
                 if not profile.phase_certain:
                     await self._detect_phase(profile, power_w, phase_currents)
+                elif profile.user_confirmed_phase:
+                    # v5.5.77: gebruiker heeft fase bevestigd — cross-validatie overslaan
+                    # Stel detected_phase in op bevestigde waarde als die afwijkt
+                    if profile.detected_phase != profile.user_confirmed_phase:
+                        profile.detected_phase    = profile.user_confirmed_phase
+                        profile.phase_certain     = True
+                        profile.phase_conflict_pct = 0.0
+                        profile.phase_post_votes  = {}
+                        profile._post_votes_obj   = None
+                        self._dirty = True
                 else:
                     await self._crossval_phase(profile, power_w, phase_currents)
 
@@ -507,6 +524,13 @@ class SolarPowerLearner:
 
         # ── 3F cross-validatie: blijven alle drie fasen symmetrisch? ──────────
         if profile.is_three_phase:
+            # v5.5.77: ook 3F crossval overslaan bij laag vermogen
+            _peak7_3f = profile.peak_power_w_7d or profile.peak_power_w or 0
+            _min_3f_w = max(CROSSVAL_MIN_POWER_ABS,
+                            _peak7_3f * CROSSVAL_MIN_POWER_PCT) if _peak7_3f > 0 \
+                        else CROSSVAL_MIN_POWER_ABS
+            if power_w < _min_3f_w:
+                return
             phases_available = [p for p in ("L1", "L2", "L3") if p in deltas]
             if len(phases_available) == 3:
                 pos_deltas = {p: deltas[p] for p in phases_available if deltas[p] > 0}
@@ -551,9 +575,25 @@ class SolarPowerLearner:
                     self._dirty = True
             return
 
-        # ── Enkelfase cross-validatie (bestaande logica) ──────────────────────
+        # ── Enkelfase cross-validatie ─────────────────────────────────────────
         winner  = max(deltas, key=lambda p: deltas[p])
         if deltas[winner] < max(0.3, power_delta / 250.0):
+            return
+
+        # v5.5.77: Vermogensdrempel — stem alleen als omvormer significant produceert.
+        # West-omvormer geeft in de ochtend ruis-stemmen bij 50-200W die het
+        # 7-daags piek pattern wegstemmen. Alleen stemmen boven 20% van het piek.
+        _peak7 = profile.peak_power_w_7d or profile.peak_power_w or 0
+        _min_crossval_w = max(CROSSVAL_MIN_POWER_ABS,
+                              _peak7 * CROSSVAL_MIN_POWER_PCT) if _peak7 > 0 \
+                          else CROSSVAL_MIN_POWER_ABS
+        if power_w < _min_crossval_w:
+            _LOGGER.debug(
+                "SolarLearner '%s': crossval stem overgeslagen — vermogen %.0fW "
+                "< drempel %.0fW (%.0f%% van 7d-piek %.0fW)",
+                profile.label, power_w, _min_crossval_w,
+                CROSSVAL_MIN_POWER_PCT * 100, _peak7,
+            )
             return
 
         post: PhaseVotes = profile._post_votes_obj or PhaseVotes()
@@ -649,6 +689,42 @@ class SolarPowerLearner:
         except (ValueError, TypeError):
             return None
 
+
+    def confirm_phase(self, inverter_label: str, phase: str) -> bool:
+        """Bevestig handmatig de fase van een omvormer.
+
+        Roep aan via HA service cloudems.confirm_inverter_phase.
+        Na bevestiging wordt cross-validatie permanent overgeslagen.
+
+        Args:
+            inverter_label: label van de omvormer (bijv. "Goodwe West")
+            phase: "L1", "L2", "L3" of "3F"
+
+        Returns:
+            True als omvormer gevonden en bijgewerkt.
+        """
+        valid = ("L1", "L2", "L3", "3F")
+        if phase not in valid:
+            _LOGGER.warning("confirm_phase: ongeldige fase '%s' (geldig: %s)", phase, valid)
+            return False
+        for profile in self._profiles.values():
+            if profile.label.lower() == inverter_label.lower() or profile.inverter_id == inverter_label:
+                profile.user_confirmed_phase = phase
+                profile.detected_phase       = phase
+                profile.phase_certain        = True
+                profile.phase_conflict_pct   = 0.0
+                profile.phase_post_votes     = {}
+                profile._post_votes_obj      = None
+                self._dirty = True
+                _LOGGER.info(
+                    "SolarLearner: fase van '%s' handmatig bevestigd als %s — "
+                    "cross-validatie permanent uitgeschakeld.",
+                    inverter_label, phase,
+                )
+                return True
+        _LOGGER.warning("confirm_phase: omvormer '%s' niet gevonden", inverter_label)
+        return False
+
     def get_phase_conflict_alerts(self) -> list[dict]:
         """Voor de notification engine: omvormers met actief fase-conflict."""
         return [
@@ -684,7 +760,8 @@ class SolarPowerLearner:
                 "samples":             p.samples,
                 "confident":           p.confident,
                 "detected_phase":      p.detected_phase,
-                "phase_certain":       p.phase_certain,
+                "phase_certain":         p.phase_certain,
+                "user_confirmed_phase":  p.user_confirmed_phase,  # v5.5.77
                 "phase_votes":         p.phase_votes,
                 "phase_post_votes":    p.phase_post_votes,
                 "phase_relearn_events": p.phase_relearn_events,
@@ -752,7 +829,8 @@ class SolarPowerLearner:
                 "last_updated":        p.last_updated,
                 "confident":           p.confident,
                 "detected_phase":      p.detected_phase,
-                "phase_certain":       p.phase_certain,
+                "phase_certain":         p.phase_certain,
+                "user_confirmed_phase":  p.user_confirmed_phase,  # v5.5.77
                 "phase_votes":         p.phase_votes,
                 "phase_post_votes":    p.phase_post_votes,
                 "phase_relearn_events": p.phase_relearn_events,

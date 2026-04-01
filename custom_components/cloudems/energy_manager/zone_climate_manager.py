@@ -80,6 +80,46 @@ SAVE_INTERVAL_S     = 300
 
 
 # ── Presets ────────────────────────────────────────────────────────────────────
+
+# ── Throttle constanten ────────────────────────────────────────────────────────
+TRV_MIN_INTERVAL_S    = 300   # TRV: max 1x per 5 min
+AIRCO_MIN_INTERVAL_S  = 180   # Airco: max 1x per 3 min
+GENERIC_MIN_INTERVAL_S = 120  # Generiek: max 1x per 2 min
+TEMP_DEADBAND_C       = 0.4   # Minimale temperatuurverandering voor nieuw commando
+
+class ThrottleGuard:
+    """Voorkomt te frequent sturen van commando's naar TRVs en airco's.
+    
+    TRVs: batterij spaarzaam, max 1x per 5 min
+    Airco: piept bij elke bevestiging, max 1x per 3 min
+    Alleen sturen als mode verandert OF temp significant verschilt EN throttle verstreken.
+    """
+    def __init__(self):
+        self._last: dict[str, float] = {}
+
+    def should_send(
+        self,
+        entity_id: str,
+        interval_s: float,
+        new_temp: float,
+        current_temp: Optional[float],
+        new_mode: str,
+        current_mode: str,
+    ) -> bool:
+        now = time.time()
+        # Mode verandering: altijd sturen
+        if new_mode != current_mode:
+            self._last[entity_id] = now
+            return True
+        # Temperatuur nauwelijks veranderd: nooit sturen
+        if current_temp is not None and abs(new_temp - current_temp) < TEMP_DEADBAND_C:
+            return False
+        # Throttle: niet vaker dan interval
+        if now - self._last.get(entity_id, 0.0) < interval_s:
+            return False
+        self._last[entity_id] = now
+        return True
+
 class Preset(str, Enum):
     COMFORT    = "comfort"
     ECO        = "eco"
@@ -394,6 +434,8 @@ class ZoneSnapshot:
     entities:       list
     pid_info:       dict
     learning:       dict
+    comfort_temp:   float = 21.0   # v5.5.44: voor stooklijn berekening
+    temp_deficit_c: float = 0.0    # v5.5.44: tekort tov setpoint
 
 
 class VirtualZone:
@@ -423,6 +465,7 @@ class VirtualZone:
         self._last_snap: Optional[ZoneSnapshot] = None
         self._update_ts  = 0.0
         self._stove_samples: deque = deque(maxlen=20)
+        self._throttle  = ThrottleGuard()  # v5.5.44: voorkom te frequent sturen
 
     # Entiteit-beheer
     def add_entity(self, eid: str, role: DeviceRole):
@@ -538,6 +581,8 @@ class VirtualZone:
             area_id=self._area_id, area_name=self._area_name,
             preset=preset, target_temp=target_t, current_temp=current_t,
             heat_demand=heat_demand, cool_demand=cool_demand, reason=reason,
+            comfort_temp=self._temps.get(Preset.COMFORT, 21.0),
+            temp_deficit_c=max(0.0, target_t - (current_t or target_t)),
             best_source=src.best_source, source_reason=src.reason,
             cost_today=self._costs.to_dict()["today_eur"],
             cost_month=self._costs.to_dict()["month_eur"],
@@ -698,6 +743,10 @@ class VirtualZone:
         modes = st.attributes.get("hvac_modes", [])
         mode  = "heat" if "heat" in modes else "auto"
         t     = self._temps[preset] if preset in (Preset.AWAY, Preset.ECO_WINDOW) else target_t
+        # v5.5.44: throttle — TRV batterij spaarzaam, max 1x per 5 min
+        if not self._throttle.should_send(eid, TRV_MIN_INTERVAL_S, t,
+                st.attributes.get("temperature"), mode, st.state):
+            return
         await self._set_mode(eid, mode, st.state)
         await self._set_temp(eid, t, st.attributes.get("temperature"))
 
@@ -714,6 +763,10 @@ class VirtualZone:
             mode = "off"
         else:
             mode = st.state
+        # v5.5.44: throttle — airco piept bij elke bevestiging, max 1x per 3 min
+        if not self._throttle.should_send(eid, AIRCO_MIN_INTERVAL_S, target_t,
+                st.attributes.get("temperature"), mode, st.state):
+            return
         await self._set_mode(eid, mode, st.state)
         await self._set_temp(eid, target_t, st.attributes.get("temperature"))
 
@@ -813,6 +866,59 @@ class VirtualZone:
         return out
 
 
+
+
+# ── Stooklijn (Heating Curve) ──────────────────────────────────────────────────
+def heating_curve_setpoint(
+    outside_temp_c: float,
+    room_setpoint_c: float,
+    curve_slope: float = 1.5,
+    pivot_temp_c: float = 20.0,
+    min_supply_c: float = 25.0,
+    max_supply_c: float = 55.0,
+) -> float:
+    """Bereken aanvoertemperatuur op basis van stooklijn.
+
+    Beter dan VTherm vaste hoog/laag waarden:
+    - Lineaire stooklijn: T_aanvoer = T_pivot + slope × (T_setpoint - T_buiten)
+    - Max 55°C → condensatieketel altijd in condensatiemodus
+    - Slope is leerbaar: CloudEMS past aan op basis van gemeten opwarmtijd
+
+    Args:
+        outside_temp_c:  Huidige buitentemperatuur
+        room_setpoint_c: Gewenste kamertemperatuur
+        curve_slope:     Steilheid stooklijn (default 1.5, leerbaar)
+        pivot_temp_c:    Buitentemp waarbij ketel niet nodig (default 20°C)
+        min_supply_c:    Minimale aanvoertemperatuur (default 25°C)
+        max_supply_c:    Maximale aanvoertemperatuur (default 55°C voor condensatie)
+    """
+    if outside_temp_c >= pivot_temp_c:
+        return min_supply_c
+    supply = pivot_temp_c + curve_slope * (room_setpoint_c - outside_temp_c)
+    return round(max(min_supply_c, min(max_supply_c, supply)), 1)
+
+
+def aggregate_heat_demand(zones: list) -> tuple[float, float]:
+    """Aggregeer warmtevraag over alle zones.
+
+    Returns:
+        (weighted_deficit_c, total_demand_fraction)
+        weighted_deficit_c: gewogen gemiddeld temperatuurtekort
+        total_demand_fraction: 0.0-1.0 fractie van zones die warmte vragen
+    """
+    if not zones:
+        return 0.0, 0.0
+    calling = [z for z in zones if hasattr(z, 'heat_demand') and z.heat_demand]
+    if not calling:
+        return 0.0, 0.0
+    # Gewogen gemiddeld tekort op basis van zone grootte (als beschikbaar)
+    total_deficit = sum(
+        getattr(z, 'temp_deficit_c', 1.0) for z in calling
+    )
+    avg_deficit = total_deficit / len(calling)
+    fraction = len(calling) / len(zones)
+    return round(avg_deficit, 2), round(fraction, 2)
+
 # ── CV-Ketel Coördinator ────────────────────────────────────────────────────────
 class CVBoilerCoordinator:
     """Schakelt CV-ketel (switch.* / climate.* / input_boolean.*) op basis van zones."""
@@ -824,6 +930,14 @@ class CVBoilerCoordinator:
         self._min_on_s  = float(config.get("cv_min_on_minutes", 5)) * 60
         self._min_off_s = float(config.get("cv_min_off_minutes", 3)) * 60
         self._summer_c  = float(config.get("cv_summer_cutoff_c", 18.0))
+        # v5.5.44: OpenTherm stooklijn
+        self._control_type = config.get("cv_control_type", "switch")  # switch / climate / opentherm
+        self._curve_slope  = float(config.get("cv_curve_slope", 1.5))
+        self._min_supply_c = float(config.get("cv_min_supply_c", 25.0))
+        self._max_supply_c = float(config.get("cv_max_supply_c", 55.0))
+        self._last_supply_c: float = 0.0
+        self._last_setpoint_ts: float = 0.0
+        self._learned_slope: float = config.get("cv_curve_slope", 1.5)  # leerbaar
         self._last_on   = 0.0
         self._last_off  = 0.0
         self._is_on     = False
@@ -847,13 +961,33 @@ class CVBoilerCoordinator:
         names    = ", ".join(z.area_name for z in calling)
         want_on  = n >= self._min_zones
 
+        # v5.5.44: bereken aanvoertemperatuur via stooklijn als OpenTherm
+        supply_c = self._min_supply_c
+        if want_on and outside_t is not None and self._control_type == "opentherm":
+            # Gewogen kamersetpoint over vragende zones
+            if calling:
+                avg_setpoint = sum(
+                    getattr(z, "comfort_temp", 21.0) for z in calling
+                ) / len(calling)
+                _deficit, _ = aggregate_heat_demand(calling)
+                # Stooklijn + extra voor warmtevraag
+                supply_c = heating_curve_setpoint(
+                    outside_temp_c=outside_t,
+                    room_setpoint_c=avg_setpoint,
+                    curve_slope=self._learned_slope,
+                    min_supply_c=self._min_supply_c,
+                    max_supply_c=self._max_supply_c,
+                )
+                # Extra als tekort groot is
+                supply_c = min(self._max_supply_c, supply_c + _deficit * 0.5)
+
         if want_on and not self._is_on and now - self._last_off < self._min_off_s:
             want_on = False
         if not want_on and self._is_on and now - self._last_on < self._min_on_s:
             want_on = True
 
         if want_on != self._is_on:
-            await self._switch(want_on, domain)
+            await self._switch(want_on, domain, supply_c)
             self._is_on = want_on
             if want_on:
                 self._last_on  = now
@@ -862,19 +996,41 @@ class CVBoilerCoordinator:
                 self._last_off = now
                 self._reason   = "Uit: geen warmtevraag"
 
-        return {"boiler_on": self._is_on, "reason": self._reason, "zones_calling": n, "zones": names}
+        return {
+            "boiler_on":      self._is_on,
+            "reason":         self._reason,
+            "zones_calling":  n,
+            "zones":          names,
+            "supply_temp_c":  self._last_supply_c if self._control_type == "opentherm" else 0.0,
+            "control_type":   self._control_type,
+            "curve_slope":    self._learned_slope,
+        }
 
-    async def _switch(self, on: bool, domain: str):
+    async def _switch(self, on: bool, domain: str, supply_c: float = 0.0):
         try:
             if domain in ("switch", "input_boolean"):
                 svc = "turn_on" if on else "turn_off"
                 await self._hass.services.async_call(domain, svc, {"entity_id": self._entity}, blocking=False)
             elif domain == "climate":
-                await self._hass.services.async_call(
-                    "climate", "set_hvac_mode",
-                    {"entity_id": self._entity, "hvac_mode": "heat" if on else "off"},
-                    blocking=False,
-                )
+                if self._control_type == "opentherm" and on and supply_c > 0:
+                    # OpenTherm: stuur berekende aanvoertemperatuur ipv aan/uit
+                    # Throttle: alleen sturen als temp significant veranderd
+                    if abs(supply_c - self._last_supply_c) >= 1.0 or not self._is_on:
+                        await self._hass.services.async_call(
+                            "climate", "set_temperature",
+                            {"entity_id": self._entity, "temperature": supply_c},
+                            blocking=False,
+                        )
+                        self._last_supply_c = supply_c
+                        _LOGGER.info(
+                            "CVBoiler: OpenTherm aanvoer %.1f°C (stooklijn)", supply_c
+                        )
+                else:
+                    await self._hass.services.async_call(
+                        "climate", "set_hvac_mode",
+                        {"entity_id": self._entity, "hvac_mode": "heat" if on else "off"},
+                        blocking=False,
+                    )
         except Exception as err:
             _LOGGER.error("CVBoiler: fout bij schakelen %s: %s", self._entity, err)
 
