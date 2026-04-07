@@ -154,6 +154,17 @@ class AIRegistry:
         Builds feature vectors and periodically sends to providers for training.
         """
         self._tick_count += 1
+        # v5.5.161: diagnose logging elke 60 ticks (~10 min)
+        if self._tick_count % 60 == 0:
+            _onnx = self._providers.get("onnx_local")
+            _buf  = len(_onnx._buffer) if _onnx else -1
+            _nst  = _onnx._n_since_train if _onnx else -1
+            _rdy  = _onnx._ready if _onnx else False
+            _sbuf = len(self._sample_buffer)
+            _LOGGER.info(
+                "CloudEMS AI diagnose: tick=%d sample_buf=%d onnx_buf=%d n_since=%d ready=%s",
+                self._tick_count, _sbuf, _buf, _nst, _rdy
+            )
 
         # Sanity check EVERY tick — validate data before it reaches JS cards
         _sanity_issues = self._sanity.check(data)
@@ -195,6 +206,7 @@ class AIRegistry:
 
         features = self._build_features(data)
         if features is None:
+            _LOGGER.warning("CloudEMS AI: _build_features returned None — sample overgeslagen (tick=%d)", self._tick_count)
             return
 
         # Determine ground-truth label from current system state
@@ -277,10 +289,27 @@ class AIRegistry:
         }
         self._sample_buffer.append(sample)
 
+        # Elke 60 ticks (10 min) status loggen
+        if self._tick_count % 60 == 0:
+            for _pname, _prov in self._providers.items():
+                _LOGGER.info(
+                    "CloudEMS AI status: provider=%s buffer=%d n_since=%d n_trained=%d ready=%s",
+                    _pname,
+                    getattr(_prov, '_buffer', []) and len(getattr(_prov, '_buffer', [])) or 0,
+                    getattr(_prov, '_n_since_train', -1),
+                    getattr(_prov, '_model', None) and getattr(getattr(_prov, '_model', None), '_n_trained', 0) or 0,
+                    getattr(_prov, '_ready', False),
+                )
+
         # Send batch to providers every 12 samples (~2 minutes)
         if len(self._sample_buffer) >= 12:
             batch = self._sample_buffer.copy()
             self._sample_buffer.clear()
+            _LOGGER.info(
+                "CloudEMS AI: batch van %d samples naar %d provider(s) — labels: %s",
+                len(batch), len(self._providers),
+                list({s.get('label','?') for s in batch}),
+            )
             for provider in self._providers.values():
                 try:
                     # Add current state snapshot for outcome tracking
@@ -317,6 +346,7 @@ class AIRegistry:
 
         features = self._build_features(data)
         if features is None:
+            _LOGGER.warning("CloudEMS AI: _build_features returned None — sample overgeslagen (tick=%d)", self._tick_count)
             return None
 
         try:

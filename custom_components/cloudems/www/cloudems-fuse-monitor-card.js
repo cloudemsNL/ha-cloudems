@@ -1,5 +1,5 @@
 // CloudEMS Dynamic Fuse Monitor Card v5.5.6
-const FM_VERSION = "5.5.6";
+const FM_VERSION = "5.5.318";
 
 class CloudEMSFuseMonitorCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }

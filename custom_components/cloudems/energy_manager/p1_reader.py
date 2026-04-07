@@ -655,6 +655,8 @@ class HAEntityFallbackReader:
         self._hass = hass
         self._resolved: Dict[str, str] = {}   # key -> entity_id
         self._last_scan: float = 0.0
+        self._telegram_callback = None   # v5.5.311: realtime callback
+        self._unsub_listeners: list = []  # state-change unsub functies
 
     def _resolve(self) -> None:
         """
@@ -868,6 +870,51 @@ class HAEntityFallbackReader:
 
         except Exception as exc:
             _LOGGER.warning("P1 HAFallback scan error: %s", exc)
+
+    def start_listeners(self, callback) -> None:
+        """v5.5.311: Registreer state-change listeners op de power sensoren.
+        Zodra een sensor wijzigt wordt direct een telegram aangemaakt en de
+        callback aangeroepen — geen wacht op coordinator cyclus.
+        """
+        self._telegram_callback = callback
+        self._resolve()
+        # Luister op totaal import/export en per-fase sensoren
+        watch_keys = [
+            "power_import_w", "power_export_w",
+            "power_l1_import", "power_l2_import", "power_l3_import",
+        ]
+        watch_eids = list({self._resolved[k] for k in watch_keys if k in self._resolved})
+        if not watch_eids:
+            return
+        try:
+            from homeassistant.helpers.event import async_track_state_change_event
+            from homeassistant.core import callback as _cb
+
+            @_cb
+            def _on_sensor_change(event) -> None:
+                new_state = event.data.get("new_state")
+                if new_state is None or new_state.state in ("unavailable", "unknown", ""):
+                    return
+                if self._telegram_callback is None:
+                    return
+                t = self.read()
+                if t is not None:
+                    try:
+                        self._telegram_callback(t)
+                    except Exception:
+                        pass
+
+            unsub = async_track_state_change_event(self._hass, watch_eids, _on_sensor_change)
+            self._unsub_listeners.append(unsub)
+        except Exception:
+            pass
+
+    def stop_listeners(self) -> None:
+        """Verwijder alle state-change listeners."""""
+        for unsub in self._unsub_listeners:
+            try: unsub()
+            except Exception: pass
+        self._unsub_listeners.clear()
 
     def read(self) -> Optional[P1Telegram]:
         """Lees een synthetisch telegram vanuit HA entiteiten."""
@@ -1132,6 +1179,9 @@ class P1Reader:
     def set_telegram_callback(self, callback) -> None:
         """Registreer een callback voor elk nieuw geldig telegram (realtime updates)."""
         self._on_telegram_callback = callback
+        # v5.5.311: ook doorgeven aan fallback reader als die al actief is
+        if self._fallback_reader and not self._fallback_reader._telegram_callback:
+            self._fallback_reader.start_listeners(callback)
 
     @property
     def latest(self) -> Optional[P1Telegram]:
@@ -1231,6 +1281,9 @@ class P1Reader:
         # HA entity fallback always available als hass meegegeven
         if self._hass:
             self._fallback_reader = HAEntityFallbackReader(self._hass)
+            # v5.5.311: start realtime state-change listeners op de power sensoren
+            if self._on_telegram_callback:
+                self._fallback_reader.start_listeners(self._on_telegram_callback)
 
         # Auto-detectie: als geen host geconfigureerd, zoek in DSMR/P1 integraties
         if not self._host and not self._serial and self._hass:

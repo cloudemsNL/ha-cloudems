@@ -519,9 +519,11 @@ class CloudEMSShutterButton(CoordinatorEntity, ButtonEntity):
         if self._action == "cancel":
             sc.cancel_override(self._cover_entity_id)
             sc.set_auto_enabled(self._cover_entity_id, True)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
         elif self._action.startswith("pause_"):
             hours = float(self._action.replace("pause_", "").replace("h", ""))
             sc.set_auto_enabled(self._cover_entity_id, False, hours=hours)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
         else:
             await sc.async_manual_override(
                 self._cover_entity_id, self._action,

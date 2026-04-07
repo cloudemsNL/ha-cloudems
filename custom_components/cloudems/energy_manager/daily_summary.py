@@ -24,6 +24,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,12 +35,26 @@ SEND_MINUTE = 30
 class DailySummaryGenerator:
     """Genereert en verstuurt een dagelijkse energiesamenvatting."""
 
+    STORAGE_KEY = "cloudems_daily_summary_yesterday"
+    STORAGE_VERSION = 1
+
     def __init__(self, hass: HomeAssistant, notify_service: str = "") -> None:
         self._hass            = hass
         self._notify_service  = notify_service
         self._last_sent_date  = ""  # "YYYY-MM-DD" van de laatste verstuurde samenvatting
         # Accumulatoren voor gisteren — gevuld door _update_yesterday_accumulators()
         self._yesterday: dict = {}
+        self._store = Store(hass, self.STORAGE_VERSION, self.STORAGE_KEY)
+
+    async def async_load(self) -> None:
+        """Laad persistente gisteren-data bij opstarten."""
+        try:
+            stored = await self._store.async_load()
+            if stored and isinstance(stored, dict):
+                self._yesterday = stored
+                _LOGGER.debug("DailySummary: gisteren-data geladen uit store")
+        except Exception as err:
+            _LOGGER.debug("DailySummary: laden mislukt: %s", err)
 
     # ── Publieke API ──────────────────────────────────────────────────────────
 
@@ -69,8 +84,11 @@ class DailySummaryGenerator:
                 key=lambda d: float((d.get("energy") or {}).get("today_kwh")
                               or d.get("energy_today_kwh") or 0), reverse=True
             )[:5]
+            # Sla ook battery_schedule op voor gisteren-tab in batterijplan kaart
+            _bs = data.get("battery_schedule") or {}
             self._yesterday = {
                 "date":            date_override or _yesterday_label(),
+                "battery_schedule": _bs.get("schedule", []),
                 "pv_kwh":          round(float(data.get("pv_forecast_today_kwh") or 0), 1),
                 "import_kwh":      round(float(p1.get("electricity_import_today_kwh") or 0), 1),
                 "export_kwh":      round(float(p1.get("electricity_export_today_kwh") or 0), 1),
@@ -101,6 +119,11 @@ class DailySummaryGenerator:
                     {"title": title, "message": msg},
                     blocking=False,
                 )
+            # Persisteer gisteren-data zodat het een herstart overleeft
+            try:
+                await self._store.async_save(self._yesterday)
+            except Exception as _se:
+                _LOGGER.debug("DailySummary: opslaan mislukt: %s", _se)
             _LOGGER.info("CloudEMS dagelijkse samenvatting verstuurd")
         except Exception as err:
             _LOGGER.debug("DailySummary send fout: %s", err)

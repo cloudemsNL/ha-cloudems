@@ -1,23 +1,26 @@
-# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-# All rights reserved. See LICENSE for full terms.
+# -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 CloudEMS
 """
-BatteryBenchmarkReporter — v1.1.0
+BatteryBenchmarkReporter — v1.2.0
 
-Posts battery performance data to an external benchmark service.
+Posts battery performance data to external benchmark services.
 Currently supports Mijnbatterij.nl (Netherlands).
 
 The reporter is designed to be extended with additional benchmark platforms
 (e.g. SolarEdge Community, pvoutput.org, battery vendor cloud APIs).
 
 Mijnbatterij.nl API:
-  Endpoint: https://api.mijnbatterij.nl/api/live
-  Method:   POST (JSON)
-  Fields:   batteryResult, batteryCharge, batteryPower,
-            chargedToday, dischargedToday, solarResult, totalBatteryCycles
-  Auth:     api_key in payload
-  Rate:     post at most once per 5 minutes
-"""
+  POST endpoint: https://api.mijnbatterij.nl/api/live
+  Method:        POST (JSON)
+  Fields:        batteryResult, batteryCharge, batteryPower,
+                 chargedToday, dischargedToday, solarResult, totalBatteryCycles
+  Auth:          api_key in payload
+  Rate:          at most once per 5 minutes
 
+  GET endpoint:  https://api.mijnbatterij.nl/api/user/stats
+  Auth:          X-API-Key header
+  Returns:       rank, score, totalUsers, percentile, todayResult, monthResult, profileUrl
+"""
 from __future__ import annotations
 
 import logging
@@ -51,13 +54,13 @@ class BatteryBenchmarkReporter:
 
     async def async_report(
         self,
-        battery_soc_pct:     float,
-        battery_power_w:     float,
-        charged_today_kwh:   float,
+        battery_soc_pct:      float,
+        battery_power_w:      float,
+        charged_today_kwh:    float,
         discharged_today_kwh: float,
-        solar_today_kwh:     float,
-        battery_result_eur:  float = 0.0,
-        total_cycles:        int   = 0,
+        solar_today_kwh:      float,
+        battery_result_eur:   float = 0.0,
+        total_cycles:         int   = 0,
     ) -> None:
         """Post battery data to all configured benchmark services."""
         if not self._enabled:
@@ -66,25 +69,21 @@ class BatteryBenchmarkReporter:
         if now - self._last_post < POST_INTERVAL_S:
             return
         await self._post_mijnbatterij(
-            battery_soc_pct,
-            battery_power_w,
-            charged_today_kwh,
-            discharged_today_kwh,
-            solar_today_kwh,
-            battery_result_eur,
-            total_cycles,
+            battery_soc_pct, battery_power_w,
+            charged_today_kwh, discharged_today_kwh,
+            solar_today_kwh, battery_result_eur, total_cycles,
         )
         self._last_post = now
 
     async def _post_mijnbatterij(
         self,
-        soc_pct:     float,
-        power_w:     float,
-        charged:     float,
-        discharged:  float,
-        solar:       float,
-        result_eur:  float,
-        cycles:      int,
+        soc_pct:    float,
+        power_w:    float,
+        charged:    float,
+        discharged: float,
+        solar:      float,
+        result_eur: float,
+        cycles:     int,
     ) -> None:
         if not self._session:
             return
@@ -102,7 +101,7 @@ class BatteryBenchmarkReporter:
             async with self._session.post(MIJNBATTERIJ_URL, json=payload, timeout=10) as r:
                 if r.status in (200, 201):
                     self._total_posts += 1
-                    self._post_errors = 0
+                    self._post_errors  = 0
                 else:
                     self._post_errors += 1
                     _LOGGER.warning("BatteryBenchmarkReporter: HTTP %s from Mijnbatterij", r.status)
@@ -145,3 +144,50 @@ class BatteryBenchmarkReporter:
 
 # Backwards-compatible alias
 MijnbatterijReporter = BatteryBenchmarkReporter
+
+
+class MijnbatterijScoreFetcher:
+    """Fetches user ranking and score from Mijnbatterij.nl."""
+
+    SCORE_URL      = "https://api.mijnbatterij.nl/api/user/stats"
+    FETCH_INTERVAL = 3600  # once per hour
+
+    def __init__(self, hass, api_key: str) -> None:
+        self._hass       = hass
+        self._api_key    = api_key
+        self._session    = None
+        self._last_fetch = 0.0
+        self._cached:    dict = {}
+
+    async def async_setup(self) -> None:
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+        self._session = async_get_clientsession(self._hass)
+
+    async def async_fetch(self) -> dict:
+        """Fetch score and ranking from Mijnbatterij.nl."""
+        now = time.time()
+        if now - self._last_fetch < self.FETCH_INTERVAL:
+            return self._cached
+        if not self._session:
+            return {}
+        try:
+            async with self._session.get(
+                self.SCORE_URL,
+                headers={"X-API-Key": self._api_key, "Accept": "application/json"},
+                timeout=10,
+            ) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    self._cached = {
+                        "rank":         data.get("rank"),
+                        "score":        data.get("score"),
+                        "total_users":  data.get("totalUsers"),
+                        "percentile":   data.get("percentile"),
+                        "today_result": data.get("todayResult"),
+                        "month_result": data.get("monthResult"),
+                        "profile_url":  data.get("profileUrl"),
+                    }
+                    self._last_fetch = now
+        except Exception as e:
+            _LOGGER.debug("Mijnbatterij score fetch error: %s", e)
+        return self._cached

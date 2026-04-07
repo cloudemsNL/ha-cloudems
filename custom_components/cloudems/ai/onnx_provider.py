@@ -202,6 +202,12 @@ class OnnxProvider(AIProvider):
                 len(self._buffer), len(_raw_buf)
             )
         self._n_since_train = saved.get("n_since_train", 0)
+        _LOGGER.info(
+            "CloudEMS AI geladen: buffer=%d n_since_train=%d n_trained=%d ready=%s",
+            len(self._buffer), self._n_since_train,
+            self._model._n_trained if self._model else 0,
+            self._ready
+        )
 
         # Check if onnxruntime is available
         try:
@@ -280,6 +286,15 @@ class OnnxProvider(AIProvider):
         """Add samples to buffer and retrain when enough data is available."""
         self._buffer.extend(samples)
         self._n_since_train += len(samples)
+        _LOGGER.info(
+            "CloudEMS AI async_train: +%d samples → buffer=%d n_since=%d retrain_at=%d first_train=%s",
+            len(samples), len(self._buffer), self._n_since_train, RETRAIN_INTERVAL,
+            self._model is None or self._model._n_trained == 0,
+        )
+        _LOGGER.debug(
+            "CloudEMS AI train: +%d samples → buffer=%d n_since=%d retrain_at=%d",
+            len(samples), len(self._buffer), self._n_since_train, RETRAIN_INTERVAL
+        )
 
         # Check outcomes of past decisions — add reward-weighted samples back
         # (we need current state — passed via samples[0] context if available)
@@ -310,11 +325,19 @@ class OnnxProvider(AIProvider):
                     thresh_name = _label_thresh.get(label, "AI_MIN_CONFIDENCE")
                     self._threshold_callback(thresh_name, good, rew)
 
-        # Retrain when buffer is large enough
-        if len(self._buffer) >= MIN_TRAIN_SAMPLES and self._n_since_train >= RETRAIN_INTERVAL:
+        # Retrain als:
+        # - Eerste keer: buffer >= MIN_TRAIN_SAMPLES (model nog niet getraind)
+        # - Daarna:      n_since_train >= RETRAIN_INTERVAL (genoeg nieuwe data)
+        _first_train = self._model is None or self._model._n_trained == 0
+        _retrain_due = (
+            (_first_train and len(self._buffer) >= MIN_TRAIN_SAMPLES) or
+            (not _first_train and self._n_since_train >= RETRAIN_INTERVAL
+             and len(self._buffer) >= MIN_TRAIN_SAMPLES)
+        )
+        if _retrain_due:
             _LOGGER.info(
-                "CloudEMS AI: retrain trigger — buffer=%d, n_since=%d",
-                len(self._buffer), self._n_since_train
+                "CloudEMS AI: retrain trigger — buffer=%d, n_since=%d, first=%s",
+                len(self._buffer), self._n_since_train, _first_train
             )
             return await self._retrain()
         # Sla op na elke batch zodat herstart de voortgang bewaart
@@ -384,8 +407,13 @@ class OnnxProvider(AIProvider):
                 "n_since_train": self._n_since_train,
                 "contract_version": CONTRACT_VERSION,
             })
+            _LOGGER.debug(
+                "CloudEMS AI opgeslagen: buffer=%d n_since=%d n_trained=%d",
+                len(self._buffer), self._n_since_train,
+                self._model._n_trained if self._model else 0,
+            )
         except Exception as exc:
-            _LOGGER.warning("CloudEMS AI: failed to save model: %s", exc)
+            _LOGGER.error("CloudEMS AI: SAVE MISLUKT — buffer en n_since_train gaan verloren bij herstart: %s", exc)
 
     def _label_to_value(self, label: str, f: AIModelContract) -> float:
         """Convert label to a numeric recommendation value."""

@@ -2,7 +2,7 @@
 // "Wat zou je verbruik/kosten zijn geweest zonder CloudEMS?"
 // Leest DOL uitkomsten + cost_today_eur voor vergelijking werkelijkheid vs schaduw
 
-const FSC_VERSION = '5.4.96';
+const FSC_VERSION = '5.5.318';
 const FSC_SENSOR  = 'sensor.cloudems_decision_learner';
 const FSC_STATUS  = 'sensor.cloudems_status';
 

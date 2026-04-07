@@ -5010,6 +5010,19 @@
         "data_description": {
           "presence_entities": ""
         }
+      },
+      "battery_advanced_opts": {
+        "title": "Batterij instellingen",
+        "description": "Geavanceerde batterij-instellingen: Mijnbatterij.nl koppeling, accu-ruimte temperatuur en terugverdientijd.",
+        "data": {
+          "mijnbatterij_api_key": "Mijnbatterij.nl API key",
+          "battery_room_temp_sensor": "Temperatuursensor accu-ruimte",
+          "battery_room_heater_w": "Vermogen verwarmer (W)",
+          "battery_room_climate_entity": "Climate/schakelaar verwarmer",
+          "battery_room_auto_heat": "Automatisch verwarmen",
+          "battery_purchase_price_eur": "Aanschafprijs (€, 0=automatisch)",
+          "battery_purchase_date": "Aankoopdatum (JJJJ-MM-DD)"
+        }
       }
     },
     "abort": {

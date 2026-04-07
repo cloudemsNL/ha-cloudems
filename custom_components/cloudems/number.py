@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -202,6 +203,55 @@ class CloudEMSShutterSetpoint(CoordinatorEntity, NumberEntity):
         sc.set_default_setpoint(self._shutter_eid, self._current)
 
 
+class CloudEMSBlackoutReservePct(CoordinatorEntity, NumberEntity, RestoreEntity):
+    """Instelbaar percentage voor stroomonderbreking reserve (0-50%).
+
+    Default: 20%. Alleen actief als switch.cloudems_blackout_reserve_actief AAN is.
+    """
+    _attr_attribution = ATTRIBUTION
+    _attr_native_min_value = 5.0
+    _attr_native_max_value = 50.0
+    _attr_native_step = 5.0
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:battery-lock-outline"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_blackout_reserve_pct"
+        self._attr_name = "CloudEMS Stroomonderbreking Reserve %"
+        self.entity_id = _eid(entry, "number.cloudems_blackout_reserve_pct")
+        self._value = 20.0  # default 20%
+
+    @property
+    def native_value(self) -> float:
+        return self._value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._value = value
+        # Als switch AAN is, update bridge direct
+        try:
+            sw_eid = _eid(self._entry, 'switch.cloudems_blackout_reserve_actief')
+            sw = self.hass.states.get(sw_eid)
+            if sw and sw.state == 'on':
+                zp = getattr(self.coordinator, '_zonneplan_bridge', None)
+                if zp and hasattr(zp, 'set_blackout_reserve'):
+                    zp.set_blackout_reserve(value)
+        except Exception:
+            pass
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state not in ('unavailable', 'unknown'):
+            try:
+                self._value = float(last.state)
+            except (ValueError, TypeError):
+                pass
+
+
 async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
     from .const import CONF_INVERTER_CONFIGS
@@ -231,6 +281,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             coordinator, entry, eid, label,
             float(sh.get("default_setpoint", 20.0)),
         ))
+    entities.append(CloudEMSBlackoutReservePct(coordinator, entry))
     async_add_entities(entities)
 
 

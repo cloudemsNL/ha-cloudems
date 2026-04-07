@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Lamp Card  v5.4.96
 
-const LAMP_VERSION = '5.4.96';
+const LAMP_VERSION = '5.5.318';
 
 const LAMP_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');

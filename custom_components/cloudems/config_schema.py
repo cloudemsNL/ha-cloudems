@@ -158,6 +158,19 @@ class PriceConfig:
     """Energieprijzen configuratie."""
     epex_country:           str   = "NL"
     entso_e_api_key:        str   = ""
+    mijnbatterij_api_key:   str   = ""   # API key van mijnbatterij.nl voor ranking
+    battery_room_temp_sensor: str = ""  # entity_id thermometer in accu-ruimte (bijv. sensor.accu_temp)
+    battery_room_heater_w:  float = 1500.0  # vermogen verwarmer in accu-ruimte (W)
+    battery_room_climate_entity: str = ""  # climate.accu_ruimte of switch.accu_verwarmer
+    battery_room_auto_heat: bool  = False
+    battery_purchase_price_eur: float = 0.0  # 0 = automatisch schatten
+    battery_purchase_date:  str   = ""        # ISO date e.g. 2023-03-15
+    zonneplan_sensor_today:    str = ""  # auto-discovered, override if needed
+    zonneplan_sensor_total:    str = ""
+    zonneplan_sensor_delivery: str = ""
+    zonneplan_sensor_charge:   str = ""
+    zonneplan_sensor_month:    str = ""
+    zonneplan_sensor_year:     str = ""    # True = CloudEMS stuurt verwarmer automatisch
     import_tariff_eur:      float = 0.0      # vast tarief override (0 = gebruik EPEX)
     export_tariff_eur:      float = 0.0
     standing_charge_eur_day: float = 0.50
@@ -294,6 +307,19 @@ class CloudEMSConfig:
         cfg.price = PriceConfig(
             epex_country           = data.get("epex_country", data.get("country", "NL")),
             entso_e_api_key        = data.get("entso_e_api_key", ""),
+            mijnbatterij_api_key   = data.get("mijnbatterij_api_key", ""),
+            battery_room_temp_sensor = data.get("battery_room_temp_sensor", ""),
+            battery_room_heater_w    = float(data.get("battery_room_heater_w", 1500.0)),
+            battery_room_climate_entity = data.get("battery_room_climate_entity", ""),
+            battery_room_auto_heat      = bool(data.get("battery_room_auto_heat", False)),
+            battery_purchase_price_eur  = float(data.get("battery_purchase_price_eur") or 0),
+            battery_purchase_date       = str(data.get("battery_purchase_date", "")),
+            zonneplan_sensor_today      = str(data.get("zonneplan_sensor_today", "")),
+            zonneplan_sensor_total      = str(data.get("zonneplan_sensor_total", "")),
+            zonneplan_sensor_delivery   = str(data.get("zonneplan_sensor_delivery", "")),
+            zonneplan_sensor_charge     = str(data.get("zonneplan_sensor_charge", "")),
+            zonneplan_sensor_month      = str(data.get("zonneplan_sensor_month", "")),
+            zonneplan_sensor_year       = str(data.get("zonneplan_sensor_year", "")),
             import_tariff_eur      = float(data.get("import_tariff_eur_kwh", 0)),
             export_tariff_eur      = float(data.get("export_tariff_eur_kwh", 0)),
             standing_charge_eur_day = float(data.get("standing_charge_eur_day", 0.50)),

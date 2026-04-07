@@ -5,7 +5,7 @@
  */
 
 const SANKEY_STYLES = `
-const CARD_SANKEY_VERSION = '5.4.96';
+const CARD_SANKEY_VERSION = '5.5.318';
   :host { display:block; }
   .card { background:var(--ha-card-background,#1a2332); border-radius:12px; padding:14px; font-family:var(--primary-font-family,sans-serif); color:#e2e8f0; }
   .card-title { font-size:12px; font-weight:600; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
@@ -88,14 +88,14 @@ class CloudemsSankeyCard extends HTMLElement {
     const sources = [
       { id:'solar',   label:'PV',    val:solar_w,  color:COLORS.solar },
       { id:'grid',    label:'Net',   val:grid_imp, color:COLORS.grid },
-      { id:'bat_dis', label:'Accu ↓',val:bat_dis,  color:COLORS.battery },
+      { id:'bat_dis', label:'Accu ↑',val:bat_dis,  color:COLORS.battery },
     ].filter(n => n.val > 5);
 
     const targets = [
       { id:'house',  label:'Huis',    val:other_w, color:COLORS.house },
       { id:'boiler', label:'Boiler',  val:boiler_w,color:COLORS.boiler },
       { id:'ev',     label:'EV',      val:ev_w,    color:COLORS.ev },
-      { id:'bat_chg',label:'Accu ↑',  val:bat_chg, color:COLORS.battery },
+      { id:'bat_chg',label:'Accu ↓',  val:bat_chg, color:COLORS.battery },
       { id:'export', label:'Teruglev',val:grid_exp,color:COLORS.export },
     ].filter(n => n.val > 5);
 

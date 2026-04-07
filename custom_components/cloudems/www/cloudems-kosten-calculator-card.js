@@ -1,5 +1,5 @@
 // CloudEMS Kosten Calculator Card v5.5.6
-const KC_VERSION = "5.5.6";
+const KC_VERSION = "5.5.318";
 
 class CloudEMSKostenCalculatorCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }

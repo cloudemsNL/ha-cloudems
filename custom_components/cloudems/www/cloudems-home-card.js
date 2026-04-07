@@ -5,7 +5,7 @@
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
 const HCV = '1.8.8';
-const CARD_HOME_VERSION = '5.4.96';
+const CARD_HOME_VERSION = '5.5.318';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';
@@ -355,6 +355,7 @@ class CloudEMSHomeCard extends HTMLElement {
     const TABS=[['status','Status'],['cats','Categorieën'],['rooms','Kamers'],['devs','Apparaten'],
       ['solar','Zonne'],['bat','Batterij'],['boiler','Boiler'],['shutters','Rolluiken'],
       ['ev','EV 🚗'],['ebike','E-bike 🚲'],['pool','Zwembad 🏊'],
+      ['groepenkast','Groepenkast ⚡ 🅱'],
       ['prices','Prijzen 💶'],['history','Historie 📋'],['diagnose','Diagnose 🩺']];
     return`<div class="card">
 <div class="hdr">
@@ -373,6 +374,7 @@ ${t==='bat'?this._tabBat(bw,soc):''}
 ${t==='boiler'?this._tabBoiler():''}
 ${t==='shutters'?this._tabShutters():''}
 ${t==='ev'?this._tabEV():''}
+${t==='groepenkast'?this._tabGroepenkast():''}
 ${t==='ebike'?this._tabEbike():''}
 ${t==='pool'?this._tabPool():''}
 ${t==='prices'?this._tabPrices():''}
@@ -1198,6 +1200,32 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
   }
 
   /* ── PRIJZEN ─────────────────────────────────────────────────────────────── */
+  _tabGroepenkast() {
+    const h = this._hass;
+    if (!h) return '';
+    // Embed de volledige groepenkast custom card als web component
+    // De kaart is geregistreerd als cloudems-groepenkast-card
+    if (!window.customElements.get('cloudems-groepenkast-card')) {
+      return `<div style="padding:16px;color:rgba(255,255,255,.5);font-size:12px">
+        Groepenkast kaart laden... Zorg dat cloudems-groepenkast-card.js als resource is toegevoegd.
+      </div>`;
+    }
+    // Maak de custom card element aan als die nog niet bestaat
+    if (!this._gkCard) {
+      this._gkCard = document.createElement('cloudems-groepenkast-card');
+      this._gkCard.setConfig({type:'custom:cloudems-groepenkast-card'});
+    }
+    this._gkCard.hass = h;
+    return '<div id="gk-card-host" style="margin:-10px -13px"></div>';
+  }
+  _afterRenderGroepenkast() {
+    if (this._tab !== 'groepenkast') return;
+    const host = this.shadowRoot && this.shadowRoot.getElementById('gk-card-host');
+    if (host && this._gkCard && !host.contains(this._gkCard)) {
+      host.appendChild(this._gkCard);
+    }
+  }
+
   _tabPrices(){
     // next_hours zit in sensor.cloudems_epex_today, niet in price_current_hour
     const prices=this._a('sensor.cloudems_epex_today','next_hours',[])||[];

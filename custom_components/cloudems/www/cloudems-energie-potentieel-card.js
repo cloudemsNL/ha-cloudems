@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // CloudEMS Energie Potentieel Card v5.5.4
-const EP_VERSION = "5.5.4";
+const EP_VERSION = "5.5.318";
 
 // ── Apparaat-definities ──────────────────────────────────────────────────────
 // Elke entry: {id, icon, label, watt, unit, per}

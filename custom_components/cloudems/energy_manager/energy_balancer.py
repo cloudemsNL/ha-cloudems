@@ -79,12 +79,12 @@ FAST_RAMP_CONF_MIN  = 0.3     # minimale lag-confidence voor fast-ramp inference
 
 
 # ── Sprong-toedeling constanten (v5.5.48) ─────────────────────────────────────
-JUMP_SIGMOID_THRESHOLD = 4000.0   # W: midden sigmoid (leerbaar)
-JUMP_SIGMOID_SCALE     = 2000.0   # W: steilheid (leerbaar)
-JUMP_MIN_BAT_FRAC      = 0.08     # minimale fractie naar accu
-JUMP_MAX_BAT_FRAC      = 0.96     # maximale fractie naar accu
+JUMP_SIGMOID_THRESHOLD = 6000.0   # W: midden sigmoid (leerbaar) — oven+kookplaat ~5-6kW
+JUMP_SIGMOID_SCALE     = 2500.0   # W: steilheid — geleidelijker overgang
+JUMP_MIN_BAT_FRAC      = 0.0      # minimale fractie naar accu (kleine sprongen = 0%)
+JUMP_MAX_BAT_FRAC      = 0.92     # maximale fractie naar accu
 JUMP_LEARN_RATE        = 0.05     # hoe snel threshold leert
-JUMP_MIN_LEARN_W       = 500.0    # minimale sprong om van te leren
+JUMP_MIN_LEARN_W       = 200.0    # minimale sprong om van te leren (v5.5.151)
 
 
 class JumpAttribution:
@@ -107,15 +107,23 @@ class JumpAttribution:
         self._n_learned = 0
 
     def battery_fraction(self, jump_w: float) -> float:
-        """Fractie van grid-sprong toe te kennen aan accu (0.08-0.96)."""
+        """Fractie van grid-sprong toe te kennen aan accu (0.0-0.96).
+
+        Zelf-lerend via sigmoid. Drempel en steilheid leren uit Nexus-feedback.
+        Klein (<150W):  bijna zeker huis (lamp, standby) → 0% naar accu
+        Middel (500W):  kan huis of accu zijn → geleerde sigmoid
+        Groot (>3kW):   kan oven MAAR ook Nexus-lag → geleerde sigmoid
+        Altijd:         huis krijgt (1-bat_frac), accu krijgt bat_frac
+        """
         j = abs(jump_w)
-        if j < 200:
-            return 0.05
+        # Kleine sprongen zijn vrijwel altijd echt huisverbruik
+        if j < 150:
+            return 0.0   # huis krijgt alles
         import math
         x = (j - self._threshold) / max(self._scale, 100.0)
         sigmoid = 1.0 / (1.0 + math.exp(-x))
-        return max(JUMP_MIN_BAT_FRAC, min(JUMP_MAX_BAT_FRAC,
-               JUMP_MIN_BAT_FRAC + sigmoid * (JUMP_MAX_BAT_FRAC - JUMP_MIN_BAT_FRAC)))
+        return max(0.0, min(JUMP_MAX_BAT_FRAC,
+               sigmoid * JUMP_MAX_BAT_FRAC))
 
     def house_alpha_factor(self, jump_w: float) -> float:
         """Hoe veel house_alpha reduceren bij deze sprong (0=geen reductie, 1=volledig)."""
@@ -128,8 +136,8 @@ class JumpAttribution:
         predicted_bat_frac: wat we voorspelden
         actual_bat_delta_w: hoeveel de accu werkelijk veranderde
         """
-        if abs(jump_w) < JUMP_MIN_LEARN_W or abs(jump_w) < 1:
-            return
+        if abs(jump_w) < 200.0 or abs(jump_w) < 1:
+            return  # te klein om van te leren — is sowieso huis
         actual_frac = min(0.99, max(0.01, abs(actual_bat_delta_w) / abs(jump_w)))
         self._obs.append((abs(jump_w), predicted_bat_frac, actual_frac))
         self._obs = self._obs[-50:]  # bewaar laatste 50
@@ -433,14 +441,18 @@ class EnergyBalancer:
         self._last_balanced:       Optional[BalancedReading] = None
         self._imbalance_log_ts:    float = 0.0
         self._start_ts:            float = time.time()  # v4.6.548: voor opwarmguard
+        # v5.5.290: geleerd maximum battery-vermogen (EMA van hoogste gemeten waarde)
+        self._bat_max_charge_learned:    float = 0.0
+        self._bat_max_discharge_learned: float = 0.0
 
     # ── Publieke interface ────────────────────────────────────────────────────
 
     def reconcile(
         self,
-        grid_w:    Optional[float],
-        solar_w:   Optional[float],
-        battery_w: Optional[float],
+        grid_w:          Optional[float],
+        solar_w:         Optional[float],
+        battery_w:       Optional[float],
+        confirmed_house_w: float = 0.0,   # v5.5.152: bevestigd huisverbruik via smart plugs
     ) -> BalancedReading:
         now = time.time()
 
@@ -525,6 +537,15 @@ class EnergyBalancer:
         g_stale = self._grid.is_stale()
         s_stale = self._solar.is_stale()
         b_stale = self._battery.is_stale()
+        # v5.5.290: leer max battery-vermogen uit gemeten waarden
+        if battery_w is not None and not b_stale:
+            _bw = float(battery_w)
+            if _bw > 0 and _bw > self._bat_max_charge_learned:
+                self._bat_max_charge_learned = max(
+                    self._bat_max_charge_learned * 0.99 + _bw * 0.01, _bw)
+            elif _bw < 0 and abs(_bw) > self._bat_max_discharge_learned:
+                self._bat_max_discharge_learned = max(
+                    self._bat_max_discharge_learned * 0.99 + abs(_bw) * 0.01, abs(_bw))
         stale   = (["grid"]    if g_stale else []) + \
                   (["solar"]   if s_stale else []) + \
                   (["battery"] if b_stale else [])
@@ -694,22 +715,36 @@ class EnergyBalancer:
         _a_bat   = self._battery.alpha
         _house_alpha = (_a_grid + _a_solar + _a_bat) / 3.0
 
-        # v5.5.48: leerbare sprong-toedeling via JumpAttribution sigmoid
-        # Hoe groter de sprong, hoe meer naar accu, hoe minder house_alpha
+        # v5.5.151: Zelf-lerend house_alpha op basis van sprong-grootte
+        # Klein (<150W):  huis boost (bijna zeker echt verbruik) → snelle reactie
+        # Middel/groot:   sigmoid verdeling geleerd uit Nexus-feedback
+        # Altijd:         huis + accu display = Kirchhoff
         _jump_age_s = now - self._last_grid_jump_ts
         _bat_delta  = abs(b_val - self._prev_battery_w)
         _jump_w = self._last_grid_jump_w
-        # Gebruik de grootste recente stimulus: grid-sprong of accu-delta
         _dominant_jump = max(abs(_jump_w) if _jump_age_s < 60.0 else 0.0, _bat_delta)
-        if _dominant_jump >= 200.0:
-            # Reduceer house_alpha proportioneel met battery_fraction
-            _bat_frac = self._jump_attr.battery_fraction(_dominant_jump)
-            # house_alpha = base_alpha × (1 - battery_fraction)
-            # Grote sprong → battery_fraction hoog → house_alpha laag → huis EMA stabiel
-            _house_alpha = _house_alpha * (1.0 - _bat_frac)
+
+        if _dominant_jump > 0:
+            # NILM-correctie: als smart plugs een sprong bevestigen als huis,
+            # verminder de "onverklaarde" sprong die naar accu zou gaan.
+            # Voorbeeld: 2kW sprong, smart plug bevestigt 1.8kW inductie →
+            #   onverklaarde rest = 200W → bat_frac op basis van 200W (laag)
+            _confirmed_delta = min(_dominant_jump, max(0.0, confirmed_house_w))
+            _unexplained_jump = max(0.0, _dominant_jump - _confirmed_delta)
+
+            _bat_frac = self._jump_attr.battery_fraction(_unexplained_jump)
+
+            if _dominant_jump < 150.0:
+                # Kleine sprong: boost house_alpha — bijna zeker echt verbruik
+                _house_alpha = min(1.0, _house_alpha * 2.5)
+            elif _bat_frac > 0:
+                # Verdeel proportioneel: huis krijgt (1-bat_frac), accu krijgt bat_frac
+                # Altijd samen 0 (Kirchhoff): wat huis niet krijgt gaat naar accu display
+                _house_alpha = _house_alpha * (1.0 - _bat_frac)
             _LOGGER.debug(
-                "EnergyBalancer: jump=%.0fW bat_frac=%.2f → house_alpha=%.3f",
-                _dominant_jump, _bat_frac, _house_alpha,
+                "EnergyBalancer: jump=%.0fW confirmed=%.0fW unexplained=%.0fW "                "bat_frac=%.2f → house_alpha=%.3f",
+                _dominant_jump, _confirmed_delta, _unexplained_jump,
+                _bat_frac, _house_alpha,
             )
 
         # Leer van Nexus aankomst: als pending observaties > 60s oud zijn
@@ -729,9 +764,17 @@ class EnergyBalancer:
             elif _obs_age <= 45.0:
                 _still_pending.append(_obs)
         self._pending_learn = _still_pending
-        self._house_trend = (_house_alpha * house_w +
-                             (1.0 - _house_alpha) * self._house_trend
-                             if self._house_trend else house_w)
+        # v5.5.288: opwarmperiode — hogere alpha zodat house_trend sneller convergeert.
+        # Bij cold-start (weinig samples) is house_trend nog niet representatief.
+        # Zonder dit blijft house_trend bevroren op lage cold-start waarde (~90W)
+        # terwijl het werkelijke verbruik 1-2kW is → som nooit 0.
+        if self._house_trend_samples < 30 and self._house_trend > 0:
+            _cold_alpha = min(1.0, _house_alpha * 5.0)  # 5× sneller in opwarmperiode
+            self._house_trend = _cold_alpha * house_w + (1.0 - _cold_alpha) * self._house_trend
+        else:
+            self._house_trend = (_house_alpha * house_w +
+                                 (1.0 - _house_alpha) * self._house_trend
+                                 if self._house_trend else house_w)
         self._house_trend_samples += 1
 
         # 6. Imbalans-check vs ruwe waarden
@@ -751,12 +794,37 @@ class EnergyBalancer:
         # Display (~5s): nauwelijks filter, geen geflicker in UI
         _g_disp = self._grid.display_ema
         _s_disp = max(0.0, self._solar.display_ema)
+        _g_fresh = not self._grid.is_stale()
         if b_est:
-            # Battery geschat (Nexus laat) → gebruik house_trend als anker
-            # display_house = house_trend (stabiel, geen sprong)
-            # display_battery = Kirchhoff van display waarden
-            _h_disp = max(0.0, self._house_trend)
-            _b_disp = _s_disp + _g_disp - _h_disp
+            # v5.5.297: fix house_display bevriezen bij Nexus-lag.
+            #
+            # Probleem: b_val is Kirchhoff-gecorrigeerd via house_trend.
+            # Als we b_val gebruiken als display-battery, dan is:
+            #   house_disp = solar_disp + grid_disp - b_val
+            #              = solar_disp + grid_disp - (solar + grid - house_trend)
+            #              = house_trend  (altijd, ongeacht grid-wijzigingen)
+            # → house_display was wiskundig vastgepind op house_trend.
+            #
+            # Fix: gebruik battery.display_ema (de ruwe EMA van de batterijsensor)
+            # voor de display-berekening, ook als b_est=True.
+            # house_disp = solar_disp + grid_disp - battery.display_ema
+            # → house volgt direct grid-wijzigingen, Kirchhoff=0 in display.
+            # Beslissingen (house_ema) blijven via b_val (Kirchhoff-correct).
+            #
+            # Fallback als grid stale: val terug op house_trend (zoals eerder).
+            if _g_fresh:
+                # Battery EMA geeft de laatste bekende sensor-waarde terug
+                # (EMA-init = sensor, daarna langzaam bijgewerkt).
+                _b_disp = self._battery.display_ema
+                _h_disp = max(0.0, _s_disp + _g_disp - _b_disp)
+                # Spike-bescherming: nooit meer dan 3x house_trend of 15kW
+                if self._house_trend > 0:
+                    _h_disp = min(_h_disp, max(self._house_trend * 3.0, 15000.0))
+                    _b_disp = _s_disp + _g_disp - _h_disp  # herbereken na clamp
+            else:
+                # Grid ook stale: val terug op house_trend als stabiel anker
+                _h_disp = max(0.0, self._house_trend)
+                _b_disp = _s_disp + _g_disp - _h_disp
         else:
             _b_disp = self._battery.display_ema
             _h_disp = max(0.0, _s_disp + _g_disp - _b_disp)
@@ -890,6 +958,8 @@ class EnergyBalancer:
             "battery_learned_lag_s":   bl.learned_lag_s,
             "battery_lag_confidence":  round(bl.confidence, 2),
             "battery_lag_samples":     len(bl._observations),
+            "bat_max_charge_learned_w":    round(self._bat_max_charge_learned, 0),
+            "bat_max_discharge_learned_w": round(self._bat_max_discharge_learned, 0),
             "solar_learned_lag_s":     sl.learned_lag_s,
             "solar_lag_confidence":    round(sl.confidence, 2),
             "solar_lag_samples":       len(sl._observations),

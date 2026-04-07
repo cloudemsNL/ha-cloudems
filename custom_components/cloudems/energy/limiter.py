@@ -110,13 +110,14 @@ class CurrentLimiter:
         p = self._phases.get(phase)
         if not p:
             return
-        # Sanity check: stroomwaarden > 3× max zijn corrupt (sensor artifact)
-        # 25A × 3 = 75A — fysiek onmogelijk op een 25A aansluiting
-        _max_safe = p.max_ampere * 3
+        # Sanity check: stroomwaarden > 2× max zijn corrupt (sensor artifact)
+        # v5.5.195: verlaagd van 3× naar 2× — 71A op een 25A aansluiting is onmogelijk
+        # maar was <75A (3×25) dus niet geblokkeerd. Nu is grens 50A (2×25).
+        _max_safe = p.max_ampere * 2
         if abs(current_a) > _max_safe:
             import logging as _log
-            _log.getLogger(__name__).debug(
-                "Limiter: fase %s stroom %.1fA > sanity grens %.1fA — genegeerd",
+            _log.getLogger(__name__).warning(
+                "Limiter: fase %s stroom %.1fA > sanity grens %.1fA (2× max) — genegeerd (waarschijnlijk startup race condition)",
                 phase, current_a, _max_safe
             )
             return

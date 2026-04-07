@@ -33,6 +33,60 @@ def _eid(entry, entity_id: str) -> str:
     return entity_id
 
 
+class CloudEMSBlackoutReserveSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
+    """Stroomonderbreking reserve schakelaar — default UIT.
+
+    Als AAN: houdt altijd het ingestelde % SoC apart (via number entity).
+    """
+    _attr_attribution = ATTRIBUTION
+    _attr_icon = "mdi:battery-lock"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_blackout_reserve_active"
+        self._attr_name = "CloudEMS Stroomonderbreking Reserve"
+        self.entity_id = _eid(entry, "switch.cloudems_blackout_reserve_actief")
+        self._is_on = False
+
+    @property
+    def is_on(self) -> bool:
+        return self._is_on
+
+    async def async_turn_on(self, **kwargs) -> None:
+        self._is_on = True
+        self._sync_to_bridge()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        self._is_on = False
+        self._sync_to_bridge()
+        self.async_write_ha_state()
+
+    def _sync_to_bridge(self) -> None:
+        try:
+            zp = getattr(self.coordinator, '_zonneplan_bridge', None)
+            if not (zp and hasattr(zp, 'set_blackout_reserve')):
+                return
+            if self._is_on:
+                pct_eid = _eid(self._entry, 'number.cloudems_blackout_reserve_pct')
+                st = self.hass.states.get(pct_eid)
+                pct = float(st.state) if (st and st.state not in ('unavailable','unknown')) else 20.0
+                zp.set_blackout_reserve(pct)
+            else:
+                zp.set_blackout_reserve(0.0)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("Blackout sync fout: %s", exc)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state not in ('unavailable', 'unknown'):
+            self._is_on = last.state == 'on'
+            self._sync_to_bridge()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -72,6 +126,8 @@ async def async_setup_entry(
         CloudEMSEBikeSwitch(coordinator, entry),
         CloudEMSZwembadSwitch(coordinator, entry),
         CloudEMSRolluikenSwitch(coordinator, entry),
+        # v5.5.168: Stroomonderbreking reserve — default UIT
+        CloudEMSBlackoutReserveSwitch(coordinator, entry),
     ]
     # Altijd 9 dimmer-schakelaar slots — unavailable als slot niet geconfigureerd is
     _inv_cfg_src = {**entry.data, **entry.options}
@@ -915,12 +971,14 @@ class CloudEMSShutterAutoSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
         sc = getattr(self.coordinator, "_shutter_ctrl", None)
         if sc:
             sc.set_auto_enabled(self._cover_id, True)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         sc = getattr(self.coordinator, "_shutter_ctrl", None)
         if sc:
             sc.set_auto_enabled(self._cover_id, False)
+            self.hass.async_create_task(self.coordinator.async_request_refresh())
         self.async_write_ha_state()
 
 

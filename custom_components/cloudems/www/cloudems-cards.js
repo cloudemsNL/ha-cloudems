@@ -474,9 +474,8 @@ window.CloudEMSTooltip = {
     setConfig(config) {
       this._config = config;
       this._needsFullRender = true;
+      this._histPrefilled = false;
       this._startAnim();
-      // Force re-render na 3s — vangt startup op waar data al beschikbaar is
-      // maar _renderFull al gedraaid had vóór hass gezet was
       setTimeout(() => { this._needsFullRender = true; }, 3000);
     }
 
@@ -501,6 +500,11 @@ window.CloudEMSTooltip = {
       if (sig !== this._hassSig) {
         this._hassSig = sig;
         this._valuesChanged = true;
+      }
+      // Pre-fill sparkline history from HA on first hass set
+      if (!this._histPrefilled && hass) {
+        this._histPrefilled = true;
+        this._prefillHist(hass);
       }
     }
 
@@ -568,6 +572,18 @@ window.CloudEMSTooltip = {
       const socState = this._hass.states['sensor.cloudems_battery_so_c'];
       const soc = socState && socState.state !== 'unavailable' && socState.state !== 'unknown'
         ? parseFloat(socState.state) : null;
+
+      // Prio 0: sensor.cloudems_status.attributes.battery_power_w
+      // Dit is de meest betrouwbare bron: berekend met _last_battery_w als fallback
+      // zodat timing-problemen in de data-dict build geen invloed hebben.
+      // Sankey gebruikt dezelfde bron → altijd identiek.
+      const _stSt = this._hass.states['sensor.cloudems_status'];
+      const _stBatW = _stSt?.attributes?.battery_power_w;
+      if (_stBatW !== undefined && _stBatW !== null && !isNaN(parseFloat(_stBatW))) {
+        const pw = parseFloat(_stBatW);
+        return [{ label: 'Batterij', soc_pct: isNaN(soc) ? null : soc,
+          power_w: pw, action: pw < -50 ? 'discharge' : pw > 50 ? 'charge' : 'idle' }];
+      }
 
       // Prio 1: all_batteries attribuut — power_w per accu al correct door coordinator
       if (socState?.attributes?.all_batteries?.length > 0) {
@@ -925,12 +941,83 @@ window.CloudEMSTooltip = {
         }));
     }
 
+    // Pre-fill sparkline history from HA history API on first load
+    async _prefillHist(hass) {
+      try {
+        const e = this._config.entities || {};
+        // Sensoren met directe CloudEMS equivalenten (allemaal in W)
+        const sensorMap = {
+          'grid':  'sensor.cloudems_grid_net_power',   // signed: pos=import, neg=export
+          'batt':  'sensor.cloudems_battery_power',    // signed: pos=laden, neg=ontladen
+          'solar': 'sensor.cloudems_solar_system',     // altijd positief
+          'home':  'sensor.cloudems_home_rest',        // altijd positief
+        };
+        const eids = Object.values(sensorMap);
+        const now   = new Date();
+        const start = new Date(now - 60 * 60 * 1000);  // 1 uur
+        const url   = `history/period/${start.toISOString()}?filter_entity_id=${eids.join(',')}&end_time=${now.toISOString()}&minimal_response&no_attributes`;
+        const raw   = await hass.callApi('GET', url);
+        if (!Array.isArray(raw)) return;
+        raw.forEach(series => {
+          if (!Array.isArray(series) || series.length === 0) return;
+          const eid  = series[0].entity_id;
+          const vals = series.map(s => parseFloat(s.state)).filter(v => isFinite(v));
+          if (vals.length < 2) return;
+          // Down-sample naar max 60 punten
+          const step  = Math.max(1, Math.floor(vals.length / 60));
+          const sampled = [];
+          for (let i = 0; i < vals.length; i += step) sampled.push(vals[i]);
+          if (sampled.length > 60) sampled.splice(0, sampled.length - 60);
+          // Zoek de hist-key voor deze entity_id
+          const key = Object.keys(sensorMap).find(k => sensorMap[k] === eid);
+          if (!key) return;
+          this._hist = this._hist || {};
+          if (key === 'grid') {
+            // Negate: export(neg)→groen omhoog, import(pos)→rood omlaag
+            this._hist[key] = sampled.map(v => -v);
+          } else {
+            this._hist[key] = sampled;
+          }
+        });
+        this._needsFullRender = true;
+      } catch(e) {
+        // Geen history beschikbaar — geen probleem, bouwt realtime op
+      }
+    }
+
     // Sparkline history tracking (60 samples per key)
     _histPush(key, val) {
       if (!this._hist) this._hist = {};
-      if (!this._hist[key]) this._hist[key] = Array.from({length: 60}, () => Math.abs(val));
-      this._hist[key].push(Math.abs(val));
+      if (!this._hist[key]) this._hist[key] = Array.from({length: 60}, () => val);
+      this._hist[key].push(val);
       if (this._hist[key].length > 60) this._hist[key].shift();
+    }
+    // Bi-color sparkline: groen voor positief, rood/oranje voor negatief
+    _sparkSvgBi(key, x, y, w, h, colorPos, colorNeg) {
+      const d = this._hist?.[key]; if (!d || d.length < 2) return '';
+      const absMax = Math.max(Math.max(...d.map(Math.abs)), 1);
+      const midY = y + h / 2;
+      const toY = v => midY - (v / absMax) * (h / 2);
+      let svg = `<line x1="${x.toFixed(1)}" y1="${midY.toFixed(1)}" x2="${(x+w).toFixed(1)}" y2="${midY.toFixed(1)}" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/>`;
+      const xStep = w / (d.length - 1);
+      const drawSeg = (x0,y0,x1,y1,v) => {
+        const c = v >= 0 ? colorPos : colorNeg;
+        svg += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="${c}" stroke-width="1.5" opacity="0.85" stroke-linecap="round"/>`;
+      };
+      for (let i = 0; i < d.length - 1; i++) {
+        const x0 = x + i*xStep, y0 = toY(d[i]);
+        const x1 = x + (i+1)*xStep, y1 = toY(d[i+1]);
+        const v0 = d[i], v1 = d[i+1];
+        if ((v0 > 0.1 && v1 < -0.1) || (v0 < -0.1 && v1 > 0.1)) {
+          const t = v0 / (v0 - v1);
+          const xZ = x0 + (x1-x0)*t;
+          drawSeg(x0, y0, xZ, midY, v0);
+          drawSeg(xZ, midY, x1, y1, v1);
+        } else {
+          drawSeg(x0, y0, x1, y1, (v0+v1)/2);
+        }
+      }
+      return svg;
     }
     _sparkSvg(key, x, y, w, h, color) {
       const d = this._hist?.[key]; if (!d || d.length < 2) return '';
@@ -975,7 +1062,7 @@ window.CloudEMSTooltip = {
         if (!this.isConnected || document.hidden) { this._animId = null; return; }
         this._tick++;
         try {
-          if (this._needsFullRender || (this._valuesChanged && this._tick % 6 === 0 && !this._activeNid)) {
+          if (this._needsFullRender || (this._valuesChanged && !this._activeNid)) {  // v5.5.299: % 6 verwijderd — throttle veroorzaakte tot 35s vertraging bij browser-throttling
             this._needsFullRender = false;
             this._valuesChanged   = false;
             this._renderFull();
@@ -1127,16 +1214,16 @@ window.CloudEMSTooltip = {
 
       // Sparkline history
       this._histPush('solar',  totalSolar);
-      this._histPush('grid',   Math.abs(grid));
+      this._histPush('grid',   -grid);  // negeren: export wordt positief(groen omhoog), import negatief(rood omlaag)
       this._histPush('home',   home);
       this._histPush('boiler', totalBoiler);
-      this._histPush('batt',   Math.abs(totalBattPw));
+      this._histPush('batt',   totalBattPw);  // signed: positief=laden(groen), negatief=ontladen(oranje)
       this._histPush('ev',     ev);
       this._histPush('ebike',  ebike);
       this._histPush('airco',  totalAirco);
       this._histPush('hp',     totalHp);
       this._histPush('pool',   pool);
-      layer2.forEach((n, i) => this._histPush(`l2_${i}`, n.power_w));
+      layer2.forEach((n, i) => this._histPush(`nilm_${(n.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`, n.power_w));
 
       // ── Layout ─────────────────────────────────────────────────────────────
       const W = 500;
@@ -1153,7 +1240,7 @@ window.CloudEMSTooltip = {
 
       const T = 10;
       const gc      = grid > T ? '#e74c3c' : '#2ecc71';
-      const bfc     = totalBattPw < -T ? '#2ecc71' : '#e74c3c';
+      const bfc     = totalBattPw > T ? '#2ecc71' : '#e74c3c';
       const battActive   = Math.abs(totalBattPw) > T;
       const gridActive   = Math.abs(grid) > T;
       const homeActive   = home > T;
@@ -1184,7 +1271,7 @@ window.CloudEMSTooltip = {
       const _nilmDevKeys = Array.from({length: 6}, (_, i) => `nilm_dev_${i}`);
       const pipeKeys = [
         'grid_l1', 'grid_l2', 'grid_l3', 'solar', 'batt', 'boiler', 'home_l1', 'home_l2', 'home_l3', 'ev', 'ebike', 'pool', 'airco', 'hp',
-        ...layer2.map((_, i) => `l2_${i}`),
+        ...layer2.map(n => `nilm_${(n.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`),
         ...subs.flatMap((s, si) => s.children.map((_, ci) => `l3_${si}_${ci}`)),
         ..._nilmAncKeys,
         ..._nilmDevKeys,
@@ -1248,7 +1335,9 @@ window.CloudEMSTooltip = {
         const x = cx-bw/2, y = cy-bh/2;
         const glow = on ? `filter:drop-shadow(0 0 8px ${color}50)` : '';
         const click = nid ? `data-nid="${nid}" data-npw="${val}" data-ncolor="${color}" style="${glow};cursor:pointer"` : `style="${glow}"`;
-        const sp = sk ? this._sparkSvg(sk, x+5, y+bh-14, bw-10, 10, color) : '';
+        const sp = sk === 'grid' ? this._sparkSvgBi(sk, x+5, y+bh-14, bw-10, 10, '#3fb950', '#f85149')  // import=groen, export=rood
+                 : sk === 'batt' ? this._sparkSvgBi(sk, x+5, y+bh-14, bw-10, 10, '#3fb950', '#d29922')   // laden=groen, ontladen=oranje
+                 : sk ? this._sparkSvg(sk, x+5, y+bh-14, bw-10, 10, color) : '';
         const tooltip = nid ? `<title>${label}${val?' — '+val:''}${sub2?' ('+sub2+')':''}</title>` : '';
         return `<g ${click}>
           ${tooltip}
@@ -1280,12 +1369,12 @@ window.CloudEMSTooltip = {
       const battBox = () => {
         const pw  = totalBattPw;
         const soc = battNodes[0]?.soc_pct ?? null;
-        const on  = Math.abs(pw) > T, ch = pw < -T;
+        const on  = Math.abs(pw) > T, ch = pw > T;
         const fc  = ch ? C.bc : C.bd;
         const sc  = !soc ? C.batt : soc > 60 ? '#2ecc71' : soc > 25 ? '#f39c12' : '#e74c3c';
         const bw  = 76, bh = soc != null ? 60 : 44, x = battX-bw/2, y = battY-bh/2;
         const fw  = ((soc||0)/100*52).toFixed(1);
-        const sp  = this._sparkSvg('batt', x+5, y+bh-14, bw-10, 10, fc);
+        const sp  = this._sparkSvgBi('batt', x+5, y+bh-14, bw-10, 10, '#3fb950', '#d29922');  // laden=groen, ontladen=oranje
         const glow = on ? `filter:drop-shadow(0 0 10px ${fc}55)` : '';
         return `<g style="${glow};cursor:pointer" data-nid="bat" data-ncolor="${fc}" data-npw="${Math.abs(pw)}">
           <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="8"
@@ -1380,7 +1469,7 @@ window.CloudEMSTooltip = {
       const subBox = (cx, cy, node, idx) => {
         const on = node.power_w > T;
         const bw = 86, bh = 46, x = cx-bw/2, y = cy-bh/2;
-        const sp = this._sparkSvg(`l2_${idx}`, x+5, y+bh-14, bw-10, 10, C.sub);
+        const sp = this._sparkSvg(`nilm_${(node.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`, x+5, y+bh-14, bw-10, 10, C.sub);
         const glow = on ? `filter:drop-shadow(0 0 8px #a78bfa44)` : '';
         return `<g style="${glow};cursor:pointer" data-nid="sub_${idx}" data-nlabel="${node.label}" data-npw="${node.power_w}" data-ncolor="${C.sub}">
           <title>${node.label} — ${Math.round(node.power_w)} W${node.phase?' (fase '+node.phase+')':''}</title>
@@ -1524,10 +1613,12 @@ window.CloudEMSTooltip = {
         const on = node.power_w > T;
         const color = node.color || '#94a3b8';
         const short = node.label.length > 9 ? node.label.slice(0,8)+'…' : node.label;
-        const bw = 74, bh = 58, x = cx-bw/2, y = cy-bh/2;
+        const bw = 74, bh = 72, x = cx-bw/2, y = cy-bh/2;
         const glow = on ? `filter:drop-shadow(0 0 8px ${color}55)` : '';
         const nid = `nilm_${node.label}`;
         const iconSvg = _nilmSvgIcon(node.device_type || '', on, color);
+        const spKey = `nilm_${(node.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`;
+        const sp = this._sparkSvg(spKey, x+5, y+bh-15, bw-10, 12, on ? color : 'rgba(255,255,255,0.12)');
         return `<g style="${glow};cursor:pointer" data-nid="${nid}" data-nlabel="${node.label}" data-npw="${node.power_w}" data-ncolor="${color}" data-nphase="${node.phase||''}" data-ntype="${node.device_type||''}" data-nconf="${node.confidence||100}" data-nevents="${node.on_events||0}" data-nroom="${node.room||'—'}">
           <rect x="${x}" y="${y}" width="${bw}" height="${bh}" rx="10"
             fill="#0d1117" stroke="${on?color:'rgba(255,255,255,0.08)'}" stroke-width="${on?1.5:1}"/>
@@ -1536,6 +1627,7 @@ window.CloudEMSTooltip = {
             fill="${on?C.text:'rgba(255,255,255,0.25)'}">${this._fmt(node.power_w)}</text>
           <text x="${cx}" y="${y+52}" text-anchor="middle" font-size="7" font-weight="600"
             letter-spacing="0.07em" fill="${on?color:'rgba(255,255,255,0.2)'}">${short.toUpperCase()}</text>
+          ${sp}
         </g>`;
       };
 
@@ -1725,7 +1817,7 @@ window.CloudEMSTooltip = {
       // Nodes
       h += solarNodeSvg();
       h += hubSvg();
-      const gridLabel = `${grid > T ? '▲' : '▼'} NET`;
+      const gridLabel = `${grid > T ? '▼' : '▲'} NET`;
       const gridSub2  = grid > T ? 'import' : 'export';
       h += nodeBoxP(COL_LEFT, R_GRID,  88, 38, gc,       gridActive,   gridLabel,    this._fmt(Math.abs(grid)), gridSub2,  'grid',   'grid',   _gridPhase);
       // Phase pills on grid node when 3-phase
@@ -1864,8 +1956,8 @@ window.CloudEMSTooltip = {
             x2:grid>T?_heGrid_x:COL_LEFT+44, y2:grid>T?_heGrid_y:R_GRID }]),
         { key:'solar',  color:C.solar, on:solarActive,  pw:totalSolar,   x1:solarX, y1:solarY+46, x2:_heSol_x, y2:_heSol_y },
         { key:'batt',   color:phaseCol(_battPhase)||bfc, on:battActive, pw:Math.abs(totalBattPw),
-          x1:totalBattPw<-T?_heBat_x:battX, y1:totalBattPw<-T?_heBat_y:battY,
-          x2:totalBattPw<-T?battX:_heBat_x, y2:totalBattPw<-T?battY:_heBat_y },
+          x1:totalBattPw>T?_heBat_x:battX, y1:totalBattPw>T?_heBat_y:battY,
+          x2:totalBattPw>T?battX:_heBat_x, y2:totalBattPw>T?battY:_heBat_y },
         { key:'boiler', color:phaseCol(_boilerPhase)||C.boiler, on:boilerActive, pw:totalBoiler, x1:_heBol_x, y1:_heBol_y, x2:bolX, y2:bolY },
         ...(aircoNodes.length > 0 ? [{ key:'airco', color:phaseCol(_aircoPhase)||C.airco, on:totalAirco>T, pw:totalAirco, x1:_heAirco_x, y1:_heAirco_y, x2:aircoX, y2:aircoY }] : []),
         ...(hpNodes.length > 0    ? [{ key:'hp',    color:C.hp,    on:totalHp>T,    pw:totalHp,    x1:_heHp_x,    y1:_heHp_y,    x2:hpX,    y2:hpY    }] : []),
@@ -1959,11 +2051,11 @@ window.CloudEMSTooltip = {
             ...battNodes.map(b => ({
               l: b.label||'Batterij',
               v: `${this._fmt(Math.abs(b.power_w))} · ${b.soc_pct!=null?b.soc_pct.toFixed(0)+'%':'—'}`,
-              sub: b.power_w<-T?'laden':b.power_w>T?'ontladen':'idle',
+              sub: b.power_w>T?'laden':b.power_w<-T?'ontladen':'idle',
             })),
             {l:'Bron', v: _bal.battery_estimated ? '〜 Kirchhoff' : '✓ Sensor', sub: _bal.battery_estimated?'berekend':'gemeten'},
             {l:'Ruw gemeten', v: _bal.battery_raw_w != null ? this._fmt(Math.abs(_bal.battery_raw_w)) : '—',
-             sub: (_bal.battery_raw_w||0) < -50 ? 'laden' : (_bal.battery_raw_w||0) > 50 ? 'ontladen' : 'idle'},
+             sub: (_bal.battery_raw_w||0) > 50 ? 'laden' : (_bal.battery_raw_w||0) < -50 ? 'ontladen' : 'idle'},
             {l:'Interval', v:_fmtAge(_bal.battery_interval_s), sub:'update-frequentie'},
             {l:'Leeftijd', v:_fmtAge(_bal.battery_age_s)+_staleBadge(_bal.battery_stale)},
             {l:'Sensor', v:_fmtEid(_bal.sensor_battery)},
@@ -2253,7 +2345,7 @@ window.CloudEMSTooltip = {
           metrics: bats.map(b => ({
             l: b.label||'Batterij',
             v: `${fmt(Math.abs(b.power_w))} · ${b.soc_pct!=null?b.soc_pct.toFixed(0)+'%':'—'}`,
-            sub: b.power_w<-T?'laden':b.power_w>T?'ontladen':'idle',
+            sub: b.power_w>T?'laden':b.power_w<-T?'ontladen':'idle',
           })),
           note: `${bats.length} batter${bats.length!==1?'ijen':'ij'} · totaal ${fmt(Math.abs(total))}`,
         };

@@ -237,12 +237,17 @@ class SystemGuardian:
         # ── Vier bewakers ────────────────────────────────────────────────────
         self._check_coordinator(data, now)
         self._check_modules(data, now)
-        self._check_sensors(data, now)
-        self._check_boiler_cascade(data, now)
-        self._check_zp_drift(data, now)
-        self._check_kirchhoff(data, now)
-        self._check_pv_forecast_accuracy(data, now)
-        self._check_battery_control_effect(data, now)
+
+        # Sensor/balance checks pas na grace period van 120s —
+        # voorkomt valse meldingen bij herstart terwijl sensoren nog laden
+        _uptime_s = now - self._setup_ts
+        if _uptime_s >= 120:
+            self._check_sensors(data, now)
+            self._check_boiler_cascade(data, now)
+            self._check_zp_drift(data, now)
+            self._check_kirchhoff(data, now)
+            self._check_pv_forecast_accuracy(data, now)
+            self._check_battery_control_effect(data, now)
 
         # ── Bijsturing op basis van gevonden issues ───────────────────────────
         await self._apply_actions(now)

@@ -7,7 +7,7 @@
  *   sensor.cloudems_nilm_devices      → device_list[] { name, room, power_w, phase, confirmed, is_on, user_suppressed }
  */
 
-const ROOMS_VERSION = "5.4.96";
+const ROOMS_VERSION = "5.5.318";
 
 class CloudEMSRoomsCard extends HTMLElement {
   constructor() {

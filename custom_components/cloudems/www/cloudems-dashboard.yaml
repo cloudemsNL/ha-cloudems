@@ -15,8 +15,9 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-self-healing-card
-    - type: custom:cloudems-flow-card
+    - type: custom:cloudems-energy-view-card
       title: ⚡ Energiestroom
+      max_ampere: 25
       entities:
         grid:
           entity: sensor.cloudems_grid_net_power
@@ -42,22 +43,18 @@ views:
       clickable_entities: true
       display_zero_lines: true
       use_new_flow_rate_model: true
-    - type: custom:cloudems-sankey-card
-      title: Energiestromen
-      max_ampere: 25
+    - type: custom:cloudems-dagrapport-card
+      title: 📊 Dagrapport
+    - type: custom:cloudems-rooms-card
   - type: grid
     column_span: 1
     cards:
-    - type: custom:cloudems-dagrapport-card
-      title: 📊 Dagrapport
     - type: custom:cloudems-home-card
-    - type: custom:cloudems-vacation-card
       title: 🏖 Vakantiemodus
     - type: custom:cloudems-alerts-ticker-card
     - type: custom:cloudems-energie-potentieel-card
       show_bat: true
       show_pv: true
-    - type: custom:cloudems-rooms-card
     - type: custom:cloudems-version-card
 - title: Solar & PV
   path: cloudems-zon
@@ -98,16 +95,11 @@ views:
   - type: grid
     column_span: 1
     cards:
-    - type: custom:cloudems-pv-forecast-card
-      title: ☀ PV Forecast + EPEX
+    - type: custom:cloudems-solar-tabs-card
+      title: Forecast & Zelfconsumptie
       show_tomorrow: true
       show_epex: true
       show_confidence: true
-    - type: custom:cloudems-zelfconsumptie-card
-      title: ♻ Zelfconsumptie
-    - type: custom:cloudems-energie-potentieel-card
-      show_bat: false
-      show_pv: true
     - type: custom:cloudems-version-card
 - title: Batterij
   path: cloudems-batterij
@@ -161,34 +153,18 @@ views:
       card:
         type: custom:cloudems-fcr-card
         title: 📈 FCR/aFRR
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_battery_savings
-        state_not: unavailable
-      card:
-        type: custom:cloudems-batterij-arbitrage-card
-        title: 💰 Batterij Besparingen
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_battery_savings
-        state_not: unavailable
-      card:
-        type: custom:cloudems-batterij-levensduur-card
-        title: 🔋 Levensduur
-        nominal_capacity_kwh: 5.8
-        max_cycles: 6000
 
   - type: grid
     column_span: 1
     cards:
-    - type: custom:cloudems-offgrid-card
-    - type: custom:cloudems-kosten-calculator-card
-    - type: custom:cloudems-energie-potentieel-card
-      show_bat: true
-      show_pv: false
+    - type: custom:cloudems-batterij-status-card
     - type: custom:cloudems-version-card
+
+  - type: grid
+    column_span: 2
+    cards:
+    - type: custom:cloudems-battery-overview-card
+
 - title: Warm Water
   path: cloudems-boiler
   type: sections
@@ -238,10 +214,6 @@ views:
         type: custom:cloudems-warmtebron-card
         title: 🔥 Verwarmingskosten
 
-  - type: grid
-    column_span: 1
-    cards:
-    - type: custom:cloudems-version-card
 - title: EV & Mobiliteit
   path: cloudems-mobiliteit
   type: sections
@@ -430,10 +402,8 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-mini-price-card
-    - type: custom:cloudems-airco-card
-      title: ❄ Multi-Split Airco
-    - type: custom:cloudems-klimaat-card
-      title: 🌡 Klimaatbeheer
+    - type: custom:cloudems-klimaat-tabs-card
+      title: Klimaat
     - type: conditional
       conditions:
       - condition: state
@@ -442,6 +412,10 @@ views:
       card:
         type: custom:cloudems-atmospheric-card
         title: 🌡 WP Atmosfeer Optimizer
+
+  - type: grid
+    column_span: 1
+    cards:
     - type: conditional
       conditions:
       - condition: state
@@ -450,10 +424,6 @@ views:
       card:
         type: custom:cloudems-climate-epex-card
         title: ❄ Airco EPEX
-
-  - type: grid
-    column_span: 1
-    cards:
     - type: custom:cloudems-kamer-heatmap-card
       title: 🌡 Kamer Temperaturen
     - type: custom:cloudems-version-card
@@ -513,28 +483,8 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-mini-price-card
-    - type: custom:cloudems-lamp-card
-      title: 💡 Lampcirculatie
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_circadian_nudge
-        state_not: inactive
-      card:
-        type: custom:cloudems-circadian-card
-        title: 🌅 Slimme Verlichting
-
-  - type: grid
-    column_span: 1
-    cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_lamp_automation
-        state_not: unavailable
-      card:
-        type: custom:cloudems-lamp-auto-card
-        title: 💡 Lamp Automatisering
+    - type: custom:cloudems-lampen-tabs-card
+      title: Lampen & Verlichting
     - type: custom:cloudems-version-card
 - title: Prijzen & Kosten
   path: cloudems-prijzen
@@ -586,39 +536,15 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-mini-price-card
-    - type: custom:cloudems-energy-visual-card
-      title: Energiestroom NILM
-    - type: custom:cloudems-nilm-visual-card
-      title: Apparaten Live
+    - type: custom:cloudems-nilm-visual-tabs-card
+      title: Energie & NILM
     - type: custom:cloudems-nilm-card
 
   - type: grid
     column_span: 1
     cards:
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_nilm_devices
-        state_not: unavailable
-      card:
-        type: custom:cloudems-apparaat-tijdlijn-card
-        title: Apparaat Tijdlijn
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_nilm_running_devices
-        state_not: unavailable
-      card:
-        type: custom:cloudems-appliance-card
-        title: 🔌 Apparaten EPEX
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_lifecycle_arbitrage
-        state_not: unavailable
-      card:
-        type: custom:cloudems-lifecycle-card
-        title: ⚙ Slijtage Arbitrage
+    - type: custom:cloudems-apparaat-tabs-card
+      title: Tijdlijn & Apparaten
     - type: custom:cloudems-version-card
 - title: Beslissingen
   path: cloudems-beslissingen
@@ -644,7 +570,6 @@ views:
       card:
         type: custom:cloudems-standby-ranking-card
         title: 💤 Standby Top 5
-    - type: custom:cloudems-decisions-card
     - type: conditional
       conditions:
       - condition: state
@@ -666,16 +591,8 @@ views:
   - type: grid
     column_span: 1
     cards:
-    - type: conditional
-      conditions:
-      - condition: numeric_state
-        entity: sensor.cloudems_actieve_meldingen
-        above: 0
-      card:
-        type: custom:cloudems-alerts-card
-        title: 🔔 Actieve Meldingen
-    - type: custom:cloudems-switches-card
-      title: ⏰ Goedkope Uren Schakelaars
+    - type: custom:cloudems-beslissingen-tabs-card
+      title: Beslissingen & Meldingen
     - type: custom:cloudems-version-card
 - title: 💡 Advies
   path: cloudems-advies
@@ -711,11 +628,8 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-mini-price-card
-    - type: custom:cloudems-ai-card
-      title: 🧠 Lokale AI
-    - type: custom:cloudems-decisions-learner-card
-    - type: custom:cloudems-learning-card
-      title: Zelflerend
+    - type: custom:cloudems-ai-tabs-card
+      title: AI & Leren
     - type: conditional
       conditions:
       - condition: state
@@ -729,31 +643,10 @@ views:
   - type: grid
     column_span: 1
     cards:
-    - type: custom:cloudems-future-shadow-card
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_blackout_guard
-        state_not: none
-      card:
-        type: custom:cloudems-blackout-card
-        title: ⚡ Blackout Guard
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_grid_phase_imbalance
-        state_not: unavailable
-      card:
-        type: custom:cloudems-fase-balans-card
-        title: ⚡ Fase Balans + cos φ
-    - type: conditional
-      conditions:
-      - condition: state
-        entity: sensor.cloudems_grid_phase_imbalance
-        state_not: unavailable
-      card:
-        type: custom:cloudems-fase-historiek-card
-        title: ⚡ Fase Historiek
+    - type: custom:cloudems-toekomst-tabs-card
+      title: Toekomst & Blackout
+    - type: custom:cloudems-fase-tabs-card
+      title: Fase Balans & Historiek
     - type: custom:cloudems-version-card
 - title: Diagnose
   path: cloudems-diagnose
@@ -765,13 +658,8 @@ views:
     column_span: 1
     cards:
     - type: custom:cloudems-mini-price-card
-    - type: custom:cloudems-diagnose-card
-    - type: custom:cloudems-p1-card
-      title: 📡 P1 / Slimme Meter
-  - type: grid
-    column_span: 1
-    cards:
-    - type: custom:cloudems-fuse-monitor-card
+    - type: custom:cloudems-diagnose-tabs-card
+      title: Diagnose & P1 & Zekeringen
     - type: custom:cloudems-version-card
 - title: Configuratie
   path: cloudems-config
@@ -800,3 +688,10 @@ views:
       cards:
         - type: custom:cloudems-arch-card
         - type: custom:cloudems-load-plan-card
+
+- title: Groepenkast 🅱 BETA
+  path: cloudems-groepenkast
+  icon: mdi:electric-switch
+  type: panel
+  cards:
+    - type: custom:cloudems-groepenkast-card

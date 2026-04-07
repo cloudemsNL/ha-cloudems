@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Solar Card  v5.5.53 — herbouwd naar Solcast-stijl met rolling history
 
-const SOL_VERSION = "5.5.63";
+const SOL_VERSION = "5.5.318";
 const SOL_STYLES = `
   :host {
     --sl-bg:#0c1409;--sl-surface:#121a0e;--sl-border:rgba(255,255,255,0.07);
@@ -271,7 +271,8 @@ class CloudemsSolarCard extends HTMLElement {
     const nextKey = curIdx < dayKeys.length - 1 ? dayKeys[curIdx + 1] : null;
 
     const mape14 = parseFloat(accA.mape_14d_pct || 0);
-    const accColor = mape14 < 10 ? '#86efac' : mape14 < 20 ? '#f0c040' : '#fb923c';
+    const acc14  = Math.max(0, Math.min(100, 100 - mape14));  // MAPE → nauwkeurigheid 0-100%
+    const accColor = acc14 > 90 ? '#86efac' : acc14 > 80 ? '#f0c040' : '#fb923c';
     const todayTotal = (this._pvHist || arr24()).reduce((a, b) => a + (b || 0), 0);
 
     const fcExpected = (cdData.fc || arr24()).slice(0, nowH + 1).reduce((a, b) => a + (parseFloat(b)||0), 0);
@@ -388,7 +389,7 @@ class CloudemsSolarCard extends HTMLElement {
 
         <div class="acc-footer">
           <div class="acc-dot" style="background:${accColor}"></div>
-          <span>Nauwkeurigheid 14d: <strong>${mape14.toFixed(1)}%</strong> · ${accA.samples || 0} dagen gemeten</span>
+          <span>Nauwkeurigheid 14d: <strong>${acc14.toFixed(1)}%</strong> · ${accA.samples || 0} dagen gemeten</span>
         </div>
       </div>
 
@@ -480,6 +481,7 @@ class CloudemsSolarCard extends HTMLElement {
     }).join('');
 
     const mape14 = parseFloat(accA.mape_14d_pct || 0);
+    const acc14  = Math.max(0, Math.min(100, 100 - mape14));
     const mape30 = parseFloat(accA.mape_30d_pct || 0);
     // SVG bar chart — horizontale bars per dag
     const SVG_W = 300, BAR_H = 14, GAP = 5;
@@ -509,7 +511,7 @@ class CloudemsSolarCard extends HTMLElement {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:8px;text-align:center;">
             <div style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:2px;">14 DAGEN</div>
-            <div style="font-family:var(--sl-mono);font-size:16px;font-weight:700;color:${mape14<10?'#86efac':mape14<20?'#f0c040':'#fb923c'}">${mape14.toFixed(1)}%</div>
+            <div style="font-family:var(--sl-mono);font-size:16px;font-weight:700;color:${acc14>90?'#86efac':acc14>80?'#f0c040':'#fb923c'}">${acc14.toFixed(1)}%</div>
           </div>
           <div style="background:rgba(255,255,255,.04);border-radius:6px;padding:8px;text-align:center;">
             <div style="font-size:9px;color:rgba(255,255,255,.3);margin-bottom:2px;">30 DAGEN</div>

@@ -5932,6 +5932,40 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional(CONF_P1_ENABLED, default=bool(data.get(CONF_P1_ENABLED, False))): bool,
                 vol.Optional(CONF_P1_HOST,    default=str(data.get(CONF_P1_HOST, ""))): str,
                 vol.Optional(CONF_P1_PORT,    default=int(data.get(CONF_P1_PORT, DEFAULT_P1_PORT))): vol.All(int, vol.Range(min=1, max=65535)),
+
+            }),
+        )
+
+
+    async def async_step_battery_advanced_opts(self, user_input=None):
+        """Options flow: geavanceerde batterij-instellingen (ruimte, terugverdientijd, Mijnbatterij)."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            return self._save(user_input)
+        return self.async_show_form(
+            step_id="battery_advanced_opts",
+            data_schema=vol.Schema({
+                # Mijnbatterij.nl
+                vol.Optional("mijnbatterij_api_key",
+                    default=str(data.get("mijnbatterij_api_key", ""))): str,
+                # Accu-ruimte temperatuur
+                vol.Optional("battery_room_temp_sensor",
+                    default=str(data.get("battery_room_temp_sensor", ""))): str,
+                vol.Optional("battery_room_heater_w",
+                    default=float(data.get("battery_room_heater_w", 1500.0))): vol.All(
+                        float, vol.Range(min=100, max=10000)),
+                vol.Optional("battery_room_climate_entity",
+                    default=str(data.get("battery_room_climate_entity", ""))): str,
+                vol.Optional("battery_room_auto_heat",
+                    default=bool(data.get("battery_room_auto_heat", False))): bool,
+                # Terugverdientijd
+                vol.Optional("battery_purchase_price_eur",
+                    default=float(data.get("battery_purchase_price_eur") or 0)): vol.All(
+                        float, vol.Range(min=0, max=50000)),
+                vol.Optional("battery_purchase_date",
+                    default=str(data.get("battery_purchase_date", ""))): str,
             }),
         )
 

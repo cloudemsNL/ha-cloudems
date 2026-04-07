@@ -73,6 +73,11 @@ class ScheduleSlot:
     reason:     str            = ""
     executed:   bool           = False   # did the battery actually do this?
     soc_start:  Optional[float]= None
+    soc_end:    Optional[float]= None    # verwachte SoC na dit uur
+    power_w:    Optional[float]= None    # laad/ontlaadvermogen in W
+    pv_w:       Optional[float]= None    # PV productie dit uur (W)
+    house_w:    Optional[float]= None    # verwacht huisverbruik dit uur (W)
+    price_allin:Optional[float]= None    # all-in prijs incl. belastingen (ct/kWh)
 
 
 @dataclass
@@ -165,6 +170,7 @@ class BatteryEPEXScheduler:
         solar_surplus_w: float   = 0.0,
         soh_pct: Optional[float] = None,
         pv_forecast_hourly: list = None,
+        house_hourly_w: list     = None,
         seasonal_params: Optional[SeasonalParameters] = None,
     ) -> dict:
         """
@@ -202,7 +208,8 @@ class BatteryEPEXScheduler:
             or season_changed
         )
         if should_replan:
-            await self._build_schedule(price_info, soc, solar_surplus_w)
+            self._house_hourly_w = house_hourly_w or []
+            await self._build_schedule(price_info, soc, solar_surplus_w, pv_forecast_hourly=pv_forecast_hourly, house_hourly_w=self._house_hourly_w)
 
         # Find current hour action
         current_slot = self._get_slot(current_hour)
@@ -285,6 +292,8 @@ class BatteryEPEXScheduler:
         price_info: dict,
         soc: Optional[float],
         solar_surplus_w: float,
+        pv_forecast_hourly: list = None,
+        house_hourly_w: list = None,
     ) -> None:
         """Build optimal charge/discharge schedule for today.
 
@@ -432,7 +441,56 @@ class BatteryEPEXScheduler:
             else:
                 action = "idle"
                 r      = f"Gemiddeld uur ({p:.4f} €/kWh)"
-            slots.append(ScheduleSlot(hour=h, action=action, price=p, reason=r))
+            # Bereken verwacht vermogen en SoC per uur
+            cap_kwh   = self._capacity_kwh or 10.0
+            max_ch_w  = float(self._config.get("battery_max_charge_w", 2500))
+            max_di_w  = float(self._config.get("battery_max_discharge_w", 2500))
+
+            # PV productie dit uur
+            pv_h_w = 0.0
+            if pv_forecast_hourly:
+                for _pv in pv_forecast_hourly:
+                    if isinstance(_pv, dict) and _pv.get("hour") == h:
+                        pv_h_w = float(_pv.get("power_w", _pv.get("forecast_w", _pv.get("watt", 0))) or 0)
+                        break
+
+            # Verwacht huisverbruik dit uur (geleerd of fallback)
+            house_h_w = 500.0
+            if house_hourly_w and h < len(house_hourly_w) and house_hourly_w[h]:
+                house_h_w = float(house_hourly_w[h])
+
+            # All-in prijs: EPEX + belasting (~18.2ct) × BTW (1.21)
+            allin_ct = round((p * 100 + 18.2) * 1.21, 1)
+
+            # Laad/ontlaadvermogen op basis van PV surplus en huisverbruik
+            slot_power_w = None
+            if action == "charge":
+                surplus = max(0.0, pv_h_w - house_h_w)
+                slot_power_w = round(min(max_ch_w, max(surplus, max_ch_w * 0.4)), 0)
+            elif action == "discharge":
+                slot_power_w = round(min(max_di_w, house_h_w), 0)
+
+            slots.append(ScheduleSlot(
+                hour=h, action=action, price=p, reason=r,
+                power_w=slot_power_w, pv_w=round(pv_h_w, 0),
+                house_w=round(house_h_w, 0), price_allin=allin_ct,
+            ))
+
+        # Bereken verwachte SoC per uur na aanmaken slots
+        _sim_soc = float(soc) if soc else 50.0
+        cap_kwh  = self._capacity_kwh or 10.0
+        max_ch_w = float(self._config.get("battery_max_charge_w", 2500))
+        max_di_w = float(self._config.get("battery_max_discharge_w", 2500))
+        for s in slots:
+            s.soc_start = round(_sim_soc, 1)
+            pw = s.power_w or 0
+            if s.action == "charge" and pw > 0:
+                delta = pw / 1000.0 / cap_kwh * 100.0
+                _sim_soc = min(95.0, _sim_soc + delta)
+            elif s.action == "discharge" and pw > 0:
+                delta = pw / 1000.0 / cap_kwh * 100.0
+                _sim_soc = max(10.0, _sim_soc - delta)
+            s.soc_end = round(_sim_soc, 1)
 
         season_label = sp.season if sp else "transition"
         self._schedule = BatterySchedule(
@@ -520,10 +578,16 @@ class BatteryEPEXScheduler:
             return []
         return [
             {
-                "hour":   s.hour,
-                "action": s.action,
-                "price":  s.price,
-                "reason": s.reason,
+                "hour":     s.hour,
+                "action":   s.action,
+                "price":    s.price,
+                "reason":   s.reason,
+                "power_w":  s.power_w,
+                "soc_start": s.soc_start,
+                "soc_end":  s.soc_end,
+                "pv_w":     s.pv_w,
+                "house_w":  s.house_w,
+                "price_allin": s.price_allin,
             }
             for s in self._schedule.slots
         ]

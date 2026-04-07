@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Architecture Card v5.4.96
 
-const ARCH_VERSION = '5.4.96';
+const ARCH_VERSION = '5.5.318';
 
 class CloudEMSArchCard extends HTMLElement {
   constructor() {

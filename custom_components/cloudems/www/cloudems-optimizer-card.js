@@ -3,7 +3,7 @@
 // CloudEMS Battery Optimizer Card v5.4.96
 // Toont het 48-uurs kostengeoptimaliseerde batterijplan
 
-const OPT_VERSION = '5.4.96';
+const OPT_VERSION = '5.5.318';
 const OPT_SENSOR  = 'sensor.cloudems_battery_optimizer';
 
 const STYLES_OPT = `

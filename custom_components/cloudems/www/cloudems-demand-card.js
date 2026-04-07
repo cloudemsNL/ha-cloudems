@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Energy Demand Card  v5.4.96
 
-const DEMAND_CARD_VERSION = "5.4.96";
+const DEMAND_CARD_VERSION = "5.5.318";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');

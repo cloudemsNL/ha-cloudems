@@ -1,5 +1,5 @@
 // CloudEMS Batterij Levensduur Card v5.4.96
-const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.4.96';
+const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.5.318';
 // Tracks battery cycles, DoD, estimated remaining capacity
 
 class CloudemsBatterijLevensduurCard extends HTMLElement {

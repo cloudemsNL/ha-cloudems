@@ -1,5 +1,5 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-const CARD_VERSION_VERSION = '5.4.96';
+const CARD_VERSION_VERSION = '5.5.318';
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Version Card  v5.4.96
 

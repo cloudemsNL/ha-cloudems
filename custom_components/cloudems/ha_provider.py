@@ -94,6 +94,14 @@ class HAEntityProvider(EntityProvider):
         Vóór HA 2021.x bestond target nog niet — de except vangt dat op en
         valt terug op de oude service_data stijl.
         """
+        # Valideer entity_id — een lege string of de literal "entity_id" is ongeldig
+        if not entity_id or entity_id == "entity_id" or "." not in entity_id:
+            logger.warning(
+                "HA service call overgeslagen (%s.%s): ongeldige entity_id %r — "
+                "controleer de CloudEMS configuratie voor dit apparaat.",
+                domain, service, entity_id,
+            )
+            return False
         service_data = dict(data) if data else {}
         target = {"entity_id": entity_id}
         try:

@@ -14,9 +14,9 @@ try:
     with open(_MANIFEST_PATH, encoding="utf-8") as _f:
         VERSION: str = _json.load(_f)["version"]
 except FileNotFoundError:
-    VERSION = "5.4.0"  # manifest.json niet gevonden (unit tests / dev omgeving)
+    VERSION = "5.5.318"  # manifest.json niet gevonden (unit tests / dev omgeving)
 except (KeyError, ValueError) as _e:
-    VERSION = "5.4.0"  # manifest.json ongeldig
+    VERSION = "5.5.318"  # manifest.json ongeldig
 MANUFACTURER = "CloudEMS"
 NAME = "CloudEMS Energy Manager"
 WEBSITE = "https://cloudems.eu"
@@ -912,6 +912,7 @@ CLOUDEMS_TABS = [
     ("cloudems-meldingen",    "🔔 Meldingen"),
     ("cloudems-intelligence", "🤖 Zelflerend"),
     ("cloudems-diagnose",     "🩺 Diagnose"),
+    ("cloudems-groepenkast",  "⚡ Groepenkast 🅱"),
 ]
 
 # Tabs die standaard verborgen zijn (optionele features zonder basisconfig)

@@ -48,7 +48,7 @@ _LOGGER = logging.getLogger("cloudems.circuit_panel")
 
 # ── Constanten ────────────────────────────────────────────────────────────────
 
-MEASURE_WAIT_S          = 8
+MEASURE_WAIT_S          = 30   # v5.5.128: 30s — 2× DSMR P1 interval (10s) + cloud buffer
 CONFIDENCE_THRESHOLD    = 0.65
 DOUBLE_MEAS_THRESHOLD   = 0.40
 MIN_POWER_DELTA_W       = 15
@@ -65,7 +65,29 @@ VOLTAGE_DROP_YELLOW_PCT = 0.01
 VOLTAGE_DROP_ORANGE_PCT = 0.03     # NEN1010 grens
 VOLTAGE_DROP_RED_PCT    = 0.05
 
-NEN1010_MAX_GROUPS_PER_RCD = 6
+NEN1010_MAX_GROUPS_PER_RCD = 4  # NL standaard; wordt overschreven door country config
+
+# Maximaal groepen per aardlek per land (gebaseerd op HD 60364 implementaties)
+MAX_GROUPS_PER_COUNTRY: dict = {
+    "NL": 4,   # NEN 1010 art. 531.3
+    "BE": 8,   # AREI art. 86
+    "DE": 6,   # DIN VDE 0100
+    "FR": 8,   # NF C 15-100 art. 771
+    "GB": 8,   # BS 7671
+    "IE": 8,   # IS 10101
+    "AT": 6,   # ÖVE/ÖNORM E 8001
+    "CH": 6,   # NIV / NIN 2020
+    "ES": 6,   # REBT ITC-BT
+    "IT": 6,   # CEI 64-8
+    "PT": 6,   # RTIEBT
+    "SE": 8,   # SS-EN 60364
+    "NO": 8,   # NEK 400
+    "DK": 8,   # DS Stærkstrøm
+    "FI": 8,   # SFS 6000
+    "LU": 8,   # NF C 15-100
+    "MT": 8,   # BS 7671
+    "CY": 8,   # BS 7671
+}
 NEN1010_LIGHT_POINT_W      = 60
 NEN1010_MAX_LIGHT_POINTS   = 20
 NEN1010_CABLE_ADVICE = {
@@ -153,6 +175,11 @@ class CircuitBreaker:
     switch_entity   : str   = ""
     energy_entity   : str   = ""   # optioneel: HA kWh-sensor (echte meter)
     rcd_type        : str   = RCDType.UNKNOWN
+    kar             : str   = "B"    # B / C / D karakteristiek
+    ma              : int   = 30    # gevoeligheid in mA (aardlekken)
+    card_type       : str   = ""    # v5.5.129: exacte kaarttype (main_4p, rcd_4p_b etc.)
+    parent_main_id  : str   = ""    # v5.5.153: parent hoofdschakelaar (serie-schakeling)
+    rail_index      : int   = 0     # v5.5.153: rail-nummer voor multi-rail herstel
     linked_devices  : List[str] = field(default_factory=list)
     linked_rooms    : List[str] = field(default_factory=list)
     linked_power_w  : float = 0.0
@@ -1151,24 +1178,48 @@ class CircuitBreakerPanel:
 
     # ── NEN1010 toetsing ──────────────────────────────────────────────────────
 
-    def check_nen1010(self, nilm_devices: Optional[List[dict]] = None) -> List[NEN1010Finding]:
+    def check_nen1010(self, nilm_devices: Optional[List[dict]] = None,
+                     country: str = "NL") -> List[NEN1010Finding]:
         findings: List[NEN1010Finding] = []
         nilm_map = {d.get("id", ""): d for d in (nilm_devices or [])}
+        max_groups = MAX_GROUPS_PER_COUNTRY.get(country.upper(), NEN1010_MAX_GROUPS_PER_RCD)
 
         for node in self.get_all_sorted():
             if not isinstance(node, CircuitBreaker):
                 continue
 
             if node.is_rcd_family and not (node.node_type == NodeType.MAIN):
-                # Max 6 groepen per aardlek
+                # NEN1010 art. 531.3: max 4 eindgroepen per 30mA aardlekschakelaar
+                # Uitzondering: RCBO's (eigen aardlekautomaat per groep) tellen NIET mee
+                # omdat elk circuit individueel beschermd is.
                 leaves = self.get_all_leaves(node.id)
-                if len(leaves) > NEN1010_MAX_GROUPS_PER_RCD:
+                # Alleen MCB's zonder eigen RCD-bescherming tellen mee
+                unprotected_leaves = [
+                    l for l in leaves
+                    if l.node_type in (NodeType.MCB, NodeType.MCB3F)
+                ]
+                # RCBO's tellen niet mee — die hebben eigen aardlekbeveiliging
+                if len(unprotected_leaves) > max_groups:
+                    severity = (NEN1010Severity.RED
+                                if len(unprotected_leaves) > max_groups + 2
+                                else NEN1010Severity.ORANGE)
+                    _norm_name = {"NL":"NEN 1010","BE":"AREI","DE":"DIN VDE 0100",
+                                  "FR":"NF C 15-100","GB":"BS 7671"}.get(country.upper(), "HD 60364")
                     findings.append(NEN1010Finding(
-                        severity = NEN1010Severity.RED,
-                        code     = "NEN1010-531.3",
+                        severity = severity,
+                        code     = "INSTALL-531.3",
                         message  = f"Te veel groepen op aardlek '{node.name}'",
-                        detail   = (f"{len(leaves)} groepen — max {NEN1010_MAX_GROUPS_PER_RCD} "
-                                    f"toegestaan (NEN1010 art. 531.3)"),
+                        detail   = (
+                            f"{len(unprotected_leaves)} groepen — max {max_groups} "                            f"per 30mA aardlekschakelaar ({_norm_name}). "                            f"RCBO's ({len(leaves) - len(unprotected_leaves)}x) tellen niet mee."
+                        ),
+                    ))
+                # Waarschuwing: 100mA aardlek heeft andere regels (bv. voor PV/EV)
+                if node.ma is not None and int(node.ma) >= 100 and len(unprotected_leaves) > 0:
+                    findings.append(NEN1010Finding(
+                        severity = NEN1010Severity.ORANGE,
+                        code     = "NEN1010-531.3-100mA",
+                        message  = f"Aardlek '{node.name}' (100mA): beperkte personenbeveiliging",
+                        detail   = "100mA aardlek beschermt niet tegen elektrische schok — alleen brandbeveiliging.",
                     ))
                 continue
 
@@ -1299,6 +1350,31 @@ class CircuitBreakerPanel:
                     detail   = f"Gemeten {drop*100:.1f}% — binnen norm maar controleerbaar.",
                 ))
 
+        # ── Globale checks op kast-niveau ─────────────────────────────────────
+        all_nodes = self.get_all_sorted()
+        mains  = [n for n in all_nodes if n.node_type == NodeType.MAIN]
+        rcds   = [n for n in all_nodes if n.node_type in (NodeType.RCD, NodeType.RCBO)]
+        mcbs   = [n for n in all_nodes if n.node_type in (NodeType.MCB, NodeType.MCB3F)]
+
+        # Geen hoofdschakelaar
+        if not mains:
+            findings.append(NEN1010Finding(
+                severity = NEN1010Severity.RED,
+                code     = "NEN1010-HS",
+                message  = "Geen hoofdschakelaar geconfigureerd",
+                detail   = "Een installatiegroepenkast vereist een hoofdschakelaar (NEN1010 art. 462)",
+            ))
+
+        # Groepen zonder aardlekbeveiliging
+        unprotected_mcbs = [n for n in mcbs if not self.node_is_protected_by_rcd(n.id)]
+        if unprotected_mcbs:
+            findings.append(NEN1010Finding(
+                severity = NEN1010Severity.ORANGE,
+                code     = "NEN1010-531-NO-RCD",
+                message  = f"{len(unprotected_mcbs)} groep(en) zonder aardlekbeveiliging",
+                detail   = ("Aanbevolen: alle eindgroepen achter een 30mA aardlekschakelaar "                            "(NEN1010 art. 531.2 best practice voor woningen)."),
+            ))
+
         return findings
 
     # ── Status voor coordinator / sensor ──────────────────────────────────────
@@ -1342,7 +1418,7 @@ class CircuitBreakerPanel:
         return NEN1010ReportGenerator.to_markdown(self.get_status())
 
     def get_status(self, nilm_devices: Optional[List[dict]] = None) -> dict:
-        findings  = self.check_nen1010(nilm_devices)
+        findings  = self.check_nen1010(nilm_devices, country=getattr(self, '_country', 'NL'))
         all_nodes = self.get_all_sorted()
 
         session_data = None
@@ -1393,6 +1469,11 @@ class CircuitBreakerPanel:
                     "id":              n.id,
                     "name":            n.name,
                     "node_type":       n.node_type,
+                    "card_type":       getattr(n, "card_type", ""),
+                    "kar":             getattr(n, "kar", "B"),
+                    "ma":              getattr(n, "ma", 30),
+                    "parent_main_id":  getattr(n, "parent_main_id", ""),
+                    "rail_index":      getattr(n, "rail_index", 0),
                     "parent_id":       n.parent_id,
                     "position":        n.position,
                     "ampere":          getattr(n, "ampere", None),

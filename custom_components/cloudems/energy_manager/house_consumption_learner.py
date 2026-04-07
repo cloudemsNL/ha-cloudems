@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 # ── Configuratie ─────────────────────────────────────────────────────────────
 EMA_ALPHA_FAST  = 0.20   # eerste 10 observaties: snel leren
 EMA_ALPHA_SLOW  = 0.05   # daarna: traag, stabiel
-MIN_SAMPLES_RELIABLE = 7  # min. observaties per uurslot voor betrouwbare waarde
+MIN_SAMPLES_RELIABLE = 2  # v5.5.212: verlaagd van 7→2 zodat herbouw sneller gaat na store-verlies
 SLOT_MIN_W      = 10.0   # onder 10W negeren (sensor noise)
 SLOT_MAX_W      = 20_000.0  # boven 20kW negeren (data fout)
 

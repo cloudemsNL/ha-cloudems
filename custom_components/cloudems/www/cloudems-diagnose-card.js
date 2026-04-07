@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Diagnose Card  v5.4.96
 
-const DIAGNOSE_VERSION = "5.4.96";
+const DIAGNOSE_VERSION = "5.5.318";
 const _esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const _fmt = (v, dec=1) => v != null && !isNaN(v) ? parseFloat(v).toFixed(dec) : "—";
 const _st  = (hass, eid) => hass?.states?.[eid];

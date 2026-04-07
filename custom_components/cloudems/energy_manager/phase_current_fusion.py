@@ -201,8 +201,22 @@ class PhaseCurrentFusion:
             return _INITIAL_WEIGHT
         return 1.0 / (s.ema_deviation + EPSILON)
 
+    # Methodes die betrouwbaar zijn direct na herstart (geen leren nodig)
+    _TRUSTED_COLD = frozenset(["p1_current", "p1power_div_voltage", "p1power_div_mains"])
+
     def _weighted_average(self, phase: str, valid: Dict[str, float]) -> float:
         st = self._state[phase]
+        # v5.5.278: na herstart (sample_count < MIN_SAMPLES) alleen P1-gebaseerde
+        # methodes gebruiken — andere methodes hebben nog geen betrouwbare gewichten
+        # en kunnen extreme uitschieters produceren (bijv. 48A bij 1.4A werkelijk).
+        cold_start = any(
+            st[m].sample_count < MIN_SAMPLES
+            for m in valid if m in st
+        )
+        if cold_start:
+            cold_valid = {m: v for m, v in valid.items() if m in self._TRUSTED_COLD}
+            if cold_valid:
+                return sum(cold_valid.values()) / len(cold_valid)
         total_w = 0.0
         total_v = 0.0
         for m, val in valid.items():

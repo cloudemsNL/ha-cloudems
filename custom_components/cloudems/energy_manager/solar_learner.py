@@ -472,7 +472,15 @@ class SolarPowerLearner:
             return
 
         votes: PhaseVotes = profile._votes_obj or PhaseVotes()
-        votes.add(winner)
+        # v5.5.112: gewogen stemmen — hoge vermogens tellen zwaarder
+        # Stem-gewicht = sqrt(power_w / 500), geclipped op 1–4
+        # 200W → gewicht 0.63 → 1 stem
+        # 500W → gewicht 1.0  → 1 stem
+        # 2kW  → gewicht 2.0  → 2 stemmen
+        # 5kW  → gewicht 3.2  → 3 stemmen
+        _vote_weight = max(1, min(4, int((power_w / 500.0) ** 0.5)))
+        for _ in range(_vote_weight):
+            votes.add(winner)
         profile.phase_votes = votes.to_dict()
         profile._votes_obj  = votes
 
@@ -514,8 +522,14 @@ class SolarPowerLearner:
             return
         prev_power  = profile._prev_power_w
         prev_phases = profile._prev_phase_currents
+        # v5.5.112: crossval alleen bij voldoende vermogen
+        # Bij laag vermogen (< 30% van 7d piek) geven we conflict-meldingen lagere prioriteit
+        _crossval_min_w = max(CROSSVAL_MIN_POWER_ABS * 0.5,
+                             profile.peak_power_w_7d * 0.20 if profile.peak_power_w_7d > 0 else CROSSVAL_MIN_POWER_ABS * 0.5)
         if not prev_phases or power_w < IRRADIANCE_MIN_W:
             return
+        if power_w < _crossval_min_w:
+            return  # te laag vermogen — crossval niet betrouwbaar
         power_delta = power_w - prev_power
         if power_delta < MIN_POWER_DELTA_W:
             return

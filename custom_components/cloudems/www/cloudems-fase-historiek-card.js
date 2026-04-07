@@ -1,5 +1,5 @@
 // CloudEMS Fase Balans Historiek Card v5.4.96
-const CARD_FASE_HISTORIEK_VERSION = '5.4.96';
+const CARD_FASE_HISTORIEK_VERSION = '5.5.318';
 // Live sparkline history of L1/L2/L3 currents and imbalance
 // v2.0.0: persistent storage via window.storage (survives restarts + page reloads)
 //         Future-proof: coordinator kan history via sensor attribuut aanleveren (cloud)

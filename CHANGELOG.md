@@ -1,3 +1,147 @@
+## v5.5.192 (2026-04-05)
+
+### Batterijplan tabel — correcte beslissingen via Zonneplan tariefgroep
+- `coordinator.py`: Plan-generator gebruikt nu de werkelijke Zonneplan tariefgroep-forecast (low/normal/high per uur) voor acties, niet meer een simplistische 15ct drempel die alles als "laden" markeerde.
+- Werkelijke SOC gelezen van batteries[], niet meer 50%% default.
+- LOW=laden, HIGH=ontladen, NORMAL=hold — overeenkomstig hoe Zonneplan zelf beslist.
+
+## v5.5.191 (2026-04-05)
+
+### Batterijplan — echte fix voor Zonneplan zonder EPEX-scheduler
+- `coordinator.py`: Plan-generatie verplaatst buiten alle `if battery_scheduler` guards. Bij Zonneplan is `_battery_scheduler = None` waardoor mijn vorige fallback nooit draaide. Nu wordt het plan vlak voor de return statement gegenereerd — altijd, ongeacht of de EPEX-scheduler actief is.
+- Gebruikt `today_all_display` (all-in prijs) als eerste keuze zodat de weergave overeenkomt met wat de gebruiker betaalt.
+
+## v5.5.190 (2026-04-05)
+
+### Batterijplan — vandaag en morgen plan gefixed
+- `coordinator.py`: morgen-plan las `tomorrow_prices` (bestaat niet) ipv `tomorrow_all` — beide plans waren daardoor altijd leeg
+- `coordinator.py`: vandaag-plan fallback probeert nu ook `today_all_display` (verrijkte all-in prijzen) naast `today_all`
+- `cloudems-battery-overview-card.js`: leegtekst verbeterd
+
+## v5.5.189 (2026-04-05)
+
+### Batterijplan Vandaag — Zonneplan fallback
+- `coordinator.py`: Als EPEX-scheduler geen schedule bouwt (bijv. bij Zonneplan waarbij `today_all` leeg is), genereert de coordinator nu een vandaag-plan via `decide_action_v3` op basis van beschikbare uurprijzen — zelfde logica als het morgen-plan.
+- `cloudems-battery-overview-card.js`: Als schedule leeg blijft, toont de kaart nu de `human_reason` tekst ("Goedkoop tarief, batterij vasthouden...") als informatieve fallback i.p.v. "Geen data".
+
+## v5.5.188 (2026-04-05)
+
+### Batterijplan diagnostiek & robustere sensor-lookup
+- `cloudems-battery-overview-card.js`: sensor wordt nu op 3 manieren gezocht (entity_id, naam-gebaseerd, attribuut-scan) om entity registry conflicten te omzeilen
+- `cloudems-battery-overview-card.js`: prijs-veld fallback `price_all_in ?? price_allin ?? price`
+- `sensor.py`: expliciete entity_id voor CloudEMSBatteryScheduleSensor
+
+## v5.5.187 (2026-04-05)
+
+### Batterijplan "Geen data" opgelost
+- `sensor.py` `CloudEMSBatteryScheduleSensor`: miste expliciete `entity_id = _eid(entry, "sensor.cloudems_battery_schedule")`. HA genereerde een willekeurige entity_id, waardoor de kaart de sensor nooit kon vinden.
+- `cloudems-battery-overview-card.js`: slot prijs-veld heet `price_allin` (zonder underscore) in de scheduler output, maar de kaart zocht naar `price_all_in`. Fallback toegevoegd: `price_all_in ?? price_allin ?? price`.
+
+## v5.5.186 (2026-04-05)
+
+### Preventieve AttributeError fixes
+- `coordinator.py`: `self._last_soc_pct` op regel 10294 vervangen door `getattr(self, "_last_soc_pct", None)` — dit was de meest frequente crash (5x in logs bij v5.5.180, 3x bij v5.5.176).
+- `coordinator.py`: `self._last_solar_w` beschermd met `getattr(..., 0.0)` op twee plekken waar het gebruikt wordt vóór het geïnitialiseerd kan zijn op eerste cyclus.
+
+## v5.5.185 (2026-04-05)
+
+### Bugfixes uit logs
+- `sensor.py` `_quarter_prices_for_sensor`: kwartierprijs toonde ruwe EPEX (bijv. €0.019) i.p.v. all-in prijs (€0.132). Fix: gebruik `today_all_display` uur→prijs lookup zodat 15M-weergave identiek is aan 1H-weergave. `price_excl_tax` bevat nu de ruwe EPEX voor de breakdown-popup.
+- `sensor.py` NILM hybride status: sensor overschreed HA 16KB attribuutlimiet (database warning). Fix: trim ankers naar 40 stuks + alleen essentiële velden.
+
+## v5.5.184 (2026-04-05)
+
+### Groepenkast bugfixes
+
+**Bug: Rail 2 verdwijnt na pagina-refresh**
+- `__init__.py` `save_circuit_panel`: sloeg `rail_index` nooit op en zette `position = i` (vlak genummerd) i.p.v. de encoded `ri*1000+ni`. Na refresh viel alles terug op Rail 1. Fix: gebruik `nd["position"]` en sla `rail_index` op.
+- `__init__.py` `add_circuit_node`: sla ook `rail_index` en `parent_main_id` op bij aanmaken.
+
+**Bug: Aardlek niet zichtbaar in aansluitschema**
+- `cloudems-groepenkast-card.js` `_buildHierarchy`: `_getParentRCD()` zocht alleen op dezelfde rail. Automaten op Rail 1, aardlekken op Rail 2 → geen koppeling → automaten direct achter hoofdschakelaar getekend. Fix: cross-rail fallback — als geen RCD op eigen rail gevonden, zoek de eerste RCD op een andere rail.
+
+## v5.5.183 (2026-04-04)
+
+### Bugfix — alle wrapper-kaarten leeg
+- Alle 10 tab-wrapper kaarten opnieuw geschreven met `window.loadCardHelpers().createCardElement()` — de correcte HA-manier om child cards aan te maken. Vorige aanpak met `document.createElement()` crashte stil wanneer child cards `this._r()` aanriepen in hun `setConfig()` vóórdat `hass` gezet was.
+- Robuuste error handling per child card zodat één falende card de wrapper niet crasht.
+
+## v5.5.182 (2026-04-04)
+
+### Bugfixes + layout
+- `battery-overview-card`: `schedule_today` → `schedule` (correct sensor-attribuut)
+- `sensor.py`: al gefixed in v5.5.177
+- Dashboard layout: Overzicht 2|6 → 4|4 (dagrapport+rooms naar links)
+- Dashboard layout: Klimaat 4|2 → 3|3 (climate-epex naar rechts)
+- Dashboard layout: Beslissingen 4|1 → 2|3 (beslissingen-tabs naar rechts)
+- Alle 10 tab-wrapper kaarten opnieuw gegenereerd met werkende event handlers
+
+## v5.5.181 (2026-04-04)
+
+### Bugfix — wrapper kaarten
+- Alle 10 tab-wrapper kaarten opnieuw gegenereerd: `getElementById` werkte niet (ID bestond niet), `innerHTML` tab-bar update verwijderde event listeners bij elke hass-update. Shadow DOM wordt nu slechts één keer gebouwd, class/visibility worden apart bijgewerkt.
+- `cloudems-solar-tabs-card`: verwijst nu alleen naar pv-forecast + zelfconsumptie (solar-card staat apart op de Solar tab).
+
+## v5.5.180 (2026-04-04)
+
+### Dashboard consolidatie — alle tabs
+10 nieuwe tab-wrapper kaarten — elke wrapper bevat bestaande kaarten als child elements:
+- `solar-tabs-card`: PV Forecast + Zelfconsumptie (Solar tab: 6→4 kaarten)
+- `klimaat-tabs-card`: Airco + Klimaat (Klimaat tab: 7→6 kaarten)
+- `nilm-visual-tabs-card`: Energie visual + NILM visual
+- `apparaat-tabs-card`: Tijdlijn + Apparaten + Levensduur (NILM: 8→5 kaarten)
+- `ai-tabs-card`: AI + Leerresultaten + Leerproces
+- `toekomst-tabs-card`: Future Shadow + Blackout Guard
+- `fase-tabs-card`: Fase Balans + Fase Historiek (Zelflerend: 9→5 kaarten)
+- `diagnose-tabs-card`: Diagnose + P1 + Zekeringen (Diagnose: 5→3 kaarten)
+- `lampen-tabs-card`: Lampen + Circadiaans + Automaat (Lampen: 5→3 kaarten)
+- `beslissingen-tabs-card`: Beslissingen + Meldingen + Schakelaars (Beslissingen: 7→5 kaarten)
+
+## v5.5.179 (2026-04-04)
+
+### Dashboard consolidatie — Overzicht tab
+- `cloudems-energy-view-card.js` — nieuw: flow + sankey gecombineerd met tabs (⚡ Stroom standaard, 〰 Sankey op klik)
+- Dashboard: cloudems-flow-card en cloudems-sankey-card vervangen door cloudems-energy-view-card
+
+## v5.5.178 (2026-04-04)
+
+### Dashboard consolidatie
+- `cloudems-battery-overview-card.js` — nieuw: week + uur-voor-uur plan gecombineerd (tabs: Week/Gisteren/Vandaag/Morgen)
+- `cloudems-batterij-status-card.js` — nieuw: off-grid survival + energiekosten gecombineerd (tabs: Off-Grid/Kosten)
+- Dashboard: batterij-arbitrage-card en batterij-levensduur-card verwijderd (data zit al in battery-card)
+- Dashboard: offgrid + kosten-calculator + energie-potentieel vervangen door batterij-status-card
+- Dashboard: week-card + battery-plan-card vervangen door battery-overview-card
+- Dashboard: duplicate vacation-card verwijderd van Overzicht tab (blijft op Beslissingen)
+- `sensor.py`: battery_power_w, solar_power_w, house_load_w toegevoegd aan sensor.cloudems_status
+
+## v5.5.177 (2026-04-04)
+
+### Bugfix — flow & sankey toonden verschillende accu-waarden
+- `sensor.py`: `battery_power_w`, `solar_power_w` en `house_load_w` toegevoegd aan `sensor.cloudems_status` attributen. Beide kaarten lezen nu dezelfde coordinator-bron i.p.v. elk hun eigen fallback-keten.
+
+## v5.5.176 (2026-04-04)
+
+### Bugfix — kritiek: Ariston boiler permanent geblokkeerd
+- `boiler_controller.py`: `_check_turn_on_no_response` preset mismatch check gebruikte `is_on` om `_want` te bepalen. In de turn-on context is `is_on` altijd `False`, waardoor `_want = preset_off` werd. Als de boiler al in `preset_off` stond (bijv. GREEN) werd geen mismatch gedetecteerd en liep de back-off teller onterecht op. Gevolg: boiler permanent geblokkeerd. Fix: `_want` altijd `preset_on` in deze context.
+
+## v5.5.175 (2026-04-04)
+
+### Bugfixes
+- `cloudems-standards.js`: syntax error LU landnaam — apostrof in Luxemburg PAN-naam brak de JS string
+- `switch.py`: rolluik automaat aan/uit triggerde geen coordinator refresh — `async_request_refresh` toegevoegd na `set_auto_enabled`
+- `button.py`: rolluik cancel/pause knoppen triggeerden geen coordinator refresh — `async_request_refresh` toegevoegd na `cancel_override` en `set_auto_enabled`
+
+## v5.5.174 (2026-04-04)
+
+### Bugfixes
+- `coordinator.py`: sluimerverbruik altijd 0 — `nilm_devices` (integer count) vervangen door `nilm_devices_enriched` (lijst) in `_build_standby_intelligence`
+- `coordinator.py`: FCR/aFRR "Batterij SOC niet beschikbaar" — `data.get("battery_soc_pct")` (key bestond niet) vervangen door `self._last_soc_pct`
+
+## v5.5.173 (2026-04-04)
+
+### Bugfix
+- `number.py`: ontbrekende `RestoreEntity` import toegevoegd. Zorgde voor `NameError` bij laden van `CloudEMSBlackoutReservePct` waardoor de volledige integratie niet startte.
+
 ## v5.5.106 (2026-04-01)
 
 ### AdaptiveHome Bridge — cloud-ready voorbereiding

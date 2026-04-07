@@ -5021,6 +5021,19 @@
         "data_description": {
           "presence_entities": ""
         }
+      },
+      "battery_advanced_opts": {
+        "title": "Battery settings",
+        "description": "Advanced battery settings: Mijnbatterij.nl integration, battery room temperature and payback period.",
+        "data": {
+          "mijnbatterij_api_key": "Mijnbatterij.nl API key",
+          "battery_room_temp_sensor": "Battery room temperature sensor",
+          "battery_room_heater_w": "Heater power (W)",
+          "battery_room_climate_entity": "Climate/switch heater entity",
+          "battery_room_auto_heat": "Auto-heat battery room",
+          "battery_purchase_price_eur": "Purchase price (€, 0=auto estimate)",
+          "battery_purchase_date": "Purchase date (YYYY-MM-DD)"
+        }
       }
     },
     "abort": {

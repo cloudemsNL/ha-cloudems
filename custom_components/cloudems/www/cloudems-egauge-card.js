@@ -1,5 +1,5 @@
 // CloudEMS eGauge Card v5.4.96
-const CARD_EGAUGE_VERSION = '5.4.96';
+const CARD_EGAUGE_VERSION = '5.5.318';
 // eGauge smart meter — grid and phase data
 
 class CloudemsEgaugeCard extends HTMLElement {

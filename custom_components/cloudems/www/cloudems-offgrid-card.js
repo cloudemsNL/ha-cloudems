@@ -1,5 +1,5 @@
 // CloudEMS Off-Grid Survival Calculator v5.5.6
-const OG_VERSION = "5.5.6";
+const OG_VERSION = "5.5.318";
 
 class CloudEMSOffgridCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }

@@ -3278,7 +3278,7 @@ class BoilerController:
                     _op = (_wh_s.attributes.get("operation_mode") or
                            _wh_s.attributes.get("current_operation") or
                            _wh_s.attributes.get("preset_mode") or "").lower()
-                    _want = b.preset_on.lower() if is_on else b.preset_off.lower()
+                    _want = b.preset_on.lower()  # altijd preset_on: deze functie is turn-on context
                     if _op and _op != _want:
                         _LOGGER.info(
                             "BoilerController [%s]: preset mismatch ('%s' ipv '%s') "
@@ -3303,7 +3303,7 @@ class BoilerController:
                 _op = (_wh_st.attributes.get("operation_mode") or
                        _wh_st.attributes.get("current_operation") or
                        _wh_st.attributes.get("preset_mode") or "").lower()
-                _want = b.preset_on.lower() if is_on else b.preset_off.lower()
+                _want = b.preset_on.lower()  # altijd preset_on: deze functie is turn-on context
                 if _op and _op != _want:
                     # Preset klopt niet — geen back-off, blijf rustig sturen
                     b._no_response_count = 0

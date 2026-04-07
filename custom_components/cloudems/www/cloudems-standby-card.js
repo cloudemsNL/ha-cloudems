@@ -1,5 +1,5 @@
 // CloudEMS Standby Intelligence Card v5.4.96
-const CARD_STANDBY_VERSION = '5.4.96';
+const CARD_STANDBY_VERSION = '5.5.318';
 // Bundled inefficiency report: always-on, creep, unaccounted power
 
 class CloudemsStandbyCard extends HTMLElement {
@@ -18,7 +18,11 @@ class CloudemsStandbyCard extends HTMLElement {
     const sh = this.shadowRoot; if (!sh) return;
     const attr = h?.states["sensor.cloudems_standby_intelligence"]?.attributes || {};
     const score = parseInt(h?.states["sensor.cloudems_standby_intelligence"]?.state || 0);
-    const totalW = attr.total_standby_w || 0;
+    // total_standby_w = geïdentificeerde apparaten, unaccounted_w = onverklaard baseline
+    // Som van beide = werkelijk sluimerverbruik
+    const _identified = attr.standby_total_w ?? attr.total_standby_w ?? 0;
+    const _unaccounted = attr.unaccounted_w ?? 0;
+    const totalW = Math.round(_identified + _unaccounted);
     const costMonth = attr.total_cost_month || 0;
     const alwaysOn = attr.always_on_count || 0;
     const creep = attr.creep_count || 0;

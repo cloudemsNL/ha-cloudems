@@ -379,6 +379,13 @@ async def async_setup_entry(
         CloudEMSAtmosphericHPSensor(coordinator, entry),
         CloudEMSVvESensor(coordinator, entry),
         CloudEMSFCRAFRRSensor(coordinator, entry),
+        CloudEMSMijnbatterijSensor(coordinator, entry),
+        CloudEMSPaybackSensor(coordinator, entry),
+        CloudEMSAlphaSensor(coordinator, entry),
+        CloudEMSImbalanceRevenueSensor(coordinator, entry),
+        CloudEMSZonneplanMarginSensor(coordinator, entry),
+        CloudEMSDiagnosticSensor(coordinator, entry),
+        CloudEMSTennetImbalanceSensor(coordinator, entry),
         # CloudEMSAISensor niet geregistreerd — CloudEMSAIStatusSensor (reg 190) heeft
         # dezelfde entity_id + unique_id en publiceert nu ook k-NN attributen
         CloudEMSPhaseOutletSensor(coordinator, entry),
@@ -2220,6 +2227,17 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
 
+    def _calc_efficiency(self) -> float | None:
+        """Round-trip efficiëntie % (discharge / charge × 100).
+        
+        Typisch 88-93% voor Li-ion. Berekend over de dag als beide > 0.5 kWh.
+        Laag getal = veel verlies (warmte, omvormer, etc.)
+        """
+        if self._charge_kwh < 0.5:
+            return None  # te weinig data
+        eff = (self._discharge_kwh / self._charge_kwh) * 100
+        return round(min(100.0, max(0.0, eff)), 1)
+
     async def async_added_to_hass(self) -> None:
         """Herstel kWh na herstart vanuit persistent storage."""
         await super().async_added_to_hass()
@@ -2259,10 +2277,11 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        data     = self.coordinator.data or {}
-        bats     = data.get("batteries", [])
-        total_w  = sum(float(b.get("power_w") or 0) for b in bats)
-        # Fallback: battery_providers.total_power_w
+        # Lees uit coordinator.data["batteries"] — gevuld door _collect_multi_battery_data_kirchhoff()
+        # die de Kirchhoff-correctie toepast als de ruwe waarde te ver afwijkt.
+        data    = self.coordinator.data or {}
+        bats    = data.get("batteries", [])
+        total_w = sum(float(b.get("power_w") or 0) for b in bats)
         if not bats:
             total_w = float(data.get("battery_providers", {}).get("total_power_w") or 0)
         self._accumulate(total_w)
@@ -2282,6 +2301,12 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
             "discharge_w":         discharge_w,
             "charge_kwh_today":    round(self._charge_kwh, 3),
             "discharge_kwh_today": round(self._discharge_kwh, 3),
+            # Round-trip efficiëntie: hoeveel % van het geladen vermogen komt er weer uit
+            # Over meerdere dagen gemiddeld (robuuster dan vandaag alleen)
+            "roundtrip_efficiency_pct": self._calc_efficiency(),
+            "efficiency_loss_kwh":      round(
+                max(0, self._charge_kwh - self._discharge_kwh), 3
+            ) if self._charge_kwh > 0.5 else None,
             "battery_count":       len(bats),
             "batteries": [
                 {
@@ -3035,9 +3060,80 @@ class CloudEMSGridNetPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Se
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_grid_net_power"
         self.entity_id = _eid(entry, "sensor.cloudems_grid_net_power")
+        self._unsub_grid_listener = None
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_GRID)
+
+    async def async_added_to_hass(self) -> None:
+        """v5.5.308: eigen state-change listener op de geconfigureerde grid sensor.
+        Zodra de DSMR sensor wijzigt roept de entity zichzelf bij via async_write_ha_state()
+        — onafhankelijk van de coordinator cyclus, nul scheduling-vertraging.
+        """
+        await super().async_added_to_hass()
+        try:
+            from homeassistant.helpers.event import async_track_state_change_event
+            from homeassistant.core import callback as _cb
+            cfg = getattr(self.coordinator, "_config", {})
+            from .const import CONF_GRID_SENSOR, CONF_USE_SEPARATE_IE, CONF_IMPORT_SENSOR, CONF_EXPORT_SENSOR
+            _use_sep = cfg.get(CONF_USE_SEPARATE_IE, False)
+            _grid_eid = cfg.get(CONF_GRID_SENSOR, "") if not _use_sep else ""
+            _imp_eid  = cfg.get(CONF_IMPORT_SENSOR, "") if _use_sep else ""
+            _exp_eid  = cfg.get(CONF_EXPORT_SENSOR, "") if _use_sep else ""
+            _listen   = [e for e in [_grid_eid, _imp_eid, _exp_eid] if e]
+            if _listen:
+                @_cb
+                def _on_source_change(event) -> None:
+                    """Bron-sensor veranderd: update _last_grid_w en push direct naar HA.
+                    UOM direct uit state lezen — geen _calc.to_watts nodig, werkt ook
+                    als kW/W conversie nog niet gecached is bij de eerste callback.
+                    """
+                    new_state = event.data.get("new_state")
+                    if new_state is None or new_state.state in ("unavailable", "unknown", ""):
+                        return
+                    try:
+                        def _to_w(st, eid):
+                            """Lees state als Watt, converteer kW→W via UOM attribuut."""
+                            val = float(st.state)
+                            uom = (st.attributes.get("unit_of_measurement") or "").strip()
+                            if uom.lower() in ("kw", "kilowatt"):
+                                val *= 1000.0
+                            # Fallback: vraag _calc als die al gecached heeft
+                            calc = getattr(self.coordinator, "_calc", None)
+                            if calc and uom.lower() not in ("w", "watt", "kw", "kilowatt"):
+                                v2 = calc.to_watts(eid, float(st.state))
+                                if v2 is not None:
+                                    return v2
+                            return val
+
+                        if _use_sep:
+                            st_imp = self.hass.states.get(_imp_eid)
+                            st_exp = self.hass.states.get(_exp_eid)
+                            if st_imp and st_exp:
+                                imp = _to_w(st_imp, _imp_eid)
+                                exp = _to_w(st_exp, _exp_eid)
+                                self.coordinator._last_grid_w = round(float(imp - exp), 1)
+                        else:
+                            gw = _to_w(new_state, _grid_eid)
+                            self.coordinator._last_grid_w = round(float(gw), 1)
+                        self.async_write_ha_state()
+                    except Exception:
+                        pass
+                self._unsub_grid_listener = async_track_state_change_event(
+                    self.hass, _listen, _on_source_change
+                )
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "CloudEMS grid realtime listener actief op: %s (use_sep=%s)", _listen, _use_sep
+                )
+        except Exception:
+            pass
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Opruimen grid listener."""""
+        if self._unsub_grid_listener:
+            self._unsub_grid_listener()
+            self._unsub_grid_listener = None
 
     @property
     def native_value(self):
@@ -3045,18 +3141,6 @@ class CloudEMSGridNetPowerSensor(AdaptiveForceUpdateMixin, CoordinatorEntity, Se
         if v is not None:
             return v
         v = (self.coordinator.data or {}).get("grid_power")
-        return v if v is not None else 0
-        v = p1.get("net_power_w")
-        if v is not None:
-            if abs(v) > 50000:
-                limiter = getattr(self.coordinator, "_limiter", None)
-                if limiter:
-                    phases = limiter.get_phase_summary()
-                    phase_sum = sum(p.get("power_w", 0) for p in phases.values())
-                    if phase_sum != 0:
-                        return round(phase_sum, 1)
-            return v
-        v = d.get("grid_power")
         return v if v is not None else 0
 
     @property
@@ -3879,8 +3963,11 @@ class CloudEMSAIStatusSensor(CoordinatorEntity, SensorEntity):
 def _quarter_prices_for_sensor(coordinator) -> list:
     """Convert coordinator quarter_prices to sensor attribute format.
 
-    Returns a list of 15-min slots: [{slot, hour, quarter, price, interpolated}]
+    Returns a list of 15-min slots: [{slot, hour, quarter, price, price_excl_tax, interpolated}]
     where slot = 0-95 (0 = 00:00, 95 = 23:45), quarter = 0-3 within the hour.
+
+    BUGFIX v5.5.184: price is now the all-in display price (same as hourly slots),
+    NOT the raw EPEX price. price_excl_tax bevat de ruwe EPEX prijs voor de breakdown.
     Returns [] if no data available.
     """
     try:
@@ -3890,10 +3977,20 @@ def _quarter_prices_for_sensor(coordinator) -> list:
         qp = getattr(prices_obj, "quarter_prices", [])
         if not qp:
             return []
+
+        # Bouw uur→all-in-prijs lookup vanuit today_all_display
+        # (dezelfde bron die de uurweergave gebruikt)
+        ep = (coordinator.data or {}).get("energy_price", {})
+        hourly_display: dict[int, float] = {}
+        for s in ep.get("today_all_display", []):
+            h = s.get("hour")
+            p = s.get("price_display") or s.get("price_all_in") or s.get("price")
+            if h is not None and p is not None:
+                hourly_display[int(h)] = float(p)
+
         result = []
         for i, slot in enumerate(qp):
             try:
-                from datetime import timezone
                 start = slot["start"]
                 if hasattr(start, "astimezone"):
                     local_h = start.astimezone().hour
@@ -3902,12 +3999,17 @@ def _quarter_prices_for_sensor(coordinator) -> list:
                     local_h = 0
                     local_m = 0
                 q = local_m // 15
+                raw_epex = round(float(slot["price"]), 5)
+                # Gebruik all-in prijs van het overeenkomstige uurslot
+                # als die beschikbaar is, anders de ruwe EPEX prijs (fallback)
+                display_price = hourly_display.get(local_h, raw_epex)
                 result.append({
                     "slot":          i,
                     "hour":          local_h,
                     "quarter":       q,
-                    "price":         round(float(slot["price"]), 5),
-                    "interpolated":  True,  # native quarter data not yet available
+                    "price":         round(display_price, 5),  # all-in (= wat uurweergave ook toont)
+                    "price_excl_tax": raw_epex,                # ruwe EPEX voor breakdown popup
+                    "interpolated":  True,
                 })
             except Exception:
                 continue
@@ -4537,6 +4639,7 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coord)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_battery_schedule"
+        self.entity_id = _eid(entry, "sensor.cloudems_battery_schedule")
 
     @property
     def device_info(self): return sub_device_info(self._entry, SUB_BATTERY)
@@ -4696,13 +4799,23 @@ class CloudEMSBatteryScheduleSensor(CoordinatorEntity, SensorEntity):
                 "entity_state":           _zp_eid("state"),
             }
 
+        # Gisteren schedule voor historische tab
+        _yesterday_sched = data.get("daily_summary_yesterday", {}).get("battery_schedule", [])
+
         return {
             "action":           bs.get("action"),
             "reason":           bs.get("reason"),
             "human_reason":     bs.get("human_reason", "") or _forecast_data.get("action_human_reason", ""),
+            # Slider-waarden en toelichting voor dashboard
+            "slider_deliver_w":  getattr(_zp_provider, "_last_sent_deliver_w", None) if _zp_provider else None,
+            "slider_solar_w":    getattr(_zp_provider, "_last_sent_solar_w",   None) if _zp_provider else None,
+            "slider_reason":     getattr(_zp_provider, "_last_slider_reason", None) if _zp_provider else None,
             "soc_pct":          soc_pct,
             "schedule_date":    bs.get("schedule_date"),
             "schedule":         bs.get("schedule", []),
+            "schedule_yesterday": _yesterday_sched,
+            "surplus_forecast":  data.get("surplus_forecast_hourly", []),
+            "schedule_tomorrow": bs.get("schedule_tomorrow", []),
             "charge_hours":     bs.get("charge_hours"),
             "discharge_hours":  bs.get("discharge_hours"),
             "plan_accuracy_pct":bs.get("plan_accuracy_pct"),
@@ -4979,13 +5092,23 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        invs = self._invs
-        # Return 0.0 when no inverter data yet (e.g. cold start) so card
-        # does not show "geen omvormer geconfigureerd". Return None only
-        # when coordinator has no data at all.
+        # Gebruik data["solar_power"] als primaire bron (Kirchhoff-balancer).
+        # Fallback op raw inverter som als solar_power nul/None is maar
+        # inverters wél data hebben — voorkomt 0W bij koude start.
         if self.coordinator.data is None:
             return None
-        return round(sum(i.get("current_w", 0) for i in invs), 1)
+        data = self.coordinator.data or {}
+        solar_w = data.get("solar_power")
+        invs = self._invs
+        inv_total = round(sum(i.get("current_w", 0) for i in invs), 1)
+        # Als balancer waarde beschikbaar en niet nul: gebruik die
+        if solar_w is not None and float(solar_w) > 0:
+            return round(float(solar_w), 1)
+        # Als inverters wel data hebben: gebruik inverter som
+        if inv_total > 0:
+            return inv_total
+        # Beide nul of None: balancer is leidend (kan bewust 0 zijn, bv. 's nachts)
+        return round(float(solar_w), 1) if solar_w is not None else inv_total
 
     @property
     def extra_state_attributes(self):
@@ -6505,7 +6628,9 @@ class CloudEMSPVForecastAccuracySensor(CoordinatorEntity, SensorEntity):
         if mape is None:
             return None
         try:
-            return round(float(mape), 1)
+            # v5.5.294: nauwkeurigheid = 100 - MAPE, geclampt op 0-100%.
+            # MAPE=0% → 100% nauwkeurig, MAPE=115% → 0% (nooit boven 100%).
+            return round(max(0.0, min(100.0, 100.0 - float(mape))), 1)
         except (ValueError, TypeError):
             return None
 
@@ -6864,6 +6989,14 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         d = (self.coordinator.data or {}).get("hybrid_nilm", {})
         stats = d.get("stats", {})
+        # v5.5.184: trim anchors om HA database-limiet (16KB) niet te overschrijden
+        # Behoud alleen de essentiële velden per anker
+        _anchor_keys = {"id", "label", "power_w", "is_on", "phase", "confidence", "device_type"}
+        raw_anchors = d.get("anchors", [])
+        anchors_slim = [
+            {k: v for k, v in a.items() if k in _anchor_keys}
+            for a in raw_anchors[:40]  # max 40 ankers
+        ]
         return {
             "anchors_total":           d.get("anchors_total", 0),
             "anchors_active":          d.get("anchors_active", 0),
@@ -6871,7 +7004,7 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
             "weather_season":          d.get("weather_season"),
             "weather_irradiance_w":    d.get("weather_irradiance_w"),
             "weather_sensors":         d.get("weather_sensors", []),
-            "anchors":                 d.get("anchors", []),
+            "anchors":                 anchors_slim,
             # stats
             "stat_enrich_calls":       stats.get("enrich_calls", 0),
             "stat_anchor_hits":        stats.get("anchor_hits", 0),
@@ -7951,10 +8084,23 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
         circuit_monitor = (self.coordinator.data or {}).get("circuit_monitor", {})
         ups = (self.coordinator.data or {}).get("ups", {})
         data = self.coordinator.data or {}
-        grid_power_w = data.get("grid_power_w") or data.get("power_w", 0)
         perf_data = data.get("performance", {})
+        _bats = data.get("batteries", [])
+        # v5.5.300: lees grid/solar/huis direct van _last_*_w — bijgewerkt elke P1 telegram (1s)
+        # via _process_p1_realtime → listener() → async_write_ha_state()
+        # zodat de flow card direct de nieuwe waarde toont zonder te wachten op de volle coordinator cyclus.
+        _coord = self.coordinator
+        grid_power_w  = round(float(getattr(_coord, "_last_grid_w",  None) or data.get("grid_power_w") or data.get("power_w", 0)), 1)
+        solar_power_w = round(float(getattr(_coord, "_last_solar_w", None) or data.get("solar_power", 0) or 0), 1)
+        house_load_w  = round(float(getattr(_coord, "_last_house_w", None) or data.get("house_power_w") or data.get("house_power") or 0), 1)
+        battery_power_w = round(
+            sum(float(b.get("power_w") or 0) for b in _bats)
+            if _bats else float(getattr(_coord, "_last_battery_w", 0) or 0), 1)
         return {"system": system, "guardian": g, "watchdog": wd, "shutters": shutters, "phases": phases, "inverter_data": inverter_data, "generator": generator, "circuit_monitor": circuit_monitor, "ups": ups,
                 "grid_power_w": grid_power_w,
+                "battery_power_w": battery_power_w,
+                "solar_power_w": solar_power_w,
+                "house_load_w": house_load_w,
                 "import_power_w": data.get("import_power_w", 0),
                 "export_power_w": data.get("export_power_w", 0),
                 "performance": perf_data,
@@ -7963,7 +8109,11 @@ class CloudEMSStatusSensor(CoordinatorEntity, SensorEntity):
                 "update_cycles": system.get("update_cycles"),
                 "total_failures": wd.get("total_failures", 0),
                 "total_restarts": wd.get("total_restarts", 0),
-                "avg_ms": perf_data.get("avg_ms")}
+                "avg_ms": perf_data.get("avg_ms"),
+                # v5.5.297: batterijcapaciteit voor demand card SOC-adequaatheid controle
+                "battery_capacity_kwh": float(getattr(self.coordinator, "_config", {}).get("battery_capacity_kwh", 0) or 0) or None,
+                "battery_soc_pct": next((b.get("soc_pct") for b in (data.get("batteries") or []) if b.get("soc_pct") is not None), None) or getattr(self.coordinator, "_last_soc_pct", None),
+                }
 
 
 class CloudEMSStandbyIntelligenceSensor(CoordinatorEntity, SensorEntity):
@@ -8186,6 +8336,8 @@ class CloudEMSBatterySavingsSensor(CoordinatorEntity, SensorEntity):
                 attrs["degradation_forecast"] = _deg.get_forecast()
             except Exception:
                 pass
+        # v5.5.236: dagelijkse history (geladen/ontladen kWh) voor week-tab
+        attrs["daily_history"] = getattr(self.coordinator, "_pv_daily_history", [])
         return attrs
 
 
@@ -9868,6 +10020,246 @@ class CloudEMSFCRAFRRSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return (self.coordinator.data or {}).get("fcr_afrr", {})
+
+
+class CloudEMSMijnbatterijSensor(CoordinatorEntity, SensorEntity):
+    """Mijnbatterij.nl score en ranking."""
+    _attr_name = "CloudEMS · Mijnbatterij Score"
+    _attr_icon = "mdi:trophy"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_mijnbatterij_score"
+        self.entity_id = _eid(entry, "sensor.cloudems_mijnbatterij_score")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("mijnbatterij", {})
+        rank = d.get("rank")
+        return int(rank) if rank else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("mijnbatterij", {})
+
+
+class CloudEMSTennetImbalanceSensor(CoordinatorEntity, SensorEntity):
+    """Tennet onbalansmarkt signaal."""
+    _attr_name = "CloudEMS · Tennet Onbalans"
+    _attr_icon = "mdi:sine-wave"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_tennet_imbalance"
+        self.entity_id = _eid(entry, "sensor.cloudems_tennet_imbalance")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("tennet_imbalance", {})
+        return d.get("direction", "neutral")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("tennet_imbalance", {})
+
+
+class CloudEMSPaybackSensor(CoordinatorEntity, SensorEntity):
+    """Terugverdientijd thuisbatterij."""
+    _attr_name = "CloudEMS · Terugverdientijd"
+    _attr_icon = "mdi:cash-clock"
+    _attr_native_unit_of_measurement = "maanden"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._attr_unique_id = f"{entry.entry_id}_payback"
+        self.entity_id = _eid(entry, "sensor.cloudems_payback")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_payback"
+        self.entity_id = _eid(entry, "sensor.cloudems_payback")
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("payback", {})
+        m = d.get("months_remaining")
+        return round(m, 1) if m else None
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("payback", {})
+
+
+class CloudEMSAlphaSensor(CoordinatorEntity, SensorEntity):
+    """CloudEMS alpha t.o.v. naive Zonneplan baseline."""
+    _attr_name = "CloudEMS · Alpha vs Zonneplan"
+    _attr_icon = "mdi:trophy-award"
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_cloudems_alpha"
+        self.entity_id = _eid(entry, "sensor.cloudems_alpha")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("cloudems_alpha", {})
+        return round(d.get("cumulative_alpha_eur", 0), 2)
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("cloudems_alpha", {})
+
+
+class CloudEMSImbalanceRevenueSensor(CoordinatorEntity, SensorEntity):
+    """Tracks theoretical imbalance market revenue vs Zonneplan actual billing."""
+    _attr_name = "CloudEMS · Imbalance Revenue"
+    _attr_icon = "mdi:bank-transfer"
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_imbalance_revenue"
+        self.entity_id = _eid(entry, "sensor.cloudems_imbalance_revenue")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("imbalance_revenue", {})
+        return round(d.get("today_theoretical_eur", 0), 4)
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("imbalance_revenue", {})
+
+
+class CloudEMSZonneplanMarginSensor(CoordinatorEntity, SensorEntity):
+    """Estimated Zonneplan margin on imbalance market earnings."""
+    _attr_name = "CloudEMS · Zonneplan Margin"
+    _attr_icon = "mdi:percent"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_zonneplan_margin"
+        self.entity_id = _eid(entry, "sensor.cloudems_zonneplan_margin")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        d = (self.coordinator.data or {}).get("zonneplan_margin", {})
+        pct = d.get("margin_pct")
+        return round(pct, 1) if pct is not None else None
+
+    @property
+    def extra_state_attributes(self):
+        return (self.coordinator.data or {}).get("zonneplan_margin", {})
+
+
+class CloudEMSDiagnosticSensor(CoordinatorEntity, SensorEntity):
+    """
+    Diagnostic sensor — exposes full CloudEMS state for analysis.
+    Check attributes in Developer Tools → States → sensor.cloudems_diagnostic
+    Share the full attribute dump when reporting issues.
+    """
+    _attr_name = "CloudEMS · Diagnostic"
+    _attr_icon = "mdi:bug-check"
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_diagnostic"
+        self.entity_id = _eid(entry, "sensor.cloudems_diagnostic")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self) -> str:
+        data = self.coordinator.data or {}
+        # One-line summary of key states
+        bt   = data.get("battery_temp", {})
+        ti   = data.get("tennet_imbalance", {})
+        zm   = data.get("zonneplan_margin", {})
+        pb   = data.get("payback", {})
+        al   = data.get("cloudems_alpha", {})
+        pa   = data.get("plan_accuracy", {})
+        return (
+            f"temp={bt.get('current_temp_c','?')}°C "
+            f"tennet={ti.get('source','?')}:{ti.get('direction','?')} "
+            f"margin={zm.get('margin_pct','?')}% "
+            f"payback={pb.get('months_remaining','?')}mnd "
+            f"accuracy={pa.get('score','?')}%"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        import datetime
+        data = self.coordinator.data or {}
+
+        def _safe(key, sub=None):
+            d = data.get(key, {})
+            if sub:
+                return {k: v for k, v in (d or {}).items() if k not in ("history_30d", "daily_revenues", "monthly_history", "recent_ptus")}
+            return d or {}
+
+        return {
+            # Version + timestamp
+            "cloudems_version":   "5.5.249",
+            "diagnostic_ts":      datetime.datetime.now().isoformat(),
+            # Battery temperature
+            "battery_temp":       _safe("battery_temp"),
+            # Tennet imbalance
+            "tennet_imbalance":   _safe("tennet_imbalance"),
+            # Zonneplan margin
+            "zonneplan_margin":   {k: v for k, v in _safe("zonneplan_margin").items()
+                                   if k not in ("monthly_history", "yearly_history")},
+            # Payback
+            "payback":            {k: v for k, v in _safe("payback").items()
+                                   if k not in ("monthly_history", "daily_revenues")},
+            # Alpha
+            "cloudems_alpha":     {k: v for k, v in _safe("cloudems_alpha").items()
+                                   if k != "history_30d"},
+            # Plan accuracy
+            "plan_accuracy":      {k: v for k, v in _safe("plan_accuracy").items()
+                                   if k != "deviations"},
+            # Imbalance revenue
+            "imbalance_revenue":  {k: v for k, v in _safe("imbalance_revenue").items()
+                                   if k not in ("daily_summary", "recent_ptus")},
+            # Mijnbatterij
+            "mijnbatterij":       _safe("mijnbatterij"),
+            # Arbitrage P&L
+            "arbitrage_pnl":      _safe("arbitrage_pnl"),
+        }
 
 
 class CloudEMSAISensor(CoordinatorEntity, SensorEntity):

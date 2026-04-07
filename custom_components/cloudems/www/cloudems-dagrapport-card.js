@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Dagrapport Card v5.5.63
 
-const DR_VERSION = "5.5.63";
+const DR_VERSION = "5.5.318";
 const DR_STYLES = `
   :host{--dr-bg:#0d1117;--dr-border:rgba(255,255,255,.07);--dr-gold:#f0c040;
     --dr-green:#3fb950;--dr-blue:#60a5fa;--dr-red:#f85149;--dr-muted:rgba(255,255,255,.3);

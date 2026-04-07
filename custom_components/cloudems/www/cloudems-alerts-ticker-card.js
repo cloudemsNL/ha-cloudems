@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // CloudEMS Alerts Ticker Card v5.5.4
-const ALERTS_VERSION = "5.5.4";
+const ALERTS_VERSION = "5.5.318";
 
 class CloudEMSAlertsTickerCard extends HTMLElement {
   constructor() { super(); this.attachShadow({mode:'open'}); this._idx=0; this._timer=null; }

@@ -35,7 +35,7 @@ STORAGE_KEY     = "cloudems_watchdog_v1"
 STORAGE_VERSION = 1
 
 # Na hoeveel opeenvolgende fouten herstarten
-MAX_CONSECUTIVE_FAILURES = 3
+MAX_CONSECUTIVE_FAILURES = 5  # v5.5.139: verhoogd van 3 → 5
 
 # Minimale wachttijd tussen twee herstarts (seconden), verdubbelt elke keer
 BACKOFF_BASE_S   = 30
@@ -168,6 +168,13 @@ class CloudEMSWatchdog:
         # Backoff langzaam terugbrengen na succes
         self._backoff_s = max(BACKOFF_BASE_S, self._backoff_s / 2)
 
+    # Tijdelijke fouten (netwerk/timeout) triggeren geen herstart zo snel
+    _TRANSIENT_ERRORS = (
+        "TimeoutError", "ClientConnectionError", "ClientConnectorError",
+        "ServerTimeoutError", "asyncio.TimeoutError", "ClientOSError",
+        "aiohttp.ServerDisconnectedError", "ConnectionResetError",
+    )
+
     async def report_failure(self, exc: Exception) -> None:
         """Coordinator update mislukt — log, sla op, herstart indien nodig."""
         now       = time.time()
@@ -175,7 +182,17 @@ class CloudEMSWatchdog:
         msg       = f"{type(exc).__name__}: {exc}"
         short_msg = str(exc)[:200]
 
-        self._consecutive_failures += 1
+        # Tijdelijke netwerk/timeout fouten tellen als 0.3 i.p.v. 1
+        # zodat kortstondige cloud/P1 storingen geen herstart veroorzaken
+        exc_name = type(exc).__name__
+        is_transient = any(t in exc_name or t in msg for t in self._TRANSIENT_ERRORS)
+        if is_transient:
+            self._consecutive_failures = min(
+                self._consecutive_failures + 0.34,  # 3x tijdelijk = 1 echte fout
+                MAX_CONSECUTIVE_FAILURES - 0.1       # nooit direct over de grens
+            )
+        else:
+            self._consecutive_failures += 1
         self._total_failures       += 1
         self._last_failure_ts       = now
         self._last_failure_msg      = short_msg

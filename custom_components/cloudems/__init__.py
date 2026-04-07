@@ -40,6 +40,21 @@ LOVELACE_CARDS_URL          = f"/local/cloudems/cloudems-cards.js?v={VERSION}"
 LOVELACE_CARDMOD_URL        = f"/local/cloudems/cloudems-card-mod.js?v={VERSION}"
 LOVELACE_BOILER_URL         = f"/local/cloudems/cloudems-boiler-card.js?v={VERSION}"
 LOVELACE_BATTERY_URL        = f"/local/cloudems/cloudems-battery-card.js?v={VERSION}"
+LOVELACE_BATPLAN_URL        = f"/local/cloudems/cloudems-battery-plan-card.js?v={VERSION}"
+LOVELACE_WEEK_URL           = f"/local/cloudems/cloudems-week-card.js?v={VERSION}"
+LOVELACE_BAT_OVERVIEW_URL   = f"/local/cloudems/cloudems-battery-overview-card.js?v={VERSION}"
+LOVELACE_BAT_STATUS_URL     = f"/local/cloudems/cloudems-batterij-status-card.js?v={VERSION}"
+LOVELACE_ENERGY_VIEW_URL    = f"/local/cloudems/cloudems-energy-view-card.js?v={VERSION}"
+LOVELACE_SOLAR_TABS_CARD_URL = f"/local/cloudems/cloudems-solar-tabs-card.js?v={VERSION}"
+LOVELACE_KLIMAAT_TABS_CARD_URL = f"/local/cloudems/cloudems-klimaat-tabs-card.js?v={VERSION}"
+LOVELACE_NILM_VISUAL_TABS_CARD_URL = f"/local/cloudems/cloudems-nilm-visual-tabs-card.js?v={VERSION}"
+LOVELACE_APPARAAT_TABS_CARD_URL = f"/local/cloudems/cloudems-apparaat-tabs-card.js?v={VERSION}"
+LOVELACE_AI_TABS_CARD_URL = f"/local/cloudems/cloudems-ai-tabs-card.js?v={VERSION}"
+LOVELACE_FASE_TABS_CARD_URL = f"/local/cloudems/cloudems-fase-tabs-card.js?v={VERSION}"
+LOVELACE_TOEKOMST_TABS_CARD_URL = f"/local/cloudems/cloudems-toekomst-tabs-card.js?v={VERSION}"
+LOVELACE_DIAGNOSE_TABS_CARD_URL = f"/local/cloudems/cloudems-diagnose-tabs-card.js?v={VERSION}"
+LOVELACE_LAMPEN_TABS_CARD_URL = f"/local/cloudems/cloudems-lampen-tabs-card.js?v={VERSION}"
+LOVELACE_BESLISSINGEN_TABS_CARD_URL = f"/local/cloudems/cloudems-beslissingen-tabs-card.js?v={VERSION}"
 LOVELACE_SHUTTER_URL        = f"/local/cloudems/cloudems-shutter-card.js?v={VERSION}"
 LOVELACE_SOLAR_URL          = f"/local/cloudems/cloudems-solar-card.js?v={VERSION}"
 LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={VERSION}"
@@ -149,6 +164,21 @@ _ALL_JS_RESOURCES = [
     # ── Losse kaarten (elk bestand één keer) ──
     (LOVELACE_BOILER_URL,        "cloudems-boiler-card.js"),
     (LOVELACE_BATTERY_URL,       "cloudems-battery-card.js"),
+    (LOVELACE_BATPLAN_URL,       "cloudems-battery-plan-card.js"),
+    (LOVELACE_WEEK_URL,          "cloudems-week-card.js"),
+    (LOVELACE_BAT_OVERVIEW_URL,  "cloudems-battery-overview-card.js"),
+    (LOVELACE_BAT_STATUS_URL,    "cloudems-batterij-status-card.js"),
+    (LOVELACE_ENERGY_VIEW_URL,   "cloudems-energy-view-card.js"),
+    (LOVELACE_SOLAR_TABS_CARD_URL, "cloudems-solar-tabs-card.js"),
+    (LOVELACE_KLIMAAT_TABS_CARD_URL, "cloudems-klimaat-tabs-card.js"),
+    (LOVELACE_NILM_VISUAL_TABS_CARD_URL, "cloudems-nilm-visual-tabs-card.js"),
+    (LOVELACE_APPARAAT_TABS_CARD_URL, "cloudems-apparaat-tabs-card.js"),
+    (LOVELACE_AI_TABS_CARD_URL, "cloudems-ai-tabs-card.js"),
+    (LOVELACE_FASE_TABS_CARD_URL, "cloudems-fase-tabs-card.js"),
+    (LOVELACE_TOEKOMST_TABS_CARD_URL, "cloudems-toekomst-tabs-card.js"),
+    (LOVELACE_DIAGNOSE_TABS_CARD_URL, "cloudems-diagnose-tabs-card.js"),
+    (LOVELACE_LAMPEN_TABS_CARD_URL, "cloudems-lampen-tabs-card.js"),
+    (LOVELACE_BESLISSINGEN_TABS_CARD_URL, "cloudems-beslissingen-tabs-card.js"),
     (LOVELACE_SHUTTER_URL,       "cloudems-shutter-card.js"),
     (LOVELACE_APPLIANCE_URL,     "cloudems-appliance-card.js"),
     (LOVELACE_P1_URL,            "cloudems-p1-card.js"),
@@ -221,6 +251,7 @@ _ALL_JS_RESOURCES = [
     (f"/local/cloudems/cloudems-kosten-calculator-card.js?v={VERSION}",  "cloudems-kosten-calculator-card.js"),
     # VERWIJDERD: cloudems-cards.backup-pre-phase.js — backup bestand mag nooit als resource geladen worden
     # (conflicteert met cloudems-cards.js op unguarded customElements.define calls)
+    (LOVELACE_GROEPENKAST_URL, "cloudems-groepenkast-card.js"),  # v5.5.114
 ]
 # cloudems-card.js bestaat niet — alle kaarten zitten in cloudems-cards.js.
 # Constante alleen voor opruimen van stale registraties.
@@ -1750,6 +1781,25 @@ def _register_services(hass: HomeAssistant, entry: ConfigEntry, coordinator: Clo
             vol.Optional("gas_netbeheerder",      default="default"): str,
         }))
 
+    # Groepenkast circuit panel services — v5.5.120
+    _circuit_svc_list = [
+        "add_circuit_node", "remove_node", "update_circuit_node",
+        "start_circuit_learning", "confirm_circuit_off", "finish_circuit_learning",
+        "cancel_circuit_learning", "accept_circuit_result", "auto_switch_off",
+        "link_room", "unlink_room", "unlink_device", "save_circuit_panel",
+    ]
+    def _make_circuit_handler(svc_name):
+        async def _handler(call):
+            await _handle_circuit_panel_service(
+                hass,
+                type("_Call", (), {"service": svc_name, "data": call.data})(),
+                coordinator,
+            )
+        return _handler
+
+    for _svc in _circuit_svc_list:
+        hass.services.async_register(DOMAIN, _svc, _make_circuit_handler(_svc))
+
     # v4.5.126: dump probe diagnostieklog naar bestand + notificatie
     async def dump_probe_log(call):
         import os as _os
@@ -3042,6 +3092,11 @@ _CLOUDEMS_SERVICES = [
     "vtherm_set_central_mode", "vtherm_set_timed_preset",
     "zonneplan_battery_charge", "zonneplan_battery_discharge", "zonneplan_set_mode",
     "zonneplan_battery_auto", "zonneplan_apply_forecast",
+    # Groepenkast circuit panel services
+    "add_circuit_node", "remove_node", "update_circuit_node",
+    "start_circuit_learning", "confirm_circuit_off", "finish_circuit_learning",
+    "cancel_circuit_learning", "accept_circuit_result", "auto_switch_off",
+    "link_room", "unlink_room", "unlink_device", "save_circuit_panel",
 ]
 
 
@@ -3066,18 +3121,33 @@ async def _handle_circuit_panel_service(hass, call, coordinator):
     if action == "add_circuit_node":
         import uuid as _uuid
         from .energy_manager.circuit_breaker_panel import CircuitBreaker, SubMeter
-        node_type = data.get("node_type","mcb")
+        node_type = data.get("node_type", "mcb")
         nid       = data.get("id") or f"node_{_uuid.uuid4().hex[:6]}"
         if node_type == "submeter":
-            panel.add_submeter(SubMeter(id=nid, name=data.get("name","Nieuw"),
-                                        parent_id=data.get("parent_id",""),
+            panel.add_submeter(SubMeter(id=nid, name=data.get("name", "Nieuw"),
+                                        parent_id=data.get("parent_id", ""),
                                         position=len(panel.get_all_sorted())))
         else:
-            panel.add_breaker(CircuitBreaker(id=nid, name=data.get("name","Nieuw"),
-                                             node_type=node_type,
-                                             ampere=int(data.get("ampere",16)),
-                                             parent_id=data.get("parent_id",""),
-                                             position=len(panel.get_all_sorted())))
+            breaker = CircuitBreaker(
+                id        = nid,
+                name      = data.get("name", "Nieuw"),
+                node_type = node_type,
+                ampere    = int(data.get("ampere", 16)),
+                parent_id = data.get("parent_id", ""),
+                position  = len(panel.get_all_sorted()),
+            )
+            # Extra velden uit kaart
+            if data.get("phase"):     breaker.phase     = data["phase"]
+            if data.get("kar"):       breaker.kar       = data["kar"]
+            if data.get("ma"):        breaker.ma        = int(data["ma"])
+            if data.get("rcd_type"): breaker.rcd_type  = data["rcd_type"]
+            if data.get("card_type"): breaker.card_type = data["card_type"]
+            if data.get("notes"):    breaker.notes     = data["notes"]
+            if data.get("rail_index") is not None and hasattr(breaker, "rail_index"):
+                breaker.rail_index = int(data["rail_index"])
+            if data.get("parent_main_id") and hasattr(breaker, "parent_main_id"):
+                breaker.parent_main_id = data["parent_main_id"]
+            panel.add_breaker(breaker)
         await panel.async_save()
 
     elif action == "remove_node":
@@ -3105,6 +3175,47 @@ async def _handle_circuit_panel_service(hass, call, coordinator):
 
     elif action == "cancel_circuit_learning":
         panel.cancel_learning()
+
+    elif action == "update_circuit_node":
+        # Sla label, merk, fase, ampere, kar, ma en card_type op voor een bestaande node
+        node = panel.get_node(data.get("node_id", ""))
+        if node:
+            if "name"      in data: node.name      = data["name"]
+            if "brand"     in data: node.notes     = data.get("brand", "")
+            if "phase"     in data: node.phase     = data["phase"]
+            if "ampere"    in data: node.ampere    = int(data["ampere"])
+            if "kar"       in data and hasattr(node, "kar"): node.kar = data["kar"]
+            if "ma"        in data and hasattr(node, "ma"):  node.ma  = int(data["ma"])
+            if "rcd_type"  in data and hasattr(node, "rcd_type"): node.rcd_type = data["rcd_type"]
+            if "card_type"      in data and hasattr(node, "card_type"): node.card_type = data["card_type"]
+            if "parent_id"      in data: node.parent_id = data["parent_id"]
+            if "parent_main_id" in data and hasattr(node, "parent_main_id"): node.parent_main_id = data["parent_main_id"]
+            if "rail_index"     in data and hasattr(node, "rail_index"):     node.rail_index     = int(data["rail_index"])
+            if "load_pct"  in data: node.current_power_w = float(data["load_pct"]) * 230 * int(data.get("ampere", getattr(node, "ampere", 16)))
+            await panel.async_save()
+
+    elif action == "save_circuit_panel":
+        # Sla volledige kastconfiguratie op (positie/volgorde vanuit kaart)
+        nodes_data = data.get("nodes", [])
+        if nodes_data:
+            # Update volgorde op basis van wat de kaart stuurt
+            # BUGFIX: gebruik encoded position (ri*1000+ni) en sla rail_index op
+            for i, nd in enumerate(nodes_data):
+                node = panel.get_node(nd.get("id", ""))
+                if node:
+                    # Gebruik de encoded position vanuit de kaart, niet flat index i
+                    if "position" in nd:
+                        node.position = int(nd["position"])
+                    else:
+                        node.position = i
+                    # Sla rail_index op zodat herstel na herstart correct werkt
+                    if "rail_index" in nd and hasattr(node, "rail_index"):
+                        node.rail_index = int(nd["rail_index"])
+                    if "parent_id" in nd:
+                        node.parent_id = nd["parent_id"]
+                    if "parent_main_id" in nd and hasattr(node, "parent_main_id"):
+                        node.parent_main_id = nd["parent_main_id"]
+            await panel.async_save()
 
     elif action == "accept_circuit_result":
         panel.cancel_learning()

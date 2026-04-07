@@ -1,5 +1,5 @@
 // CloudEMS Batterij Arbitrage Card v5.4.96
-const CARD_BATTERIJ_ARBITRAGE_VERSION = '5.4.96';
+const CARD_BATTERIJ_ARBITRAGE_VERSION = '5.5.318';
 // Shows battery savings breakdown: eigenverbruik, arbitrage, PV zelfconsumptie
 
 class CloudemsBatterijArbitrageCard extends HTMLElement {

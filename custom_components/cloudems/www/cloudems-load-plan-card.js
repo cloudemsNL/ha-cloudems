@@ -2,7 +2,7 @@
 // All rights reserved. See LICENSE for full terms.
 // CloudEMS Load Plan Card v5.4.96 — 24-uurs tijdlijn zoals PredBat
 
-const LPC_VERSION = '5.4.96';
+const LPC_VERSION = '5.5.318';
 const LPC_SENSOR  = 'sensor.cloudems_load_plan';
 const LPC_EPEX    = 'sensor.cloudems_price_current_hour';
 
