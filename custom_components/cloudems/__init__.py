@@ -46,6 +46,7 @@ LOVELACE_PV_FORECAST_URL    = f"/local/cloudems/cloudems-pv-forecast-card.js?v={
 LOVELACE_SWITCHES_URL       = f"/local/cloudems/cloudems-switches-card.js?v={VERSION}"
 LOVELACE_ZELFCONS_URL       = f"/local/cloudems/cloudems-zelfconsumptie-card.js?v={VERSION}"
 LOVELACE_DECISIONS_URL      = f"/local/cloudems/cloudems-decisions-card.js?v={VERSION}"
+LOVELACE_GROEPENKAST_URL    = f"/local/cloudems/cloudems-groepenkast-card.js?v={VERSION}"
 LOVELACE_MINI_PRICE_URL     = f"/local/cloudems/cloudems-mini-price-card.js?v={VERSION}"
 LOVELACE_ROOMS_URL          = f"/local/cloudems/cloudems-rooms-card.js?v={VERSION}"
 LOVELACE_HOME_URL           = f"/local/cloudems/cloudems-home-card.js?v={VERSION}"
@@ -3042,6 +3043,92 @@ _CLOUDEMS_SERVICES = [
     "zonneplan_battery_charge", "zonneplan_battery_discharge", "zonneplan_set_mode",
     "zonneplan_battery_auto", "zonneplan_apply_forecast",
 ]
+
+
+async def _handle_circuit_panel_service(hass, call, coordinator):
+    """Services voor de groepenkast."""
+    action = call.service
+    data   = call.data or {}
+    panel  = getattr(coordinator, "_circuit_panel", None)
+    if panel is None:
+        return
+
+    def _snap():
+        nilm_data = (coordinator.data or {}).get("nilm_devices", [])
+        return {d.get("id",""):float(d.get("current_power_w",0) or 0) for d in nilm_data}
+
+    def _phase_w():
+        d = coordinator.data or {}
+        return {"L1":float(d.get("power_l1_import_w",0) or 0),
+                "L2":float(d.get("power_l2_import_w",0) or 0),
+                "L3":float(d.get("power_l3_import_w",0) or 0)}
+
+    if action == "add_circuit_node":
+        import uuid as _uuid
+        from .energy_manager.circuit_breaker_panel import CircuitBreaker, SubMeter
+        node_type = data.get("node_type","mcb")
+        nid       = data.get("id") or f"node_{_uuid.uuid4().hex[:6]}"
+        if node_type == "submeter":
+            panel.add_submeter(SubMeter(id=nid, name=data.get("name","Nieuw"),
+                                        parent_id=data.get("parent_id",""),
+                                        position=len(panel.get_all_sorted())))
+        else:
+            panel.add_breaker(CircuitBreaker(id=nid, name=data.get("name","Nieuw"),
+                                             node_type=node_type,
+                                             ampere=int(data.get("ampere",16)),
+                                             parent_id=data.get("parent_id",""),
+                                             position=len(panel.get_all_sorted())))
+        await panel.async_save()
+
+    elif action == "remove_node":
+        panel.remove_node(data["node_id"])
+        await panel.async_save()
+
+    elif action == "start_circuit_learning":
+        sub  = panel.read_submeters(hass)
+        nilm = (coordinator.data or {}).get("nilm_devices", [])
+        nph  = {d.get("id",""):(d.get("phase",""),float(d.get("phase_confidence",0) or 0))
+                for d in nilm}
+        panel.start_learning(data["node_id"], _snap(), _phase_w(), sub, nph)
+
+    elif action == "confirm_circuit_off":
+        sub = panel.read_submeters(hass)
+        panel.confirm_off(_snap(), _phase_w(), sub)
+
+    elif action == "finish_circuit_learning":
+        sub  = panel.read_submeters(hass)
+        nilm = (coordinator.data or {}).get("nilm_devices", [])
+        nph  = {d.get("id",""):(d.get("phase",""),float(d.get("phase_confidence",0) or 0))
+                for d in nilm}
+        panel.finish_learning(_snap(), _phase_w(), sub, nilm, nph)
+        await panel.async_save()
+
+    elif action == "cancel_circuit_learning":
+        panel.cancel_learning()
+
+    elif action == "accept_circuit_result":
+        panel.cancel_learning()
+        await panel.async_save()
+
+    elif action == "auto_switch_off":
+        node = panel.get_node(data.get("node_id",""))
+        if node and getattr(node,"switch_entity",""):
+            await hass.services.async_call("homeassistant","turn_off",
+                target={"entity_id": node.switch_entity})
+
+    elif action == "link_room":
+        panel.set_room_link(data["node_id"], data["room"], bool(data.get("linked",True)))
+        await panel.async_save()
+
+    elif action == "unlink_room":
+        panel.set_room_link(data["node_id"], data["room"], False)
+        await panel.async_save()
+
+    elif action == "unlink_device":
+        panel.set_device_link(data["node_id"], data["device_id"], False)
+        await panel.async_save()
+
+    await coordinator.async_request_refresh()
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

@@ -1,3 +1,25 @@
+## v5.5.106 (2026-04-01)
+
+### AdaptiveHome Bridge — cloud-ready voorbereiding
+- `adaptivehome_bridge.py` uitgebreid met:
+  - Cloud-beslissing override mechanisme (`get_cloud_decision()`, `CloudDecision` dataclass)
+  - Offline buffer voor cloud-uitval (max 50.000 metingen, FIFO)
+  - `async_push_to_cloud()` met aiohttp + backfill bij reconnect
+  - `configure_cloud()` voor URL/token/licentieniveau
+  - `LicenseLevel` constanten (cloudems/ah_basic/bundle/enterprise)
+  - `adaptivehome_decision` event listener voor cloud-beslissingen
+  - Buffer-status in `get_status()` output
+- `coordinator.py` bijgewerkt:
+  - Cloud push aanroep toegevoegd in bridge-sectie
+  - `configure_cloud()` aangeroepen bij setup vanuit config-keys
+  - Config-keys: `adaptivehome_cloud_url`, `adaptivehome_license`
+
+### Bugfixes sessie 2026-04-01
+- JS kaarten: alle live vermogenswaarden nu consistent via `sensor.cloudems_status.attributes`
+  (sankey, home-card, iso-card, self-healing-card)
+- `en.json`: `neighbourhood_url` placeholder toegevoegd (HA validatie-warning opgelost)
+- Coordinator ctx pipeline: alle 61 cross-method variabelen gedekt, geen NameErrors meer
+
 # CloudEMS Changelog
 
 ## v5.5.78 (2026-03-31)

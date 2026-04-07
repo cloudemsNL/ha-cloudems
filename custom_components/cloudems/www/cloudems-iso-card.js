@@ -168,10 +168,11 @@ hx/hy/hw=house x/y/width, bx/by/bw=battery, ex/ey/ew=EV, gx/gy/gw=grid pole, px/
     const h = this._hass;
     if (!h) return null;
     const st = h.states;
-    const solarW   = parseFloat(st['sensor.cloudems_solar_system']?.state || 0);
+    const _isoInvs = (st['sensor.cloudems_solar_system']?.attributes?.inverters || []);
+    const solarW   = _isoInvs.length > 0 ? _isoInvs.reduce((s,i)=>s+(parseFloat(i.current_w)||0),0) : parseFloat(st['sensor.cloudems_status']?.attributes?.solar_power_w || st['sensor.cloudems_solar_system']?.state || 0);
     const gridW    = parseFloat(st['sensor.cloudems_status']?.attributes?.grid_power_w || 0);
     const houseW   = parseFloat(st['sensor.cloudems_home_rest']?.state || 0);
-    const batW     = parseFloat(st['sensor.cloudems_battery_power']?.state || 0);
+    const batW     = parseFloat(st['sensor.cloudems_status']?.attributes?.battery_power_w || st['sensor.cloudems_battery_power']?.state || 0);
     const batSoc   = parseFloat(st['sensor.cloudems_battery_so_c']?.state || 0);
     const price    = parseFloat(st['sensor.cloudems_price_current_hour']?.state || 0);
     const boilers  = st['sensor.cloudems_boiler_status']?.attributes?.boilers || [];

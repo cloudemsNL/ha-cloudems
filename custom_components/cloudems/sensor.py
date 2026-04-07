@@ -253,6 +253,7 @@ async def async_setup_entry(
         CloudEMSClippingLossSensor(coordinator, entry),
         CloudEMSConsumptionCategoriesSensor(coordinator, entry),
         CloudEMSRoomMeterOverviewSensor(coordinator, entry),     # v1.20
+        CloudEMSGroepenkastSensor(coordinator, entry),
         CloudEMSSolarSystemSensor(coordinator, entry),
         # v1.5: dedicated previous / current / next-hour price sensors
         CloudEMSPriceSensor(coordinator, entry),
@@ -4911,6 +4912,35 @@ class CloudEMSPvDipSensor(CoordinatorEntity, SensorEntity):
 # ═══════════════════════════════════════════════════════════════════════════════
 # v1.10.2 — Solar Intelligence: per-inverter profile + system overview
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+
+class CloudEMSGroepenkastSensor(CoordinatorEntity, SensorEntity):
+    """Digitale twin van de groepenkast — toont alle groepen met NILM-koppeling."""
+
+    _attr_icon           = "mdi:home-lightning-bolt-outline"
+    _attr_has_entity_name = True
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry          = entry
+        self._attr_name      = "Groepenkast"
+        self._attr_unique_id = f"{entry.entry_id}_groepenkast"
+        self.entity_id       = _eid(entry, "sensor.cloudems_groepenkast")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        panel = data.get("circuit_panel", {})
+        return panel.get("learned_count", 0)
+
+    @property
+    def extra_state_attributes(self):
+        data = self.coordinator.data or {}
+        return data.get("circuit_panel", {})
 
 class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
     """

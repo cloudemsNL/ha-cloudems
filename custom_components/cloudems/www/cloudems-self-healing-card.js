@@ -164,12 +164,11 @@ function getData(h) {
   const boiler = st.boiler || {};
   const nilm = (st.nilm_devices || []).filter(d => d.power_w > 10);
 
-  const gridW  = parseFloat(h.states['sensor.cloudems_grid_net_power']?.state || st.grid_power_w || 0);
-  const solarW = parseFloat(h.states['sensor.cloudems_zon_vermogen']?.state || h.states['sensor.cloudems_solar_system']?.state || 0);
-  const battW  = parseFloat(
-    h.states['sensor.thuisbatterij_power']?.state ||
-    h.states['sensor.cloudems_battery_power']?.state ||
-    st.battery_power_w || 0);
+  const gridW  = parseFloat(st.grid_power_w || h.states['sensor.cloudems_grid_net_power']?.state || 0);
+  const _shInvs = (h.states['sensor.cloudems_solar_system']?.attributes?.inverters || []);
+  const _shRaw = _shInvs.reduce((s,i)=>s+(parseFloat(i.current_w)||0),0);
+  const solarW = _shRaw > 0 ? _shRaw : parseFloat(st.solar_power_w || h.states['sensor.cloudems_zon_vermogen']?.state || 0);
+  const battW  = parseFloat(st.battery_power_w || h.states['sensor.thuisbatterij_power']?.state || h.states['sensor.cloudems_battery_power']?.state || 0);
   const soc    = Math.round(parseFloat(
     h.states['sensor.thuisbatterij_percentage']?.state ||
     h.states['sensor.cloudems_battery_soc']?.state ||

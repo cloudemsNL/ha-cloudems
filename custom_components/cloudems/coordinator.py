@@ -90,6 +90,7 @@ import aiohttp
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .entity_provider import EntityState
 from .adaptivehome_bridge import AdaptiveHomeBridge, HouseMode
+from .energy_manager.circuit_breaker_panel import CircuitBreakerPanel, PhaseBoost
 from .ha_provider import HAEntityProvider
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -377,6 +378,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v4.6.276: AdaptiveHome koppeling — staat onzichtbaar klaar voor koppeling
         self._ah_bridge:        AdaptiveHomeBridge = AdaptiveHomeBridge(hass, self)
+        self._circuit_panel:    CircuitBreakerPanel | None = None
         self._ah_house_mode:    str  = HouseMode.HOME
         self._ah_occupied_rooms: list = []
         self._ah_active_scene:  str  = ""
@@ -747,6 +749,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         self._last_battery_w: float = 0.0  # v1.16: for consumption category correction
         self._battery_w_ema:          Optional[float] = None   # v4.5.15: EMA voor spike-filtering
         self._kirchhoff_battery_w:    Optional[float] = None   # v5.5.73: gecorrigeerde waarde
+        self._inv_power_cache:       dict            = {}     # v5.5.110: last-known-good per omvormer
         self._kirchhoff_battery_data: Optional[list]  = None   # v5.5.73: gecorrigeerde data
         # v4.5.15: rollend venster van house_w metingen voor dynamische anomaly-drempel.
         # We bewaren de laatste 1440 samples (~24u bij 60s interval) en gebruiken P95
@@ -2295,6 +2298,14 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
 
         # v4.6.276: AdaptiveHome bridge opstarten (luistert naar AH events)
         await self._ah_bridge.async_setup()
+        # Groepenkast module
+        try:
+            from homeassistant.helpers.storage import Store as _Store
+            _panel_store = _Store(self.hass, 1, "cloudems_circuit_panel_v1")
+            self._circuit_panel = CircuitBreakerPanel(_panel_store)
+            await self._circuit_panel.async_load()
+        except Exception as _cp_err:
+            _LOGGER.warning("Groepenkast init fout: %s", _cp_err)
         # v4.5.7: EnergyBalancer geleerde lags laden
         if self._energy_balancer:
             _bal_saved = await self._store_balancer.async_load()
@@ -2743,7 +2754,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             self._knmi_calibration = _KC(
                 lat=_lat, lon=_lon, session=self._pv_forecast._session)
 
-        # v5.5.67: AdaptiveHome uploader
+        # AdaptiveHome uploader (bestaand) + cloud bridge configuratie
         _ah_token   = self._config.get("adaptivehome_token", "")
         _share_obs  = bool(self._config.get("share_observations", False))
         if _ah_token and self._pv_forecast and getattr(self._pv_forecast, "_session", None):
@@ -2752,6 +2763,16 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                 session      = self._pv_forecast._session,
                 bridge_token = _ah_token,
                 enabled      = _share_obs,
+            )
+        # Configureer cloud bridge als AdaptiveHome URL en token aanwezig zijn
+        _ah_url     = self._config.get("adaptivehome_cloud_url", "")
+        _ah_license = self._config.get("adaptivehome_license", "cloudems")
+        if hasattr(self, "_ah_bridge") and self._ah_bridge is not None:
+            self._ah_bridge.configure_cloud(
+                url           = _ah_url,
+                token         = _ah_token,
+                enabled       = bool(_ah_url and _ah_token),
+                license_level = _ah_license,
             )
         # v2.2.2: installatie-score (stateless, berekening on-demand)
         self._install_score = InstallationScoreCalculator(self._config)
@@ -4737,9 +4758,17 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         for _sp_dev in self._nilm._devices.values():
             if getattr(_sp_dev, "source", "") in ("smart_plug", "injected") and _sp_dev.is_on and _sp_dev.current_power > 0:
                 _sp_dev.tick_energy(_now_ts)
-        # v1.16: persist so consumption categories can subtract battery from totals
-        self._last_battery_w = total_battery_w
-        return total_battery_w
+        # v5.5.109: respecteer Kirchhoff-correctie uit _gather_sensor_data.
+        # Als de balancer een gecorrigeerde waarde heeft (battery_estimated=True),
+        # gebruik die voor _last_battery_w (display) maar wis NIET — 
+        # _collect_multi_battery_data_kirchhoff() heeft het ook nodig.
+        _kirchhoff_corrected = getattr(self, "_kirchhoff_battery_w", None)
+        if _kirchhoff_corrected is not None and abs(total_battery_w) < abs(_kirchhoff_corrected) * 0.5:
+            # Ruwe sensorwaarde is veel kleiner dan Kirchhoff-schatting → gebruik Kirchhoff
+            self._last_battery_w = _kirchhoff_corrected
+        else:
+            self._last_battery_w = total_battery_w
+        return self._last_battery_w
 
 
     async def _evaluate_solar(
@@ -4959,9 +4988,25 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                         "Z","ZZW","ZW","WZW","W","WNW","NW","NNW"]
                 return dirs[round(az / 22.5) % 16]
 
+            if not hasattr(self, '_inv_power_cache'):
+                self._inv_power_cache = {}
+            _now_cache = __import__('time').time()
             for eid, profile in {p.inverter_id: p for p in self._solar_learner.get_all_profiles()}.items():
                 raw = self._read_state(eid)
                 cur_w = self._calc.to_watts(eid, raw) if raw is not None else 0.0
+                # v5.5.110: last-known-good cache — voorkomt Kirchhoff-cascade bij
+                # kortstondige API-miss (Growatt/Goodwe cloud latency/WiFi hiccup)
+                _cache = self._inv_power_cache.get(eid, {})
+                if cur_w > 0:
+                    # Verse meting — update cache
+                    _cache = {'last_w': cur_w, 'ts': _now_cache}
+                    self._inv_power_cache[eid] = _cache
+                elif _cache.get('last_w', 0) > 0 and (_now_cache - _cache.get('ts', 0)) < 90:
+                    # Sensor geeft 0 maar vorige meting <90s oud → gebruik cache
+                    cur_w = _cache['last_w']
+                else:
+                    # Cache verlopen of nooit gevuld → echt 0
+                    self._inv_power_cache.pop(eid, None)
                 peak_w = profile.peak_power_w
                 util   = round(cur_w / peak_w * 100, 1) if peak_w > 0 else 0.0
 
@@ -5113,6 +5158,30 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     "peak_production_hour":       peak_hour,
                     "hourly_yield_fraction":      hourly_yield,
                 })
+
+        # v5.5.109: Solar fallback — als omvormer-sensoren 0W rapporteren maar
+        # data["solar_power"] is bekend (via CONF_SOLAR_SENSOR of balancer),
+        # verdeel het bekende totaal proportioneel op basis van peak_w.
+        # Oplossing voor Growatt/Goodwe die traag/unavailable zijn terwijl
+        # de centrale solar-sensor al de correcte waarde heeft.
+        _inv_sum     = sum(inv.get("current_w", 0) for inv in inverter_data)
+        _known_solar = float(data.get("solar_power", 0) or 0)
+        if _inv_sum == 0 and _known_solar > 0 and inverter_data:
+            _peak_total = sum(inv.get("peak_w", 0) for inv in inverter_data)
+            for inv in inverter_data:
+                _share = (
+                    (inv.get("peak_w", 0) / _peak_total) * _known_solar
+                    if _peak_total > 0
+                    else _known_solar / len(inverter_data)
+                )
+                inv["current_w"] = round(_share, 1)
+                if inv.get("peak_w", 0) > 0:
+                    inv["utilisation_pct"] = round(_share / inv["peak_w"] * 100, 1)
+            _LOGGER.debug(
+                "Solar fallback: omvormer-sensors tonen 0W, %.1fW verdeeld uit solar_power",
+                _known_solar,
+            )
+
         if self._pv_forecast:
             await self._pv_forecast.async_refresh_weather()
             pv_forecast_kwh          = self._pv_forecast.get_total_forecast_today_kwh(
@@ -8243,7 +8312,6 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             'drift_data': locals().get('drift_data'),
             'flex_data': locals().get('flex_data'),
             'hp_cop_data': locals().get('hp_cop_data'),
-            'inverter_data': locals().get('inverter_data'),
             'micro_mobility_data': locals().get('micro_mobility_data'),
             'nilm_shift_data': locals().get('nilm_shift_data'),
             'outside_temp_c_val': locals().get('outside_temp_c_val'),
@@ -9742,6 +9810,10 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             "inverter_profiles":    inverter_profiles,
             "peak_shaving":         peak_data,
             "boiler_status":        self._boiler_ctrl.get_status() if self._boiler_ctrl else [],
+            "circuit_panel":        (self._circuit_panel.get_status(
+                nilm_devices if 'nilm_devices' in dir() else []
+            ) if self._circuit_panel else {}),
+
             "energy_demand":        self._calc_energy_demand(data, price_info),
             "pool":                 pool_data,          # ← v1.25.8 zwembad controller
             "lamp_circulation":     lamp_circ_data,     # ← v1.25.9 intelligente lampenbeveiliging
@@ -10214,7 +10286,7 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
             except Exception as _ae:
                 _LOGGER.debug("CloudEMS NILM auto-exclusie/merge fout: %s", _ae)
 
-        # v4.6.276: AdaptiveHome bridge — stuur energiestatus, NILM en prijsinfo
+        # AdaptiveHome bridge — lokale events + cloud push
         try:
             _ah = getattr(self, "_ah_bridge", None)
             if _ah is not None:
@@ -10227,8 +10299,11 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
                     _ah.fire_price_update(_pi)
                 _pres = self._data.get("presence_detected", False)
                 _ah.fire_presence_update(_pres, method="power")
+                # Cloud push — gebufferd, alleen als hosted_enabled
+                if _ah.cloud_enabled:
+                    self.hass.async_create_task(_ah.async_push_to_cloud())
         except Exception as _ah_err:  # noqa: BLE001
-            _LOGGER.debug("CloudEMS AdaptiveHome bridge fire fout: %s", _ah_err)
+            _LOGGER.debug("AdaptiveHome bridge fout: %s", _ah_err)
 
         # ── Long-term statistics (InfluxDB/Grafana compatible) ────────────
         # Write elk uur key metrics naar HA statistieken zodat
@@ -10607,6 +10682,49 @@ class CloudEMSCoordinator(DataUpdateCoordinator):
         # Kirchhoff-schattingen bij stale waarden. Hier alleen de ruwe meting
         # ophalen en doorgeven — staleness-logica zit volledig in de balancer.
         total_battery_w = self._evaluate_battery_data(data)
+
+        # Groepenkast: tick + fase-boosts doorsturen naar NILM
+        if self._circuit_panel is not None:
+            try:
+                _cp_nilm_snap   = {d.get("id",""):float(d.get("current_power_w",0) or 0)
+                                   for d in nilm_devices} if 'nilm_devices' in dir() else {}
+                _cp_nilm_phases = {d.get("id",""):(d.get("phase",""),
+                                   float(d.get("phase_confidence",0) or 0))
+                                   for d in (nilm_devices if 'nilm_devices' in dir() else [])}
+                _cp_phase_w = {"L1": float(data.get("power_l1_import_w", 0) or 0),
+                               "L2": float(data.get("power_l2_import_w", 0) or 0),
+                               "L3": float(data.get("power_l3_import_w", 0) or 0)}
+                _cp_phase_v = {"L1": float(data.get("voltage_l1", 0) or 0),
+                               "L2": float(data.get("voltage_l2", 0) or 0),
+                               "L3": float(data.get("voltage_l3", 0) or 0)}
+                _cp_sub = self._circuit_panel.read_submeters(self.hass)
+                _cp_notifs, _cp_boosts = self._circuit_panel.tick(
+                    _cp_nilm_snap, _cp_nilm_phases, _cp_phase_w,
+                    _cp_phase_v, _cp_sub,
+                    nilm_devices if 'nilm_devices' in dir() else [],
+                )
+                # Fase-boosts doorsturen naar NILM
+                for boost in _cp_boosts:
+                    if boost.target_type == "nilm_device" and self._nilm:
+                        try:
+                            self._nilm.update_phase_confidence(
+                                boost.target_id, boost.phase, boost.confidence)
+                        except Exception:
+                            pass
+                # Uitval-notificaties
+                for notif in _cp_notifs:
+                    try:
+                        from homeassistant.components.persistent_notification import async_create
+                        async_create(self.hass, notif["message"],
+                                     title="CloudEMS Groepenkast",
+                                     notification_id=f"cloudems_circuit_{notif['node_id']}")
+                    except Exception:
+                        _LOGGER.warning("Groepenkast: %s", notif["message"])
+                await self._circuit_panel.async_save()
+            except Exception as _cp_err:
+                _LOGGER.debug("Groepenkast tick fout: %s", _cp_err)
+
+
         self._ctx['p1_data'] = locals().get('p1_data') or {}
         return total_battery_w
 

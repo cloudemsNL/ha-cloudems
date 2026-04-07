@@ -651,20 +651,12 @@ class EnergyBalancer:
             b_est    = True
             lag_comp = True
 
-        # v4.5.61 Fix: solar sensor rapporteert 0 terwijl grid sterk negatief is
-        # (teruglevering zonder solar is fysiek onmogelijk tenzij accu leeg is).
-        # Als grid < -500W én solar = 0 én solar is niet stale → sensor geeft
-        # waarschijnlijk een false-zero. Infereer solar via Kirchhoff met house_trend
-        # zodat house_w niet onterecht op 0 blijft staan.
-        if s_val == 0.0 and not s_stale and g_val < -500.0 and b_val >= -100.0:
-            _inferred_solar = max(0.0, self._house_trend - g_val + b_val)
-            if _inferred_solar > 200.0:
-                _LOGGER.debug(
-                    "EnergyBalancer: solar=0 maar grid=%.0fW → infereer solar=%.0fW via Kirchhoff",
-                    g_val, _inferred_solar,
-                )
-                s_val = _inferred_solar
-                s_est = True
+        # v5.5.110: Solar wordt NOOIT gecorrigeerd of geïnfereerd.
+        # Solar (PV) is na grid de betrouwbaarste waarde — de zon gaat niet
+        # plotseling aan of uit, en de sensor-waarde is al EMA-gefilterd.
+        # Als solar=0 en grid exporteert, dan klopt de BATTERIJ niet.
+        # Kirchhoff lost dat automatisch op in de battery-schatting hieronder.
+        # (Verwijderd: v4.5.61 solar-inferentie die fundamenteel fout was)
 
         # 5. Kirchhoff → house (nooit negatief)
         house_w_raw = s_val + g_val - b_val

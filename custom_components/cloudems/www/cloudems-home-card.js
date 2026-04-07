@@ -340,10 +340,13 @@ class CloudEMSHomeCard extends HTMLElement {
 
   _html(){
     const t=this._tab;
-    const gw=this._v('sensor.cloudems_net_vermogen');
-    const sw=this._v('sensor.cloudems_zon_vermogen');
-    const bw=this._v('sensor.cloudems_battery_power');
-    const hw=this._v('sensor.cloudems_home_rest');
+    const _hcSt = this._s('sensor.cloudems_status')?.attributes || {};
+    const _hcInvs = (this._s('sensor.cloudems_solar_system')?.attributes?.inverters || []);
+    const gw = parseFloat(_hcSt.grid_power_w ?? this._v('sensor.cloudems_net_vermogen'));
+    const _hcRaw = _hcInvs.reduce((s,i)=>s+(parseFloat(i.current_w)||0),0);
+    const sw = _hcRaw > 0 ? _hcRaw : parseFloat(_hcSt.solar_power_w ?? this._v('sensor.cloudems_zon_vermogen'));
+    const bw = parseFloat(_hcSt.battery_power_w ?? this._v('sensor.cloudems_battery_power'));
+    const hw = parseFloat(_hcSt.house_load_w ?? this._v('sensor.cloudems_home_rest'));
     const soc=this._v('sensor.cloudems_batterij_soc');
     const top=this._a('sensor.cloudems_kamers_overzicht','top_room')||'—';
     const imp=gw>50,exp=gw<-50;

@@ -55,20 +55,21 @@ class CloudemsSankeyCard extends HTMLElement {
     if (!h) return;
     const sh = this.shadowRoot;
 
-    // Read power values
-    // Lees solar via inverter-som (zelfde bron als flow card) voor consistentie
+    // Read power values — allemaal via coordinator status (zelfde bron als flow card)
+    const _st       = h.states['sensor.cloudems_status']?.attributes || {};
     const _sankeyInvs = (h.states['sensor.cloudems_solar_system']?.attributes?.inverters || []);
-    const solar_w = _sankeyInvs.length > 0
-      ? _sankeyInvs.reduce((s, i) => s + (parseFloat(i.current_w) || 0), 0)
-      : (this._w('sensor.cloudems_zon_vermogen') || this._w('sensor.cloudems_solar_power'));
-    const grid_imp  = Math.max(0, parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0));
-    const grid_exp  = Math.max(0, -(parseFloat(h.states['sensor.cloudems_net_vermogen']?.state || 0)));
-    const bat_w     = parseFloat(h.states['sensor.cloudems_battery_power']?.state || 0);
+    const _sankeyRaw = _sankeyInvs.reduce((s, i) => s + (parseFloat(i.current_w) || 0), 0);
+    const solar_w = _sankeyRaw > 0 ? _sankeyRaw
+      : parseFloat(_st.solar_power_w || h.states['sensor.cloudems_solar_system_intelligence']?.state || 0);
+    const _grid_w   = parseFloat(_st.grid_power_w || h.states['sensor.cloudems_net_vermogen']?.state || 0);
+    const grid_imp  = Math.max(0,  _grid_w);
+    const grid_exp  = Math.max(0, -_grid_w);
+    const bat_w     = parseFloat(_st.battery_power_w || h.states['sensor.cloudems_battery_power']?.state || 0);
     const bat_chg   = Math.max(0,  bat_w);
     const bat_dis   = Math.max(0, -bat_w);
 
     // House breakdown from coordinator
-    const house_w   = this._w('sensor.cloudems_home_rest') || this._w('sensor.cloudems_house_power');
+    const house_w   = parseFloat(_st.house_load_w || h.states['sensor.cloudems_home_rest']?.state || 0);
     const boiler_w  = this._w('sensor.cloudems_boiler_efficiency') || this._w('sensor.cloudems_boiler_power');
     const ev_w      = this._w('sensor.cloudems_ev_session');
     const other_w   = Math.max(0, house_w - boiler_w - ev_w);
