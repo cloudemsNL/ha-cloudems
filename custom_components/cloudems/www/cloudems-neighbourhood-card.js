@@ -1,8 +1,10 @@
-// CloudEMS neighbourhood Card v5.4.96
-const CARD_NEIGHBOURHOOD_VERSION = '5.5.318';
+// CloudEMS neighbourhood Card v5.5.465
+const CARD_NEIGHBOURHOOD_VERSION = '5.5.465';
 class CloudemsCardneighbourhood extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:"open"}); this._p=""; }
   setConfig(c){ this._cfg={title:"CloudEMS neighbourhood",  ...c}; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-neighbourhood-card-editor');}
   set hass(h){ this._h=h; const s=h.states["sensor.cloudems_neighbourhood"]; const j=JSON.stringify([s?.state,s?.last_changed]); if(j!==this._p){this._p=j;this._r();} }
   _r(){
     const h=this._h,c=this._cfg||{},sh=this.shadowRoot; if(!sh||!h)return;
@@ -12,7 +14,7 @@ class CloudemsCardneighbourhood extends HTMLElement {
 <div class="card"><div class="t">${c.title}</div><div class="s">${state}</div><div class="info">${JSON.stringify(attr).slice(0,200)}</div></div>`;
   }
   getCardSize(){return 2;}
-  static getConfigElement(){return document.createElement("cloudems-neighbourhood-card-editor");}
+  static getConfigElement(){return document.createElement('cloudems-neighbourhood-card-editor');}
   static getStubConfig(){return {};}
 }
 class CloudemsCardneighbourhoodEditor extends HTMLElement {
@@ -20,6 +22,34 @@ class CloudemsCardneighbourhoodEditor extends HTMLElement {
   _r(){if(!this.shadowRoot)this.attachShadow({mode:"open"});this.shadowRoot.innerHTML=`<label style="font-size:12px;color:#aaa;display:block;margin:8px 0 2px">Title</label><input style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #333;color:#fff;padding:6px 8px;border-radius:6px;font-size:13px" id="t" value="${this._config?.title||""}" />`;
   this.shadowRoot.getElementById("t").addEventListener("input",e=>this.dispatchEvent(new CustomEvent("config-changed",{detail:{config:{...this._config,title:e.target.value}}})));}
 }
+
+
+
+class CloudemsNeighbourhoodCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-neighbourhood-card-editor'))customElements.define('cloudems-neighbourhood-card-editor',CloudemsNeighbourhoodCardEditor);
+if(!customElements.get('cloudems-neighbourhood-card-editor'))customElements.define('cloudems-neighbourhood-card-editor',CloudemsNeighbourhoodCardEditor);
+
 if (!customElements.get('cloudems-neighbourhood-card')) customElements.define("cloudems-neighbourhood-card",CloudemsCardneighbourhood);
 if (!customElements.get('cloudems-neighbourhood-card-editor')) customElements.define("cloudems-neighbourhood-card-editor",CloudemsCardneighbourhoodEditor);
 window.customCards=window.customCards||[];

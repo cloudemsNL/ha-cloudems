@@ -1,9 +1,11 @@
-// CloudEMS Piekdagen Kalender Card v5.4.96 — monthly EPEX price calendar
-const CARD_PIEKDAGEN_VERSION = '5.5.318';
+// CloudEMS Piekdagen Kalender Card v5.5.465 — monthly EPEX price calendar
+const CARD_PIEKDAGEN_VERSION = '5.5.465';
 
 class CloudemsPiekdagenCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode:"open" }); this._p = ""; }
   setConfig(c) { this._cfg = { title:"📅 Piekdagen Kalender", ...c }; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-piekdagen-card-editor');}
   set hass(h) {
     this._hass = h;
     const k = h.states["sensor.cloudems_price_current_hour"]?.state;
@@ -143,7 +145,7 @@ class CloudemsPiekdagenCard extends HTMLElement {
 </div>`;
   }
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement("cloudems-piekdagen-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-piekdagen-card-editor');}
   static getStubConfig() { return {}; }
 }
 class CloudemsPiekdagenCardEditor extends HTMLElement {

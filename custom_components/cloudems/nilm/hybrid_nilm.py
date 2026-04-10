@@ -120,6 +120,7 @@ class AnchoredDevice:
     area:              str  = ""   # HA-ruimte
     is_topology_meter: bool = False # True = submeter, niet tellen in kamertotaal
     pending_identity:  bool = False # True = socket zonder bekende apparaat → review
+    energy_sensor_id:  str  = ""    # v5.5.520: kWh sensor van dit apparaat (prioriteit boven W×t)
 
     @property
     def is_stale(self) -> bool:
@@ -301,6 +302,18 @@ class HybridNILM:
             # Registreer nieuwe ankers
             for plug in result.plugs:
                 if plug.entity_id not in self._anchors:
+                    # v5.5.520: zoek energy sensor voor dit apparaat
+                    _e_sensor = ""
+                    try:
+                        _base = plug.entity_id.lower().replace("sensor.", "").replace("switch.", "")
+                        for _suffix in ("_energy", "_energy_kwh", "_kwh", "_energy_today",
+                                        "_power_consumption", "_daily_energy"):
+                            _candidate = f"sensor.{_base}{_suffix}"
+                            if self._hass and self._hass.states.get(_candidate):
+                                _e_sensor = _candidate
+                                break
+                    except Exception:
+                        pass
                     self._anchors[plug.entity_id] = AnchoredDevice(
                         plug_id          = plug.entity_id,
                         entity_id        = plug.entity_id,
@@ -314,6 +327,7 @@ class HybridNILM:
                         area             = plug.area,
                         is_topology_meter= plug.is_topology_meter,
                         pending_identity = plug.pending_identity,
+                        energy_sensor_id = _e_sensor,
                     )
                     _LOGGER.info(
                         "[nilm_anchor] nieuw anker → %s (type=%s bron=%s area=%s fab=%s pending=%s)",

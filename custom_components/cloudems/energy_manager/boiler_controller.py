@@ -164,7 +164,7 @@ ARISTON_TEMP_TOLERANCE    = 1.0    # setpoint mag ±1°C afwijken (float compare
 # v4.6.550: debounce — send commando pas als gewenste state 10 min stable is.
 # Voorkomt 429-errors bij Ariston cloud door te frequente API-aanroepen.
 # Het laatste gewenste commando wint altijd (geen stale commands).
-ARISTON_CMD_DEBOUNCE_S    = 30     # 30s debounce — iMemory brug vereist snel reageren
+ARISTON_CMD_DEBOUNCE_S    = 300    # v5.5.381: 5 min debounce — was 30s, te agressief voor Ariston cloud (429)
 
 # ─── Thermisch model: learnede opwarmsnelheid ────────────────────────────────
 HEAT_RATE_ALPHA           = 0.10   # EMA-factor voor g_heat_rate bijwerking
@@ -230,13 +230,18 @@ FALLBACK_SETPOINT_OFF_C  = 40.0
 
 @dataclass
 class BoilerDecision:
-    entity_id:     str
-    label:         str
-    action:        str
-    reason:        str
-    current_state: bool
-    group_id:      str   = ""
-    power_pct:     float = 0.0
+    entity_id:         str
+    label:             str
+    action:            str
+    reason:            str
+    current_state:     bool
+    group_id:          str   = ""
+    power_pct:         float = 0.0
+    # v5.5.351: temperatuur en setpoint voor log-analyse
+    temp_c:            float = None   # type: ignore[assignment]
+    active_setpoint_c: float = None   # type: ignore[assignment]
+    boiler_type:       str   = ""
+    power_w:           float = 0.0
 
 
 @dataclass
@@ -274,6 +279,8 @@ class BoilerState:
     last_demand_ts:      float = 0.0
     stagger_ticks:       int   = 0
     control_mode:        str   = "switch"
+    power_switch:        str   = ""     # v5.5.367: energie-schakelaar (switch.*) apart van de stuur-entity
+                                         # wordt NOOIT uitgeschakeld als control_mode != 'switch'
     surplus_setpoint_c:  float = 75.0    # setpoint bij PV-surplus (setpoint_boost mode)
     # v4.6.507: communicatiestoring detectie — telt opeenvolgende turn_on zonder respons
     _no_response_count:  int   = 0       # hoe vaak turn_on gestuurd maar is_on bleef False
@@ -684,6 +691,70 @@ class BoilerLearner:
         """7 × 24 matrix: dow[weekdag][uur]."""
         return self._g().get("usage_pattern_dow", [[0.0] * 24 for _ in range(7)])
 
+    # ── Douche-event leren via temperatuurdaling ─────────────────────────────
+    # v5.5.325: leer douche-volume en duur zonder watermeter, alleen op basis van
+    # de thermische massa van de boiler (tank_liters × ΔT = verbruikte energie).
+
+    def record_shower_event(self, liters: float, duration_min: float,
+                             hour: int, temp_dip_c: float) -> None:
+        """Registreer een douche-event op basis van gemeten temperatuurdaling."""
+        if liters < 5 or liters > 300:  # sanity check
+            return
+        ev = self._g().setdefault("shower_events", {
+            "count": 0,
+            "liters_ema": 0.0,   # exponentieel voortschrijdend gemiddelde (EMA)
+            "duration_ema": 0.0,
+            "last_liters": 0.0,
+            "last_duration": 0.0,
+            "last_hour": -1,
+        })
+        # EMA met α=0.2 — geeft recente events meer gewicht, maar vergeet niet te snel
+        alpha = 0.2
+        if ev["count"] == 0:
+            ev["liters_ema"]   = liters
+            ev["duration_ema"] = duration_min
+        else:
+            ev["liters_ema"]   = alpha * liters   + (1 - alpha) * ev["liters_ema"]
+            ev["duration_ema"] = alpha * duration_min + (1 - alpha) * ev["duration_ema"]
+        ev["count"]         += 1
+        ev["last_liters"]    = round(liters, 1)
+        ev["last_duration"]  = round(duration_min, 1)
+        ev["last_hour"]      = hour
+        ev["liters_ema"]     = round(ev["liters_ema"], 1)
+        ev["duration_ema"]   = round(ev["duration_ema"], 1)
+        self._g()["shower_events"] = ev
+        self._save()
+        _LOGGER.debug(
+            "BoilerLearner [%s]: douche geleerd — %.0fL / %.1fmin "
+            "(EMA: %.0fL / %.1fmin, n=%d)",
+            self._gid, liters, duration_min,
+            ev["liters_ema"], ev["duration_ema"], ev["count"],
+        )
+
+    def get_shower_stats(self) -> dict:
+        """Geeft geleerde douche-statistieken terug."""
+        return self._g().get("shower_events", {
+            "count": 0, "liters_ema": 0.0, "duration_ema": 0.0,
+            "last_liters": 0.0, "last_duration": 0.0, "last_hour": -1,
+        })
+
+    def get_learned_liters_per_shower(self) -> Optional[float]:
+        """Geleerde liters per douche, None als onvoldoende data."""
+        ev = self.get_shower_stats()
+        return ev["liters_ema"] if ev["count"] >= 3 else None
+
+    def get_learned_duration_min(self) -> Optional[float]:
+        """Geleerde douche-duur in minuten, None als onvoldoende data."""
+        ev = self.get_shower_stats()
+        return ev["duration_ema"] if ev["count"] >= 3 else None
+
+    def get_learned_flow_lpm(self) -> Optional[float]:
+        """Geleerde flow rate (L/min). Berekend uit liters/duur."""
+        ev = self.get_shower_stats()
+        if ev["count"] >= 3 and ev["duration_ema"] > 0:
+            return round(ev["liters_ema"] / ev["duration_ema"], 1)
+        return None
+
     def should_preheat(self, hour_now: int, minutes_to_setpoint: Optional[float]) -> bool:
         """Controleer of preventief opwarmen nodig is op basis van dag+uur patroon."""
         if minutes_to_setpoint is None or minutes_to_setpoint <= 0:
@@ -769,7 +840,7 @@ class BoilerLearner:
         boiler._temp_history = hist[-30:]
         # Sla ook vermogen op voor grafiek
         pw = boiler.current_power_w if boiler.current_power_w is not None else 0.0
-        boiler._power_history = (boiler._power_history + [(now, pw)])[-48:]
+        boiler._power_history = (boiler._power_history + [(now, pw)])[-960:]  # v5.5.323: 4u bij 15s interval
         if len(hist) < 2:
             return
         dt_s    = hist[-1][0] - hist[0][0]
@@ -1297,8 +1368,9 @@ def _anode_hardness_factor(hardness_dh: float) -> float:
 class BoilerController:
     """CloudEMS boiler/stopcontact controller v3.1."""
 
-    def __init__(self, hass: HomeAssistant, boiler_configs: list[dict]) -> None:
-        self._hass    = hass
+    def __init__(self, hass: HomeAssistant, boiler_configs: list[dict], notify_mgr=None) -> None:
+        self._hass       = hass
+        self._notify_mgr = notify_mgr  # v5.5.335: voor proactieve notificaties
         self._boilers: list[BoilerState]  = []
         self._groups:  list[CascadeGroup] = []
         self._p1_surplus_w: float = 0.0
@@ -1332,7 +1404,7 @@ class BoilerController:
         self._cmd_queue = CloudCommandQueue(
             api_key      = "ariston",
             debounce_s   = ARISTON_CMD_DEBOUNCE_S,
-            rate_per_min = 6.0,
+            rate_per_min = 2.0,   # v5.5.381: was 6/min — Ariston cloud limit ~2/min
         )  # minuten AAN vereist voor +1 ramp-stap
 
     def _build_boiler(self, cfg: dict) -> BoilerState:
@@ -1443,6 +1515,7 @@ class BoilerController:
             setpoint_winter_c  = float(cfg.get("setpoint_winter_c", 0.0)),
             priority           = int(cfg.get("priority", 0)),
             control_mode       = _g("control_mode",       "switch"),
+            power_switch       = _g("power_switch",        ""),
             surplus_setpoint_c = float(_g("surplus_setpoint_c", 75.0)),
             preset_on          = _g("preset_on",           "boost"),
             preset_off         = _g("preset_off",          "green"),
@@ -1600,7 +1673,7 @@ class BoilerController:
         await self._power_store.async_save({
             **{b.entity_id: round(b.power_w, 0) for b in all_b if b.power_w > 50},
             **{"_temp_hist_" + b.entity_id: b._temp_history[-48:] for b in all_b},
-            **{"_pow_hist_"  + b.entity_id: b._power_history[-48:] for b in all_b},
+            **{"_pow_hist_"  + b.entity_id: b._power_history[-960:] for b in all_b},
         })
         self._power_dirty     = False
         self._power_last_save = _time.time()
@@ -1636,6 +1709,7 @@ class BoilerController:
         surplus_threshold_w: float = DEFAULT_SURPLUS_THRESHOLD_W,
         export_threshold_a:  float = DEFAULT_EXPORT_THRESHOLD_A,
         battery_w:           float = 0.0,
+        co2_info:            Optional[dict] = None,  # v5.5.325: CO2-intensiteit (gCO2/kWh)
     ) -> list[BoilerDecision]:
         # v5.5.30: battery_w < 0 = ontladen, > 0 = laden
         # Sla op voor gebruik in setpoint logica
@@ -1647,6 +1721,9 @@ class BoilerController:
 
         # P1 directe respons: gebruik de meest recente P1-value als die recent is (< 90s)
         now = time.time()
+        # v5.5.383: herstel Ariston rate adaptief als lang geen 429
+        if hasattr(self, '_cmd_queue') and self._cmd_queue:
+            self._cmd_queue.maybe_restore_rate(original_rate=2.0)
         effective_surplus = solar_surplus_w
         if self._p1_surplus_w > 0 and (now - self._p1_last_ts) < 90:
             effective_surplus = max(solar_surplus_w, self._p1_surplus_w)
@@ -1985,6 +2062,9 @@ class BoilerController:
                 action="hold_off",
                 reason=f"entiteit {b.entity_id} {'niet gevonden' if _state is None else _state.state}",
                 current_state=False,
+                temp_c=b.current_temp_c,
+                active_setpoint_c=getattr(b, 'active_setpoint_c', b.setpoint_c),
+                boiler_type=getattr(b, 'boiler_type', ''),
             )
 
         # v4.6.45: manual override active → CloudEMS blijft af, virtual boiler stuurt zelf
@@ -1992,7 +2072,11 @@ class BoilerController:
             return BoilerDecision(
                 entity_id=b.entity_id, label=b.label,
                 action="hold_off", reason="manual override actief",
-                current_state=self._is_on(b.entity_id, b),
+                current_state=self._is_on(b.entity_id, b,
+                temp_c=b.current_temp_c,
+                active_setpoint_c=getattr(b, 'active_setpoint_c', b.setpoint_c),
+                boiler_type=getattr(b, 'boiler_type', ''),
+            ),
             )
 
         is_on   = self._is_on(b.entity_id, b)
@@ -2095,6 +2179,76 @@ class BoilerController:
                     elif _deficit > 3.0 and 5 <= _hour <= 8 and _price_ok:
                         want_on = True; reason = f"Warmtevraag ochtend {_hour}:00 ({_deficit:.1f}°C tekort)"
                 # Als gas goedkoper: warmtevraag via CV — boiler doet niets extra
+
+        # ── CO2-GESTUURDE STURING — warm als grid extra groen is ──────────────────────────
+        # v5.5.325: als CO2-intensiteit < 150 gCO2/kWh (veel wind/solar op net) EN
+        # de boiler nog warmte nodig heeft → nu starten, ook als prijs niet optimaal.
+        # Aanpasbaar via notify_categories: co2_charging aan/uit (default aan).
+        if not want_on and b.needs_heat and co2_info:
+            _co2_g = float(co2_info.get("current_gco2_kwh", 999) or 999)
+            _co2_green_threshold = float(
+                getattr(self, "_co2_green_threshold_g", 150.0)
+            )
+            if _co2_g < _co2_green_threshold:
+                # Alleen als prijs acceptabel (niet extreem duur)
+                if _current_price < _avg_price * 2.0:
+                    want_on = True
+                    reason  = (f"CO2-groen net: {_co2_g:.0f} gCO2/kWh "
+                               f"(drempel {_co2_green_threshold:.0f}) — "
+                               f"laag-koolstof moment benut")
+
+        # ── PROACTIEF OPWARMEN op basis van geleerd gebruikspatroon ─────────────────────
+        # Van toepassing op alle typen: als het patroon aangeeft dat er binnen N uur
+        # warm water nodig is EN de boiler nog opwarmtijd nodig heeft → nu starten.
+        # v5.5.324: ook voor standaard RESISTIVE boilers (eerder alleen cascade + WP-hybrid).
+        if not want_on and b.needs_heat:
+            _b_learner = next(
+                (g.learner for g in self._groups
+                 if g.learner and any(gb.entity_id == b.entity_id for gb in g.boilers)),
+                None,
+            )
+            if _b_learner:
+                _hour_now = datetime.now().hour
+                _mts      = b.minutes_to_setpoint  # minuten tot setpoint op basis van geleerde opwarmsnelheid
+                if _b_learner.should_preheat(_hour_now, _mts):
+                    # Alleen proactief starten als prijs acceptabel (niet boven daggemiddelde × 1.5)
+                    _proact_price_ok = _current_price < _avg_price * 1.5 or solar_surplus_w > 200
+                    if _proact_price_ok:
+                        want_on = True
+                        _pat_h = _hour_now + 1
+                        reason = (f"Proactief opwarmen — patroon verwacht gebruik om ~{_pat_h % 24:02d}:00 "
+                                  f"(opwarmtijd ≈{int(_mts or 60)} min, {_current_price:.4f} €/kWh)")
+                        # v5.5.335: notificeer gebruiker bij proactief opwarmen
+                        if self._notify_mgr and not getattr(b, "_preheat_notified_h", -1) == _hour_now:
+                            b._preheat_notified_h = _hour_now
+                            import asyncio
+                            asyncio.ensure_future(self._notify_mgr.send(
+                                f"🚿 Boiler verwarmt proactief",
+                                f"{b.label} warmt alvast op — gebruik verwacht om ~{_pat_h % 24:02d}:00. "
+                                f"Opwarmtijd ≈{int(_mts or 60)} min bij {_current_price:.4f} €/kWh.",
+                                category="boiler",
+                                notification_id=f"cloudems_preheat_{b.entity_id.replace('.','_')}",
+                            ))
+
+        # ── LEGIONELLA op goedkoopste uur ─────────────────────────────────────────────
+        # v5.5.324: legionella-cyclus alleen plannen tijdens goedkoopste 3u blok van de dag,
+        # of bij PV-surplus — zo kost het BOOST-uur zo min mogelijk.
+        if not want_on and b.needs_heat:
+            _b_learner2 = next(
+                (g.learner for g in self._groups
+                 if g.learner and any(gb.entity_id == b.entity_id for gb in g.boilers)),
+                None,
+            )
+            if _b_learner2 and _b_learner2.legionella_needed(b.entity_id):
+                _leg_price_ok = (
+                    bool(price_info.get("in_cheapest_3h"))
+                    or bool(price_info.get("is_negative"))
+                    or solar_surplus_w >= surplus_threshold_w
+                )
+                if _leg_price_ok:
+                    want_on = True
+                    reason  = (f"Legionella-cyclus (≥{LEGIONELLA_TEMP_C:.0f}°C) — "
+                               f"goedkoopste uur ({_current_price:.4f} €/kWh)")
 
         # ── TYPE 2: HEAT_PUMP — altijd warm via WP-element, boost selectief ─────────────
         # COP > 1: green (WP) is altijd goedkoper dan weerstand of gas.
@@ -2484,8 +2638,15 @@ class BoilerController:
         # zet _pending_preset zodat de verify loop het oppakt én stuur direct.
         # Dit vangt ook gevallen op na herstart, iMemory drift, etc.
         await self._do_mismatch_correction(b, is_on, action, solar_surplus_w)
-        return BoilerDecision(entity_id=b.entity_id, label=b.label,
-                              action=action, reason=reason, current_state=is_on)
+        return BoilerDecision(
+                entity_id=b.entity_id, label=b.label,
+                action=action, reason=reason, current_state=is_on,
+                # v5.5.351: temperatuur voor log-analyse
+                temp_c=b.current_temp_c,
+                active_setpoint_c=getattr(b, 'active_setpoint_c', b.setpoint_c),
+                boiler_type=getattr(b, 'boiler_type', ''),
+                power_w=getattr(b, 'current_power_w', 0.0) or 0.0,
+            )
 
     # ── Cascade evaluatie ─────────────────────────────────────────────────────
 
@@ -3027,11 +3188,28 @@ class BoilerController:
                             for g in self._groups:
                                 if b in g.boilers and g.learner:
                                     g.learner.record_demand(datetime.now().hour)
-                                    _LOGGER.debug(
-                                        "BoilerController [%s]: temp-dip %.1f°C → warm water "
-                                        "verbruik geregistreerd (%02d:00)",
-                                        b.label, _dip, datetime.now().hour,
-                                    )
+                                    # v5.5.325: leer douche-volume en duur uit temperatuurdaling
+                                    # Thermisch model: Q = V_tank × ΔT × 4.186 kJ/(kg·°C)
+                                    # Verbruikte liters = Q / ((T_douche - T_koud) × 4.186)
+                                    _tank_l = b._effective_tank_liters if b._effective_tank_liters > 10 else 80.0
+                                    _t_shower, _t_cold = 38.0, 10.0
+                                    _heat_kj   = _tank_l * _dip * 4.186          # kJ onttrokken
+                                    _heat_p_l  = (_t_shower - _t_cold) * 4.186   # kJ per liter douchewater
+                                    if _heat_p_l > 0:
+                                        _liters = round(_heat_kj / _heat_p_l, 1)
+                                        _flow_lpm = g.learner.get_learned_flow_lpm() or 8.0
+                                        _dur_min  = round(_liters / _flow_lpm, 1)
+                                        g.learner.record_shower_event(
+                                            liters=_liters,
+                                            duration_min=_dur_min,
+                                            hour=datetime.now().hour,
+                                            temp_dip_c=_dip,
+                                        )
+                                        _LOGGER.debug(
+                                            "BoilerController [%s]: temp-dip %.1f°C → "
+                                            "douche ~%.0fL ~%.1fmin geregistreerd (%02d:00)",
+                                            b.label, _dip, _liters, _dur_min, datetime.now().hour,
+                                        )
                     b._prev_temp_for_dip = b.current_temp_c
 
             # ── Thermisch model: heat_rate leren + legionella tick ────────────
@@ -3154,17 +3332,27 @@ class BoilerController:
                     _completed = _grp.learner.legionella_tick(b.entity_id, b.current_temp_c)
                     if _completed:
                         try:
-                            await self._hass.services.async_call(
-                                "persistent_notification", "create",
-                                {"title": "CloudEMS — Legionella cyclus voltooid",
-                                 "message": (
-                                     f"Boiler **{b.label}** heeft 1 uur op ≥{LEGIONELLA_TEMP_C:.0f}°C gestaan. "
-                                     f"Legionella-preventie succesvol voltooid. "
-                                     f"Volgende cyclus over ~{LEGIONELLA_INTERVAL_DAYS} dagen."
-                                 ),
-                                 "notification_id": f"cloudems_legionella_{b.entity_id}"},
-                                blocking=False,
+                            _leg_msg = (
+                                f"Boiler {b.label} heeft 1 uur op ≥{LEGIONELLA_TEMP_C:.0f}°C gestaan. "
+                                f"Legionella-preventie succesvol voltooid. "
+                                f"Volgende cyclus over ~{LEGIONELLA_INTERVAL_DAYS} dagen."
                             )
+                            if self._notify_mgr:
+                                await self._notify_mgr.send(
+                                    "✅ Legionella cyclus voltooid",
+                                    _leg_msg,
+                                    category="legionella",
+                                    notification_id=f"cloudems_legionella_{b.entity_id}",
+                                    force=True,
+                                )
+                            else:
+                                await self._hass.services.async_call(
+                                    "persistent_notification", "create",
+                                    {"title": "CloudEMS — Legionella cyclus voltooid",
+                                     "message": _leg_msg,
+                                     "notification_id": f"cloudems_legionella_{b.entity_id}"},
+                                    blocking=False,
+                                )
                         except Exception:
                             pass
 
@@ -3931,10 +4119,110 @@ class BoilerController:
                     {"entity_id": entity_id, "value": pct}, blocking=False)
             return
 
+        # v5.5.367: NOOIT switch.turn_off voor cloud/LAN gestuurde boilers
+        # Regel: alleen control_mode="switch" (domme boiler, alleen stopcontact) mag
+        # via de schakelaar uit worden gezet. Alle andere control modes (preset/setpoint/
+        # dimmer/acrouter/climate) sturen via de integratie — de switch is alleen voor
+        # stroom en mag nooit worden uitgeschakeld (verlies van cloud-verbinding).
+        if not on and domain == "switch" and ctrl != "switch":
+            _LOGGER.warning(
+                "BoilerController: switch.turn_off GEBLOKKEERD voor %s "
+                "(control_mode=%s — alleen switch-gestuurde boilers mogen via switch uit). "
+                "Gebruik setpoint/preset om te stoppen.",
+                entity_id, ctrl,
+            )
+            return
+
+        # v5.5.378: herstel power_switch als die uit staat — MET rate limiting
+        # Maximaal 1x per 5 minuten om Ariston/cloud API rate limits te voorkomen
+        if ctrl != "switch" and boiler and boiler.power_switch:
+            _ps_state = self._hass.states.get(boiler.power_switch)
+            if _ps_state and _ps_state.state in ("off", "false", "0"):
+                _now_ts = __import__('time').time()
+                _last_key = f"_ps_restore_ts_{boiler.power_switch}"
+                _last_restore = getattr(self, _last_key, 0.0)
+                if _now_ts - _last_restore > 300:  # max 1x per 5 minuten
+                    _LOGGER.warning(
+                        "BoilerController [%s]: power_switch %s is UIT — zet aan (verbinding herstellen)",
+                        boiler.label, boiler.power_switch,
+                    )
+                    await self._hass.services.async_call(
+                        "switch", "turn_on",
+                        {"entity_id": boiler.power_switch},
+                        blocking=False,
+                    )
+                    setattr(self, _last_key, _now_ts)
+
         await self._hass.services.async_call(domain, "turn_on" if on else "turn_off",
             {"entity_id": entity_id}, blocking=False)
 
     # ── Externe updates ───────────────────────────────────────────────────────
+
+
+    async def async_peak_shed(self) -> None:
+        """v5.5.465: Piekschaving — zet alle boilers op minimum via climate/water_heater.
+        NOOIT via switch. Alleen preset/setpoint gestuurde boilers worden geschaald."""
+        all_boilers = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_boilers:
+            if b.control_mode == "switch":
+                continue  # switch-boilers worden door peak_shaving._shed_loads afgehandeld
+            if getattr(b, '_peak_shed_active', False):
+                continue  # al in peak shed modus
+            b._peak_shed_active = True
+            b._peak_shed_preset_before = None
+            try:
+                eid = b.entity_id
+                domain = eid.split(".")[0]
+                if domain == "water_heater":
+                    # Zet op GREEN (laagste verbruik) — geen switch aanraken
+                    preset = b.preset_off or "green"
+                    if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                        await self._hass.services.async_call(
+                            "water_heater", "set_operation_mode",
+                            {"entity_id": eid, "operation_mode": preset}, blocking=False,
+                        )
+                    _LOGGER.info("PeakShaving boiler [%s]: geschaald naar %s", b.label, preset)
+                elif domain in ("climate",):
+                    # Zet setpoint op minimum
+                    min_sp = b.min_temp_c or 10.0
+                    if self._hass.services.has_service("climate", "set_temperature"):
+                        await self._hass.services.async_call(
+                            "climate", "set_temperature",
+                            {"entity_id": eid, "temperature": min_sp}, blocking=False,
+                        )
+                    _LOGGER.info("PeakShaving boiler [%s]: setpoint → %.0f°C", b.label, min_sp)
+            except Exception as _err:
+                _LOGGER.debug("PeakShaving boiler shed fout [%s]: %s", b.label, _err)
+
+    async def async_peak_restore(self) -> None:
+        """v5.5.465: Piekschaving voorbij — herstel boilers naar normale werking."""
+        all_boilers = list(self._boilers) + [b for g in self._groups for b in g.boilers]
+        for b in all_boilers:
+            if not getattr(b, '_peak_shed_active', False):
+                continue
+            b._peak_shed_active = False
+            try:
+                eid = b.entity_id
+                domain = eid.split(".")[0]
+                if domain == "water_heater":
+                    # Terug naar normale preset — boiler controller pikt dit op in volgende cycle
+                    preset = b.preset_on or "boost"
+                    if self._hass.services.has_service("water_heater", "set_operation_mode"):
+                        await self._hass.services.async_call(
+                            "water_heater", "set_operation_mode",
+                            {"entity_id": eid, "operation_mode": preset}, blocking=False,
+                        )
+                    _LOGGER.info("PeakShaving boiler [%s]: hersteld naar %s", b.label, preset)
+                elif domain == "climate":
+                    sp = b.active_setpoint_c or b.setpoint_c or 55.0
+                    if self._hass.services.has_service("climate", "set_temperature"):
+                        await self._hass.services.async_call(
+                            "climate", "set_temperature",
+                            {"entity_id": eid, "temperature": sp}, blocking=False,
+                        )
+                    _LOGGER.info("PeakShaving boiler [%s]: setpoint hersteld → %.0f°C", b.label, sp)
+            except Exception as _err:
+                _LOGGER.debug("PeakShaving boiler restore fout [%s]: %s", b.label, _err)
 
     def update_outside_temp(self, temp_c: Optional[float]) -> None:
         for b in self._boilers: b.outside_temp_c = temp_c
@@ -4048,6 +4336,9 @@ class BoilerController:
         # Gebruiker heeft bewust op BOOST geklikt — respecteer dat
         boiler._manual_override_until = time.time() + 7200.0
         self._cmd_queue.reset_debounce(entity_id)
+        # v5.5.324: reset back-off bij handmatige override — gebruiker weet wat hij doet
+        boiler._no_response_backoff_until = 0.0
+        boiler._no_response_count = 0
 
         # Voor preset-boilers: kies GREEN of BOOST op basis van setpoint
         _prev_force_green = boiler.force_green
@@ -4430,13 +4721,13 @@ class BoilerController:
              "temp_c": b.current_temp_c, "setpoint_c": b.active_setpoint_c or b.setpoint_c,
              "active_setpoint_c": b.active_setpoint_c,  # gecapped op hw-max; None vóór eerste cycle
              # v4.6.575: power_w = 0 als boiler niet aan staat (is_on=False).
-             # Een niet-geïnstalleerde of offline boiler kan via cloud-sensor toch
-             # een value rapporteren — die negeren we als de boiler niet active is.
-             # v4.6.595: als current_power_w nog None is (eerste seconden na restart),
-             # gebruik het learnede nominale power als schatting zodat de energy flow
-             # direct een value toont ipv 0W te wachten op de eerste meting.
+             # v5.5.319: als current_power_w > 50W toon altijd de gemeten waarde —
+             # CloudEMS kan in back-off zitten terwijl de boiler wél verwarmt
+             # (bijv. na handmatige override). Flow kaart toont dan 0W terwijl de
+             # echte sensor kWh rapporteert. Gemeten vermogen wint van model-staat.
              "power_w": (b.current_power_w if b.current_power_w is not None else b.power_w)
-                        if self._is_on(b.entity_id, b) else 0.0,
+                        if self._is_on(b.entity_id, b)
+                        else max(0.0, b.current_power_w or 0.0),  # toon meting ook als CloudEMS denkt dat boiler uit is
              "current_power_w": b.current_power_w,
              "cycle_kwh": round(b.cycle_kwh, 3),
              "thermal_loss_c_h": b.thermal_loss_c_h, "control_mode": b.control_mode,
@@ -4462,6 +4753,12 @@ class BoilerController:
              "water_hardness_dh": b.water_hardness_dh,
              "legionella_days": getattr(b, "_leg_last_done", 0) and
                                 round((time.time() - b._leg_last_done) / 86400, 1) if getattr(b, "_leg_last_done", 0) > 0 else None,
+             # v5.5.383: API call statistieken voor diagnostiek
+             "api_calls_5min":  self._cmd_queue.get_diagnostics().get("calls_per_5min", 0) if self._cmd_queue else 0,
+             "api_calls_hour":  self._cmd_queue.get_diagnostics().get("calls_per_hour", 0) if self._cmd_queue else 0,
+             "api_429_total":   self._cmd_queue.get_diagnostics().get("total_429s", 0) if self._cmd_queue else 0,
+             "api_429_ago_s":   self._cmd_queue.get_diagnostics().get("last_429_ago_s") if self._cmd_queue else None,
+             "api_rate_current":self._cmd_queue.get_diagnostics().get("adaptive_rate") if self._cmd_queue else None,
              # FIX 4: learned tankvolume en ramp-setpoint zichtbaar in sensor
              "tank_liters_config":  b.tank_liters if b.tank_liters > 0 else None,
              "tank_liters_learned": round(b._learned_tank_l, 0) if b._learned_tank_l > 1.0 else None,
@@ -4475,7 +4772,7 @@ class BoilerController:
              ],
              "power_history": [
                  {"t": round(ts), "v": round(v, 0)}
-                 for ts, v in (b._power_history or [])[-48:]
+                 for ts, v in (b._power_history or [])[-960:]
              ],
              }
             for b in all_boilers
@@ -4528,10 +4825,15 @@ class BoilerController:
                   "ramp_setpoint_c":     round(b._cheap_ramp_setpoint_c, 1) if b.boiler_type == BOILER_TYPE_HYBRID and b._cheap_ramp_setpoint_c > 0 else None,
                   # FIX 2: demand boost statistieken
                   "demand_boost_stats":  g.learner.get_demand_boost_stats() if g.learner else None,
-                  # Douche-teller
+                  # Douche-statistieken — geleerd via temperatuurdaling (v5.5.325)
                   "shower_minutes":      b.shower_minutes_available,
                   "shower_temp_c":       38.0,
                   "cold_water_temp_c":   10.0,
+                  "shower_learned":      g.learner.get_shower_stats() if g.learner else {},
+                  "usage_pattern_dow":   g.learner.get_usage_pattern_dow() if g.learner else [],
+                  "shower_liters_learned": g.learner.get_learned_liters_per_shower() if g.learner else None,
+                  "shower_duration_learned": g.learner.get_learned_duration_min() if g.learner else None,
+                  "shower_flow_learned":  g.learner.get_learned_flow_lpm() if g.learner else None,
                   }
                  for b in g.boilers
              ]}

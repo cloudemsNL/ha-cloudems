@@ -1,5 +1,5 @@
-// CloudEMS Fase Balans Historiek Card v5.4.96
-const CARD_FASE_HISTORIEK_VERSION = '5.5.318';
+// CloudEMS Fase Balans Historiek Card v5.5.465
+const CARD_FASE_HISTORIEK_VERSION = '5.5.465';
 // Live sparkline history of L1/L2/L3 currents and imbalance
 // v2.0.0: persistent storage via window.storage (survives restarts + page reloads)
 //         Future-proof: coordinator kan history via sensor attribuut aanleveren (cloud)
@@ -43,6 +43,8 @@ class CloudemsFaseHistoriekCard extends HTMLElement {
     }
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-fase-historiek-card-editor');}
   set hass(h) {
     this._hass = h;
     const st = h.states['sensor.cloudems_grid_phase_imbalance'] ||
@@ -185,10 +187,7 @@ svg{width:100%;overflow:visible}
   }
 
   getCardSize() { return 4; }
-  static getConfigElement() {
-    const e = document.createElement('cloudems-fase-historiek-card-editor');
-    return e;
-  }
+  static getConfigElement(){return document.createElement('cloudems-fase-historiek-card-editor');}
   static getStubConfig() { return {}; }
 }
 
@@ -202,4 +201,4 @@ class CloudemsFaseHistoriekCardEditor extends HTMLElement {
 }
 
 customElements.define('cloudems-fase-historiek-card', CloudemsFaseHistoriekCard);
-customElements.define('cloudems-fase-historiek-card-editor', CloudemsFaseHistoriekCardEditor);
+if(!customElements.get('cloudems-fase-historiek-card-editor'))customElements.define('cloudems-fase-historiek-card-editor', CloudemsFaseHistoriekCardEditor);

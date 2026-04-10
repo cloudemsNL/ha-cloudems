@@ -5,7 +5,7 @@
  * Module toggles + Leerdata beheer met bevestigingsdialoog
  */
 
-const CARD_CONFIG_VERSION = '5.5.318';
+const CARD_CONFIG_VERSION = '5.5.465';
 
 class CloudEMSConfigCard extends HTMLElement {
   constructor() {
@@ -253,5 +253,4 @@ if (!customElements.get('cloudems-config-card-editor')) {
       @input="${e=>this._fire('title',e.target.value)}" /></div></div>`;
     }
   }
-  customElements.define('cloudems-config-card-editor', _cloudems_config_card_editor);
 }

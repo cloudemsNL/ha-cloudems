@@ -620,6 +620,20 @@ class SystemGuardian:
         # Sla over als we geen data hebben
         if all(v == 0 for v in [solar_w, grid_w, house_w]):
             return
+        # v5.5.354: sla over als grid én battery allebei 0 zijn maar house niet
+        # Dit is een herstart-scenario: P1/DSMR laadt snel, Nexus/net nog niet
+        # house > 0 terwijl grid=0 en battery=0 is fysiek onmogelijk → data ontbreekt
+        _sources_total = abs(solar_w) + abs(grid_w) + abs(battery_w)
+        if _sources_total < 100 and house_w > 200:
+            return
+        # v5.5.354: startup grace period — 5 minuten na setup geen Kirchhoff alarm
+        import time as _t354
+        _guardian_start = getattr(self, '_guardian_start_ts', None)
+        if _guardian_start is None:
+            self._guardian_start_ts = _t354.time()
+            return
+        if _t354.time() - _guardian_start < 300:  # 5 minuten grace
+            return
 
         # Kirchhoff: solar + grid_import - grid_export + battery_discharge - battery_charge = house
         # In CloudEMS conventies: grid > 0 = import, battery > 0 = laden (uit net/solar)
@@ -799,22 +813,15 @@ class SystemGuardian:
     async def _activate_safe_mode(self) -> None:
         """Zet het systeem in veilige stand: boilers uit, EV minimum."""
         self._safe_mode = True
-        _LOGGER.warning("SystemGuardian: VEILIGE STAND geactiveerd")
-        try:
-            # Boilers uitschakelen via CloudEMS service
-            await self._hass.services.async_call(
-                "cloudems", "set_module_state",
-                {"module": "boiler", "enabled": False},
-                blocking=False,
-            )
-        except Exception:
-            pass
+        # v5.5.465: CloudEMS schakelt NOOIT automatisch modules uit — alleen de gebruiker doet dat.
+        # De guardian informeert via notificatie maar raakt module-toggles niet aan.
+        _LOGGER.warning("SystemGuardian: VEILIGE STAND geactiveerd — modules blijven aan (gebruiker beheert dit zelf)")
         await self._send_notification(GuardianIssue(
             key     = "guardian:safe_mode",
             level   = "critical",
             title   = "CloudEMS — VEILIGE STAND ACTIEF",
             message = ("Meerdere kritieke problemen gedetecteerd. "
-                       "Boilers en EV-lader zijn teruggeschaald. "
+                       "Modules blijven actief — alleen de gebruiker schakelt modules in/uit. "
                        "Controleer het CloudEMS diagnose-tabblad."),
             action  = "safe_mode",
             source  = "coordinator",

@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Appliance Card  v5.4.96
+// CloudEMS Appliance Card  v5.5.465
 
-const APPLIANCE_VERSION = "5.5.318";
+const APPLIANCE_VERSION = "5.5.465";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const DEVICE_ICONS = {
@@ -489,7 +489,7 @@ class CloudemsApplianceCard extends HTMLElement {
     });
   }
 
-  static getConfigElement() { return document.createElement("cloudems-appliance-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-appliance-card-editor');}
   static getStubConfig()    { return {title:"Slimme Schakelaars"}; }
   getCardSize() { return 6; }
 }

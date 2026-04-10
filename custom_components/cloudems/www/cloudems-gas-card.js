@@ -4,7 +4,7 @@
  * Klik op periode → zie breakdown (week→dagen, maand→weken, jaar→maanden)
  */
 
-const CARD_GAS_VERSION = '5.5.318';
+const CARD_GAS_VERSION = '5.5.465';
 
 class CloudEMSGasCard extends HTMLElement {
   constructor() {
@@ -21,6 +21,8 @@ class CloudEMSGasCard extends HTMLElement {
     setTimeout(() => { this._prev = ''; this._render(); }, 3000);
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-gas-card-editor');}
   set hass(h) {
     this._hass = h;
     this._render();
@@ -376,12 +378,38 @@ class CloudEMSGasCard extends HTMLElement {
   }
 
   getCardSize() { return 7; }
-  static getConfigElement() { return document.createElement('cloudems-gas-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-gas-card-editor');}
   static getStubConfig() { return {}; }
 }
 
+
+
+
+class CloudemsGasCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-gas-card-editor'))customElements.define('cloudems-gas-card-editor',CloudemsGasCardEditor);
+
 if (!customElements.get('cloudems-gas-card')) {
-  customElements.define('cloudems-gas-card', CloudEMSGasCard);
 }
 window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === 'cloudems-gas-card')) {
@@ -398,5 +426,4 @@ if (!customElements.get('cloudems-gas-card-editor')) {
       <div style="padding:8px"><div class="row"><label>Geen opties</label></div></div>`;
     }
   }
-  customElements.define('cloudems-gas-card-editor', _cloudems_gas_card_editor);
 }

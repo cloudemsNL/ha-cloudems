@@ -1,183 +1,104 @@
-# -*- coding: utf-8 -*-
-# Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-# All rights reserved. Unauthorized copying, redistribution, or commercial
-# use of this file is strictly prohibited. See LICENSE for full terms.
-
 """
-CloudEMS Fase-Migratie Adviseur — v1.0.0
+CloudEMS — PhaseAdvisor v1.0.0
 
-Combineert drie databronnen om concrete fase-migratie-adviezen te geven:
-  1. Fase-belasting (coordinator phase_data) — welke fase is zwaarst?
-  2. Omvormer-fase (solar_learner)           — welke PV op welke fase?
-  3. Apparaat-fase (NILM)                    — welke last op welke fase?
+Leert welke fases structureel zwaarder belast zijn op basis van
+historische fase-stromen. Geeft advies via NotificationManager als
+er structurele onbalans is (> 4A verschil gemiddeld over de dag).
 
-Logica:
-  - Bereken structurele ongelijkheid over meerdere uren
-  - Identificeer verplaatsbare apparaten op overbelaste fase
-  - Identificeer lege fasen als bestemming
-  - Bereken winst in balanspercentage bij verplaatsing
-
-Output:
-  sensor.cloudems_fase_advies → state = "Verplaats wasmachine van L1 naar L3 (+18% balans)"
-  attributes: gedetailleerde breakdown
-
-Copyright © 2025 CloudEMS — https://cloudems.eu
+Gebruikt bestaande fase-data van de P1/HAFallbackReader.
 """
 from __future__ import annotations
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+import time
+from collections import deque
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
-# Apparaattypen die fysiek verplaatsbaar zijn (stopcontact wisselen)
-MOVABLE_DEVICE_TYPES = {
-    "washing_machine", "dishwasher", "dryer",
-    "refrigerator", "ev_charger",
-}
-
-# Minimale ongelijkheid om advies te geven (Ampère)
-MIN_IMBALANCE_A = 3.0
+IMBALANCE_THRESHOLD_A   = 4.0   # A verschil tussen zwaarste en lichtste fase
+ADVISE_COOLDOWN_S       = 86400  # max 1x per dag notificatie
+HISTORY_SAMPLES         = 360    # 1u bij 10s interval
 
 
-@dataclass
-class PhaseMigrationAdvice:
-    """Eén specifiek migratie-advies."""
-    device_label:       str
-    device_type:        str
-    from_phase:         str     # L1 / L2 / L3
-    to_phase:           str
-    current_load_w:     float   # apparaatbelasting in W
-    balance_gain_pct:   float   # geschatte verbetering in balanspercentage
-    explanation:        str
+class PhaseAdvisor:
+    """Bewaakt fase-onbalans en geeft advies."""
 
+    def __init__(self, hass: "HomeAssistant", notify_mgr=None) -> None:
+        self._hass       = hass
+        self._notify_mgr = notify_mgr
+        self._history: dict[str, deque] = {
+            "L1": deque(maxlen=HISTORY_SAMPLES),
+            "L2": deque(maxlen=HISTORY_SAMPLES),
+            "L3": deque(maxlen=HISTORY_SAMPLES),
+        }
+        self._last_advice_ts: float = 0.0
+        self._imbalance_count: int  = 0  # aaneengesloten ticks met onbalans
 
-@dataclass
-class PhaseMigrationReport:
-    """Rapport van alle migratie-adviezen."""
-    advices:            list[PhaseMigrationAdvice]
-    overloaded_phase:   Optional[str]
-    lightest_phase:     Optional[str]
-    imbalance_a:        float
-    summary:            str
-    has_advice:         bool
+    def tick(self, phase_currents: dict[str, float]) -> dict:
+        """
+        Verwerk fase-stromen. Geeft status dict terug.
+        phase_currents: {"L1": 12.3, "L2": 8.1, "L3": 15.2}  (A)
+        """
+        now = time.time()
+        for ph in ("L1", "L2", "L3"):
+            val = phase_currents.get(ph)
+            if val is not None:
+                self._history[ph].append(abs(float(val)))
 
+        status = self._analyse()
+        if status.get("imbalanced") and now - self._last_advice_ts > ADVISE_COOLDOWN_S:
+            self._last_advice_ts = now
+            import asyncio
+            asyncio.ensure_future(self._send_advice(status))
 
-def generate_migration_advice(
-    *,
-    phase_currents: dict[str, float],            # {"L1": 12.3, "L2": 5.1, "L3": 8.7}
-    inverter_phases: dict[str, str],             # {inverter_id: "L1"} (from solar_learner)
-    nilm_devices: list[dict],                    # coordinator nilm_devices
-    voltage_v: float = 230.0,
-) -> PhaseMigrationReport:
-    """
-    Genereer fase-migratie-adviezen.
+        return status
 
-    Parameters
-    ----------
-    phase_currents  : actuele fasestroom per fase (A)
-    inverter_phases : bekende fase per omvormer (uit solar_learner)
-    nilm_devices    : lijst van NILM-gedetecteerde apparaten
-    voltage_v       : netspanning (default 230V)
-    """
-    if not phase_currents or len(phase_currents) < 2:
-        return PhaseMigrationReport(
-            advices=[], overloaded_phase=None, lightest_phase=None,
-            imbalance_a=0.0, summary="Geen fase-data beschikbaar.", has_advice=False,
-        )
+    def _analyse(self) -> dict:
+        """Analyseer gemiddelde belasting per fase."""
+        avgs = {}
+        for ph, hist in self._history.items():
+            if len(hist) >= 10:
+                avgs[ph] = round(sum(hist) / len(hist), 2)
 
-    # Identificeer overbelaste en lichtste fase
-    max_phase = max(phase_currents, key=phase_currents.get)
-    min_phase = min(phase_currents, key=phase_currents.get)
-    imbalance = phase_currents[max_phase] - phase_currents[min_phase]
+        if len(avgs) < 3:
+            return {"imbalanced": False, "averages": avgs}
 
-    if imbalance < MIN_IMBALANCE_A:
-        return PhaseMigrationReport(
-            advices=[], overloaded_phase=max_phase, lightest_phase=min_phase,
-            imbalance_a=round(imbalance, 2),
-            summary=f"Fase-balans is goed (ongelijkheid {imbalance:.1f} A). Geen actie nodig.",
-            has_advice=False,
-        )
+        heaviest = max(avgs, key=avgs.get)
+        lightest = min(avgs, key=avgs.get)
+        spread   = round(avgs[heaviest] - avgs[lightest], 2)
+        imbalanced = spread >= IMBALANCE_THRESHOLD_A
 
-    advices: list[PhaseMigrationAdvice] = []
+        return {
+            "imbalanced":    imbalanced,
+            "spread_a":      spread,
+            "heaviest_phase": heaviest,
+            "lightest_phase": lightest,
+            "averages":      avgs,
+            "advice": (
+                f"Fase {heaviest} is structureel {spread:.1f}A zwaarder dan {lightest}. "
+                f"Overweeg om een apparaat van {heaviest} naar {lightest} te verplaatsen "
+                f"(bijv. EV-lader of wasmachine)."
+            ) if imbalanced else "",
+        }
 
-    # Zoek apparaten op de overbelaste fase die verplaatst kunnen worden
-    for dev in nilm_devices:
-        dtype       = dev.get("device_type", "")
-        dev_phase   = dev.get("detected_phase") or dev.get("phase")
-        label       = dev.get("name") or dev.get("label") or dtype
-        power_w     = float(dev.get("current_power") or 0)
-
-        if dtype not in MOVABLE_DEVICE_TYPES:
-            continue
-        if dev_phase != max_phase:
-            continue
-        if power_w < 100:
-            continue
-
-        # Bereken verbetering: hoeveel Ampère verschuift van max naar min fase?
-        device_current_a = power_w / voltage_v
-        new_max  = phase_currents[max_phase] - device_current_a
-        new_min  = phase_currents[min_phase] + device_current_a
-        new_imbalance = abs(new_max - new_min)
-        improvement_pct = round((imbalance - new_imbalance) / imbalance * 100, 1) if imbalance > 0 else 0.0
-
-        if improvement_pct < 5.0:
-            continue   # Verwaarloosbare winst
-
-        explanation = (
-            f"'{label}' zit op {max_phase} (zwaarst belast: {phase_currents[max_phase]:.1f} A). "
-            f"Verplaatsen naar {min_phase} ({phase_currents[min_phase]:.1f} A) verbetert de balans "
-            f"met ~{improvement_pct:.0f}%."
-        )
-
-        advices.append(PhaseMigrationAdvice(
-            device_label    = label,
-            device_type     = dtype,
-            from_phase      = max_phase,
-            to_phase        = min_phase,
-            current_load_w  = round(power_w),
-            balance_gain_pct= improvement_pct,
-            explanation     = explanation,
-        ))
-
-    # Sorteer op hoogste winst
-    advices.sort(key=lambda a: a.balance_gain_pct, reverse=True)
-
-    # Controleer ook of een omvormer op overbelaste fase staat (dedupliceer per fase)
-    seen_inv_notes: set = set()
-    inverter_notes = []
-    for inv_id, inv_phase in inverter_phases.items():
-        if inv_phase == max_phase:
-            note = (
-                f"Omvormer op {max_phase}: exporteert op de zwaarst belaste fase — "
-                "overweeg faseverdeling bij volgende installatie."
+    async def _send_advice(self, status: dict) -> None:
+        msg = status.get("advice", "")
+        if not msg:
+            return
+        avgs = status.get("averages", {})
+        detail = " · ".join(f"{ph}: {avgs[ph]:.1f}A" for ph in ("L1","L2","L3") if ph in avgs)
+        full_msg = f"{msg}\n\nGemiddelde belasting (laatste uur): {detail}"
+        if self._notify_mgr:
+            await self._notify_mgr.send(
+                "⚡ Fase-onbalans gedetecteerd", full_msg,
+                category="alert",
+                notification_id="cloudems_phase_imbalance",
             )
-            if note not in seen_inv_notes:
-                seen_inv_notes.add(note)
-                inverter_notes.append(note)
+        else:
+            _LOGGER.warning("PhaseAdvisor: %s", msg)
 
-    if advices:
-        top = advices[0]
-        summary = (
-            f"Fase {max_phase} is zwaarst belast ({phase_currents[max_phase]:.1f} A, "
-            f"ongelijkheid {imbalance:.1f} A). "
-            f"Aanbeveling: verplaats {top.device_label} van {top.from_phase} naar {top.to_phase} "
-            f"(+{top.balance_gain_pct:.0f}% balansverbetering)."
-        )
-    else:
-        summary = (
-            f"Fase {max_phase} is het meest belast (ongelijkheid {imbalance:.1f} A), "
-            "maar er zijn geen eenvoudig verplaatsbare apparaten geïdentificeerd. "
-            + ("; ".join(inverter_notes) if inverter_notes else "")
-        )
-    summary = summary[:255]
-
-    return PhaseMigrationReport(
-        advices         = advices,
-        overloaded_phase= max_phase,
-        lightest_phase  = min_phase,
-        imbalance_a     = round(imbalance, 2),
-        summary         = summary,
-        has_advice      = bool(advices),
-    )
+    def get_status(self) -> dict:
+        return self._analyse()

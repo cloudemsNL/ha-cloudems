@@ -179,6 +179,11 @@ class CloudCommandQueue:
         self._global_error_count:   int   = 0
         self._total_sent:   int = 0
         self._total_errors: int = 0
+        # v5.5.383: call-teller per 5 minuten + adaptieve rate
+        self._call_timestamps:      list  = []   # ring buffer van call timestamps
+        self._total_429s:           int   = 0    # totaal 429s ooit
+        self._last_429_ts:          float = 0.0  # timestamp laatste 429
+        self._adaptive_rate:        float = 0.0  # 0 = gebruik vaste rate, >0 = adaptief
         _LOGGER.info(
             "CloudCommandQueue [%s]: debounce=%.0fs rate=%.1f/min backoff=%s",
             api_key, debounce_s, rate_per_min, self._backoff_s,
@@ -278,6 +283,10 @@ class CloudCommandQueue:
             slot.last_error      = ""
             self._total_sent    += 1
             self._global_error_count = 0
+            # v5.5.383: bijhouden voor calls/5min display
+            now_ts = time.time()
+            self._call_timestamps.append(now_ts)
+            self._call_timestamps = [t for t in self._call_timestamps if now_ts - t < 3600]
             return True
 
         except Exception as exc:
@@ -318,6 +327,32 @@ class CloudCommandQueue:
         slot = self._get_or_create_slot(device_id)
         slot.desired_since = 0.0  # onmiddellijk sturen bij volgende request()
 
+    def maybe_restore_rate(self, original_rate: float) -> None:
+        """v5.5.384: adaptief verhogen — conservatief om oscillatie te voorkomen.
+        
+        Strategie:
+        - Na 429: halveer rate (min 0.5/min)
+        - Onthoud laagste veilige rate (net onder waar 429 optrad)
+        - Verhoog pas na 24 uur zonder 429, met max 10% per dag
+        - Plafond: 80% van originele rate — altijd marge houden
+        - Nooit hoger dan pre-429 rate * 0.85 (stabiel niveau)
+        """
+        now = time.time()
+        if self._last_429_ts == 0.0:
+            return  # geen 429 gehad
+        since_last_429 = now - self._last_429_ts
+        # Verhoog pas na 24 uur zonder 429, max 10% per dag, plafond = geconfigureerde rate
+        # 1x per dag/week een 429 is acceptabel — dat is beter dan permanent traag blijven
+        if since_last_429 > 86400 and self._adaptive_rate < original_rate:
+            new_rate = min(original_rate, self._adaptive_rate * 1.10)
+            if new_rate - self._adaptive_rate > 0.05:
+                self._adaptive_rate = new_rate
+                self._bucket.rate_per_min = new_rate
+                _LOGGER.info(
+                    "CloudCommandQueue [%s]: %.0f uur geen 429 → rate verhoogd naar %.2f/min",
+                    self.api_key, since_last_429/3600, new_rate,
+                )
+
     def get_diagnostics(self) -> dict:
         """Diagnostics voor dashboard/logging."""
         now = time.time()
@@ -330,6 +365,11 @@ class CloudCommandQueue:
             "global_backoff_remaining_s": round(max(0, self._global_backoff_until - now), 0),
             "total_sent":           self._total_sent,
             "total_errors":         self._total_errors,
+            "total_429s":           self._total_429s,
+            "last_429_ago_s":       round(now - self._last_429_ts, 0) if self._last_429_ts > 0 else None,
+            "calls_per_5min":       sum(1 for t in self._call_timestamps if now - t < 300),
+            "calls_per_hour":       sum(1 for t in self._call_timestamps if now - t < 3600),
+            "adaptive_rate":        round(self._adaptive_rate, 2) if self._adaptive_rate > 0 else None,
             "devices":              {k: v.to_dict() for k, v in self._slots.items()},
         }
 
@@ -355,6 +395,15 @@ class CloudCommandQueue:
 
         # Globale backoff: na 3 429s in een sessie → hele API pauze
         self._global_error_count += 1
+        self._total_429s         += 1
+        self._last_429_ts         = now
+        # v5.5.383: adaptief vertragen na 429
+        # Rate halveren bij elke 429, minimum 0.5/min (1 call per 2 min)
+        old_rate = self._adaptive_rate if self._adaptive_rate > 0 else self._bucket.rate_per_min
+        self._adaptive_rate = max(0.5, old_rate * 0.5)
+        self._bucket.rate_per_min = self._adaptive_rate
+        _LOGGER.warning("CloudCommandQueue [%s]: 429 → rate verlaagd naar %.1f/min (was %.1f)",
+                        self.api_key, self._adaptive_rate, old_rate)
         if self._global_error_count >= 3:
             global_delay = min(delay * 2, MAX_BACKOFF_S)
             self._global_backoff_until = now + global_delay

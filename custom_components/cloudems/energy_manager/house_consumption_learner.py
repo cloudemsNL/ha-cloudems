@@ -20,6 +20,12 @@ from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
+# ── Load profile configuratie ─────────────────────────────────────────────────
+LOAD_PROFILE_URL = (
+    "https://raw.githubusercontent.com/cloudemsNL/ha-cloudems/main/load_profiles.json"
+)
+LOAD_PROFILE_TTL = 7 * 86400   # 7 dagen cache — profiel wijzigt zelden
+
 # ── Configuratie ─────────────────────────────────────────────────────────────
 EMA_ALPHA_FAST  = 0.20   # eerste 10 observaties: snel leren
 EMA_ALPHA_SLOW  = 0.05   # daarna: traag, stabiel
@@ -67,6 +73,36 @@ class HouseConsumptionLearner:
         now = datetime.now()
         return now.weekday(), now.hour
 
+    # ── Lastprofiel — geladen vanuit load_profiles.json (GitHub of lokaal) ──────
+    # Standaard: NEDU E1A profiel. Automatisch bijgewerkt via GitHub.
+    # Fallback: ingebouwde NEDU E1A waarden (nooit stale hardcode)
+    _NL_WEEKDAY: list = [
+        260, 230, 210, 200, 210, 290,
+        560, 950, 1150, 820, 620, 580,
+        720, 620, 570, 620, 850, 1450,
+        2300, 1900, 1550, 1250, 920, 540,
+    ]
+    _NL_WEEKEND: list = [
+        310, 270, 230, 210, 200, 210,
+        320, 530, 950, 1250, 1150, 1100,
+        1300, 1150, 980, 960, 1050, 1450,
+        2100, 1750, 1450, 1150, 840, 530,
+    ]
+    _NL_SEASON: list = [
+        1.35, 1.30, 1.10, 0.95, 0.85, 0.75,
+        0.70, 0.75, 0.88, 1.05, 1.20, 1.35,
+    ]
+    _profile_loaded_ts: float = 0.0   # timestamp laatste fetch
+
+    def _nl_default_w(self, dt: "datetime") -> float:
+        """Nederlands NEDU E1A profiel als startdefault voor ongeleerde slots."""
+        hour    = dt.hour
+        weekday = dt.weekday()
+        month   = dt.month - 1  # 0-gebaseerd
+        profile = self._NL_WEEKDAY if weekday < 5 else self._NL_WEEKEND
+        season  = self._NL_SEASON[month]
+        return round(profile[hour] * season, 0)
+
     def observe(self, house_w: float) -> None:
         """
         Verwerk één vermogensmeting van het huis.
@@ -112,16 +148,137 @@ class HouseConsumptionLearner:
                         self._slots[wd][h].samples = int(s.get("samples", 0))
                         self._slots[wd][h].last_ts = float(s.get("last_ts", 0))
             self._dirty = False
-            _LOGGER.debug("HouseConsumptionLearner: model geladen (%d slots actief)",
-                          sum(self._slots[wd][h].samples > 0 for wd in range(7) for h in range(24)))
+            # v5.5.371: herstel ook gedeeltelijk huidig uur als opgeslagen
+            if "current_hour_acc" in saved and saved["current_hour_acc"]:
+                self._hour_acc_w = [float(v) for v in saved["current_hour_acc"]]
+                self._last_hour  = saved.get("current_hour", -1)
+            _LOGGER.debug("HouseConsumptionLearner: model geladen (%d slots actief, %d acc)",
+                          sum(self._slots[wd][h].samples > 0 for wd in range(7) for h in range(24)),
+                          len(self._hour_acc_w))
         except Exception as e:
             _LOGGER.debug("HouseConsumptionLearner load fout: %s", e)
+
+    async def async_fetch_load_profile(self, session=None) -> None:
+        """v5.5.375: Haal lastprofiel op van GitHub (zelfde patroon als tariff_fetcher).
+        
+        Prioriteit:
+        1. GitHub load_profiles.json (7 dagen cache)
+        2. Lokaal meegeleverd load_profiles.json
+        3. Ingebouwde NEDU E1A fallback
+        """
+        import time
+        if time.time() - self._profile_loaded_ts < LOAD_PROFILE_TTL:
+            return  # Nog vers
+
+        # Stap 1: GitHub
+        if session:
+            try:
+                async with session.get(LOAD_PROFILE_URL, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        self._apply_profile(data)
+                        self._profile_loaded_ts = time.time()
+                        _LOGGER.info("HouseConsumptionLearner: lastprofiel geladen van GitHub")
+                        return
+            except Exception as e:
+                _LOGGER.debug("HouseConsumptionLearner: GitHub fetch mislukt: %s", e)
+
+        # Stap 2: Lokaal bestand
+        try:
+            import os, json as _json
+            _dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            _path = os.path.join(os.path.dirname(_dir), "load_profiles.json")
+            if os.path.exists(_path):
+                with open(_path) as f:
+                    data = _json.load(f)
+                self._apply_profile(data)
+                self._profile_loaded_ts = time.time()
+                _LOGGER.info("HouseConsumptionLearner: lastprofiel geladen van lokaal bestand")
+                return
+        except Exception as e:
+            _LOGGER.debug("HouseConsumptionLearner: lokaal profiel laden mislukt: %s", e)
+
+        # Stap 3: ingebouwde fallback blijft actief
+        _LOGGER.debug("HouseConsumptionLearner: gebruik ingebouwde NEDU E1A fallback")
+
+    def _apply_profile(self, data: dict) -> None:
+        """Pas geladen profiel toe op de klasse-variabelen."""
+        try:
+            if "weekday" in data and len(data["weekday"]) == 24:
+                self._NL_WEEKDAY = [float(v) for v in data["weekday"]]
+            if "weekend" in data and len(data["weekend"]) == 24:
+                self._NL_WEEKEND = [float(v) for v in data["weekend"]]
+            if "seasonal_factor" in data:
+                sf = data["seasonal_factor"]
+                self._NL_SEASON = [float(sf.get(str(m+1), self._NL_SEASON[m]))
+                                   for m in range(12)]
+        except Exception as e:
+            _LOGGER.debug("HouseConsumptionLearner: profiel toepassen mislukt: %s", e)
+
+    async def async_load_from_ha_history(self, entity_id: str = "sensor.cloudems_home_rest") -> None:
+        """v5.5.374: Pre-populeer slots vanuit HA recorder history (afgelopen 14 dagen).
+        Wordt aangeroepen na async_load als er lege slots zijn.
+        """
+        if not self._hass:
+            return
+        filled = sum(self._slots[wd][h].samples > 0 for wd in range(7) for h in range(24))
+        if filled >= 24:
+            return  # Genoeg data — skip
+        try:
+            from datetime import datetime, timedelta
+            from homeassistant.components.recorder import get_instance
+            from homeassistant.components.recorder.history import get_significant_states
+
+            end   = datetime.now()
+            start = end - timedelta(days=14)
+            instance = get_instance(self._hass)
+
+            # Haal history op via recorder
+            states = await instance.async_add_executor_job(
+                get_significant_states,
+                self._hass, start, end, [entity_id],
+                None, True, False, False,
+            )
+            entity_states = states.get(entity_id, [])
+            if not entity_states:
+                _LOGGER.debug("HouseConsumptionLearner: geen HA history voor %s", entity_id)
+                return
+
+            # Groepeer per weekdag × uur
+            buckets: dict = {}
+            for state in entity_states:
+                try:
+                    val = float(state.state)
+                    if val < 10 or val > 20000:
+                        continue
+                    dt  = state.last_updated.astimezone()
+                    key = (dt.weekday(), dt.hour)
+                    buckets.setdefault(key, []).append(val)
+                except (ValueError, AttributeError):
+                    continue
+
+            count = 0
+            for (wd, h), vals in buckets.items():
+                if not vals:
+                    continue
+                avg = sum(vals) / len(vals)
+                slot = self._slots[wd][h]
+                if slot.samples == 0:
+                    slot.ema_w   = avg
+                    slot.samples = min(len(vals), 10)
+                    slot.last_ts = end.timestamp()
+                    count += 1
+            self._dirty = True
+            _LOGGER.info("HouseConsumptionLearner: %d slots gevuld vanuit HA history (%d staten)",
+                         count, len(entity_states))
+        except Exception as e:
+            _LOGGER.debug("HouseConsumptionLearner history load fout: %s", e)
 
     async def async_maybe_save(self) -> None:
         """Sla model op als er nieuwe data is (max 1x per uur)."""
         if not self._store or not self._dirty:
             return
-        if time.time() - self._last_save_ts < 3600:
+        if time.time() - self._last_save_ts < 300:  # v5.5.371: 5 min ipv 1 uur
             return
         await self.async_save()
 
@@ -130,13 +287,19 @@ class HouseConsumptionLearner:
         if not self._store:
             return
         try:
-            data = {"slots": [
-                [{"ema_w": round(self._slots[wd][h].ema_w, 1),
-                  "samples": self._slots[wd][h].samples,
-                  "last_ts": round(self._slots[wd][h].last_ts, 0)}
-                 for h in range(24)]
-                for wd in range(7)
-            ]}
+            # v5.5.371: sla ook lopend uur op zodat herstart geen data verliest
+            weekday, hour = self._now_slot()
+            data = {
+                "slots": [
+                    [{"ema_w": round(self._slots[wd][h].ema_w, 1),
+                      "samples": self._slots[wd][h].samples,
+                      "last_ts": round(self._slots[wd][h].last_ts, 0)}
+                     for h in range(24)]
+                    for wd in range(7)
+                ],
+                "current_hour": hour,
+                "current_hour_acc": [round(v, 1) for v in self._hour_acc_w[-360:]],
+            }
             await self._store.async_save(data)
             self._dirty = False
             self._last_save_ts = time.time()
@@ -145,10 +308,21 @@ class HouseConsumptionLearner:
             _LOGGER.debug("HouseConsumptionLearner save fout: %s", e)
 
     def expected_w(self, weekday: int, hour: int) -> Optional[float]:
-        """Geleerd verwacht vermogen voor dit uurslot (W)."""
+        """Geleerd verwacht vermogen voor dit uurslot (W).
+        
+        Geeft NL NEDU default terug als er nog geen geleerde data is (< MIN_SAMPLES).
+        Na voldoende observaties wordt de geleerde waarde gebruikt.
+        """
         slot = self._slots[weekday][hour]
         if slot.samples < MIN_SAMPLES_RELIABLE:
-            return None
+            # v5.5.374: gebruik NL profiel als startdefault ipv None/500W
+            from datetime import datetime
+            dt = datetime.now().replace(hour=hour)
+            dt = dt.replace(day=dt.day + (weekday - dt.weekday()) % 7
+                            if weekday != dt.weekday() else 0) if False else dt
+            profile = self._NL_WEEKDAY if weekday < 5 else self._NL_WEEKEND
+            season  = self._NL_SEASON[dt.month - 1]
+            return round(profile[hour] * season, 0)
         return round(slot.ema_w, 1)
 
     def forecast_today(self) -> dict:
@@ -177,7 +351,10 @@ class HouseConsumptionLearner:
 
         # Schat ontbrekende slots via globaal gemiddelde
         known = [w for w in hourly_w if w is not None]
-        fallback_w = sum(known) / len(known) if known else 500.0
+        if known:
+            fallback_w = sum(known) / len(known)
+        else:
+            fallback_w = self._nl_default_w(datetime.now())
 
         hourly_filled = [w if w is not None else fallback_w for w in hourly_w]
 

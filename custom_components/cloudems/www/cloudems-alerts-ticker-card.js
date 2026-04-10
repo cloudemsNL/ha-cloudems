@@ -1,12 +1,14 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-// CloudEMS Alerts Ticker Card v5.5.4
-const ALERTS_VERSION = "5.5.318";
+// CloudEMS Alerts Ticker Card v5.5.465
+const ALERTS_VERSION = "5.5.465";
 
 class CloudEMSAlertsTickerCard extends HTMLElement {
   constructor() { super(); this.attachShadow({mode:'open'}); this._idx=0; this._timer=null; }
   setConfig(c){ this._cfg={title:'CloudEMS Meldingen',interval:5000,...c}; }
   disconnectedCallback(){ if(this._timer)clearInterval(this._timer); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-alerts-ticker-card-editor');}
   set hass(h){
     this._hass=h;
     const st=h?.states['sensor.cloudems_notifications'];
@@ -84,7 +86,7 @@ class CloudEMSAlertsTickerCard extends HTMLElement {
   }
 
   getCardSize(){ return 1; }
-  static getConfigElement(){ return document.createElement('cloudems-alerts-ticker-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-alerts-ticker-card-editor');}
   static getStubConfig(){ return {}; }
 }
 
@@ -94,6 +96,49 @@ class CloudEMSAlertsTickerCardEditor extends HTMLElement {
   set hass(h){}
   connectedCallback(){ this.shadowRoot.innerHTML=`<div style="padding:8px;font-size:12px;color:var(--secondary-text-color)">Geen configuratie nodig.</div>`; }
 }
+
+
+
+
+class CloudemsAlertsTickerCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_interval=document.createElement('div');row_interval.style.marginBottom='10px';
+    var lbl_interval=document.createElement('label');lbl_interval.textContent='Interval (ms)';lbl_interval.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_interval=document.createElement('input');
+    inp_interval.id='interval';
+    inp_interval.type='number';
+    inp_interval.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_interval.value=c.interval||'4000';
+    
+    row_interval.appendChild(lbl_interval);row_interval.appendChild(inp_interval);sh.appendChild(row_interval);
+    inp_interval.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["interval"]=inp_interval.type==="number"?parseFloat(inp_interval.value)||0:inp_interval.value||undefined;
+      if(nc['interval']===undefined||nc['interval']==='')delete nc['interval'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-alerts-ticker-card-editor'))customElements.define('cloudems-alerts-ticker-card-editor',CloudemsAlertsTickerCardEditor);
+if(!customElements.get('cloudems-alerts-ticker-card-editor'))customElements.define('cloudems-alerts-ticker-card-editor',CloudemsAlertsTickerCardEditor);
 
 if(!customElements.get('cloudems-alerts-ticker-card')) customElements.define('cloudems-alerts-ticker-card', CloudEMSAlertsTickerCard);
 if(!customElements.get('cloudems-alerts-ticker-card-editor')) customElements.define('cloudems-alerts-ticker-card-editor', CloudEMSAlertsTickerCardEditor);

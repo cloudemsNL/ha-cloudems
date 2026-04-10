@@ -1,4 +1,4 @@
-// CloudEMS Battery Plan Card v1.0
+// CloudEMS Battery Plan Card v5.5.528
 // Toont uur-voor-uur laad/ontlaad plan: gisteren, vandaag, morgen
 // Leest van sensor.cloudems_battery_schedule / sensor.cloudems_batterij_epex_schema
 
@@ -11,6 +11,8 @@ class CloudEMSBatteryPlanCard extends HTMLElement {
 
   setConfig(config) { this._config = config || {}; }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-battery-plan-card-editor');}
   set hass(h) {
     this._hass = h;
     this._render();
@@ -60,8 +62,10 @@ class CloudEMSBatteryPlanCard extends HTMLElement {
         pv_w:      s.pv_w       ?? sf.pv_w    ?? 0,
         house_w:   s.house_w    ?? sf.house_w  ?? 0,
         power_w:   s.power_w    ?? null,
-        soc_start: s.soc_start  ?? null,
-        soc_end:   s.soc_end    ?? null,
+        soc_start:       s.soc_start       ?? s.actual?.soc_pct ?? null,
+        soc_end:         s.soc_end         ?? s.actual?.soc_pct ?? null,
+        house_estimated: s.house_estimated  ?? true,
+        house_actual:    h === nowH,
         price_allin: s.price_allin ?? this._allin(s.price ?? 0),
         reason:    s.reason     ?? '',
         executed:  !!(s.is_tomorrow ? false : day === 'gisteren' || (day === 'vandaag' && h < nowH)),
@@ -83,95 +87,50 @@ class CloudEMSBatteryPlanCard extends HTMLElement {
       const isNow  = day === 'vandaag' && d.h === nowH;
       const isPast = d.executed;
       const C  = pc(d.price_allin);
-      const A  = ac(d.action);
       const S  = d.soc_end != null ? sc(d.soc_end) : '#475569';
-      const pvB  = Math.round((d.pv_w    / maxPV) * 52);
-      const prB  = Math.round((d.price_allin / maxPR) * 52);
       const socB = d.soc_end != null ? Math.round(d.soc_end / 100 * 56) : 0;
-      const surplus = d.pv_w > 0 && d.house_w > 0 ? d.pv_w - d.house_w : null;
 
-      return `<tr style="
-        border-bottom:1px solid rgba(255,255,255,.03);
-        ${isNow ? 'background:rgba(245,158,11,.06);box-shadow:inset 3px 0 0 #f59e0b;' : ''}
-        ${isPast && !isNow ? 'opacity:.38;' : ''}
-      ">
-        <!-- Uur -->
-        <td style="padding:8px 10px 8px 20px;white-space:nowrap">
-          <div style="font-family:var(--m);font-size:12px;font-weight:600;color:${isNow?'#f59e0b':'#475569'}">
-            ${isNow ? '<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#f59e0b;margin-right:5px;animation:p 1.4s ease-in-out infinite;vertical-align:middle"></span>' : ''}
-            ${String(d.h).padStart(2,'0')}:00
-          </div>
-          ${d.executed && d.action !== 'idle' ? '<div style="font-size:8px;color:#1e3a2f;margin-top:1px">✓ uitgevoerd</div>' : ''}
-        </td>
+      // Formatteer watt/kWh: altijd een getal, nooit een streepje
+      const fmtW = v => v >= 1000 ? (v/1000).toFixed(2)+'kWh' : Math.round(v)+'W';
+      const fmtKwh = v => v == null ? null : v === 0 ? '0 kWh' : v < 0.05 ? Math.round(v*1000)+'W' : v.toFixed(2)+' kWh';
 
-        <!-- Tarief badge + all-in prijs -->
-        <td style="padding:8px 10px 8px 0">
-          <div style="font-family:var(--m);font-size:11px;font-weight:700;color:${C}">${d.price_allin.toFixed(1)} ct</div>
-          <div style="font-size:9px;color:#475569;margin-top:1px">EPEX ${(d.price_eur*100).toFixed(1)}ct</div>
-          <div style="height:2px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:4px;width:52px">
-            <div style="height:2px;border-radius:2px;width:${prB}px;background:${C}"></div>
-          </div>
-        </td>
+      // LADEN verleden: gemiddeld laadvermogen W (uit accumulator chg_w), toekomst: plan W
+      // LEVER verleden: gemiddeld ontlaadvermogen W (uit accumulator dis_w), toekomst: plan W
+      const _ladValP = isPast ? (d.actual?.chg_w ?? d.charge_kwh*1000 ?? 0) : (d.charge_w ?? 0);
+      const _levValP = isPast ? (d.actual?.dis_w ?? d.discharge_kwh*1000 ?? 0) : (d.discharge_w ?? 0);
+      const chgDisp = isPast ? (_ladValP > 0 ? Math.round(_ladValP)+'W' : '0W') : fmtW(_ladValP);
+      const disDisp = isPast ? (_levValP > 0 ? Math.round(_levValP)+'W' : '0W') : fmtW(_levValP);
+      const chgVal  = _ladValP;
+      const disVal  = _levValP;
 
-        <!-- PV -->
-        <td style="padding:8px 10px 8px 0">
-          ${d.pv_w > 0
-            ? `<div style="font-family:var(--m);font-size:12px;color:#f59e0b">
-                 ${d.pv_w>=1000?(d.pv_w/1000).toFixed(2)+' kW':d.pv_w+' W'}
-               </div>
-               <div style="height:2px;background:rgba(255,255,255,.06);border-radius:2px;margin-top:4px;width:52px">
-                 <div style="height:2px;border-radius:2px;width:${pvB}px;background:#f59e0b"></div>
-               </div>`
-            : '<div style="color:rgba(255,255,255,.1);font-size:13px">—</div>'}
-        </td>
+      const pvW    = Math.round(d.pv_w || 0);
+      const hwW    = Math.round(d.house_w || 0);
+      const hwSrc  = isNow ? '●' : d.house_estimated ? '~' : '✓';
+      const pvDisp = fmtW(pvW);
+      const hwDisp = fmtW(hwW);
+      const priceStr = d.price_allin != null ? d.price_allin.toFixed(1)+'ct' : '0.0ct';
 
-        <!-- Huis + surplus/tekort -->
-        <td style="padding:8px 10px 8px 0">
-          ${d.house_w > 0
-            ? `<div style="font-family:var(--m);font-size:12px;color:#94a3b8">
-                 ${d.house_w>=1000?(d.house_w/1000).toFixed(2)+' kW':d.house_w+' W'}
-               </div>
-               ${surplus !== null ? `<div style="font-size:9px;margin-top:2px;color:${surplus>=0?'#10b981':'#ef4444'}">
-                 ${surplus>=0?'↑ +'+Math.round(surplus)+'W':'↓ '+Math.round(-surplus)+'W'}
-               </div>` : ''}`
-            : '<div style="color:rgba(255,255,255,.1);font-size:13px">—</div>'}
-        </td>
+      // SOC: toon soc_end% als hoofd, "van X%" als kleine regel eronder wanneer start ≠ eind
+      const _s0 = d.soc_start != null ? Math.round(d.soc_start) : null;
+      const _s1 = d.soc_end   != null ? Math.round(d.soc_end)   : null;
+      const _sA = d.actual?.soc_pct != null ? Math.round(d.actual.soc_pct) : null;
+      const socEnd = _s1 ?? _sA;
+      // SOC: start→eind als beiden bekend, anders enkel eind
+      const socDisp = socEnd != null
+        ? (_s0 != null ? _s0+'%→'+socEnd+'%' : socEnd+'%')
+        : '—';
 
-        <!-- Actie + vermogen -->
-        <td style="padding:8px 10px 8px 0">
-          ${d.action !== 'idle'
-            ? `<div style="display:flex;align-items:center;gap:7px">
-                 <div style="font-size:17px;line-height:1">${d.action==='charge'?'⚡':'↓'}</div>
-                 <div>
-                   <div style="font-size:12px;font-weight:700;color:${A}">${d.action==='charge'?'Laden':'Ontladen'}</div>
-                   ${d.power_w!=null?`<div style="font-family:var(--m);font-size:10px;color:${A};margin-top:1px">
-                     ${d.power_w>=1000?(d.power_w/1000).toFixed(2)+' kW':d.power_w+' W'}
-                   </div>`:''}
-                 </div>
-               </div>`
-            : '<div style="color:rgba(255,255,255,.1);font-size:13px">—</div>'}
-        </td>
-
-        <!-- SoC -->
-        <td style="padding:8px 10px 8px 0">
-          ${d.soc_end != null
-            ? `<div style="display:flex;align-items:center;gap:7px">
-                 <div style="width:56px;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden;flex-shrink:0">
-                   <div style="height:6px;border-radius:3px;width:${socB}px;background:${S}"></div>
-                 </div>
-                 <div>
-                   <div style="font-family:var(--m);font-size:12px;font-weight:700;color:${S}">${d.soc_end.toFixed(0)}%</div>
-                   ${d.soc_start!=null&&d.soc_start!==d.soc_end
-                     ?`<div style="font-family:var(--m);font-size:9px;color:#475569;margin-top:1px">van ${d.soc_start.toFixed(0)}%</div>`:''}
-                 </div>
-               </div>`
-            : '<div style="color:rgba(255,255,255,.1)">—</div>'}
-        </td>
-
-        <!-- Reden -->
-        <td style="padding:8px 20px 8px 0">
-          <div style="font-size:10px;color:#475569;line-height:1.5;max-width:220px">${d.reason || (d.action==='idle'?'Geen actie gepland':'')}</div>
-        </td>
+      const chgColor = chgVal > 0 ? '#22c55e' : '#475569';
+      const disColor = disVal > 0 ? '#f97316' : '#475569';
+      const pvColor  = pvW   > 0 ? '#fbbf24' : '#475569';
+      return `<tr style="border-bottom:1px solid rgba(255,255,255,.03);${isNow?'background:rgba(245,158,11,.06);box-shadow:inset 3px 0 0 #f59e0b;':''}${isPast&&!isNow?'opacity:.55;':''}">
+        <td style="padding:5px 8px 5px 16px;font-family:var(--m);font-size:12px;font-weight:600;color:${isNow?'#f59e0b':'#475569'};white-space:nowrap">${isNow?'<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#f59e0b;margin-right:4px;vertical-align:middle"></span>':''}${String(d.h).padStart(2,'0')}:00</td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:${chgColor}">${chgDisp}</td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:${disColor}">${disDisp}</td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:${pvColor}">${pvDisp}</td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:#94a3b8">${hwDisp}<span style="font-size:8px;opacity:.5;margin-left:2px">${hwSrc}</span></td>
+        <td style="padding:5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:${C}">${priceStr}</td>
+        <td style="padding:5px 16px 5px 6px;text-align:right;font-family:var(--m);font-size:11px;color:${S};line-height:1.3">${socDisp}</td>
       </tr>`;
     }).join('');
 
@@ -241,8 +200,13 @@ class CloudEMSBatteryPlanCard extends HTMLElement {
           <div class="tw">
             <table>
               <thead><tr>
-                <th>UUR</th><th>ALL-IN · EPEX</th><th>PV</th><th>HUIS</th>
-                <th>ACTIE &amp; VERMOGEN</th><th>SOC</th><th>REDEN</th>
+                <th style='text-align:left;padding:0 8px 6px 16px;font-size:9px;color:#4b5563'>UUR</th>
+                <th style='text-align:right;padding:0 6px 6px;font-size:9px;color:#22c55e'>LADEN</th>
+                <th style='text-align:right;padding:0 6px 6px;font-size:9px;color:#f97316'>LEVER.</th>
+                <th style='text-align:right;padding:0 6px 6px;font-size:9px;color:#fbbf24'>PV</th>
+                <th style='text-align:right;padding:0 6px 6px;font-size:9px;color:#4b5563'>HUIS</th>
+                <th style='text-align:right;padding:0 6px 6px;font-size:9px;color:#4b5563'>PRIJS</th>
+                <th style='text-align:right;padding:0 16px 6px 6px;font-size:9px;color:#4b5563'>SOC</th>
               </tr></thead>
               <tbody>${rows}</tbody>
             </table>
@@ -257,7 +221,7 @@ class CloudEMSBatteryPlanCard extends HTMLElement {
     this.shadowRoot.getElementById('tab-m')?.addEventListener('click', () => { this._activeDay='morgen';   this._render(); });
   }
 
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement(){return document.createElement('cloudems-battery-plan-card-editor');}
   static getStubConfig()    { return {}; }
 }
 
@@ -270,3 +234,29 @@ if (!window.customCards.find(c => c.type === 'cloudems-battery-plan-card')) {
     description: 'Uur-voor-uur laad/ontlaad plan: gisteren, vandaag, morgen',
   });
 }
+
+
+class CloudemsBatteryPlanCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-battery-plan-card-editor'))customElements.define('cloudems-battery-plan-card-editor',CloudemsBatteryPlanCardEditor);
+if(!customElements.get('cloudems-battery-plan-card-editor'))customElements.define('cloudems-battery-plan-card-editor',CloudemsBatteryPlanCardEditor);

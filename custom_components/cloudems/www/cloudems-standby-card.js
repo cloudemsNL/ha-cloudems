@@ -1,11 +1,13 @@
-// CloudEMS Standby Intelligence Card v5.4.96
-const CARD_STANDBY_VERSION = '5.5.318';
+// CloudEMS Standby Intelligence Card v5.5.465
+const CARD_STANDBY_VERSION = '5.5.465';
 // Bundled inefficiency report: always-on, creep, unaccounted power
 
 class CloudemsStandbyCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "💤 Sluimerverbruik", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-standby-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_standby_intelligence"];
@@ -108,7 +110,7 @@ class CloudemsStandbyCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement("cloudems-standby-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-standby-card-editor');}
   static getStubConfig() { return {}; }
 }
 

@@ -3,7 +3,7 @@
 // use of this file is strictly prohibited. See LICENSE for full terms.
 
 /**
- * CloudEMSTooltip — v4.6.641
+ * CloudEMSTooltip — v5.5.528
  * Gedeelde tooltip helper voor alle CloudEMS custom cards.
  *
  * Gebruik:
@@ -436,6 +436,19 @@ window.CloudEMSTooltip = {
         <ha-card>
           <div class="cc">
             ${cfg.name ? `<div class="ttl">${cfg.name}</div>` : ''}
+            ${(()=>{
+              try {
+                const sd = this._hass?.states['sensor.cloudems_goedkoopste_laadmoment']?.attributes?.smart_delay || [];
+                const waiting = sd.filter(s => s.delay_state === 'intercepted' || s.delay_state === 'detected');
+                const suggest = sd.filter(s => s.delay_state === 'idle' && s.suggest_only && s.suggest_last_reason);
+                if(!waiting.length && !suggest.length) return '';
+                const items = [
+                  ...waiting.map(s=>`<span style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.4);border-radius:5px;padding:2px 7px;font-size:10px;color:#fbbf24">⏳ ${s.label||s.entity_id} wacht</span>`),
+                  ...suggest.map(s=>`<span style="background:rgba(74,222,128,0.12);border:1px solid rgba(74,222,128,0.3);border-radius:5px;padding:2px 7px;font-size:10px;color:#4ade80">✅ Start nu: ${s.label||s.entity_id}</span>`),
+                ].join('');
+                return `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">${items}</div>`;
+              } catch(e){ return ''; }
+            })()}
             ${loading || `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
               ${grid}${yLbls}${xLbls}${lines}
             </svg>
@@ -952,6 +965,21 @@ window.CloudEMSTooltip = {
           'solar': 'sensor.cloudems_solar_system',     // altijd positief
           'home':  'sensor.cloudems_home_rest',        // altijd positief
         };
+        // v5.5.465: NILM prefill via running_devices sensor (bevat sensor_entity_id)
+        const nilmDevs = (
+          this._hass?.states['sensor.cloudems_nilm_running_devices']?.attributes?.devices ||
+          this._hass?.states['sensor.cloudems_nilm_status']?.attributes?.devices || []
+        );
+        nilmDevs.slice(0, 12).forEach(d => {
+          const eid = d.sensor_entity_id || d.source_entity_id;
+          const label = d.user_name || d.name || d.label || 'x';
+          const k = 'nilm_' + label.replace(/[^a-z0-9]/gi,'_').toLowerCase();
+          if (eid) {
+            sensorMap[k] = eid;
+          }
+        });
+        // Voeg ook NILM totaal + overig toe
+        sensorMap['nilm_total']  = 'sensor.cloudems_nilm_running_devices_power';
         const eids = Object.values(sensorMap);
         const now   = new Date();
         const start = new Date(now - 60 * 60 * 1000);  // 1 uur
@@ -1062,7 +1090,7 @@ window.CloudEMSTooltip = {
         if (!this.isConnected || document.hidden) { this._animId = null; return; }
         this._tick++;
         try {
-          if (this._needsFullRender || (this._valuesChanged && !this._activeNid)) {  // v5.5.299: % 6 verwijderd — throttle veroorzaakte tot 35s vertraging bij browser-throttling
+          if (this._needsFullRender || (this._valuesChanged && !this._activeNid)) {  // v5.5.465: % 6 verwijderd — throttle veroorzaakte tot 35s vertraging bij browser-throttling
             this._needsFullRender = false;
             this._valuesChanged   = false;
             this._renderFull();
@@ -1112,7 +1140,10 @@ window.CloudEMSTooltip = {
       // Grid: lees altijd van sensor.cloudems_status.grid_power_w — altijd beschikbaar, altijd correct
       const _statusGrid = _statusSt?.attributes?.grid_power_w;
       let   grid        = _statusGrid != null ? _statusGrid : this._getVal(e.grid);
-      const home        = this._getVal(e.home);
+      // v5.5.465: home uit status sensor (coordinator-berekend, altijd vers)
+      // net als grid — niet van de geconfigureerde e.home entiteit die minuten oud kan zijn
+      const _statusHome = _statusSt?.attributes?.house_load_w;
+      const home        = _statusHome != null ? _statusHome : this._getVal(e.home);
       const solarNodes  = this._getSolarNodes();
       // Read per-phase power from status sensor (for 3-wire rendering)
       const _statusPhases = _statusSt?.attributes?.phases || {};
@@ -1223,7 +1254,11 @@ window.CloudEMSTooltip = {
       this._histPush('airco',  totalAirco);
       this._histPush('hp',     totalHp);
       this._histPush('pool',   pool);
-      layer2.forEach((n, i) => this._histPush(`nilm_${(n.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`, n.power_w));
+      layer2.forEach((n, i) => this._histPush(`nilm_${(n.user_name||n.label||'x').replace(/[^a-z0-9]/gi,'_').toLowerCase()}`, n.power_w));
+      // v5.5.465: push NILM totaal + overig voor sub-blok sparklines
+      const _nilmIdNow = layer2.reduce((s,n)=>s+(n.power_w||0),0);
+      this._histPush('nilm_total', _nilmIdNow);
+      this._histPush('nilm_overig', Math.max(0, home - _nilmIdNow));
 
       // ── Layout ─────────────────────────────────────────────────────────────
       const W = 500;
@@ -1236,7 +1271,7 @@ window.CloudEMSTooltip = {
       const R_HOME  = 365, R_L2    = 455, R_L3   = 530;
       const hasL3 = subs.some(s => s.children.length > 0);
       const _hasNilm = layer2.length > 0;
-      const H = _hasNilm ? R_HOME + 170 : R_HOME + 40;  // dynamic — extended below if NILM present
+      const H = _hasNilm ? R_HOME + 245 : R_HOME + 80;  // v5.5.465: THUIS+sub-blokken+anchors+nilmBox(72) passen alle
 
       const T = 10;
       const gc      = grid > T ? '#e74c3c' : '#2ecc71';
@@ -1394,12 +1429,111 @@ window.CloudEMSTooltip = {
       };
 
       const hubSvg = () => {
-        const active = gridActive||homeActive||battActive||solarActive||boilerActive;
-        return `<g style="${active?'filter:drop-shadow(0 0 14px rgba(255,255,255,0.12))':''}">
-          <circle cx="${COL_HUB}" cy="${R_HUB}" r="26" fill="#0d1117" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
-          <circle cx="${COL_HUB}" cy="${R_HUB}" r="20" fill="#111827" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <text x="${COL_HUB}" y="${R_HUB+4}" text-anchor="middle" font-size="9" font-weight="700"
-            letter-spacing="0.1em" fill="rgba(255,255,255,0.4)">HUB</text>
+        // v5.5.465: volledig dynamische donut — alle hub-nodes, hoek berekend uit positie
+        // Klok-conventie: midDeg = atan2(dx, -dy)*180/π  (0=boven, +90=rechts, -90=links)
+        const _cx=COL_HUB, _cy=R_HUB;
+        const _Rmid=25, _sw=14;
+        const _circ = 2*Math.PI*_Rmid;
+        const _t = this._tick * 0.012;
+        const _battChg = totalBattPw > 0;
+        const _gridExp = grid < 0;
+
+        // Helper: bereken klok-hoek van hub-centrum naar node (nx, ny)
+        const _ang = (nx, ny) => Math.atan2(nx - _cx, _cy - ny) * 180 / Math.PI;
+
+        // Alle mogelijke hub-nodes — alleen toegevoegd als vermogen > drempel
+        // Formaat: {pwr, col, lbl, nx, ny}
+        const _T = 2; // minimaal vermogen om te tonen
+        const _allNodes = [
+          // Boven
+          {pwr: Math.max(0, totalSolar),    col:'#f0c040',                            lbl:'zon',
+           nx: COL_HUB,        ny: R_SUN},
+          // Rechts boven → rechts onder
+          {pwr: Math.abs(totalBattPw),       col:_battChg?'#d29922':'#3fb950',         lbl:_battChg?'laden':'ontladen',
+           nx: COL_R-20,       ny: R_BATT},
+          {pwr: Math.max(0, totalBoiler),    col:'#60a5fa',                            lbl:'boiler',
+           nx: COL_R-20,       ny: R_BOI},
+          {pwr: Math.max(0, totalAirco),     col:'#38bdf8',                            lbl:'airco',
+           nx: COL_R-16,       ny: R_AIRCO},
+          {pwr: Math.max(0, typeof totalHp!=='undefined'?totalHp:0), col:'#a78bfa',   lbl:'wp',
+           nx: COL_R-16,       ny: R_HP},
+          // Links boven → links onder
+          {pwr: Math.abs(grid),              col:_gridExp?'#3fb950':'#f85149',         lbl:_gridExp?'export':'import',
+           nx: COL_LEFT+44,    ny: R_GRID},
+          {pwr: Math.max(0, typeof genPowerW!=='undefined'?genPowerW:0), col:'#fbbf24', lbl:'gen',
+           nx: COL_LEFT+44,    ny: R_GEN},
+          {pwr: Math.max(0, ev),             col:'#4ade80',                            lbl:'ev',
+           nx: COL_LEFT+44,    ny: R_EV},
+          {pwr: Math.max(0, typeof ebike!=='undefined'?ebike:0), col:'#86efac',        lbl:'ebike',
+           nx: COL_LEFT+44,    ny: R_EBIKE},
+          {pwr: Math.max(0, pool),           col:'#67e8f9',                            lbl:'zwembad',
+           nx: COL_LEFT+44,    ny: R_POOL},
+          // Onder
+          {pwr: Math.max(0, home),           col:'#93c5fd',                            lbl:'huis',
+           nx: COL_HUB,        ny: R_HOME},
+        ];
+
+        // Alleen nodes met pwr > drempel
+        const _active = _allNodes.filter(n => n.pwr > _T);
+        const _total  = _active.reduce((s,n) => s+n.pwr, 0) || 1;
+
+        // Bouw _RAW met fractie + berekende hoek
+        const _RAW = _active.map(n => ({
+          fr:     n.pwr / _total,
+          col:    n.col,
+          lbl:    n.lbl,
+          midDeg: _ang(n.nx, n.ny),
+        }));
+        _RAW.sort((a,b) => a.midDeg - b.midDeg);
+
+        // Optimale starthoek: minimaliseer gewogen afwijking ringpositie ↔ node-hoek
+        let _bestOff=0, _bestErr=1e9;
+        for(let trial=-180; trial<=180; trial+=2){
+          let cur=trial, err=0;
+          for(const s of _RAW){
+            const boog=s.fr*360, mid=cur+boog/2;
+            const mn=((mid%360)+360)%360, mn2=mn>180?mn-360:mn;
+            let diff=Math.abs(mn2-s.midDeg); if(diff>180) diff=360-diff;
+            err+=diff*s.fr; cur+=boog;
+          }
+          if(err<_bestErr){_bestErr=err;_bestOff=trial;}
+        }
+
+        // Render segmenten + labels
+        // Klok-conventie dashoffset: offset = circ*(1 − curDeg/360)
+        // → curDeg=0 (boven) geeft offset=circ=0 mod circ → start boven ✓
+        // → curDeg=90 (rechts) geeft offset=0.75*circ → start rechts ✓
+        let _parts='', _labels='', curDeg=_bestOff;
+        _RAW.forEach((s,i) => {
+          const boogDeg = s.fr*360;
+          const midDeg  = curDeg + boogDeg/2;
+          const arcLen  = (_circ*s.fr).toFixed(2);
+          const gapLen  = (_circ*(1-s.fr)).toFixed(2);
+          const offset  = (_circ*(1-curDeg/360)).toFixed(2);
+          const pulse   = 0.75+0.18*Math.sin(_t*1.4+i*1.3);
+          const al      = Math.round(pulse*255).toString(16).padStart(2,'0');
+          _parts += `<circle cx="${_cx}" cy="${_cy}" r="${_Rmid}" fill="none" stroke="${s.col}${al}" stroke-width="${_sw}" stroke-dasharray="${arcLen} ${gapLen}" stroke-dashoffset="${offset}" transform="rotate(-90,${_cx},${_cy})" stroke-linecap="butt"/>`;
+          if(s.fr > 0.04){
+            // Label positie: klok-hoek → SVG richting
+            const midRad = (midDeg-90)*Math.PI/180;
+            const ldist  = _Rmid+_sw/2+18;
+            const lx     = (_cx+Math.cos(midRad)*ldist).toFixed(1);
+            const ly     = (_cy+Math.sin(midRad)*ldist).toFixed(1);
+            const lw     = s.lbl.length*5+6;
+            _labels += `<rect x="${(parseFloat(lx)-lw/2).toFixed(1)}" y="${(parseFloat(ly)-7).toFixed(1)}" width="${lw}" height="13" rx="3" fill="#0d111788"/>`;
+            _labels += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle" font-size="9" font-weight="600" fill="${s.col}" opacity="0.95">${s.lbl}</text>`;
+          }
+          curDeg += boogDeg;
+        });
+
+        const _dr  = ((_t*0.35*180/Math.PI)%360).toFixed(1);
+        const _Ro  = _Rmid+_sw/2;
+        return `<g>
+          ${_parts}
+          <circle cx="${_cx}" cy="${_cy}" r="${_Ro+5}" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="3" stroke-dasharray="5 12" stroke-linecap="round" transform="rotate(${_dr},${_cx},${_cy})"/>
+          <circle cx="${_cx}" cy="${_cy}" r="${_Rmid-_sw/2-1}" fill="#161b22" stroke="#21262d" stroke-width="1"/>
+          <text x="${_cx}" y="${_cy+4}" text-anchor="middle" font-size="8" font-weight="700" letter-spacing="0.12em" fill="rgba(255,255,255,0.35)">HUB</text>
+          ${_labels}
         </g>`;
       };
 
@@ -1745,7 +1879,11 @@ window.CloudEMSTooltip = {
       // 6 vaste device slots — gelijkmatig
       const _SLOTS = [45, 127, 209, 291, 373, 455];
 
-      const _ANCHOR_Y = R_HOME + 75;
+      // v5.5.465: NILM + OVERIG sub-blokken — berekeningen alvast, tekenen gebeurt na THUIS nodeBox
+      const _nilmIdentified = _topDevs.reduce((s,d) => s + (d.power_w||0), 0);
+      const _nilmOverig     = Math.max(0, home - _nilmIdentified);
+
+      const _ANCHOR_Y = R_HOME + 105;
       const _DEV_Y    = _ANCHOR_Y + 72;
 
       // Store op nodes voor dots/pipes
@@ -1767,7 +1905,7 @@ window.CloudEMSTooltip = {
         const col = _ANC_COL[k];
         const active = !!_ancActive[k];
         const isDash = k === '?';
-        h += `<line x1="${COL_HUB}" y1="${R_HOME+20}" x2="${ax}" y2="${_ANCHOR_Y-12}"
+        h += `<line x1="${COL_HUB-48}" y1="${R_HOME+62}" x2="${ax}" y2="${_ANCHOR_Y-12}"
           stroke="${col}" stroke-width="${active?1:0.6}" opacity="${active?0.65:0.15}"
           ${isDash?'stroke-dasharray="4,3"':''} stroke-linecap="round"/>`;
       });
@@ -1925,6 +2063,27 @@ window.CloudEMSTooltip = {
       if (battNodes.length > 0) h += battBox();
       const homeName = (e.home||{}).name || 'Thuis';
       h += nodeBox(COL_HUB, R_HOME, 64, 38, C.home, homeActive, homeName.toUpperCase(), this._fmt(home), null, 'home', 'home');
+
+      // v5.5.465: NILM + OVERIG sub-blokken — getekend NA de THUIS nodeBox
+      {
+        const _SUB_Y = R_HOME + 32;
+        const _SUB_W = 76, _SUB_H = 30;
+        const _NX = COL_HUB - 48, _OX = COL_HUB + 48;
+        // Verbindingslijnen
+        h += `<line x1="${COL_HUB-10}" y1="${R_HOME+19}" x2="${_NX}" y2="${_SUB_Y}" stroke="${C.home}" stroke-width="1.5" opacity="0.6" stroke-linecap="round"/>`;
+        h += `<line x1="${COL_HUB+10}" y1="${R_HOME+19}" x2="${_OX}" y2="${_SUB_Y}" stroke="#475569" stroke-width="1.5" opacity="0.5" stroke-dasharray="4 3" stroke-linecap="round"/>`;
+        // NILM blok + sparkline
+        h += `<rect x="${_NX-_SUB_W/2}" y="${_SUB_Y}" width="${_SUB_W}" height="${_SUB_H}" rx="6" fill="${C.home}22" stroke="${C.home}" stroke-width="1.2"/>`;
+        h += `<text x="${_NX-_SUB_W/2+5}" y="${_SUB_Y+10}" font-size="7.5" font-weight="600" fill="${C.home}bb">NILM</text>`;
+        h += `<text x="${_NX-_SUB_W/2+5}" y="${_SUB_Y+22}" font-size="10" font-weight="700" fill="${C.home}">${this._fmt(_nilmIdentified)}</text>`;
+        h += this._sparkSvg('nilm_total', _NX+2, _SUB_Y+3, 32, 22, C.home);
+        // OVERIG blok + sparkline
+        h += `<rect x="${_OX-_SUB_W/2}" y="${_SUB_Y}" width="${_SUB_W}" height="${_SUB_H}" rx="6" fill="#21262d" stroke="#475569" stroke-width="1" stroke-dasharray="4 2"/>`;
+        h += `<text x="${_OX-_SUB_W/2+5}" y="${_SUB_Y+10}" font-size="7.5" font-weight="600" fill="#6b7280">OVERIG</text>`;
+        h += `<text x="${_OX-_SUB_W/2+5}" y="${_SUB_Y+22}" font-size="10" font-weight="700" fill="#6b7280">${this._fmt(_nilmOverig)}</text>`;
+        h += this._sparkSvg('nilm_overig', _OX+2, _SUB_Y+3, 32, 22, '#475569');
+      }
+
       // Phase pills above THUIS node when 3-phase
       if (_isThreePhase) {
         const _phLabels = ['L1','L2','L3'];
@@ -1984,7 +2143,7 @@ window.CloudEMSTooltip = {
             if (!seenAnc[ak]) {
               seenAnc[ak] = true;
               results.push({ key:`nilm_anc_${ak}`, color: d._phCol||C.sub, on:true, pw:d.power_w||0,
-                x1: COL_HUB, y1: R_HOME+20, x2: ax, y2: _ANCHOR_Y-12 });
+                x1: COL_HUB-48, y1: R_HOME+62, x2: ax, y2: _ANCHOR_Y-12 });
             }
             // Segment 2: fase-anker → device slot
             results.push({ key:`nilm_dev_${i}`, color: d._phCol||C.sub, on:true, pw:d.power_w||0,
@@ -2322,17 +2481,46 @@ window.CloudEMSTooltip = {
         const todaySt = h.states['sensor.cloudems_solar_pv_forecast_today'] ?? h.states['sensor.cloudems_pv_forecast_today'];
         const tomSt   = h.states['sensor.cloudems_solar_pv_forecast_tomorrow'] ?? h.states['sensor.cloudems_pv_forecast_tomorrow'];
         const accSt   = h.states['sensor.cloudems_solar_pv_forecast_accuracy'] ?? h.states['sensor.cloudems_pv_forecast_accuracy'];
+        // v5.5.465: per-omvormer dagproductie via config flow (energy_sensor per omvormer)
+        // Beschikbaar via sensor.cloudems_solar_system inverters[].energy_sensor
+        const invCfg = sysInvs.length > 0 ? sysInvs : [];
+        const allInvsEnhanced = allInvs.map((inv, i) => {
+          const cfg = sysInvs[i] || {};
+          let todayKwh = null;
+          if (cfg.energy_sensor) {
+            const est = h.states[cfg.energy_sensor];
+            if (est && est.state !== 'unavailable' && est.state !== 'unknown') {
+              todayKwh = parseFloat(est.state);
+              const unit = (est.attributes?.unit_of_measurement||'').toLowerCase();
+              if (unit === 'wh') todayKwh /= 1000;
+            }
+          }
+          return {...inv, todayKwh};
+        });
+        const maxW = Math.max(1, ...allInvsEnhanced.map(n=>n.w));
+        const invMetrics = allInvsEnhanced.map(n => ({
+          l: n.label,
+          v: fmt(n.w),
+          sub: [
+            n.todayKwh != null ? `vandaag: ${n.todayKwh.toFixed(2)} kWh` : null,
+            n.peak_w ? `piek: ${fmt(n.peak_w)}` : null,
+            n.phase && n.phase !== '?' ? `fase: ${n.phase}` : null,
+          ].filter(Boolean).join(' · '),
+          barPct: Math.round(n.w/maxW*100),
+          barCol: C,
+        }));
+        const totalTodayKwh = allInvsEnhanced.reduce((s,n)=>s+(n.todayKwh||0),0);
         return {
           title: 'Zonnepanelen', color: C,
           metrics: [
             {l:'Productie nu',  v: fmt(totalSolar)},
-            {l:'Vandaag',       v: todaySt&&todaySt.state!=='unavailable'? parseFloat(todaySt.state).toFixed(2)+' kWh':'—'},
+            {l:'Vandaag',       v: todaySt&&todaySt.state!=='unavailable'? parseFloat(todaySt.state).toFixed(2)+' kWh':(totalTodayKwh>0?totalTodayKwh.toFixed(2)+' kWh':'—')},
             {l:'Morgen fcst',   v: tomSt&&tomSt.state!=='unavailable'?    parseFloat(tomSt.state).toFixed(2)+' kWh':'—'},
-            {l:'Piek 7d',       v: allInvs.length ? fmt(Math.max(...allInvs.map(n=>n.peak_w||n.peak_w_7d||0))) : '—'},
+            {l:'Piek 7d',       v: allInvsEnhanced.length ? fmt(Math.max(...allInvsEnhanced.map(n=>n.peak_w||0))) : '—'},
             {l:'Zekerheid',     v: accSt&&accSt.state!=='unavailable'?    Math.round(parseFloat(accSt.state))+'%':'—'},
-            ...allInvs.map(n => ({l: n.label, v: fmt(n.w), sub: n.peak_w?'piek: '+fmt(n.peak_w):''})),
+            ...invMetrics,
           ],
-          note: `${allInvs.length} omvormer${allInvs.length!==1?'s':''} · totaal ${fmt(totalSolar)}`,
+          note: `${allInvsEnhanced.length} omvormer${allInvsEnhanced.length!==1?'s':''} · totaal ${fmt(totalSolar)}`,
         };
       }
 
@@ -5232,4 +5420,4 @@ window.CloudEMSTooltip = {
 
 })();
 
-// v5.5.4: nieuwe kaarten dynamisch geladen via eigen bestanden
+// v5.5.465: nieuwe kaarten dynamisch geladen via eigen bestanden

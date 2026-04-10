@@ -5,7 +5,7 @@
  * 15 tabs: Status · Categorieën · Kamers · Apparaten · Zonne · Batterij · Boiler · Rolluiken · EV · E-bike · Zwembad
  */
 const HCV = '1.8.8';
-const CARD_HOME_VERSION = '5.5.318';
+const CARD_HOME_VERSION = '5.5.465';
 
 const PCOL = ct => ct<=15?'#34d399':ct<=22?'#86efac':ct<=28?'#fbbf24':ct<=33?'#f97316':'#ef4444';
 const PLBL = ct => ct<=15?'LAAG':ct<=22?'NORMAAL':ct<=28?'MEDIUM':ct<=33?'HIGH':'PIEK';
@@ -1062,9 +1062,35 @@ ${(()=>{
 </div>
 <div class="boil-stats">
   <div class="bstat"><div class="bstatv" style="color:#f87171">${this._a(`sensor.cloudems_boiler_${slug}_temp`,'showers_today',0)||0}</div><div class="bstatl">douches</div></div>
-  <div class="bstat"><div class="bstatv" style="color:#60a5fa">—</div><div class="bstatl">liter</div></div>
+  <div class="bstat"><div class="bstatv" style="color:#60a5fa">${b.shower_liters_learned?Math.round(b.shower_liters_learned)+'L':'—'}</div><div class="bstatl">p/douche${b.shower_liters_learned?' ✓':''}</div></div>
   ${cop!=null?`<div class="bstat"><div class="bstatv" style="color:#34d399">${parseFloat(cop).toFixed(1)}</div><div class="bstatl">COP</div></div>`:'<div class="bstat"></div>'}
 </div>
+${(()=>{
+  const dow = b.usage_pattern_dow;
+  if(!dow||!dow.length) return '';
+  const days = ['Ma','Di','Wo','Do','Vr','Za','Zo'];
+  const max = Math.max(...dow.flatMap(d=>d), 0.01);
+  const cells = dow.map((dayArr,di)=>
+    dayArr.map((v,h)=>{
+      const pct = v/max;
+      const alpha = Math.round(pct*220);
+      const hex = alpha.toString(16).padStart(2,'0');
+      const title = `${days[di]} ${h}:00 — ${Math.round(pct*100)}%`;
+      return `<div title="${title}" style="width:9px;height:9px;border-radius:1px;background:#EF9F27${hex}"></div>`;
+    }).join('')
+  );
+  const hourLabels = [0,6,12,18].map(h=>`<span style="font-size:7px;color:#484f58;position:absolute;left:${h*9+20}px">${h}u</span>`).join('');
+  return `<div style="margin:8px 0 4px;padding:6px;background:#0d1117;border-radius:6px">
+    <div style="font-size:9px;color:#6b7280;margin-bottom:4px">Warmwaterpatroon (geleerd)</div>
+    <div style="position:relative;height:10px;margin-bottom:2px">${hourLabels}</div>
+    <div style="display:flex;gap:2px">
+      ${dow.map((dayArr,di)=>`<div>
+        <div style="font-size:6px;color:#484f58;text-align:center;margin-bottom:1px">${days[di]}</div>
+        <div style="display:flex;flex-direction:column;gap:1px">${dayArr.map((v,h)=>{const p=v/max;const a=Math.round(p*220).toString(16).padStart(2,'0');return `<div style="width:9px;height:4px;border-radius:1px;background:#EF9F27${a}"></div>`;}).join('')}</div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+})()}
 <div class="boil-foot">⚡ Elekriciteit vs gas vergelijking beschikbaar via Boiler tab</div>`;
     }).join('');
   }
@@ -1331,6 +1357,11 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
         const sp=parseFloat(btn.dataset.sp);
         const ctrl=btn.closest('.boiler-sp-ctrl');
         const slug=ctrl?.dataset.slug||'boiler_1';
+        // Optimistic: toon nieuwe setpoint direct
+        if(!this._optimisticSp) this._optimisticSp = {};
+        this._optimisticSp[`water_heater.cloudems_boiler_${slug}`] = sp;
+        const spValEl = btn.closest('.boiler-sp-ctrl')?.querySelector('.sp-val');
+        if(spValEl) spValEl.textContent = sp + '°C';
         this._hass.callService('water_heater','set_temperature',{entity_id:`water_heater.cloudems_boiler_${slug}`,temperature:sp});
         setTimeout(()=>{this._prev='';},500);
       });
@@ -1566,25 +1597,100 @@ ${advice?`<div class="ins" style="border-top:1px solid rgba(255,255,255,0.05);pa
 }
 
 class CloudEMSHomeCardEditor extends HTMLElement {
-  setConfig(c){this._config=c||{};}
+  constructor(){super();this.attachShadow({mode:'open'});this._config={};}
+
+  setConfig(c){this._config=c||{};this._render();}
   set hass(h){}
-  connectedCallback(){
-    if(this._built)return; this._built=true;
-    this.innerHTML=`<div style="padding:12px;font-size:13px;display:flex;flex-direction:column;gap:8px">
-      <label>Max ampere per fase<br><input type="number" id="max_a" value="${this._config.max_ampere||25}" min="10" max="63" style="width:80px;margin-top:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:inherit"></label>
-      <label>Aantal fasen<br><select id="phases" style="margin-top:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.07);color:inherit">
-        <option value="1" ${(this._config.phase_count||3)===1?'selected':''}>1 fase</option>
-        <option value="3" ${(this._config.phase_count||3)===3?'selected':''}>3 fasen</option>
-      </select></label>
-      <div style="font-size:10px;color:rgba(255,255,255,0.4)">Max grid = ${this._config.max_ampere||25}A × 230V × ${this._config.phase_count||3} = ${(this._config.max_ampere||25)*230*(this._config.phase_count||3)} W</div>
-    </div>`;
-    const fire = () => this.dispatchEvent(new CustomEvent('config-changed',{
-      detail:{config:{...this._config,
-        max_ampere: parseInt(this.querySelector('#max_a').value),
-        phase_count: parseInt(this.querySelector('#phases').value),
-      }},bubbles:true,composed:true}));
-    this.querySelector('#max_a').addEventListener('change', fire);
-    this.querySelector('#phases').addEventListener('change', fire);
+
+  _fire(cfg){
+    this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:cfg},bubbles:true,composed:true}));
+  }
+
+  _render(){
+    const c=this._config;
+    const sh=this.shadowRoot;
+    sh.innerHTML='';
+    const style=document.createElement('style');
+    style.textContent=`
+      :host{display:block;padding:12px}
+      .row{margin-bottom:12px}
+      label{display:block;font-size:12px;color:#aaa;margin-bottom:4px}
+      input[type=number],select{background:#1c1c1c;border:1px solid rgba(255,255,255,.15);
+        border-radius:6px;color:#fff;padding:5px 8px;font-size:13px;box-sizing:border-box}
+      input[type=number]{width:90px}
+      select{width:100%}
+      .cb{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+      .cb label{margin:0;color:#ccc;font-size:13px}
+      .hint{font-size:11px;color:#666;margin-top:4px}
+      .sec{font-size:11px;font-weight:700;color:#fff;letter-spacing:.05em;text-transform:uppercase;
+        margin:14px 0 8px;border-top:1px solid rgba(255,255,255,.08);padding-top:10px}
+    `;
+    sh.appendChild(style);
+
+    const add=(el)=>sh.appendChild(el);
+    const row=(label,el,hint)=>{
+      const d=document.createElement('div');d.className='row';
+      const l=document.createElement('label');l.textContent=label;
+      d.appendChild(l);d.appendChild(el);
+      if(hint){const h=document.createElement('div');h.className='hint';h.textContent=hint;d.appendChild(h);}
+      return d;
+    };
+    const inp=(type,id,val,min,max)=>{
+      const i=document.createElement('input');i.type=type;i.id=id;
+      if(type==='number'){i.value=val;if(min!=null)i.min=min;if(max!=null)i.max=max;}
+      else if(type==='checkbox')i.checked=val;
+      return i;
+    };
+    const cb=(id,label,key,def)=>{
+      const d=document.createElement('div');d.className='cb';
+      const i=inp('checkbox',id,c[key]!=null?c[key]:def);
+      const l=document.createElement('label');l.textContent=label;l.htmlFor=id;
+      d.appendChild(i);d.appendChild(l);
+      i.addEventListener('change',()=>{const nc=Object.assign({},c);nc[key]=i.checked;this._fire(nc);});
+      return d;
+    };
+    const sel=(id,label,key,opts,def)=>{
+      const s=document.createElement('select');s.id=id;
+      opts.forEach(o=>{const op=document.createElement('option');op.value=o.v;op.textContent=o.l;if((c[key]||def)===o.v)op.selected=true;s.appendChild(op);});
+      s.addEventListener('change',()=>{const nc=Object.assign({},c);nc[key]=s.value;this._fire(nc);});
+      return row(label,s);
+    };
+
+    // Titel
+    const ti=inp('text','title',c.title||'');ti.placeholder='(automatisch)';ti.style.cssText='background:#1c1c1c;border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#fff;padding:5px 8px;font-size:13px;width:100%;box-sizing:border-box';
+    ti.addEventListener('change',()=>{const nc=Object.assign({},c);if(ti.value)nc.title=ti.value;else delete nc.title;this._fire(nc);});
+    add(row('Titel',ti));
+
+    // Installatie sectie
+    const sec1=document.createElement('div');sec1.className='sec';sec1.textContent='Installatie';add(sec1);
+
+    const ma=inp('number','max_a',c.max_ampere||25,1,125);
+    ma.addEventListener('change',()=>{const nc=Object.assign({},c);nc.max_ampere=parseInt(ma.value)||25;this._fire(nc);});
+    add(row('Max. stroom per fase (A)',ma,'Hoofdzekering — gebruik 25 voor 3×25A, 40 voor 3×40A'));
+
+    add(sel('phases','Aantal fasen','phase_count',[{v:'1',l:'1 fase'},{v:'3',l:'3 fasen'}],'3'));
+
+    // Weergave sectie
+    const sec2=document.createElement('div');sec2.className='sec';sec2.textContent='Weergave';add(sec2);
+
+    add(cb('show_gas','Gas sectie tonen','show_gas',true));
+    add(cb('show_peak','Piekschaving tonen','show_peak_shaving',true));
+    add(cb('show_solar','Zonnedimmer tonen','show_solar_dimmer',true));
+    add(cb('show_grid_flow','Grid afname/teruglevering tonen','show_grid_flow',true));
+
+    // Standaard tab
+    add(sel('def_tab','Standaard tab','default_tab',[
+      {v:'energie',l:'⚡ Energie'},{v:'boiler',l:'🚿 Boiler'},
+      {v:'rolluiken',l:'🪟 Rolluiken'},{v:'lampen',l:'💡 Lampen'},
+      {v:'airco',l:'❄️ Airco'},{v:'ev',l:'🚗 EV'},{v:'gas',l:'🔥 Gas'},
+      {v:'solar',l:'☀️ Zonne-energie'},{v:'beheer',l:'⚙️ Beheer'},
+    ],'energie'));
+
+    // Max vermogen hint
+    const hint=document.createElement('div');
+    hint.className='hint';
+    hint.textContent='Max grid: '+( (c.max_ampere||25) * 230 * (parseInt(c.phase_count)||3) )+' W';
+    add(hint);
   }
 }
 

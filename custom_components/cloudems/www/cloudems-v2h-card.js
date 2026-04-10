@@ -1,11 +1,13 @@
-// CloudEMS V2H Card v5.4.96
-const CARD_V2H_VERSION = '5.5.318';
+// CloudEMS V2H Card v5.5.465
+const CARD_V2H_VERSION = '5.5.465';
 // Vehicle-to-Home status and control
 
 class CloudemsV2hCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "🔄 Vehicle-to-Home", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-v2h-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_v2h_status"];
@@ -76,7 +78,7 @@ class CloudemsV2hCard extends HTMLElement {
   }
 
   getCardSize() { return 3; }
-  static getConfigElement() { return document.createElement("cloudems-v2h-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-v2h-card-editor');}
   static getStubConfig() { return {}; }
 }
 

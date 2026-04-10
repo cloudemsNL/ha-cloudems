@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Isometric Energy Card v5.4.96
+// CloudEMS Isometric Energy Card v5.5.465
 
 const ISO_VERSION = '4.0.0';
 const ISO_BASE = '/local/cloudems/iso-assets/';
@@ -101,9 +101,7 @@ class CloudEMSIsoCard extends HTMLElement {
 
   getCardSize() { return 10; }
 
-  static getConfigElement() {
-    return document.createElement('cloudems-iso-card-editor');
-  }
+  static getConfigElement(){return document.createElement('cloudems-iso-card-editor');}
 
   static getStubConfig() {
     return { house_type: 'modern' };
@@ -822,6 +820,65 @@ hx/hy/hw=house center x/y/width%, bx/by/bw=battery left, ex/ey/ew=EV right, gx/g
     }
   }
 }
+
+
+
+
+class CloudemsIsoCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_house_type=document.createElement('div');row_house_type.style.marginBottom='10px';
+    var lbl_house_type=document.createElement('label');lbl_house_type.textContent='Woningtype';lbl_house_type.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_house_type=document.createElement('input');
+    inp_house_type.id='house_type';
+    inp_house_type.type='text';
+    inp_house_type.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_house_type.value=c.house_type||'';
+    
+    row_house_type.appendChild(lbl_house_type);row_house_type.appendChild(inp_house_type);sh.appendChild(row_house_type);
+    inp_house_type.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["house_type"]=inp_house_type.type==="number"?parseFloat(inp_house_type.value)||0:inp_house_type.value||undefined;
+      if(nc['house_type']===undefined||nc['house_type']==='')delete nc['house_type'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+
+    var row_custom_image_url=document.createElement('div');row_custom_image_url.style.marginBottom='10px';
+    var lbl_custom_image_url=document.createElement('label');lbl_custom_image_url.textContent='Afbeelding URL';lbl_custom_image_url.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_custom_image_url=document.createElement('input');
+    inp_custom_image_url.id='custom_image_url';
+    inp_custom_image_url.type='text';
+    inp_custom_image_url.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_custom_image_url.value=c.custom_image_url||'';
+    
+    row_custom_image_url.appendChild(lbl_custom_image_url);row_custom_image_url.appendChild(inp_custom_image_url);sh.appendChild(row_custom_image_url);
+    inp_custom_image_url.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["custom_image_url"]=inp_custom_image_url.type==="number"?parseFloat(inp_custom_image_url.value)||0:inp_custom_image_url.value||undefined;
+      if(nc['custom_image_url']===undefined||nc['custom_image_url']==='')delete nc['custom_image_url'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-iso-card-editor'))customElements.define('cloudems-iso-card-editor',CloudemsIsoCardEditor);
+if(!customElements.get('cloudems-iso-card-editor'))customElements.define('cloudems-iso-card-editor',CloudemsIsoCardEditor);
 
 if (!customElements.get('cloudems-iso-card'))
   customElements.define('cloudems-iso-card', CloudEMSIsoCard);

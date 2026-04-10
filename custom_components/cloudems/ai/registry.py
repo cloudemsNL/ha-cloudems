@@ -269,13 +269,14 @@ class AIRegistry:
                 )
 
         # Record to learning log
-        _ai_pred_now = await self._default_provider.async_predict(features) if self._ready else None
+        _def_prov = self.default_provider
+        _ai_pred_now = await _def_prov.async_predict(features) if (_def_prov and _def_prov.is_ready) else None
         if _ai_pred_now:
             self._learning_log.record_from_data(
                 data          = data,
                 ai_label      = _ai_pred_now.label,
                 ai_conf       = _ai_pred_now.confidence,
-                ai_source     = "knn" if self._ready else "bootstrap",
+                ai_source     = "knn" if (_def_prov and _def_prov.is_ready) else "bootstrap",
                 action_taken  = self._infer_label(data),
                 action_source = "coordinator",
                 thresholds    = self._threshold_learner.all_values,

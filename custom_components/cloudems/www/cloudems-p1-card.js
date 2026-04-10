@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS P1 Card  v5.4.96
+// CloudEMS P1 Card  v5.5.465
 
-const P1_VERSION = "5.5.318";
+const P1_VERSION = "5.5.465";
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 function fmt(v, dec=0, unit="") {
@@ -90,6 +90,8 @@ class CloudemsP1Card extends HTMLElement {
 
   setConfig(c) { this._cfg = {title:"P1 Netbalans",...c}; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-p1-card-editor');}
   set hass(h) {
     this._hass = h;
     const st  = h.states["sensor.cloudems_p1_power"];
@@ -240,7 +242,7 @@ class CloudemsP1Card extends HTMLElement {
     </div>`;
   }
 
-  static getConfigElement() { return document.createElement("cloudems-p1-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-p1-card-editor');}
   static getStubConfig()    { return {title:"P1 Netbalans"}; }
   getCardSize() { return 5; }
 }

@@ -37,6 +37,7 @@ PLATFORMS = [
 ]
 
 LOVELACE_CARDS_URL          = f"/local/cloudems/cloudems-cards.js?v={VERSION}"
+LOVELACE_EDITORS_URL        = f"/local/cloudems/cloudems-card-editors.js?v={VERSION}"
 LOVELACE_CARDMOD_URL        = f"/local/cloudems/cloudems-card-mod.js?v={VERSION}"
 LOVELACE_BOILER_URL         = f"/local/cloudems/cloudems-boiler-card.js?v={VERSION}"
 LOVELACE_BATTERY_URL        = f"/local/cloudems/cloudems-battery-card.js?v={VERSION}"
@@ -151,6 +152,7 @@ LOVELACE_RESOURCE_TYPE = "module"
 
 _ALL_JS_RESOURCES = [
     # ── Bundel (eerst laden — definieert flow-card, graph-card, nilm-card, overview-card) ──
+    (LOVELACE_EDITORS_URL,      "cloudems-card-editors.js"),  # v5.5.340: gedeelde editors
     (LOVELACE_CARDS_URL,        "cloudems-cards.js"),
 
     # ── Stubs / aliassen (lege bestanden die verwijzen naar de bundel) ──
@@ -823,10 +825,18 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
                 _LOGGER.debug("CloudEMS: %s niet gevonden, dashboard overgeslagen", dash["yaml_file"])
                 continue
 
-            dashboard_config = _yaml.safe_load(yaml_src.read_text(encoding="utf-8"))
+            _yaml_text = yaml_src.read_text(encoding="utf-8")
+            if not _yaml_text or not _yaml_text.strip():
+                _LOGGER.warning("CloudEMS: %s is leeg — dashboard overgeslagen", dash["yaml_file"])
+                continue
+            dashboard_config = _yaml.safe_load(_yaml_text)
 
             # Dashboard YAML kan een lijst van views zijn OF een dict met views: sleutel.
             # HA storage verwacht altijd een dict — normaliseer hier.
+            if dashboard_config is None:
+                _LOGGER.warning("CloudEMS: %s laadt als None (leeg YAML?) — dashboard overgeslagen",
+                                dash["yaml_file"])
+                continue
             if isinstance(dashboard_config, list):
                 dashboard_config = {"views": dashboard_config}
             elif not isinstance(dashboard_config, dict):
@@ -852,12 +862,48 @@ async def _async_ensure_lovelace_dashboard(hass: HomeAssistant) -> None:
                 _LOGGER.info("CloudEMS: dashboard '%s' geregistreerd", dash["title"])
 
             # --- Stap 2: lovelace.{slug} — altijd updaten na HACS-installatie ---
+            # Detecteer of huidig bestand leeg/reset is (bijv. na HA repair)
+            _needs_restore = False
+            if dash_cfg.exists():
+                try:
+                    _cur = json.loads(dash_cfg.read_text(encoding="utf-8"))
+                    _cur_views = _cur.get("data", {}).get("config", {}).get("views", [])
+                    _has_cloudems = any(
+                        str(v.get("path", "")).startswith("cloudems-") for v in _cur_views
+                    )
+                    if not _has_cloudems:
+                        _LOGGER.warning(
+                            "CloudEMS: dashboard '%s' bevat geen CloudEMS views "
+                            "(gereset door HA repair?) — herstellen...", slug
+                        )
+                        _needs_restore = True
+                        newly_created.append(slug)  # trigger live reload
+                except Exception:
+                    _needs_restore = True
+
             cfg_data = {
                 "version": 1, "minor_version": 1,
                 "key": f"lovelace.{slug}",
                 "data": {"config": dashboard_config},
             }
-            dash_cfg.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            # v5.5.516: atomic write — voorkomt lege/corrupte storage bij crash
+            _json_out = json.dumps(cfg_data, ensure_ascii=False, indent=2)
+            if not _json_out or not _json_out.strip():
+                _LOGGER.warning("CloudEMS: lege JSON voor dashboard '%s' — schrijven overgeslagen", slug)
+                continue
+            _tmp_path = dash_cfg.with_suffix(".tmp")
+            _tmp_path.write_text(_json_out, encoding="utf-8")
+            # Valideer vóór rename
+            try:
+                _verify = json.loads(_tmp_path.read_text(encoding="utf-8"))
+                if not _verify or "data" not in _verify:
+                    raise ValueError("Ongeldige structuur")
+                _tmp_path.replace(dash_cfg)  # atomair op Linux
+            except Exception as _verify_err:
+                _LOGGER.error("CloudEMS: dashboard '%s' validatie mislukt: %s — origineel behouden",
+                              slug, _verify_err)
+                _tmp_path.unlink(missing_ok=True)
+                continue
             _LOGGER.info(
                 "CloudEMS: dashboard '%s' config geschreven naar %s (%d bytes)",
                 slug, dash_cfg.name, dash_cfg.stat().st_size

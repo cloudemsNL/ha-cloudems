@@ -1,4 +1,4 @@
-// CloudEMS Energy Visual Card v5.4.96
+// CloudEMS Energy Visual Card v5.5.465
 // Animated energy flow with NILM device icons as nodes
 
 const EVC_VER = '1.0.0';
@@ -92,6 +92,8 @@ class CloudemsEnergyVisualCard extends HTMLElement {
 
   setConfig(c) { this._cfg = {title:'⚡ Energiestroom', max_devices:6, ...c}; this._r(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-energy-visual-card-editor');}
   set hass(h) {
     this._hass = h;
     const k = JSON.stringify([
@@ -251,10 +253,7 @@ class CloudemsEnergyVisualCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() {
-    const el = document.createElement('cloudems-energy-visual-card-editor');
-    return el;
-  }
+  static getConfigElement(){return document.createElement('cloudems-energy-visual-card-editor');}
   static getStubConfig() { return {}; }
 }
 

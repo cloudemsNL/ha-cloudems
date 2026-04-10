@@ -581,12 +581,16 @@ class ShutterController:
                         state.auto_enabled = False
                         _LOGGER.info("CloudEMS Shutters: pauze hersteld voor %s tot %s", eid, until)
             # v4.6.491: herstel permanent uitgeschakelde automaten
+            # v5.5.349: permanent uit → bij herstart max 12u, daarna auto-resume
             for eid in data.get("auto_disabled_permanent", []):
                 state = self._states.get(eid)
                 if state:
                     state.auto_enabled = False
-                    state.auto_disabled_until = None
-                    _LOGGER.info("CloudEMS Shutters: automaat permanent UIT hersteld voor %s", eid)
+                    state.auto_disabled_until = dt_util.now() + timedelta(hours=12.0)
+                    _LOGGER.info(
+                        "CloudEMS Shutters: automaat UIT hersteld voor %s "
+                        "(was permanent, nu max 12u om hangen te voorkomen)", eid
+                    )
             for eid, t in data.get("override_until", {}).items():
                 state = self._states.get(eid)
                 if state and t:

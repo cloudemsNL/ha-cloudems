@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Control Card  v5.4.96  — alles-in-één interactieve beheerkaart
+// CloudEMS Control Card  v5.5.465  — alles-in-één interactieve beheerkaart
 
 const CTRL_VER = "2.0.0";
 
@@ -443,6 +443,29 @@ class CloudemsControlCard extends HTMLElement {
             <input class="sp-input" type="number" min="20" max="75" step="1" value="${Math.round(sp)}" data-wheid="${esc(wheid)}" style="width:64px">
             <button class="btn-set" data-action="set_sp" data-eid="${esc(wheid)}">Instellen</button>
           </div>
+          ${(()=>{
+            // v5.5.465: alleen tonen bij cloud/LAN-gestuurde boilers (niet switch-only)
+            const ctrlMode = b.control_mode ?? 'switch';
+            if (ctrlMode === 'switch') return '';
+            const c5 = b.api_calls_5min ?? 0;
+            const c60 = b.api_calls_hour ?? 0;
+            if (c5 === 0 && c60 === 0) return '';
+            const t429 = b.api_429_total ?? 0;
+            const ago = b.api_429_ago_s;
+            const rate = b.api_rate_current;
+            const rateStr = rate ? rate.toFixed(1)+'/min (adaptief)' : '2.0/min';
+            const col429 = t429 > 0 ? (ago != null && ago < 3600 ? '#f87171' : '#fb923c') : '#4ade80';
+            return '<div style="margin-top:6px;padding:5px 8px;background:rgba(255,255,255,0.04);border-radius:6px;font-size:10px;color:#6b7280">'+
+              '<span style="color:#9ca3af">API calls: </span>'+
+              '<span style="color:#60a5fa">'+c5+'/5min</span>'+
+              '<span style="margin:0 4px">·</span>'+
+              '<span style="color:#60a5fa">'+c60+'/uur</span>'+
+              '<span style="margin:0 4px">·</span>'+
+              '<span style="color:'+col429+'">429: '+t429+'x'+(ago!=null?' ('+Math.round(ago/60)+'min geleden)':'')+'</span>'+
+              '<span style="margin:0 4px">·</span>'+
+              '<span style="color:#9ca3af">Rate: '+rateStr+'</span>'+
+            '</div>';
+          })()}
         </div>`;
       }).join("")}
     </div>` : `<div class="sec" style="color:var(--sub);font-size:11px">Geen boilers geconfigureerd.</div>`;

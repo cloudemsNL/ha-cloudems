@@ -1,5 +1,5 @@
-// cloudems-lampen-tabs-card — tab-wrapper v5.5.183
-const CLOUDEMS_LAMPEN_TABS_CARD_VERSION = "5.5.318";
+// cloudems-lampen-tabs-card — tab-wrapper v5.5.465
+const CLOUDEMS_LAMPEN_TABS_CARD_VERSION = "5.5.465";
 
 class CloudEMSLampenTabsCard extends HTMLElement {
   constructor() {
@@ -21,6 +21,8 @@ class CloudEMSLampenTabsCard extends HTMLElement {
     this._config = config || {};
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-lampen-tabs-card-editor');}
   set hass(h) {
     this._hass = h;
     // Geef hass door aan alle al gecreëerde child cards
@@ -112,9 +114,20 @@ class CloudEMSLampenTabsCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement(){return document.createElement('cloudems-lampen-tabs-card-editor');}
   static getStubConfig() { return {}; }
 }
+
+
+
+
+class CloudemsLampenTabsCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});}
+  setConfig(){}
+  connectedCallback(){this.shadowRoot.innerHTML='<div style="padding:12px;font-size:12px;color:#aaa">Geen configuratie nodig — alles automatisch via CloudEMS.</div>';}
+}
+if(!customElements.get('cloudems-lampen-tabs-card-editor'))customElements.define('cloudems-lampen-tabs-card-editor',CloudemsLampenTabsCardEditor);
+if(!customElements.get('cloudems-lampen-tabs-card-editor'))customElements.define('cloudems-lampen-tabs-card-editor',CloudemsLampenTabsCardEditor);
 
 if (!customElements.get('cloudems-lampen-tabs-card'))
   customElements.define('cloudems-lampen-tabs-card', CloudEMSLampenTabsCard);

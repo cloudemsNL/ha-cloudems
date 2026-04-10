@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Shutter Card  v5.4.96
+// CloudEMS Shutter Card  v5.5.465
 
-const SHUTTER_VERSION = "5.5.318";
+const SHUTTER_VERSION = "5.5.465";
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 const CSS = `
@@ -308,6 +308,9 @@ class CloudemsShutterCard extends HTMLElement {
         if(!s2||!this._hass) return;
         const cur = Math.round(parseFloat(s2.position ?? s2.current_position ?? 0));
         const np = action==="up" ? Math.min(100,cur+10) : Math.max(0,cur-10);
+        // Optimistic: toon nieuwe positie direct
+        const posLbl = sh.getElementById("pos-lbl");
+        if(posLbl && this._selIdx === idx) posLbl.textContent = np + "%";
         this._hass.callService("cover","set_cover_position",{entity_id:s2.entity_id,position:np})
           .catch(err=>console.warn("CloudEMS shutter move:",err));
         return;

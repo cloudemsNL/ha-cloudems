@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Dagrapport Card v5.5.63
+// CloudEMS Dagrapport Card v5.5.465
 
-const DR_VERSION = "5.5.318";
+const DR_VERSION = "5.5.465";
 const DR_STYLES = `
   :host{--dr-bg:#0d1117;--dr-border:rgba(255,255,255,.07);--dr-gold:#f0c040;
     --dr-green:#3fb950;--dr-blue:#60a5fa;--dr-red:#f85149;--dr-muted:rgba(255,255,255,.3);
@@ -63,6 +63,8 @@ class CloudemsDagrapportCard extends HTMLElement {
     this._prev='';
   }
   setConfig(c){ this._cfg=c||{}; }
+  
+  static getConfigElement(){return document.createElement('cloudems-dagrapport-card-editor');}
   set hass(h){
     this._hass=h;
     const sc=h.states['sensor.cloudems_self_consumption'];
@@ -220,7 +222,7 @@ class CloudemsDagrapportCard extends HTMLElement {
     </div>`;
   }
 
-  static getConfigElement(){ return document.createElement('cloudems-dagrapport-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-dagrapport-card-editor');}
   static getStubConfig(){ return {type:'cloudems-dagrapport-card'}; }
   getCardSize(){ return 6; }
 }
@@ -237,6 +239,11 @@ class CloudemsDagrapportCardEditor extends HTMLElement {
 
 if(!customElements.get('cloudems-dagrapport-card-editor'))
   customElements.define('cloudems-dagrapport-card-editor',CloudemsDagrapportCardEditor);
+
+if(!customElements.get('cloudems-dagrapport-card-editor'))customElements.define('cloudems-dagrapport-card-editor',CloudemsDagrapportCardEditor);
+
+
+
 if(!customElements.get('cloudems-dagrapport-card'))
   customElements.define('cloudems-dagrapport-card',CloudemsDagrapportCard);
 

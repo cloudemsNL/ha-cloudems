@@ -1,5 +1,5 @@
 // CloudEMS Mini Prijs Widget — cloudems-mini-price-card
-const CARD_MINI_PRICE_VERSION = '5.5.318';
+const CARD_MINI_PRICE_VERSION = '5.5.465';
 // Compact EPEX prijskaart met incl/excl belasting toggle.
 // v1.2.0 — leest sensor.cloudems_energy_epex_today (alle data voor toggle aanwezig)
 
@@ -143,15 +143,54 @@ class CloudemsMiniPriceCard extends HTMLElement {
 
   getCardSize() { return 2; }
   static getStubConfig() { return {}; }
-  static getConfigElement() {
-    const el = document.createElement('div');
-    el.innerHTML = '<p style="padding:8px;color:#aaa">Geen configuratie vereist.</p>';
-    return el;
-  }
+  static getConfigElement(){return document.createElement('cloudems-mini-price-card-editor');}
 }
 
-if (!customElements.get('cloudems-mini-price-card')) {
+
+
+
+class CloudemsMiniPriceCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_show_incl=document.createElement('div');row_show_incl.style.marginBottom='10px';
+    var lbl_show_incl=document.createElement('label');lbl_show_incl.textContent='Inclusief belasting';lbl_show_incl.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_show_incl=document.createElement('input');
+    inp_show_incl.id='show_incl';
+    inp_show_incl.type='checkbox';
+    inp_show_incl.style.marginRight='6px';
+    
+    inp_show_incl.checked=c.show_incl!==false;
+    row_show_incl.appendChild(lbl_show_incl);row_show_incl.appendChild(inp_show_incl);sh.appendChild(row_show_incl);
+    inp_show_incl.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["show_incl"]=inp_show_incl.checked;
+      if(nc['show_incl']===undefined||nc['show_incl']==='')delete nc['show_incl'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
   customElements.define('cloudems-mini-price-card', CloudemsMiniPriceCard);
+if(!customElements.get('cloudems-mini-price-card-editor'))customElements.define('cloudems-mini-price-card-editor',CloudemsMiniPriceCardEditor);
+if(!customElements.get('cloudems-mini-price-card-editor'))customElements.define('cloudems-mini-price-card-editor',CloudemsMiniPriceCardEditor);
+
+if (!customElements.get('cloudems-mini-price-card')) {
 }
 window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === 'cloudems-mini-price-card')) {

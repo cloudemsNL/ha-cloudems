@@ -1,11 +1,13 @@
-// CloudEMS Phase Outlet Detector Card v5.4.96
-const CARD_PHASE_OUTLET_VERSION = '5.5.318';
+// CloudEMS Phase Outlet Detector Card v5.5.465
+const CARD_PHASE_OUTLET_VERSION = '5.5.465';
 // Auto-detected phase assignments for devices
 
 class CloudemsPhaseOutletCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "⚡ Fase Detectie", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-phase-outlet-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_phase_outlet_detector"];
@@ -80,7 +82,7 @@ class CloudemsPhaseOutletCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement("cloudems-phase-outlet-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-phase-outlet-card-editor');}
   static getStubConfig() { return {}; }
 }
 

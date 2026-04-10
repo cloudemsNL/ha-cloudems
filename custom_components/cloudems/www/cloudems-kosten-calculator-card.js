@@ -1,10 +1,12 @@
-// CloudEMS Kosten Calculator Card v5.5.6
-const KC_VERSION = "5.5.318";
+// CloudEMS Kosten Calculator Card v5.5.465
+const KC_VERSION = "5.5.465";
 
 class CloudEMSKostenCalculatorCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }
   setConfig(c){ this._cfg={title:'Energie Kosten',...c}; }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-kosten-calculator-card-editor');}
   set hass(h){
     this._hass=h;
     const price  = h?.states['sensor.cloudems_price_current_hour'];
@@ -96,7 +98,7 @@ class CloudEMSKostenCalculatorCard extends HTMLElement {
     </div>`;
   }
   getCardSize(){ return 3; }
-  static getConfigElement(){ return document.createElement('cloudems-kosten-calculator-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-kosten-calculator-card-editor');}
   static getStubConfig(){ return {}; }
 }
 class CloudEMSKostenCalculatorCardEditor extends HTMLElement {
@@ -105,6 +107,34 @@ class CloudEMSKostenCalculatorCardEditor extends HTMLElement {
   set hass(h){}
   connectedCallback(){ this.shadowRoot.innerHTML=`<div style="padding:8px;font-size:12px;color:var(--secondary-text-color)">Geen configuratie nodig.</div>`; }
 }
+
+
+
+class CloudemsKostenCalculatorCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-kosten-calculator-card-editor'))customElements.define('cloudems-kosten-calculator-card-editor',CloudemsKostenCalculatorCardEditor);
+if(!customElements.get('cloudems-kosten-calculator-card-editor'))customElements.define('cloudems-kosten-calculator-card-editor',CloudemsKostenCalculatorCardEditor);
+
 if(!customElements.get('cloudems-kosten-calculator-card')) customElements.define('cloudems-kosten-calculator-card', CloudEMSKostenCalculatorCard);
 if(!customElements.get('cloudems-kosten-calculator-card-editor')) customElements.define('cloudems-kosten-calculator-card-editor', CloudEMSKostenCalculatorCardEditor);
 window.customCards=window.customCards||[];

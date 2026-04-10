@@ -1,9 +1,11 @@
-// CloudEMS FCR/aFRR Card v5.4.96
-const CARD_FCR_VERSION = '5.5.318';
+// CloudEMS FCR/aFRR Card v5.5.465
+const CARD_FCR_VERSION = '5.5.465';
 
 class CloudemsFcrCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
   setConfig(c) { this._cfg = { title: "📈 FCR/aFRR Gereedheid", ...c }; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-fcr-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_fcr_afrr"];
@@ -128,15 +130,15 @@ class CloudemsFcrCard extends HTMLElement {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
       <div>
         <div style="font-size:9px;color:#6b7280">Tennet theoretical</div>
-        <div style="font-size:13px;font-weight:600;color:#4ade80">€${irTheor.toFixed(4)}</div>
+        <div style="font-size:13px;font-weight:600;color:#4ade80">€${irTheor.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
       </div>
       <div>
         <div style="font-size:9px;color:#6b7280">Zonneplan actual</div>
-        <div style="font-size:13px;font-weight:600;color:#60a5fa">€${irActual.toFixed(4)}</div>
+        <div style="font-size:13px;font-weight:600;color:#60a5fa">€${irActual.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
       </div>
       <div>
         <div style="font-size:9px;color:#6b7280">Zonneplan margin</div>
-        <div style="font-size:13px;font-weight:600;color:#f87171">€${irMargin.toFixed(4)} (${irMarginPct.toFixed(0)}%)</div>
+        <div style="font-size:13px;font-weight:600;color:#f87171">€${irMargin.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})} (${irMarginPct.toFixed(0)}%)</div>
       </div>
       <div>
         <div style="font-size:9px;color:#6b7280">Events today</div>
@@ -152,19 +154,19 @@ class CloudemsFcrCard extends HTMLElement {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
       <div>
         <div style="font-size:9px;color:#6b7280">Zonneplan credits you</div>
-        <div style="font-size:15px;font-weight:700;color:#4ade80">€${zmZpToday.toFixed(4)}</div>
+        <div style="font-size:15px;font-weight:700;color:#4ade80">€${zmZpToday.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div style="font-size:9px;color:#6b7280">${zmZpRate.toFixed(1)}ct/kWh</div>
       </div>
       <div>
         <div style="font-size:9px;color:#6b7280">Tennet would pay</div>
-        <div style="font-size:15px;font-weight:700;color:#f59e0b">€${zmTheor.toFixed(4)}</div>
+        <div style="font-size:15px;font-weight:700;color:#f59e0b">€${zmTheor.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div style="font-size:9px;color:#6b7280">${zmTennetRate.toFixed(1)}ct/kWh</div>
       </div>
     </div>
     <div style="background:rgba(248,113,113,.1);border-radius:8px;padding:8px;margin-bottom:6px">
       <div style="font-size:10px;color:#6b7280">Estimated Zonneplan margin</div>
       <div style="font-size:22px;font-weight:700;color:#f87171">${zmMarginPct.toFixed(0)}%
-        <span style="font-size:12px;font-weight:400">= €${zmMarginEur.toFixed(4)} today</span>
+        <span style="font-size:12px;font-weight:400">= €${zmMarginEur.toLocaleString('nl-NL',{minimumFractionDigits:2,maximumFractionDigits:2})} today</span>
       </div>
     </div>
     ${zmZpTotal!=null?`<div style="font-size:10px;color:#6b7280">All-time Zonneplan earnings: <b style="color:#fff">€${zmZpTotal?.toFixed(2)}</b></div>`:''}
@@ -188,7 +190,7 @@ class CloudemsFcrCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement("cloudems-fcr-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-fcr-card-editor');}
   static getStubConfig() { return {}; }
 }
 

@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Lamp Card  v5.4.96
+// CloudEMS Lamp Card  v5.5.465
 
-const LAMP_VERSION = '5.5.318';
+const LAMP_VERSION = '5.5.465';
 
 const LAMP_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -266,6 +266,8 @@ class CloudEMSLampCard extends HTMLElement {
       el.addEventListener('click',()=>{
         const eid=el.dataset.toggle;
         const on=this._hass?.states[eid]?.state==='on';
+        // Optimistic: direct icon wisselen, geen wachten op HA
+        el.textContent = on ? '○' : '💡';
         this._svc('light',on?'turn_off':'turn_on',{entity_id:eid});
       });
     });
@@ -278,7 +280,7 @@ class CloudEMSLampCard extends HTMLElement {
   }
 
   getCardSize(){ return 7; }
-  static getConfigElement(){ return document.createElement('cloudems-lamp-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-lamp-card-editor');}
   static getStubConfig(){ return {title:'Slimme Verlichting'}; }
 }
 
@@ -293,6 +295,65 @@ class CloudEMSLampCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('input').addEventListener('change',e=>{this._cfg={...this._cfg,title:e.target.value};this._fire();});
   }
 }
+
+
+
+
+class CloudemsLampCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_mode=document.createElement('div');row_mode.style.marginBottom='10px';
+    var lbl_mode=document.createElement('label');lbl_mode.textContent='Modus';lbl_mode.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_mode=document.createElement('select');
+    inp_mode.id='mode';
+    
+    inp_mode.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    
+    
+    row_mode.appendChild(lbl_mode);row_mode.appendChild(inp_mode);sh.appendChild(row_mode);
+    inp_mode.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["mode"]=inp_mode.type==="number"?parseFloat(inp_mode.value)||0:inp_mode.value||undefined;
+      if(nc['mode']===undefined||nc['mode']==='')delete nc['mode'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+
+    var row_enabled=document.createElement('div');row_enabled.style.marginBottom='10px';
+    var lbl_enabled=document.createElement('label');lbl_enabled.textContent='Ingeschakeld';lbl_enabled.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_enabled=document.createElement('input');
+    inp_enabled.id='enabled';
+    inp_enabled.type='checkbox';
+    inp_enabled.style.marginRight='6px';
+    
+    inp_enabled.checked=c.enabled!==false;
+    row_enabled.appendChild(lbl_enabled);row_enabled.appendChild(inp_enabled);sh.appendChild(row_enabled);
+    inp_enabled.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["enabled"]=inp_enabled.checked;
+      if(nc['enabled']===undefined||nc['enabled']==='')delete nc['enabled'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-lamp-card-editor'))customElements.define('cloudems-lamp-card-editor',CloudemsLampCardEditor);
+if(!customElements.get('cloudems-lamp-card-editor'))customElements.define('cloudems-lamp-card-editor',CloudemsLampCardEditor);
 
 if (!customElements.get('cloudems-lamp-card')) customElements.define('cloudems-lamp-card',CloudEMSLampCard);
 if (!customElements.get('cloudems-lamp-card-editor')) customElements.define('cloudems-lamp-card-editor',CloudEMSLampCardEditor);

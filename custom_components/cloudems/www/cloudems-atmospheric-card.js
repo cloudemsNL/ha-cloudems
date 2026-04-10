@@ -1,5 +1,5 @@
-// CloudEMS Atmospheric Heat Pump Card v5.4.96
-const CARD_ATMOSPHERIC_VERSION = '5.5.318';
+// CloudEMS Atmospheric Heat Pump Card v5.5.465
+const CARD_ATMOSPHERIC_VERSION = '5.5.465';
 
 class CloudemsAtmosphericCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
@@ -75,7 +75,7 @@ class CloudemsAtmosphericCard extends HTMLElement {
   }
 
   getCardSize() { return 4; }
-  static getConfigElement() { return document.createElement("cloudems-atmospheric-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-atmospheric-card-editor');}
   static getStubConfig() { return {}; }
 }
 

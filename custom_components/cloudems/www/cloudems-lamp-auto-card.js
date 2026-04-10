@@ -1,11 +1,13 @@
-// CloudEMS Lamp Automatisering Card — v5.4.96
+// CloudEMS Lamp Automatisering Card — v5.5.465
 // Los van lamp-circulatie: aan/uit onafhankelijk
 
-const CARD_VERSION = '5.5.318';
+const CARD_VERSION = '5.5.465';
 const MODES = { manual: '⏸ Handmatig', semi: '🔔 Semi-auto', auto: '⚡ Automatisch' };
 const MODE_COLOR = { manual: '#6b7280', semi: '#f59e0b', auto: '#22c55e' };
 
 class CloudEMSLampAutoCard extends HTMLElement {
+  
+  static getConfigElement(){return document.createElement('cloudems-lamp-auto-card-editor');}
   set hass(hass) {
     if (!this._hass || this._hass !== hass) {
       this._hass = hass;
@@ -15,10 +17,7 @@ class CloudEMSLampAutoCard extends HTMLElement {
   setConfig(config) { this._config = config || {}; }
   getCardSize() { return 4; }
 
-  static getConfigElement() {
-    const el = document.createElement('cloudems-lamp-auto-card-editor');
-    return el;
-  }
+  static getConfigElement(){return document.createElement('cloudems-lamp-auto-card-editor');}
   static getStubConfig() { return {}; }
 
   _getData() {
@@ -144,6 +143,34 @@ class CloudEMSLampAutoCard extends HTMLElement {
     });
   }
 }
+
+
+
+
+class CloudemsLampAutoCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-lamp-auto-card-editor'))customElements.define('cloudems-lamp-auto-card-editor',CloudemsLampAutoCardEditor);
+if(!customElements.get('cloudems-lamp-auto-card-editor'))customElements.define('cloudems-lamp-auto-card-editor',CloudemsLampAutoCardEditor);
 
 if (!customElements.get('cloudems-lamp-auto-card')) customElements.define('cloudems-lamp-auto-card', CloudEMSLampAutoCard);
 

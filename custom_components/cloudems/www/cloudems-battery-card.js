@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Battery Card  v5.4.96
+// CloudEMS Battery Card  v5.5.466
 
-const BAT_VERSION = "5.5.318";
+const BAT_VERSION = "5.5.528";
 const BAT_STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
   :host {
@@ -91,6 +91,7 @@ const BAT_STYLES = `
   .zp-slider-label span{color:var(--b-text);font-weight:600;}
   .zp-range{width:100%;height:4px;-webkit-appearance:none;appearance:none;background:rgba(255,255,255,.1);border-radius:2px;outline:none;cursor:pointer;}
   .zp-range::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#f0c040;cursor:pointer;}
+    @keyframes zp-pulse{0%,100%{opacity:1}50%{opacity:.35}}
   .zp-range:disabled{opacity:.3;cursor:default;}
   .zp-mode-row{padding:8px 18px;border-bottom:1px solid var(--b-border);display:flex;gap:6px;flex-wrap:wrap;}
   .zp-mode-btn{padding:4px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:transparent;color:rgba(255,255,255,.5);font-size:10px;cursor:pointer;}
@@ -179,8 +180,14 @@ class CloudemsBatteryCard extends HTMLElement {
     const reason=schA.human_reason||schA.reason||sA.reason||'';
     const sliderReason=schA.slider_reason||null;
     const capKwh=parseFloat(sA.capacity_kwh)||0;
+    // v5.5.505: kwaliteit en gezondheid
+    const setupScore = sA.setup_score || null;
+    const dataQuality = sA.data_quality || {};
+    const batHealth = sA.battery_health || {};
+    const effPctReal = batHealth.roundtrip_efficiency_pct ?? null;
+    const sohPct = batHealth.estimated_soh_pct ?? null;
     const chargeKwh=parseFloat(pA.charge_kwh_today)||0;
-    const effPct=pA.roundtrip_efficiency_pct!=null?parseFloat(pA.roundtrip_efficiency_pct):null;
+    const effPct=effPctReal ?? (pA.roundtrip_efficiency_pct!=null?parseFloat(pA.roundtrip_efficiency_pct):null);
     const lossKwh=pA.efficiency_loss_kwh!=null?parseFloat(pA.efficiency_loss_kwh):null;
     // Arbitrage P&L
     const pnlA = h?.states['sensor.cloudems_battery_power']?.attributes || {};
@@ -198,6 +205,8 @@ class CloudemsBatteryCard extends HTMLElement {
     const schedule=schA.schedule||[];
     const scheduleTomorrow=schA.schedule_tomorrow||[];
     const zp=schA.zonneplan||{};
+    const planDeliverW=zp.plan_deliver_w!=null?Math.round(zp.plan_deliver_w):null;
+    const planChargeW=zp.plan_charge_w!=null?Math.round(zp.plan_charge_w):null;
     const hasSliders   = zp.has_sliders || false;
     const hasCtrlMode  = zp.has_control_mode || false;
     const eidDeliver   = zp.entity_deliver_to_home || '';
@@ -295,9 +304,9 @@ class CloudemsBatteryCard extends HTMLElement {
       const nowIdx = todaySlots.findIndex(s=>parseInt(s.hour??0)===nowH);
       const startIdx = Math.max(0, nowIdx - PAST);
       const endIdx   = Math.min(allSlots.length, (nowIdx >= 0 ? nowIdx : 0) + FUTURE + 1);
-      const window   = allSlots.slice(startIdx, endIdx);
+      const _windowSlots = allSlots.slice(startIdx, endIdx);
 
-      const rows = window.map(s => {
+      const rows = _windowSlots.map(s => {
         const h    = parseInt((s.hour??'0').toString());
         const a    = (s.action||'idle').toLowerCase();
         const isNow = s._day==='vandaag' && h === nowH;
@@ -307,9 +316,20 @@ class CloudemsBatteryCard extends HTMLElement {
         const chgW = s.charge_w    ?? (a==='charge'    ? s.power_w : null);
         const disW = s.discharge_w ?? (a==='discharge' ? Math.abs(s.power_w||0) : null);
         const pr   = (s.price_allin??s.price_all_in??s.price) != null
-                     ? ((s.price_allin??s.price_all_in??s.price*100)).toFixed(1)+'ct' : '—';
-        const soc0 = !isPast && s.soc_start != null ? Math.round(s.soc_start)+'%' : '—';
-        const soc1 = !isPast && s.soc_end   != null ? Math.round(s.soc_end)+'%'   : '—';
+                     ? ((s.price_allin??s.price_all_in??s.price*100)).toFixed(1) : '—';
+        // v5.5.466: verleden uren tonen werkelijke SoC uit _hourly_actual
+        const actSoc = actual?.soc_pct != null ? Math.round(actual.soc_pct) : null;
+        // SOC: verleden = gemeten SOC (enkel getal), toekomst = start→eind% (alleen als verschillend)
+        const _ps0 = s.soc_start != null ? Math.round(s.soc_start) : null;
+        const _ps1 = s.soc_end   != null ? Math.round(s.soc_end)   : null;
+        // SOC: altijd start→eind als beiden bekend, anders enkel eind of actSoc
+        // SOC: altijd start→eind, gebruik actSoc als fallback voor ontbrekende ps0
+        const _socStart = _ps0 ?? actSoc;
+        const _socEnd = _ps1 ?? actSoc;
+        const socStr = _socEnd != null
+          ? (_socStart != null ? _socStart+'→'+_socEnd : _socEnd+'')
+          : '—';
+
         const tg   = s.tariff_group || '';
         const rowBg = isNow ? 'background:rgba(239,159,39,0.08)' :
                       tg==='high' ? 'background:rgba(249,115,22,0.04)' :
@@ -318,29 +338,61 @@ class CloudemsBatteryCard extends HTMLElement {
         const actBat   = actual ? Math.round(Math.abs(actual.bat_w || 0)) : null;
         const actPv    = actual ? Math.round(actual.pv_w || 0) : null;
         const actHouse = actual ? Math.round(actual.house_w || 0) : null;
-        const actChg   = actual && (actual.bat_w || 0) > 0 ? Math.round(actual.bat_w) : null;
-        const actDis   = actual && (actual.bat_w || 0) < 0 ? Math.round(Math.abs(actual.bat_w)) : null;
+        // v5.5.466: toon 0 als actual beschikbaar is maar bat_w=0 (bevestigt data opgehaald)
+        const actChg   = actual ? (actual.bat_w > 0 ? Math.round(actual.bat_w) : 0) : null;
+        const actDis   = actual ? (actual.bat_w < 0 ? Math.round(Math.abs(actual.bat_w)) : 0) : null;
 
+        // LADEN en LEVER zijn onafhankelijk — beiden tonen als plan beide stuurt
         const chgDisp = isPast && actual ? actChg : (chgW && chgW>0 ? Math.round(chgW) : null);
         const disDisp = isPast && actual ? actDis : (disW && disW>0 ? Math.round(disW) : null);
-        const pvDisp  = isPast && actual ? (actPv > 0 ? actPv : null) : (s.pv_w > 0 ? Math.round(s.pv_w) : null);
+        const _zero = isPast ? '0 kWh' : '0W';
+        const fmtE = w => w > 0 ? (w/1000).toFixed(2)+' kWh' : _zero;
+        const pvDisp  = isPast && actual ? actPv : (s.pv_w > 0 ? Math.round(s.pv_w) : 0);
         const hwDisp  = isPast && actual ? actHouse : (s.house_w > 0 ? Math.round(s.house_w) : null);
         const isActual = isPast && actual;
-        const pv  = pvDisp != null ? pvDisp+'W' : '—';
+        const pvFmt = pvDisp > 0 ? (isPast ? (pvDisp/1000).toFixed(2) : pvDisp) : '0';
+        const pv  = pvDisp > 0 ? `<span style="color:#f59e0b">${pvFmt}</span>` : '<span style="color:#475569">0</span>';
         const hwVal = hwDisp;
-        const hw  = hwVal ? (isActual ? hwVal+'W' : (s.house_estimated ? '~'+hwVal+'W' : hwVal+'W')) : '—';
+        const hwIsEst = !isActual && s.house_estimated;
+        const hw  = hwVal ? (isActual ? hwVal : (hwIsEst ? '~'+hwVal : hwVal)) : '—';
+        // Kleur: oranje=geleerd, grijs-dim=E1A default, wit=werkelijk gemeten
+        const hwColor = isActual ? '#9ca3af' : hwIsEst ? '#6b7280' : '#94a3b8';
 
-        const chgStr = chgDisp ? `<span style="color:${isActual?'#34d399':'#22c55e'}">${chgDisp}W</span>` : '<span style="color:#374151">—</span>';
-        const disStr = disDisp ? `<span style="color:${isActual?'#fb923c':'#ef9f27'}">${disDisp}W</span>` : '<span style="color:#374151">—</span>';
+        // LADEN: gemiddeld laadvermogen (alleen positieve bat_w samples uit accumulator)
+        // LEVER: gemiddeld ontlaadvermogen (alleen negatieve bat_w samples)
+        // NETTO: netto energie kWh (SOC delta × cap)
+        const _capK = capKwh > 0 ? capKwh : 9.3;
+        const _ladW = isPast
+          ? (actual?.chg_w != null ? actual.chg_w : Math.max(0, actual?.bat_w||0))
+          : (chgDisp||0);
+        const _levW = isPast
+          ? (actual?.dis_w != null ? actual.dis_w : Math.max(0, -(actual?.bat_w||0)))
+          : (disDisp||0);
+        const chgFmt = _ladW > 0 ? Math.round(_ladW) : '0';
+        const disFmt = _levW > 0 ? Math.round(_levW) : '0';
+        // NETTO: altijd SOC delta × capaciteit — voor elk uur (verleden, huidig, toekomst)
+        // soc_start en soc_end zijn beschikbaar uit meting (verleden) of simulatie (toekomst)
+        const _nettoKwh = (_ps0 != null && _ps1 != null)
+          ? (_ps1 - _ps0) / 100 * _capK
+          : null;
+        const _nettoFmt = _nettoKwh == null ? '0 kWh'
+          : Math.abs(_nettoKwh) < 0.005 ? '0'
+          : (_nettoKwh > 0 ? '+' : '') + _nettoKwh.toFixed(2);
+        const _nettoColor = (_nettoKwh == null || Math.abs(_nettoKwh) < 0.005) ? '#475569'
+          : _nettoKwh > 0 ? '#22c55e' : '#f97316';
+        const chgStr = _ladW > 0 ? `<span style="color:${isActual?'#34d399':'#22c55e'}">${chgFmt}</span>` : '<span style="color:#475569">0</span>';
+        const disStr = _levW > 0 ? `<span style="color:${isActual?'#fb923c':'#ef9f27'}">${disFmt}</span>` : '<span style="color:#475569">0</span>';
+        const nettoStr = `<span style="color:${_nettoColor}">${_nettoFmt}</span>`;
         const dayLabel = isTomorrow ? '<span style="font-size:8px;color:#60a5fa;margin-left:2px">mor</span>' : '';
         return `<tr style="${rowBg};opacity:${isPast?.5:1};border-left:${isNow?'2px solid #ef9f27':isTomorrow?'2px solid #60a5fa':'2px solid transparent'}">
           <td style="color:${isNow?'#ef9f27':isTomorrow?'#60a5fa':'#6b7280'};font-weight:${isNow?700:400}">${String(h).padStart(2,'0')}:00${dayLabel}</td>
-          <td style="font-variant-numeric:tabular-nums">${chgStr}</td>
-          <td style="font-variant-numeric:tabular-nums">${disStr}</td>
-          <td style="color:#f59e0b;font-variant-numeric:tabular-nums">${pv}</td>
-          <td style="color:#6b7280;font-variant-numeric:tabular-nums">${hw}</td>
-          <td style="color:${tg==='high'?'#f97316':tg==='low'?'#10b981':'#9ca3af'};font-variant-numeric:tabular-nums">${pr}</td>
-          <td style="color:#6b7280;font-variant-numeric:tabular-nums">${soc0}→${soc1}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${chgStr}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${disStr}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;font-size:10px">${nettoStr}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${pv}</td>
+          <td style="text-align:right;color:${hwColor};font-variant-numeric:tabular-nums" title="${hwIsEst?'NEDU E1A standaard (nog niet geleerd)':'Geleerd verbruik'}">${hw}</td>
+          <td style="text-align:right;color:${tg==='high'?'#f97316':tg==='low'?'#10b981':'#9ca3af'};font-variant-numeric:tabular-nums">${pr}</td>
+          <td style="text-align:right;color:#6b7280;font-variant-numeric:tabular-nums">${socStr}</td>
         </tr>`;
       }).join('');
       tlHtml=`<div class="schedule-section">
@@ -350,12 +402,13 @@ class CloudemsBatteryCard extends HTMLElement {
             <thead>
               <tr style="border-bottom:1px solid #1f2937">
                 <th style="text-align:left;padding:0 6px 6px 0;color:#4b5563;font-size:9px">UUR</th>
-                <th style="text-align:right;padding:0 6px 6px 0;color:#22c55e;font-size:9px">LADEN</th>
-                <th style="text-align:right;padding:0 6px 6px 0;color:#ef9f27;font-size:9px">LEVER.</th>
-                <th style="text-align:right;padding:0 6px 6px 0;color:#f59e0b;font-size:9px">PV</th>
-                <th style="text-align:right;padding:0 6px 6px 0;color:#6b7280;font-size:9px">HUIS</th>
-                <th style="text-align:right;padding:0 6px 6px 0;color:#4b5563;font-size:9px">PRIJS</th>
-                <th style="text-align:right;padding:0 0 6px 0;color:#4b5563;font-size:9px">SOC</th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#22c55e;font-size:9px">LADEN<br><span style="color:#374151;font-weight:400">W</span></th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#ef9f27;font-size:9px">LEVER.<br><span style="color:#374151;font-weight:400">W</span></th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#6b7280;font-size:9px">NETTO<br><span style="color:#374151;font-weight:400">kWh</span></th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#f59e0b;font-size:9px">PV<br><span style="color:#374151;font-weight:400">kWh/W</span></th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#4b5563;font-size:9px">HUIS<br><span style="color:#374151;font-weight:400">W</span></th>
+                <th style="text-align:right;padding:0 6px 6px 0;color:#4b5563;font-size:9px">PRIJS<br><span style="color:#374151;font-weight:400">ct</span></th>
+                <th style="text-align:right;padding:0 0 6px 0;color:#4b5563;font-size:9px">SOC<br><span style="color:#374151;font-weight:400">%</span></th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -480,21 +533,51 @@ class CloudemsBatteryCard extends HTMLElement {
         }
         ${hasSliders && eidDeliver ? `
         <div class="zp-slider-row">
-          <div class="zp-slider-label">Levering thuis<span id="lbl-deliver">${Math.round(curDeliver)} W</span></div>
-          <input class="zp-range" type="range" id="sl-deliver" min="0" max="${Math.round(maxDeliver)}" step="50" value="${Math.round(curDeliver)}"
-            data-eid="${eidDeliver}"/>
+          <div class="zp-slider-label">Levering thuis<span style="display:flex;align-items:center;gap:6px">${planDeliverW!==null&&Math.abs(planDeliverW-Math.round(curDeliver))>50?'<span style="font-size:10px;color:#BA7517;background:#FAEEDA;padding:1px 5px;border-radius:3px">→'+planDeliverW+'W</span>':' '}<span id="lbl-deliver">${Math.round(curDeliver)} W</span></span></div>
+          <div style="position:relative;height:22px;margin:4px 0">
+            <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:rgba(255,255,255,.08);border-radius:2px"></div>
+            <div style="position:absolute;top:9px;left:0;width:${Math.min(98,maxDeliver>0?curDeliver/maxDeliver*100:0).toFixed(1)}%;height:4px;background:#f97316;border-radius:2px"></div>
+            ${planDeliverW!==null&&maxDeliver>0?'<div style="position:absolute;top:5px;left:'+Math.min(98,planDeliverW/maxDeliver*100).toFixed(1)+'%;width:2px;height:12px;background:#BA7517;border-radius:1px;transform:translateX(-50%)"></div>':''}
+            <input class="zp-range" type="range" id="sl-deliver" min="0" max="${Math.round(maxDeliver)}" step="50" value="${Math.round(curDeliver)}"
+              data-eid="${eidDeliver}" style="position:absolute;top:0;left:0;width:100%;height:22px;opacity:0;cursor:pointer;margin:0"/>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+            <span style="font-size:10px;color:#6b7280">0W</span>
+            ${planDeliverW!==null&&Math.abs(planDeliverW-Math.round(curDeliver))>50
+              ?`<div style="display:flex;align-items:center;gap:4px"><div style="width:6px;height:6px;border-radius:50%;background:#f59e0b;animation:zp-pulse 1.2s ease-in-out infinite"></div><span class="zp-cd" style="font-size:10px;color:#BA7517">wachten · ${window._zpCd||15}s</span></div>`
+              :`<span style="font-size:10px;color:#3B6D11">✓ plan · <span class="zp-cd" style="color:#475569">${window._zpCd||15}s</span></span>`}
+            <span style="font-size:10px;color:#6b7280">${Math.round(maxDeliver)}W</span>
+          </div>
         </div>`:''
         }
         ${hasSliders && eidSolar ? `
         <div class="zp-slider-row">
-          <div class="zp-slider-label">Solar laden<span id="lbl-solar">${Math.round(curSolar)} W</span></div>
-          <input class="zp-range" type="range" id="sl-solar" min="0" max="${Math.round(maxSolar)}" step="50" value="${Math.round(curSolar)}"
-            data-eid="${eidSolar}"/>
+          <div class="zp-slider-label">Laden (max)<span style="display:flex;align-items:center;gap:6px">${planChargeW!==null&&Math.abs(planChargeW-Math.round(curSolar))>50?'<span style="font-size:10px;color:#3B6D11;background:#EAF3DE;padding:1px 5px;border-radius:3px">→'+planChargeW+'W</span>':' '}<span id="lbl-solar">${Math.round(curSolar)} W</span></span></div>
+          <div style="position:relative;height:22px;margin:4px 0">
+            <div style="position:absolute;top:9px;left:0;right:0;height:4px;background:rgba(255,255,255,.08);border-radius:2px"></div>
+            <div style="position:absolute;top:9px;left:0;width:${Math.min(98,maxSolar>0?curSolar/maxSolar*100:0).toFixed(1)}%;height:4px;background:#22c55e;border-radius:2px"></div>
+            ${planChargeW!==null&&maxSolar>0?'<div style="position:absolute;top:5px;left:'+Math.min(98,planChargeW/maxSolar*100).toFixed(1)+'%;width:2px;height:12px;background:#3B6D11;border-radius:1px;transform:translateX(-50%)"></div>':''}
+            <input class="zp-range" type="range" id="sl-solar" min="0" max="${Math.round(maxSolar)}" step="50" value="${Math.round(curSolar)}"
+              data-eid="${eidSolar}" style="position:absolute;top:0;left:0;width:100%;height:22px;opacity:0;cursor:pointer;margin:0"/>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+            <span style="font-size:10px;color:#6b7280">0W</span>
+            ${planChargeW!==null&&Math.abs(planChargeW-Math.round(curSolar))>50
+              ?`<div style="display:flex;align-items:center;gap:4px"><div style="width:6px;height:6px;border-radius:50%;background:#f59e0b;animation:zp-pulse 1.2s ease-in-out infinite"></div><span class="zp-cd" style="font-size:10px;color:#BA7517">wachten · ${window._zpCd||15}s</span></div>`
+              :`<span style="font-size:10px;color:#3B6D11">✓ plan · <span class="zp-cd" style="color:#475569">${window._zpCd||15}s</span></span>`}
+            <span style="font-size:10px;color:#6b7280">${Math.round(maxSolar)}W</span>
+          </div>
         </div>`:''
         }
       </div>`;
 
     const sub=socLow?`⚠️ Laag — ${soc.toFixed(1)}%`:`${soc.toFixed(1)}% · ${capKwh?(capKwh*soc/100).toFixed(2)+' kWh opgeslagen':''}`;
+    // Data kwaliteit badge
+    const _dqColors = {'sensor':'#22c55e','calculated':'#f59e0b','estimated':'#94a3b8','missing':'#f87171'};
+    const _dqLabels = {'sensor':'●','calculated':'◐','estimated':'○','missing':'✕'};
+    const _batQual = dataQuality.battery_kwh || dataQuality.battery_power || 'estimated';
+    const _batQualBadge = `<span title="Databron: ${_batQual}" style="font-size:9px;color:${_dqColors[_batQual] || '#94a3b8'}">${_dqLabels[_batQual] || '○'}</span>`;
+    const _setupBadge = setupScore ? `<span style="font-size:9px;color:${setupScore>=85?'#22c55e':setupScore>=65?'#f59e0b':setupScore>=45?'#fb923c':'#f87171'}" title="Setup kwaliteit: ${setupScore}%">${setupScore}%</span>` : '';
 
     sh.innerHTML=`<style>${BAT_STYLES}</style>
     <div class="card">
@@ -552,6 +635,78 @@ class CloudemsBatteryCard extends HTMLElement {
           <span class="kwh-val" style="color:${tempC<10?'#f87171':tempC<18?'var(--b-amber)':'var(--b-green)'}">${tempC.toFixed(1)}°C (${tempEff?.toFixed(0)}% eff)</span>
         </div>`:''}
       </div>
+      ${(()=>{
+        try {
+          const pb = h?.states['sensor.cloudems_payback']?.attributes || {};
+          const dod = pb.dod_histogram || {};
+          const wa  = pb.wat_als || {};
+          if(!dod.buckets && !wa.total_saved_eur) return '';
+          const buckets = dod.buckets || {};
+          const maxB = Math.max(1, ...Object.values(buckets));
+          const bKeys = ['0-20','20-40','40-60','60-80','80-100'];
+          const bCols = ['#4ade80','#86efac','#fbbf24','#fb923c','#f87171'];
+          const bars = bKeys.map((k,i) => {
+            const v = buckets[k]||0;
+            const pct = Math.round(v/maxB*100);
+            return `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
+              <span style="font-size:9px;color:#6b7280;width:36px;flex-shrink:0">${k}%</span>
+              <div style="flex:1;background:#21262d;border-radius:2px;height:8px">
+                <div style="width:${pct}%;height:100%;background:${bCols[i]};border-radius:2px"></div>
+              </div>
+              <span style="font-size:9px;color:#8b949e;width:20px;text-align:right">${v}d</span>
+            </div>`;
+          }).join('');
+          const lifetimeYr = dod.est_lifetime_years ? `<div style="font-size:10px;color:#8b949e;margin-top:4px">Geschatte levensduur: <strong style="color:#c9d1d9">${dod.est_lifetime_years} jaar</strong> · gem DoD ${dod.avg_dod_pct||0}% · ${dod.equivalent_cycles||0} eq. cycli</div>` : '';
+          const watAls = wa.total_saved_eur > 0 ? `
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid #21262d">
+              <div style="font-size:10px;color:#6b7280;margin-bottom:4px">Wat-als zonder batterij (laatste ${wa.days_analysed||0} dagen)</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                <div style="background:#0d1117;border-radius:6px;padding:6px">
+                  <div style="font-size:9px;color:#6b7280">Besparing</div>
+                  <div style="font-size:13px;font-weight:700;color:#4ade80">€${Number(wa.total_saved_eur).toFixed(2)}</div>
+                </div>
+                <div style="background:#0d1117;border-radius:6px;padding:6px">
+                  <div style="font-size:9px;color:#6b7280">Per maand</div>
+                  <div style="font-size:13px;font-weight:700;color:#60a5fa">€${Number(wa.avg_saving_per_month||0).toFixed(2)}</div>
+                </div>
+                <div style="background:#0d1117;border-radius:6px;padding:6px;grid-column:1/-1">
+                  <div style="font-size:9px;color:#6b7280">Prognose dit jaar</div>
+                  <div style="font-size:13px;font-weight:700;color:#fbbf24">€${Number(wa.annual_projection_eur||0).toFixed(0)}</div>
+                </div>
+              </div>
+            </div>` : '';
+          return `<div style="padding:10px 0;border-top:1px solid #21262d;margin-top:6px">
+            <div style="font-size:10px;color:#6b7280;margin-bottom:6px">📊 Ontlaaddiepte-verdeling (${dod.days_analysed||0} dagen)</div>
+            ${bars}
+            ${lifetimeYr}
+            ${watAls}
+          </div>`;
+        } catch(e) { return ''; }
+      })()}
+      ${(()=>{
+        try {
+          const ev = h?.states['sensor.cloudems_ev_sessie_leermodel']?.attributes || {};
+          const sess = ev.recent_sessions || [];
+          if(!sess.length) return '';
+          const days = {'Ma':'Ma','Di':'Di','Wo':'Wo','Do':'Do','Vr':'Vr','Za':'Za','Zo':'Zo'};
+          const rows = sess.slice(-5).reverse().map(s => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #21262d;font-size:11px">
+              <span style="color:#8b949e">${s.weekday||'?'} ${s.start_hour!=null?s.start_hour+':00':''}</span>
+              <span style="color:#60a5fa">${Number(s.kwh||0).toFixed(1)} kWh</span>
+              <span style="color:#8b949e">${Number(s.duration_h||0).toFixed(1)}u</span>
+              <span style="color:#4ade80">€${Number(s.cost_eur||0).toFixed(2)}</span>
+            </div>`).join('');
+          const avg = ev.avg_cost_per_session;
+          return `<div style="padding:10px 0;border-top:1px solid #21262d;margin-top:6px">
+            <div style="font-size:10px;color:#6b7280;margin-bottom:6px">⚡ Recente EV laadsessies</div>
+            <div style="display:flex;justify-content:space-between;font-size:9px;color:#484f58;padding-bottom:4px">
+              <span>Dag</span><span>kWh</span><span>Duur</span><span>Kosten</span>
+            </div>
+            ${rows}
+            ${avg!=null?`<div style="font-size:10px;color:#6b7280;margin-top:6px">Gem. €${Number(avg).toFixed(2)} / sessie · ${ev.avg_kwh_per_session||'?'} kWh gem.</div>`:''}
+          </div>`;
+        } catch(e) { return ''; }
+      })()}
       <div class="chart-section" id="chart-section">
         <div class="chart-hdr">
           <span class="chart-title">Vermogen</span>
@@ -594,6 +749,11 @@ class CloudemsBatteryCard extends HTMLElement {
       this._hass?.callService(domain, svc, data);
     };
 
+    // Countdown (eenmalig via window guard)
+    // Countdown: sla shadowRoot op, update via interval (shadow DOM is encapsulated)
+    if(!window._zpCdHosts) window._zpCdHosts = new Set();
+    window._zpCdHosts.add(this.shadowRoot);
+    if(!window._zpCdT){window._zpCd=15;window._zpCdT=setInterval(function(){window._zpCd=window._zpCd>0?window._zpCd-1:15;window._zpCdHosts.forEach(function(sr){sr.querySelectorAll('.zp-cd').forEach(function(e){e.textContent='wachten · '+window._zpCd+'s';});});},1000);}
     // Slider: deliver_to_home
     const slDeliver = sh.getElementById('sl-deliver');
     if(slDeliver){

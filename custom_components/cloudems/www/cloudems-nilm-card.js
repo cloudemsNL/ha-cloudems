@@ -4,7 +4,7 @@
  */
 
 // ── Categorie → icoon + kleur ────────────────────────────────────────────────
-const CARD_NILM_VERSION = '5.5.318';
+const CARD_NILM_VERSION = '5.5.465';
 const CAT = {
   verlichting:    { i:'💡', c:'#fde047' },
   entertainment:  { i:'📺', c:'#a78bfa' },

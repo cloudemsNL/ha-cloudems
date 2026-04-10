@@ -450,9 +450,15 @@ class IntegrationLatencyMonitor(CloudSyncMixin):
 
         s["last_ts"] = now
 
+    STARTUP_GRACE_S = 300  # 5 minuten grace na herstart — omvormers hebben tijd nodig
+
     def check_stale(self) -> List[dict]:
         """Controleer of integraties nog actief zijn. Aanroepen elke cyclus."""
         now = time.time()
+        # v5.5.345: grace period na herstart — na boot zijn alle sensoren "stale"
+        # omdat last_ts uit vorige run is geladen. Wacht 5 minuten voor eerste check.
+        if now - self._start_ts < self.STARTUP_GRACE_S:
+            return []
         issues = []
         for name, s in self._state.items():
             if s["last_ts"] <= 0 or s["samples"] < 5:

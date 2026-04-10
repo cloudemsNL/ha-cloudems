@@ -20,7 +20,7 @@
  *   sensor.cloudems_pool_water_temp     → state
  *   switch.cloudems_module_accu/ev/ketel/zwembad → state on/off
  */
-const CARD_PRIJS_VERSION = '5.5.318';
+const CARD_PRIJS_VERSION = '5.5.465';
 
 
 const TPL = document.createElement('template');
@@ -354,6 +354,8 @@ class CloudemsPrijsverloopCard extends HTMLElement {
   setConfig(config) { this._config = config || {}; }
   getCardSize() { return 8; }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-prijsverloop-card-editor');}
   set hass(hass) {
     this._hass = hass;
     const hash = this._buildHash(hass);
@@ -732,10 +734,7 @@ class CloudemsPrijsverloopCard extends HTMLElement {
     });
   }
 
-  static getConfigElement() {
-    const el = document.createElement('cloudems-prijsverloop-card-editor');
-    return el;
-  }
+  static getConfigElement(){return document.createElement('cloudems-prijsverloop-card-editor');}
   static getStubConfig() { return {}; }
 }
 

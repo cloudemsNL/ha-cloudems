@@ -359,6 +359,7 @@ async def async_setup_entry(
         CloudEMSHybridNILMSensor(coordinator, entry),
         # v2.1.9: Watchdog — crashgeschiedenis en herstartteller
         CloudEMSWatchdogSensor(coordinator, entry),
+        CloudEMSSelfDiagnosticsSensor(coordinator, entry),  # v5.5.344
         # v5.3.86: Versie info sensor — klein, nooit 16KB limiet issue
         CloudEMSVersionSensor(coordinator, entry),
         CloudEMSOptimizerSensor(coordinator, entry),
@@ -1044,6 +1045,20 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
                    - self._ebike_w(d) \
                    - self._pool_w(d) \
                    - self._climate_w(d)
+            # v5.5.373: vloer op basis van NILM — als Kirchhoff tijdelijk 0W geeft
+            # maar NILM-apparaten draaien, dan weten we dat rest minimaal NILM is.
+            # NILM-apparaten zijn onbeheerd (niet in de aftrek hierboven) dus horen
+            # thuis in rest. Boiler/EV zitten er NIET bij — die zijn al afgetrokken.
+            try:
+                _nilm_floor = sum(
+                    float(getattr(dev, 'current_power', 0) or 0)
+                    for dev in (self.coordinator._nilm._devices.values()
+                                if self.coordinator._nilm else [])
+                    if getattr(dev, 'is_on', False)
+                )
+                rest = max(rest, _nilm_floor)
+            except Exception:
+                pass
             return round(max(0.0, rest), 1)
         # Fallback als balancer nog niet beschikbaar is (eerste seconden na herstart)
         solar_w = float(d.get("solar_power_w", 0) or 0)
@@ -1075,7 +1090,7 @@ class CloudEMSHomeRestSensor(CoordinatorEntity, SensorEntity):
         # v4.6.593: diagnostische log — als rest > 60% van house_power wijst dit op
         # een hub-node die niet wordt afgetrokken (bijv. nieuwe module zonder aftrek).
         # Zo is dit zelf te vinden zonder de flow-kaart te inspecteren.
-        if house_w > 200 and total_hub > 50 and rest > house_w * 0.6:
+        if house_w > 800 and total_hub > 100 and rest > house_w * 0.8:
             import logging as _log
             _log.getLogger(__name__).warning(
                 "HomeRest: rest=%.0fW is %.0f%% van house=%.0fW — "
@@ -2153,6 +2168,22 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
         data = self.coordinator.data or {}
         batteries = data.get("batteries", [])
         if batteries:
+            # Multi-battery: capaciteitsgewogen gemiddelde SOC
+            # Voorbeeld: bat1=80% 10kWh, bat2=40% 5kWh → (8+2)/15 = 66.7%
+            # Capaciteitsgewogen gemiddelde: (SOC1×Cap1 + SOC2×Cap2) / (Cap1+Cap2)
+            # Kleine 5kWh accu op 90% + grote 20kWh accu op 20% → (4.5+4)/25 = 34%
+            # Simpel gemiddelde (55%) zou misleidend zijn
+            total_cap = sum(float(b.get("capacity_kwh") or 0) for b in batteries)
+            if total_cap > 0:
+                weighted = sum(
+                    float(b.get("soc_pct") or 0) * float(b.get("capacity_kwh") or 0)
+                    for b in batteries if b.get("soc_pct") is not None
+                )
+                return round(weighted / total_cap, 1)
+            # Fallback als geen capaciteit bekend: simpel gemiddelde
+            valid = [float(b.get("soc_pct")) for b in batteries if b.get("soc_pct") is not None]
+            if valid:
+                return round(sum(valid) / len(valid), 1)
             soc = batteries[0].get("soc_pct")
             if soc is not None:
                 return round(float(soc), 1)
@@ -2167,16 +2198,21 @@ class CloudEMSBatterySocSensor(CoordinatorEntity, SensorEntity):
         batteries = data.get("batteries", [])
         attrs: dict = {}
         if batteries:
-            b = batteries[0]
-            attrs["label"]        = b.get("label")
-            attrs["power_w"]      = b.get("power_w")
-            attrs["action"]       = b.get("action")
-            attrs["reason"]       = b.get("reason")
-            attrs["capacity_kwh"] = b.get("capacity_kwh")
+            # Multi-battery: totale capaciteit, gesommeerd vermogen
+            attrs["capacity_kwh"] = round(
+                sum(float(b.get("capacity_kwh") or 0) for b in batteries), 2)
+            attrs["power_w"]      = round(
+                sum(float(b.get("power_w") or 0) for b in batteries), 1)
+            attrs["label"]        = batteries[0].get("label")
+            attrs["action"]       = batteries[0].get("action")
+            attrs["reason"]       = batteries[0].get("reason")
         if len(batteries) > 1:
             attrs["all_batteries"] = [
-                {"label": bx.get("label"), "soc_pct": bx.get("soc_pct"),
-                 "power_w": bx.get("power_w"), "action": bx.get("action")}
+                {"label":       bx.get("label"),
+                 "soc_pct":     bx.get("soc_pct"),
+                 "power_w":     bx.get("power_w"),
+                 "capacity_kwh":bx.get("capacity_kwh"),
+                 "action":      bx.get("action")}
                 for bx in batteries
             ]
         return attrs
@@ -2278,13 +2314,126 @@ class CloudEMSBatteryPowerSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         # Lees uit coordinator.data["batteries"] — gevuld door _collect_multi_battery_data_kirchhoff()
-        # die de Kirchhoff-correctie toepast als de ruwe waarde te ver afwijkt.
+        # Gebruik battery_raw_w (voor Kirchhoff) voor kWh-accumulatie
+        # Kirchhoff-gecorrigeerde waarden wijken systematisch af van Nexus/Zonneplan interne meting
         data    = self.coordinator.data or {}
         bats    = data.get("batteries", [])
         total_w = sum(float(b.get("power_w") or 0) for b in bats)
         if not bats:
             total_w = float(data.get("battery_providers", {}).get("total_power_w") or 0)
-        self._accumulate(total_w)
+
+        # kWh accumulatie — prioriteit:
+        # 1. Geconfigureerde charge/discharge kWh sensoren (meest nauwkeurig, uit accu zelf)
+        # 2. Bridge charged/discharged today (via Nexus entity map, als beschikbaar)
+        # 3. battery_raw_w (ruwe Nexus meting, vóór Kirchhoff)
+        # 4. total_w (Kirchhoff-gecorrigeerd, als fallback)
+        # v5.5.526: multi-battery kWh — sommeer over alle geconfigureerde batterijen
+        bat_cfgs = (self.coordinator._config or {}).get("battery_configs", [])
+        _esm = getattr(self.coordinator, "_energy_source_mgr", {})
+
+        _chg_patterns = ["production_day", "productie_vandaag",
+                         "production_today", "charged_kwh"]
+        _dis_patterns = ["delivery_day", "levering_vandaag",
+                         "delivery_today", "discharged_kwh"]
+
+        def _read_kwh(entity_id):
+            if not entity_id: return None
+            try:
+                st = self.coordinator.hass.states.get(entity_id)
+                if st and st.state not in ("unavailable", "unknown", ""):
+                    return float(st.state or 0)
+            except (ValueError, TypeError): pass
+            return None
+
+        def _find_sensors_for_bat(idx):
+            """Zoek charge/discharge sensor voor batterij idx via alle bronnen."""
+            cfg = bat_cfgs[idx] if idx < len(bat_cfgs) else {}
+            # Bron 1: geconfigureerd in battery_configs
+            chg = cfg.get("charge_kwh_sensor", "")
+            dis = cfg.get("discharge_kwh_sensor", "")
+            if chg and dis:
+                return chg, dis
+            # Bron 2: ESM managers (bat_chg_0, bat_chg_1, ...)
+            chg_mgr = _esm.get(f"bat_chg_{idx}")
+            dis_mgr = _esm.get(f"bat_dis_{idx}")
+            if chg_mgr and chg_mgr.sensor_entity_id:
+                chg = chg_mgr.sensor_entity_id
+            if dis_mgr and dis_mgr.sensor_entity_id:
+                dis = dis_mgr.sensor_entity_id
+            return chg, dis
+
+        # Prio 1: sommeer geconfigureerde sensoren per batterij
+        _total_chg = 0.0
+        _total_dis = 0.0
+        _found_count = 0
+        _bat_count = max(len(bat_cfgs), 1)  # minimaal 1 batterij
+
+        for _i in range(_bat_count):
+            _chg_eid, _dis_eid = _find_sensors_for_bat(_i)
+            _v_chg = _read_kwh(_chg_eid)
+            _v_dis = _read_kwh(_dis_eid)
+            if _v_chg is not None and _v_dis is not None:
+                _total_chg += _v_chg
+                _total_dis += _v_dis
+                _found_count += 1
+
+        _used_direct = _found_count > 0
+        if _used_direct:
+            self._charge_kwh    = _total_chg
+            self._discharge_kwh = _total_dis
+
+        if not _used_direct:
+            # Prio 2: directe pattern scan — werkt voor Nexus en andere managed batteries
+            # Zoekt NL én EN patronen, sommeer alle matches per patroongroep
+            try:
+                _all_chg = []
+                _all_dis = []
+                for _st in self.coordinator.hass.states.async_all("sensor"):
+                    _eid = _st.entity_id.lower()
+                    if any(p in _eid for p in _chg_patterns):
+                        v = _read_kwh(_st.entity_id)
+                        if v is not None: _all_chg.append(v)
+                    elif any(p in _eid for p in _dis_patterns):
+                        v = _read_kwh(_st.entity_id)
+                        if v is not None: _all_dis.append(v)
+                if _all_chg and _all_dis:
+                    self._charge_kwh    = sum(_all_chg)
+                    self._discharge_kwh = sum(_all_dis)
+                    _used_direct = True
+            except Exception:
+                pass
+        if not _used_direct:
+            # Bron 2a: ZonneplanP1Bridge data (v5.5.514+)
+            # bridge schrijft zp_bat_charged_kwh_today / zp_bat_discharged_kwh_today
+            _zp_chg = data.get("zp_bat_charged_kwh_today")
+            _zp_dis = data.get("zp_bat_discharged_kwh_today")
+            if _zp_chg is not None and _zp_dis is not None:
+                self._charge_kwh    = float(_zp_chg)
+                self._discharge_kwh = float(_zp_dis)
+                _used_direct = True
+
+        if not _used_direct:
+            # Bron 2b: oude zonneplan bridge structuur (legacy)
+            _zp = data.get("zonneplan") or {}
+            _br_chg = _zp.get("charged_today_kwh")
+            _br_dis = _zp.get("discharged_today_kwh")
+            if _br_chg is not None and _br_dis is not None:
+                self._charge_kwh    = float(_br_chg)
+                self._discharge_kwh = float(_br_dis)
+                _used_direct = True
+        if not _used_direct:
+            # Bron 3/4: accumuleer op basis van raw_w of gecorrigeerde total_w
+            raw_w = data.get("battery_raw_w")
+            self._accumulate(raw_w if raw_w is not None else total_w)
+        else:
+            # v5.5.520: vergelijk sensor met berekende accumulator
+            _tracker = getattr(self.coordinator, "_measurement_tracker", None)
+            if _tracker and self._charge_kwh > 0.1:
+                # Bereken W×t totaal als vergelijkingswaarde
+                _raw_w = data.get("battery_raw_w")
+                if _raw_w is not None:
+                    # Schat berekend totaal: gebruik accumulator vóór overschrijving
+                    pass  # tracker wordt gevoed vanuit coordinator dagrollover
         return round(total_w, 0)
 
     @property
@@ -3688,6 +3837,8 @@ class CloudEMSNILMRunningDevicesSensor(CoordinatorEntity, SensorEntity):
                         "local_ai": "local_ai",
                     }.get(d.get("source", ""), "nilm"),
                     "confirmed":    d.get("confirmed", False),
+                    # v5.5.347: sensor_entity_id voor sparkline prefill in flow card
+                    "sensor_entity_id": d.get("source_entity_id") or None,
                 }
                 for d in running
             ],
@@ -4120,11 +4271,14 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
         return {
             "current_price_display": cur_display,  # altijd de display-prijs voor dashboard
             "today_prices":         today_prices,
-            "today_prices_base":    today_all,
             "tomorrow_prices":      tomorrow_prices,
-            # v5.5.77: kwartierdata — [{slot, hour, quarter, price, interpolated}]
-            "today_quarter_prices": _quarter_prices_for_sensor(self.coordinator),
-            "yesterday_prices":   ep.get("yesterday_prices", []),
+            # v5.5.345: today_prices_base verwijderd (dupplicaat), yesterday beperkt tot 24 slots
+            # kwartierdata beperkt tot essentiële velden om <16384 byte HA limiet te respecteren
+            "today_quarter_prices": [
+                {"slot": q.get("slot"), "price": q.get("price")}
+                for q in (_quarter_prices_for_sensor(self.coordinator) or [])
+            ],
+            "yesterday_prices":   (ep.get("yesterday_prices") or [])[:24],
             "tomorrow_available": ep.get("tomorrow_available", False),
             "next_hours":         _next_hours_display,
             "min_today":          min_display,
@@ -4160,15 +4314,8 @@ class CloudEMSEPEXTodaySensor(CoordinatorEntity, SensorEntity):
             "min_today_excl_tax": ep.get("min_today_excl_tax") or ep.get("min_today"),
             "max_today_excl_tax": ep.get("max_today_excl_tax") or ep.get("max_today"),
             "avg_today_excl_tax": ep.get("avg_today_excl_tax") or ep.get("avg_today"),
-            # today_prices_excl_tax: slots met kale EPEX prijs voor dashboard toggle
-            "today_prices_excl_tax": [
-                {**s, "price": s.get("price_excl_tax") or s.get("price")}
-                for s in (ep.get("today_all_display") or today_all)
-            ],
-            "today_prices_incl_tax": [
-                {**s, "price": s.get("price_incl_tax") or s.get("price_all_in") or s.get("price")}
-                for s in (ep.get("today_all_display") or today_all)
-            ],
+            # v5.5.345: excl/incl_tax lijsten verwijderd - dashboard gebruikt today_prices
+            # met price_include_tax flag. Bespaart ~4kB attribuut-ruimte.
         }
 
 
@@ -5161,6 +5308,7 @@ class CloudEMSSolarSystemSensor(CoordinatorEntity, SensorEntity):
                     "orientation_learning_pct": i.get("orientation_learning_pct", 0),
                     "clear_sky_samples":        i.get("clear_sky_samples"),
                     "orientation_samples_needed": i.get("orientation_samples_needed"),
+                    "energy_sensor":            i.get("energy_sensor"),  # v5.5.339
                 }
                 for i in invs
             ],
@@ -6993,9 +7141,10 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
         # Behoud alleen de essentiële velden per anker
         _anchor_keys = {"id", "label", "power_w", "is_on", "phase", "confidence", "device_type"}
         raw_anchors = d.get("anchors", [])
+        # v5.5.345: max 20 ankers, geen weather_sensors lijst → HA 16KB limiet respecteren
         anchors_slim = [
             {k: v for k, v in a.items() if k in _anchor_keys}
-            for a in raw_anchors[:40]  # max 40 ankers
+            for a in raw_anchors[:20]
         ]
         return {
             "anchors_total":           d.get("anchors_total", 0),
@@ -7003,7 +7152,6 @@ class CloudEMSHybridNILMSensor(CoordinatorEntity, SensorEntity):
             "weather_temperature_c":   d.get("weather_temperature_c"),
             "weather_season":          d.get("weather_season"),
             "weather_irradiance_w":    d.get("weather_irradiance_w"),
-            "weather_sensors":         d.get("weather_sensors", []),
             "anchors":                 anchors_slim,
             # stats
             "stat_enrich_calls":       stats.get("enrich_calls", 0),
@@ -10072,6 +10220,42 @@ class CloudEMSTennetImbalanceSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         return (self.coordinator.data or {}).get("tennet_imbalance", {})
 
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# v5.5.344: SelfDiagnostics sensor
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CloudEMSSelfDiagnosticsSensor(CoordinatorEntity, SensorEntity):
+    """CloudEMS zelfreflectie — dagelijkse analyse van eigen werking."""
+    _attr_name            = "CloudEMS · Zelfreflectie"
+    _attr_icon            = "mdi:stethoscope"
+    _attr_has_entity_name = False
+
+    def __init__(self, coord, entry):
+        super().__init__(coord)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_self_diagnostics"
+        self.entity_id = _eid(entry, "sensor.cloudems_zelfreflectie")
+
+    @property
+    def device_info(self): return sub_device_info(self._entry, SUB_SYSTEM)
+
+    @property
+    def native_value(self) -> str:
+        d = (self.coordinator.data or {}).get("self_diagnostics", {})
+        return d.get("status", "ok")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return (self.coordinator.data or {}).get("self_diagnostics", {})
+
+    @property
+    def icon(self) -> str:
+        val = self.native_value
+        return ("mdi:alert-circle" if val == "error"
+                else "mdi:alert" if val == "warn"
+                else "mdi:check-circle")
 
 class CloudEMSPaybackSensor(CoordinatorEntity, SensorEntity):
     """Terugverdientijd thuisbatterij."""

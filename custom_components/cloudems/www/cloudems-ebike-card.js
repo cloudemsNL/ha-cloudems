@@ -1,9 +1,11 @@
-// CloudEMS E-bike & Scooter Card v5.4.96
-const CARD_EBIKE_VERSION = '5.5.318';
+// CloudEMS E-bike & Scooter Card v5.5.465
+const CARD_EBIKE_VERSION = '5.5.465';
 
 class CloudemsEbikeCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
   setConfig(c) { this._cfg = { title: "🚲 E-bike & Scooter", ...c }; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-ebike-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_micro_mobiliteit"];
@@ -126,7 +128,7 @@ class CloudemsEbikeCard extends HTMLElement {
 </div>`;
   }
   getCardSize() { return 4; }
-  static getConfigElement() { return document.createElement("cloudems-ebike-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-ebike-card-editor');}
   static getStubConfig() { return {}; }
 }
 class CloudemsEbikeCardEditor extends HTMLElement {

@@ -71,6 +71,13 @@ class DegradationState:
     measured_kwh:          Optional[float] = None
     measured_kwh_ts:       float = 0.0
 
+    # v5.5.333: DoD-histogram — telt cycli per diepte-categorie
+    # Buckets: 0-20%, 20-40%, 40-60%, 60-80%, 80-100% (DoD = depth of discharge)
+    dod_histogram:         dict  = field(default_factory=lambda: {
+        "0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0
+    })
+    _cycle_soc_high:       Optional[float] = None   # SOC bij start van ontlaadcyclus
+
 
 @dataclass
 class DegradationResult:
@@ -128,6 +135,10 @@ class BatteryDegradationTracker:
             s.capacity_history     = list(data.get("capacity_history", []))
             s.last_snapshot_month  = str(data.get("last_snapshot_month", ""))
             s.measured_kwh         = data.get("measured_kwh")
+            # v5.5.356: laad dod_histogram — ontbrak in async_setup → reset bij elke herstart
+            _saved_dod = data.get("dod_histogram")
+            if isinstance(_saved_dod, dict) and _saved_dod:
+                s.dod_histogram = _saved_dod
         _LOGGER.debug(
             "BatteryDegradationTracker ready — SoH=%.1f%% cycles=%.1f chemistry=%s",
             self._state.soh_pct, self._state.total_full_cycles, self._state.chemistry,
@@ -150,6 +161,7 @@ class BatteryDegradationTracker:
             "capacity_history":     s.capacity_history[-120:],
             "last_snapshot_month":  s.last_snapshot_month,
             "measured_kwh":         s.measured_kwh,
+            "dod_histogram":        getattr(s, "dod_histogram", {}),
         })
         self._dirty = False
 
@@ -173,6 +185,42 @@ class BatteryDegradationTracker:
                 degraded = frac_cycle * factor
                 s.soh_pct = max(0.0, s.soh_pct - degraded)
                 s.capacity_kwh_current = round(s.capacity_kwh_nominal * (s.soh_pct / 100.0), 2)
+                self._dirty = True
+
+                # v5.5.365 #37: snellere leercurve via partial cycle coulomb counting
+                # Accumuleer energie per richting; na voldoende data → capaciteitsschatting
+                _energy_kwh = frac_cycle * s.capacity_kwh_nominal
+                if not hasattr(s, 'partial_kwh_charged'):
+                    s.__dict__.setdefault('partial_kwh_charged', 0.0)
+                    s.__dict__.setdefault('partial_soc_start', soc_pct or 0.0)
+                s.__dict__['partial_kwh_charged'] = s.__dict__.get('partial_kwh_charged', 0.0) + _energy_kwh
+                _partial_delta_soc = abs((soc_pct or 0) - s.__dict__.get('partial_soc_start', soc_pct or 0))
+                # Als we ≥20% SoC-range hebben gemeten → schat capaciteit
+                if _partial_delta_soc >= 20 and s.__dict__.get('partial_kwh_charged', 0) > 0.5:
+                    _implied_cap = s.__dict__['partial_kwh_charged'] / (_partial_delta_soc / 100.0)
+                    if 3.0 < _implied_cap < 25.0:  # plausibel bereik
+                        # EMA update op nominale capaciteit (conservatief: 10% gewicht)
+                        s.capacity_kwh_nominal = round(
+                            s.capacity_kwh_nominal * 0.90 + _implied_cap * 0.10, 2)
+                        s.capacity_kwh_current = round(
+                            s.capacity_kwh_nominal * (s.soh_pct / 100.0), 2)
+                    # Reset partial cycle tracker
+                    s.__dict__['partial_kwh_charged'] = 0.0
+                    s.__dict__['partial_soc_start'] = soc_pct or 0.0
+
+            # v5.5.333: DoD histogram — track ontlaaddiepte per cyclus
+            if delta < 0:  # ontladen
+                if s._cycle_soc_high is None:
+                    s._cycle_soc_high = s.last_soc or soc_pct
+            elif delta > 0 and s._cycle_soc_high is not None:
+                # Cyclus voltooid: van _cycle_soc_high naar het laagste punt (soc_pct voor stijging)
+                dod = max(0.0, s._cycle_soc_high - s.last_soc) if s.last_soc else 0.0
+                bucket = ("0-20" if dod < 20 else "20-40" if dod < 40
+                          else "40-60" if dod < 60 else "60-80" if dod < 80 else "80-100")
+                if not hasattr(s, 'dod_histogram') or not isinstance(s.dod_histogram, dict):
+                    s.dod_histogram = {"0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
+                s.dod_histogram[bucket] = s.dod_histogram.get(bucket, 0) + 1
+                s._cycle_soc_high = None
                 self._dirty = True
 
             # Stress events
@@ -216,6 +264,7 @@ class BatteryDegradationTracker:
 
         return DegradationResult(
             soh_pct          = round(s.soh_pct, 2),
+            dod_histogram    = getattr(s, 'dod_histogram', {}),
             capacity_kwh     = s.capacity_kwh_current,
             total_cycles     = round(s.total_full_cycles, 1),
             cycles_per_day   = cycles_per_day,

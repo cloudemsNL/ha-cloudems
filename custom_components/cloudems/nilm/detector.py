@@ -308,6 +308,9 @@ class DetectedDevice:
     # v1.20 — room meter: originating HA entity for area registry lookup
     source_entity_id: str = ""      # entity_id of smart plug / power sensor that anchored this device
 
+    # v5.5.520 — directe kWh sensor (optioneel, hogere prioriteit dan W×t accumulatie)
+    energy_sensor_id: str = ""      # entity_id van kWh sensor van het apparaat (bijv. smart plug energy)
+
     # v4.6.279 — auto/manual excluderen van energiebalans
     exclude_from_balance: bool = False  # True = niet meegeteld in huisverbruik (auto of handmatig)
     balance_exclude_reason: str = ""    # reden: "auto_integration", "user", ""
@@ -384,6 +387,7 @@ class DetectedDevice:
             "user_hidden":    self.user_hidden,
             "user_suppressed": self.user_suppressed,
             "source_entity_id": self.source_entity_id,
+            "energy_sensor_id":  self.energy_sensor_id,
             "exclude_from_balance": self.exclude_from_balance,
             "balance_exclude_reason": self.balance_exclude_reason,
             "suggested_name": self.suggested_name,
@@ -1009,6 +1013,40 @@ class NILMDetector:
     def set_high_log_callback(self, cb) -> None:
         """Registreer de high-log callback (coordinator injecteert LearningBackup.async_log_high)."""
         self._high_log_cb = cb
+
+    def _group_multisplit_events(self, events: list, window_s: float = 10.0) -> list:
+        """v5.5.365 #39: groepeer multisplit airco events binnen window_s.
+
+        Multisplit = buitenunit + N binnenunits die binnen seconden starten.
+        NILM ziet elke step als apart apparaat. Groepeer ze tot 1 gecombineerd event.
+        """
+        if len(events) < 2:
+            return events
+        grouped = []
+        used = set()
+        for i, ev in enumerate(sorted(events, key=lambda e: e.get('ts', 0))):
+            if i in used:
+                continue
+            group = [ev]
+            used.add(i)
+            for j, other in enumerate(sorted(events, key=lambda e: e.get('ts', 0))):
+                if j <= i or j in used:
+                    continue
+                if (ev.get('phase') == other.get('phase')
+                        and abs(other.get('ts', 0) - ev.get('ts', 0)) < window_s
+                        and abs(other.get('power_w', 0) - ev.get('power_w', 0)) < 1500):
+                    group.append(other)
+                    used.add(j)
+            if len(group) > 1:
+                main = max(group, key=lambda e: e.get('power_w', 0))
+                merged = {**main,
+                          'power_w':         sum(e.get('power_w', 0) for e in group),
+                          'label':           f"{main.get('label','?')} (multisplit {len(group)}×)",
+                          'multisplit_count': len(group)}
+                grouped.append(merged)
+            else:
+                grouped.append(ev)
+        return grouped
 
     def _high_log(self, category: str, payload: dict) -> None:
         """Fire-and-forget: stuur een high-log entry via de callback als die beschikbaar is."""
@@ -2961,22 +2999,45 @@ class NILMDetector:
                 # v4.5.61: voeg absolute minimum toe — een apparaat van <150W wordt
                 # nooit verwijderd door batterij-overlap (te veel false negatives).
                 # Alleen verwijderen als het apparaat écht vergelijkbaar groot is.
-                if 0.6 <= ratio <= 1.4 and dev_w >= 150.0:
+                # v5.5.363: leer battery overlap ratio van Nexus stapgrootten per installatie
+                # Nexus rapporteert discrete stappen (bijv. 1kW, 2kW, 5kW, 10kW)
+                # Ratio-range wordt geleerd zodat ook afwijkende Nexus-modellen correct werken
+                _overlap_steps = getattr(self, '_learned_bat_steps', [])
+                if batt_w > 100:
+                    _overlap_steps.append(batt_w)
+                    if len(_overlap_steps) > 50: _overlap_steps.pop(0)
+                    self._learned_bat_steps = _overlap_steps
+                # Leer de overlap-tolerance: standaard ±40%, minimum ±20%
+                _overlap_tol = 0.40  # default
+                if len(_overlap_steps) >= 10:
+                    import statistics as _st_nil
+                    _cv = _st_nil.stdev(_overlap_steps) / max(_st_nil.mean(_overlap_steps), 1)
+                    _overlap_tol = max(0.20, min(0.60, _cv * 2.0))
+                _lo = 1.0 - _overlap_tol
+                _hi = 1.0 + _overlap_tol
+                if _lo <= ratio <= _hi and dev_w >= 150.0:
                     to_remove.append(did)
                     _LOGGER.debug(
                         "NILM: verwijder vals positief '%s' (%.0fW) — batterij (%.0fW, ratio=%.2f)",
                         dev.name, dev_w, batt_w, ratio,
                     )
-                    # v4.5.11: battery false positive → high log
-                    self._high_log("nilm_false_positive", {
-                        "name":    dev.name,
-                        "type":    dev.device_type,
-                        "phase":   dev.phase,
-                        "dev_w":   round(dev_w, 1),
-                        "batt_w":  round(batt_w, 1),
-                        "ratio":   round(ratio, 2),
-                        "reason":  "battery_overlap",
-                    })
+                    # v5.5.357: suppress duplicate battery_overlap logs (max 1x/uur per apparaat)
+                    # Bug fix: initialiseer _fp_log_ts persistent op self, niet via getattr
+                    import time as _t357
+                    if not hasattr(self, "_fp_log_ts"):
+                        self._fp_log_ts = {}
+                    _fp_key = f"battery_overlap_{dev.device_id}"
+                    if _t357.time() - self._fp_log_ts.get(_fp_key, 0) > 3600:
+                        self._high_log("nilm_false_positive", {
+                            "name":    dev.name,
+                            "type":    dev.device_type,
+                            "phase":   dev.phase,
+                            "dev_w":   round(dev_w, 1),
+                            "batt_w":  round(batt_w, 1),
+                            "ratio":   round(ratio, 2),
+                            "reason":  "battery_overlap",
+                        })
+                        self._fp_log_ts[_fp_key] = _t357.time()
             for did in to_remove:
                 del self._devices[did]
 

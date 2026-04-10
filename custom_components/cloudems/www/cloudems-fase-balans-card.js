@@ -1,9 +1,11 @@
-// CloudEMS Fase Balans Card v5.4.96 — Phase balance with cos phi
-const CARD_FASE_BALANS_VERSION = '5.5.318';
+// CloudEMS Fase Balans Card v5.5.465 — Phase balance with cos phi
+const CARD_FASE_BALANS_VERSION = '5.5.465';
 
 class CloudemsFaseBalansCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._p = ""; }
   setConfig(c) { this._cfg = { title: "⚡ Fase Balans", ...c }; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-fase-balans-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_power_quality"];
@@ -62,7 +64,7 @@ class CloudemsFaseBalansCard extends HTMLElement {
 </div>`;
   }
   getCardSize() { return 3; }
-  static getConfigElement() { return document.createElement("cloudems-fase-balans-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-fase-balans-card-editor');}
   static getStubConfig() { return {}; }
 }
 class CloudemsFaseBalansCardEditor extends HTMLElement {

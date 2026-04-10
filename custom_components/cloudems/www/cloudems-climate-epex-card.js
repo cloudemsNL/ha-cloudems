@@ -15,7 +15,7 @@
  *   price_sensor: "sensor.cloudems_price_current_hour"  (default)
  */
 
-const CE_CARD_VERSION = "5.5.318";
+const CE_CARD_VERSION = "5.5.465";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -167,6 +167,8 @@ class CloudEMSClimateEpexCard extends HTMLElement {
     this._render();
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-climate-epex-card-editor');}
   set hass(hass) {
     this._hass = hass;
     this._render();
@@ -303,9 +305,7 @@ class CloudEMSClimateEpexCard extends HTMLElement {
   getCardSize() { return Math.max(3, 2 + (this._hass?.states[this._config?.sensor]?.attributes?.devices?.length || 1)); }
 
   // ── GUI Editor ───────────────────────────────────────────────────────────
-  static getConfigElement() {
-    return document.createElement("cloudems-climate-epex-card-editor");
-  }
+  static getConfigElement(){return document.createElement('cloudems-climate-epex-card-editor');}
 
   static getStubConfig() {
     return {
@@ -361,6 +361,65 @@ class CloudEMSClimateEpexCardEditor extends HTMLElement {
     }
   }
 }
+
+
+
+
+class CloudemsClimateEpexCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_sensor=document.createElement('div');row_sensor.style.marginBottom='10px';
+    var lbl_sensor=document.createElement('label');lbl_sensor.textContent='Klimaat sensor';lbl_sensor.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_sensor=document.createElement('input');
+    inp_sensor.id='sensor';
+    inp_sensor.type='text';
+    inp_sensor.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_sensor.value=c.sensor||'sensor.cloudems_climate_epex_status';
+    
+    row_sensor.appendChild(lbl_sensor);row_sensor.appendChild(inp_sensor);sh.appendChild(row_sensor);
+    inp_sensor.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["sensor"]=inp_sensor.type==="number"?parseFloat(inp_sensor.value)||0:inp_sensor.value||undefined;
+      if(nc['sensor']===undefined||nc['sensor']==='')delete nc['sensor'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+
+    var row_price_sensor=document.createElement('div');row_price_sensor.style.marginBottom='10px';
+    var lbl_price_sensor=document.createElement('label');lbl_price_sensor.textContent='Prijs sensor';lbl_price_sensor.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_price_sensor=document.createElement('input');
+    inp_price_sensor.id='price_sensor';
+    inp_price_sensor.type='text';
+    inp_price_sensor.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_price_sensor.value=c.price_sensor||'';
+    
+    row_price_sensor.appendChild(lbl_price_sensor);row_price_sensor.appendChild(inp_price_sensor);sh.appendChild(row_price_sensor);
+    inp_price_sensor.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["price_sensor"]=inp_price_sensor.type==="number"?parseFloat(inp_price_sensor.value)||0:inp_price_sensor.value||undefined;
+      if(nc['price_sensor']===undefined||nc['price_sensor']==='')delete nc['price_sensor'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-climate-epex-card-editor'))customElements.define('cloudems-climate-epex-card-editor',CloudemsClimateEpexCardEditor);
+if(!customElements.get('cloudems-climate-epex-card-editor'))customElements.define('cloudems-climate-epex-card-editor',CloudemsClimateEpexCardEditor);
 
 if (!customElements.get('cloudems-climate-epex-card')) customElements.define("cloudems-climate-epex-card", CloudEMSClimateEpexCard);
 if (!customElements.get('cloudems-climate-epex-card-editor')) customElements.define("cloudems-climate-epex-card-editor", CloudEMSClimateEpexCardEditor);

@@ -1,10 +1,12 @@
-// CloudEMS Vacation Mode Card v5.4.96
-const CARD_VACATION_VERSION = '5.5.318';
+// CloudEMS Vacation Mode Card v5.5.465
+const CARD_VACATION_VERSION = '5.5.465';
 
 class CloudemsVacationCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "🏖️ Vakantiemodus", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-vacation-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_vacation_mode"];
@@ -52,7 +54,7 @@ class CloudemsVacationCard extends HTMLElement {
   }
 
   getCardSize() { return 2; }
-  static getConfigElement() { return document.createElement("cloudems-vacation-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-vacation-card-editor');}
   static getStubConfig() { return {}; }
 }
 

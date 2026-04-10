@@ -537,15 +537,22 @@ class EnergyBalancer:
         g_stale = self._grid.is_stale()
         s_stale = self._solar.is_stale()
         b_stale = self._battery.is_stale()
-        # v5.5.290: leer max battery-vermogen uit gemeten waarden
-        if battery_w is not None and not b_stale:
-            _bw = float(battery_w)
-            if _bw > 0 and _bw > self._bat_max_charge_learned:
-                self._bat_max_charge_learned = max(
-                    self._bat_max_charge_learned * 0.99 + _bw * 0.01, _bw)
-            elif _bw < 0 and abs(_bw) > self._bat_max_discharge_learned:
-                self._bat_max_discharge_learned = max(
-                    self._bat_max_discharge_learned * 0.99 + abs(_bw) * 0.01, abs(_bw))
+        # v5.5.358: leer battery max ALLEEN van verse, niet-geschatte Nexus raw waarden
+        # Gebruik raw_battery_w (voor Kirchhoff-correctie) zodat we de werkelijke
+        # Nexus-piek leren, niet een door Kirchhoff overschatte waarde.
+        # Dit voorkomt dat een fout-gecorrigeerde waarde (bijv. -11200W) wordt geleerd
+        # als "maximum" terwijl Nexus fysiek max 10000W kan leveren.
+        _raw_bw = float(battery_w) if battery_w is not None else None
+        if _raw_bw is not None and not b_stale:
+            # Alleen leren als waarde realistisch is (niet Kirchhoff-overschatting)
+            # Sanity: max 15kW abs (ruim boven elke thuisbatterij)
+            if abs(_raw_bw) <= 15000:
+                if _raw_bw > 0 and _raw_bw > self._bat_max_charge_learned:
+                    self._bat_max_charge_learned = max(
+                        self._bat_max_charge_learned * 0.99 + _raw_bw * 0.01, _raw_bw)
+                elif _raw_bw < 0 and abs(_raw_bw) > self._bat_max_discharge_learned:
+                    self._bat_max_discharge_learned = max(
+                        self._bat_max_discharge_learned * 0.99 + abs(_raw_bw) * 0.01, abs(_raw_bw))
         stale   = (["grid"]    if g_stale else []) + \
                   (["solar"]   if s_stale else []) + \
                   (["battery"] if b_stale else [])

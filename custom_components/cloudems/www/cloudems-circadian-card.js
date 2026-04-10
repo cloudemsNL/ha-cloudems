@@ -1,10 +1,12 @@
-// CloudEMS Circadian Nudge Card v5.4.96
-const CARD_CIRCADIAN_VERSION = '5.5.318';
+// CloudEMS Circadian Nudge Card v5.5.465
+const CARD_CIRCADIAN_VERSION = '5.5.465';
 
 class CloudemsCircadianCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "🌅 Slimme Verlichting", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-circadian-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_circadian_nudge"];
@@ -79,7 +81,7 @@ class CloudemsCircadianCard extends HTMLElement {
   }
 
   getCardSize() { return 4; }
-  static getConfigElement() { return document.createElement("cloudems-circadian-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-circadian-card-editor');}
   static getStubConfig() { return {}; }
 }
 

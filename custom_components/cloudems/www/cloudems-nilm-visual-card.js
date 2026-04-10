@@ -1,7 +1,7 @@
-// CloudEMS NILM Visual Card v5.4.96
+// CloudEMS NILM Visual Card v5.5.465
 // Animated device icons per type/brand — washer, dishwasher, dryer, TV, router, NAS, fridge, boiler, EV, switch, generic
 
-const NVC_VERSION = '5.5.318';
+const NVC_VERSION = '5.5.465';
 
 
 // ── Brand color map ───────────────────────────────────────────────────────────
@@ -370,10 +370,7 @@ class CloudemsNilmVisualCard extends HTMLElement {
     return Math.ceil(d.length/cols) + 2;
   }
 
-  static getConfigElement() {
-    const el = document.createElement('cloudems-nilm-visual-card-editor');
-    return el;
-  }
+  static getConfigElement(){return document.createElement('cloudems-nilm-visual-card-editor');}
   static getStubConfig() { return {}; }
 }
 

@@ -5,7 +5,7 @@
  */
 
 const SANKEY_STYLES = `
-const CARD_SANKEY_VERSION = '5.5.318';
+const CARD_SANKEY_VERSION = '5.5.465';
   :host { display:block; }
   .card { background:var(--ha-card-background,#1a2332); border-radius:12px; padding:14px; font-family:var(--primary-font-family,sans-serif); color:#e2e8f0; }
   .card-title { font-size:12px; font-weight:600; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
@@ -36,12 +36,11 @@ const COLORS = {
 class CloudemsSankeyCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'open' }); this._cfg = {}; }
 
-  static getConfigElement() {
-    const e = document.createElement('cloudems-sankey-card-editor');
-    return e;
-  }
+  static getConfigElement(){return document.createElement('cloudems-sankey-card-editor');}
   static getStubConfig() { return { title: 'Energie Stromen' }; }
   setConfig(cfg) { this._cfg = cfg || {}; }
+  
+  static getConfigElement(){return document.createElement('cloudems-sankey-card-editor');}
   set hass(h) { this._hass = h; this._render(); }
 
   _w(id, fallback=0) {
@@ -199,6 +198,34 @@ class CloudemsSankeyCard extends HTMLElement {
 
   getCardSize() { return 3; }
 }
+
+
+
+
+class CloudemsSankeyCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-sankey-card-editor'))customElements.define('cloudems-sankey-card-editor',CloudemsSankeyCardEditor);
+if(!customElements.get('cloudems-sankey-card-editor'))customElements.define('cloudems-sankey-card-editor',CloudemsSankeyCardEditor);
 
 if (!customElements.get('cloudems-sankey-card')) customElements.define('cloudems-sankey-card', CloudemsSankeyCard);
 window.customCards = window.customCards || [];

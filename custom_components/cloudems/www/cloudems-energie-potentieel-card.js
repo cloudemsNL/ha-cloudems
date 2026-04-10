@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
-// CloudEMS Energie Potentieel Card v5.5.4
-const EP_VERSION = "5.5.318";
+// CloudEMS Energie Potentieel Card v5.5.465
+const EP_VERSION = "5.5.465";
 
 // ── Apparaat-definities ──────────────────────────────────────────────────────
 // Elke entry: {id, icon, label, watt, unit, per}
@@ -52,6 +52,8 @@ class CloudEMSEnergiePotentieelCard extends HTMLElement {
   constructor(){ super(); this.attachShadow({mode:'open'}); }
   setConfig(c){ this._cfg={title:'Energie Potentieel',show_pv:true,show_bat:true,...c}; }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-energie-potentieel-card-editor');}
   set hass(h){
     this._hass=h;
     const batSt   = h?.states['sensor.cloudems_battery_so_c'];
@@ -183,7 +185,7 @@ class CloudEMSEnergiePotentieelCard extends HTMLElement {
   }
 
   getCardSize(){ return 3; }
-  static getConfigElement(){ return document.createElement('cloudems-energie-potentieel-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-energie-potentieel-card-editor');}
   static getStubConfig(){ return {}; }
 }
 
@@ -201,6 +203,81 @@ class CloudEMSEnergiePotentieelCardEditor extends HTMLElement {
     </div>`;
   }
 }
+
+
+
+
+class CloudemsEnergiePotentieelCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_show_bat=document.createElement('div');row_show_bat.style.marginBottom='10px';
+    var lbl_show_bat=document.createElement('label');lbl_show_bat.textContent='Toon batterij';lbl_show_bat.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_show_bat=document.createElement('input');
+    inp_show_bat.id='show_bat';
+    inp_show_bat.type='checkbox';
+    inp_show_bat.style.marginRight='6px';
+    
+    inp_show_bat.checked=c.show_bat!==false;
+    row_show_bat.appendChild(lbl_show_bat);row_show_bat.appendChild(inp_show_bat);sh.appendChild(row_show_bat);
+    inp_show_bat.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["show_bat"]=inp_show_bat.checked;
+      if(nc['show_bat']===undefined||nc['show_bat']==='')delete nc['show_bat'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+
+    var row_show_pv=document.createElement('div');row_show_pv.style.marginBottom='10px';
+    var lbl_show_pv=document.createElement('label');lbl_show_pv.textContent='Toon zonne-energie';lbl_show_pv.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_show_pv=document.createElement('input');
+    inp_show_pv.id='show_pv';
+    inp_show_pv.type='checkbox';
+    inp_show_pv.style.marginRight='6px';
+    
+    inp_show_pv.checked=c.show_pv!==false;
+    row_show_pv.appendChild(lbl_show_pv);row_show_pv.appendChild(inp_show_pv);sh.appendChild(row_show_pv);
+    inp_show_pv.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["show_pv"]=inp_show_pv.checked;
+      if(nc['show_pv']===undefined||nc['show_pv']==='')delete nc['show_pv'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+
+    var row_rows=document.createElement('div');row_rows.style.marginBottom='10px';
+    var lbl_rows=document.createElement('label');lbl_rows.textContent='Rijen';lbl_rows.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_rows=document.createElement('input');
+    inp_rows.id='rows';
+    inp_rows.type='number';
+    inp_rows.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';
+    inp_rows.value=c.rows||'3';
+    
+    row_rows.appendChild(lbl_rows);row_rows.appendChild(inp_rows);sh.appendChild(row_rows);
+    inp_rows.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["rows"]=inp_rows.type==="number"?parseFloat(inp_rows.value)||0:inp_rows.value||undefined;
+      if(nc['rows']===undefined||nc['rows']==='')delete nc['rows'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-energie-potentieel-card-editor'))customElements.define('cloudems-energie-potentieel-card-editor',CloudemsEnergiePotentieelCardEditor);
+if(!customElements.get('cloudems-energie-potentieel-card-editor'))customElements.define('cloudems-energie-potentieel-card-editor',CloudemsEnergiePotentieelCardEditor);
 
 if(!customElements.get('cloudems-energie-potentieel-card')) customElements.define('cloudems-energie-potentieel-card', CloudEMSEnergiePotentieelCard);
 if(!customElements.get('cloudems-energie-potentieel-card-editor')) customElements.define('cloudems-energie-potentieel-card-editor', CloudEMSEnergiePotentieelCardEditor);

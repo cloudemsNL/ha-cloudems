@@ -299,7 +299,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "inv_energy_sensor": "Daily production sensor (kWh) (optional)",
+          "inv_max_ac_power": "AC output limit (Wp) (optional)"
         },
         "data_description": {
           "inv_sensor": "🔌 Connect the power sensor of this inverter (W or kW)",
@@ -562,7 +564,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "bat_charge_kwh_sensor": "Battery charge kWh sensor (optional)",
+          "bat_discharge_kwh_sensor": "Battery discharge kWh sensor (optional)"
         },
         "placeholders": {
           "battery_num": {
@@ -590,7 +594,9 @@
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
           "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
-          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
+          "shutter_global_wind_sensor": "Wind speed sensor — storm protection (optional)",
+          "shutter_wind_threshold_ms": "Storm threshold m/s (default 12) (optional)"
         }
       },
       "shutter_detail": {
@@ -1413,7 +1419,8 @@
           "ev_charger_entity": "Charger sensor/setpoint",
           "ev_charger_label": "Label",
           "ev_charger_switch": "Switch (optional)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "ev_energy_sensor": "EV energy sensor (kWh today) (optional)"
         }
       },
       "ev_opts": {
@@ -1598,7 +1605,9 @@
           "inv_azimuth": "Azimut (graden)",
           "inv_tilt": "Hellingshoek (graden)",
           "inv_rated_power": "Nominaal vermogen (Wp)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "inv_energy_sensor": "Daily production sensor (kWh) (optional)",
+          "inv_max_ac_power": "AC output limit (Wp) (optional)"
         },
         "title": "Inverter Detail"
       },
@@ -1619,7 +1628,9 @@
           "bat_charge_entity": "Laad-entiteit",
           "bat_discharge_entity": "Ontlaad-entiteit",
           "bat_label": "Libellé / nom",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "bat_charge_kwh_sensor": "Battery charge kWh sensor (optional)",
+          "bat_discharge_kwh_sensor": "Battery discharge kWh sensor (optional)"
         },
         "title": "Battery Detail"
       },
@@ -1761,7 +1772,11 @@
           "grid_sensor": "Net vermogenssensor (W)",
           "import_power_sensor": "Import sensor (W)",
           "export_power_sensor": "Export sensor (W)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "grid_import_kwh_t1": "Import kWh — Tariff 1 (low/night) (optional)",
+          "grid_import_kwh_t2": "Import kWh — Tariff 2 (high/day) (optional)",
+          "grid_export_kwh_t1": "Export kWh — Tariff 1 (low/night) (optional)",
+          "grid_export_kwh_t2": "Export kWh — Tariff 2 (high/day) (optional)"
         }
       },
       "phase_sensors_l1": {
@@ -1857,7 +1872,9 @@
         "data": {
           "shutter_count": "Aantal rolluiken (0–99)",
           "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "shutter_global_wind_sensor": "Wind speed sensor — storm protection (optional)",
+          "shutter_wind_threshold_ms": "Storm threshold m/s (default 12) (optional)"
         }
       },
       "ai_opts": {
@@ -2179,6 +2196,22 @@
         "data_description": {
           "presence_entities": ""
         }
+      },
+      "extra_sensors_opts": {
+        "title": "🌡️ Extra Sensors & Environment",
+        "description": "Optional sensors for more accurate control and better forecasts.\n\nAuto-detected: {auto_detected}",
+        "data": {
+          "outside_temp_entity": "Outdoor temperature sensor (optional)",
+          "pv_panel_temp_sensor": "PV panel temperature sensor (optional)",
+          "battery_temp_sensor": "Battery temperature sensor (optional)",
+          "irradiance_sensor": "Solar irradiance sensor / pyranometer (optional)",
+          "wind_speed_sensor": "Wind speed sensor (optional)",
+          "rain_sensor": "Precipitation sensor (optional)",
+          "co2_sensor": "CO₂ sensor outdoor (optional)",
+          "indoor_co2_sensor": "CO₂ sensor indoor (optional)",
+          "grid_frequency_sensor": "Grid frequency sensor (optional)",
+          "water_meter_sensor": "Water meter sensor (optional)"
+        }
       }
     },
     "abort": {
@@ -2236,7 +2269,11 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "grid_import_kwh_t1": "Import kWh — Tariff 1 (low/night) (optional)",
+          "grid_import_kwh_t2": "Import kWh — Tariff 2 (high/day) (optional)",
+          "grid_export_kwh_t1": "Export kWh — Tariff 1 (low/night) (optional)",
+          "grid_export_kwh_t2": "Export kWh — Tariff 2 (high/day) (optional)"
         }
       },
       "phase_sensors": {
@@ -2371,7 +2408,7 @@
           "congestion_threshold_w": "Grid congestion threshold (W)",
           "congestion_price_threshold": "Congestion price threshold (€/kWh)",
           "battery_chemistry": "Battery chemistry (LFP / NMC / NCA / LTO)",
-          "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode)",
+          "outside_temp_entity": "Outdoor temperature sensor (for heat demand mode) (optional)",
           "battery_degradation_enabled": "Suivre la dégradation de la batterie",
           "congestion_enabled": "Enable grid congestion detection",
           "dsmr_source": "Source compteur",
@@ -2426,7 +2463,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "inv_energy_sensor": "Daily production sensor (kWh) (optional)",
+          "inv_max_ac_power": "AC output limit (Wp) (optional)"
         },
         "placeholders": {
           "azimuth_tip": {
@@ -2526,7 +2565,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "bat_charge_kwh_sensor": "Battery charge kWh sensor (optional)",
+          "bat_discharge_kwh_sensor": "Battery discharge kWh sensor (optional)"
         },
         "placeholders": {
           "battery_num": {
@@ -2553,7 +2594,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "shutter_global_wind_sensor": "Wind speed sensor — storm protection (optional)",
+          "shutter_wind_threshold_ms": "Storm threshold m/s (default 12) (optional)"
         }
       },
       "shutter_detail_opts": {
@@ -3027,7 +3070,7 @@
       },
       "battery_type_opts": {
         "title": "🔋 Battery {battery_num} of {total} — Which type?",
-        "description": "Choose how CloudEMS controls this battery.\n\n⚡ **Managed provider** (Zonneplan, Tibber…) — CloudEMS communicates via the official integration. No separate sensors needed.\n\n🔧 **Manual** — You connect your own SOC sensor and charge/discharge switch.\n\n{detected_hint}",
+        "description": "Choose how CloudEMS controls this battery.\n\n⚡ **Managed provider** (Zonneplan, Tibber…) — CloudEMS communicates via the official integration. No separate sensors needed.\n\n🔧 **Manual** — You connect your own SOC sensor and charge/discharge switch.",
         "data": {
           "bat_type": "Battery type",
           "back_to_menu": "← Retour au menu",
@@ -3568,7 +3611,8 @@
         "data": {
           "ev_charger_entity": "Charger sensor/setpoint",
           "ev_charger_label": "Label",
-          "ev_charger_switch": "Switch (optional)"
+          "ev_charger_switch": "Switch (optional)",
+          "ev_energy_sensor": "EV energy sensor (kWh today) (optional)"
         }
       },
       "user": {
@@ -3813,7 +3857,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "inv_energy_sensor": "Daily production sensor (kWh) (optional)",
+          "inv_max_ac_power": "AC output limit (Wp) (optional)"
         },
         "data_description": {
           "inv_sensor": "🔌 Connect the power sensor of this inverter (W or kW)",
@@ -4076,7 +4122,9 @@
           "nilm_shift_price_threshold": "Seuil de prix pour délestage (€/kWh)",
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
-          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)"
+          "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
+          "bat_charge_kwh_sensor": "Battery charge kWh sensor (optional)",
+          "bat_discharge_kwh_sensor": "Battery discharge kWh sensor (optional)"
         },
         "placeholders": {
           "battery_num": {
@@ -4104,7 +4152,9 @@
           "pool_filter_power_entity": "Capteur de puissance pompe filtre",
           "pool_heat_power_entity": "Capteur de puissance pompe à chaleur",
           "shutter_smoke_sensor": "Détecteur de fumée (optionnel)",
-          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
+          "shutter_global_wind_sensor": "Wind speed sensor — storm protection (optional)",
+          "shutter_wind_threshold_ms": "Storm threshold m/s (default 12) (optional)"
         }
       },
       "shutter_detail": {
@@ -5024,6 +5074,22 @@
         },
         "data_description": {
           "presence_entities": ""
+        }
+      },
+      "extra_sensors_opts": {
+        "title": "🌡️ Extra Sensors & Environment",
+        "description": "Optional sensors for more accurate control and better forecasts.\n\nAuto-detected: {auto_detected}",
+        "data": {
+          "outside_temp_entity": "Outdoor temperature sensor (optional)",
+          "pv_panel_temp_sensor": "PV panel temperature sensor (optional)",
+          "battery_temp_sensor": "Battery temperature sensor (optional)",
+          "irradiance_sensor": "Solar irradiance sensor / pyranometer (optional)",
+          "wind_speed_sensor": "Wind speed sensor (optional)",
+          "rain_sensor": "Precipitation sensor (optional)",
+          "co2_sensor": "CO₂ sensor outdoor (optional)",
+          "indoor_co2_sensor": "CO₂ sensor indoor (optional)",
+          "grid_frequency_sensor": "Grid frequency sensor (optional)",
+          "water_meter_sensor": "Water meter sensor (optional)"
         }
       }
     },

@@ -1,5 +1,5 @@
-// CloudEMS Standby Ranking Card v5.4.96
-const CARD_STANDBY_RANKING_VERSION = '5.5.318';
+// CloudEMS Standby Ranking Card v5.5.465
+const CARD_STANDBY_RANKING_VERSION = '5.5.465';
 // Top energy wasters with monthly cost
 
 class CloudemsStandbyRankingCard extends HTMLElement {
@@ -102,7 +102,7 @@ class CloudemsStandbyRankingCard extends HTMLElement {
 </div>`;
   }
   getCardSize() { return 4; }
-  static getConfigElement() { return document.createElement("cloudems-standby-ranking-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-standby-ranking-card-editor');}
   static getStubConfig() { return { max_items: 5 }; }
 }
 class CloudemsStandbyRankingCardEditor extends HTMLElement {

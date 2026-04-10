@@ -1,9 +1,11 @@
-// CloudEMS VvE Energy Split Card v5.4.96
-const CARD_VVE_VERSION = '5.5.318';
+// CloudEMS VvE Energy Split Card v5.5.465
+const CARD_VVE_VERSION = '5.5.465';
 
 class CloudemsVveCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "🏢 VvE Energieverdeling", ...c }; this._render(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-vve-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_vve"];
@@ -78,7 +80,7 @@ class CloudemsVveCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement("cloudems-vve-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-vve-card-editor');}
   static getStubConfig() { return {}; }
 }
 

@@ -1,5 +1,5 @@
-// cloudems-klimaat-tabs-card — tab-wrapper v5.5.183
-const CLOUDEMS_KLIMAAT_TABS_CARD_VERSION = "5.5.318";
+// cloudems-klimaat-tabs-card — tab-wrapper v5.5.465
+const CLOUDEMS_KLIMAAT_TABS_CARD_VERSION = "5.5.465";
 
 class CloudEMSKlimaatTabsCard extends HTMLElement {
   constructor() {
@@ -20,6 +20,8 @@ class CloudEMSKlimaatTabsCard extends HTMLElement {
     this._config = config || {};
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-klimaat-tabs-card-editor');}
   set hass(h) {
     this._hass = h;
     // Geef hass door aan alle al gecreëerde child cards
@@ -109,9 +111,20 @@ class CloudEMSKlimaatTabsCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement(){return document.createElement('cloudems-klimaat-tabs-card-editor');}
   static getStubConfig() { return {}; }
 }
+
+
+
+
+class CloudemsKlimaatTabsCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});}
+  setConfig(){}
+  connectedCallback(){this.shadowRoot.innerHTML='<div style="padding:12px;font-size:12px;color:#aaa">Geen configuratie nodig — alles automatisch via CloudEMS.</div>';}
+}
+if(!customElements.get('cloudems-klimaat-tabs-card-editor'))customElements.define('cloudems-klimaat-tabs-card-editor',CloudemsKlimaatTabsCardEditor);
+if(!customElements.get('cloudems-klimaat-tabs-card-editor'))customElements.define('cloudems-klimaat-tabs-card-editor',CloudemsKlimaatTabsCardEditor);
 
 if (!customElements.get('cloudems-klimaat-tabs-card'))
   customElements.define('cloudems-klimaat-tabs-card', CloudEMSKlimaatTabsCard);

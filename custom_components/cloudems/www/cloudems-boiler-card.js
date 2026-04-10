@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Boiler Card  v5.4.96
+// CloudEMS Boiler Card  v5.5.465
 
-const BOILER_CARD_VERSION = "5.5.318";
+const BOILER_CARD_VERSION = "5.5.465";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -245,6 +245,8 @@ function buildDecisionsHtml(log,label,entityId){
 class CloudemsBoilerCard extends HTMLElement {
   constructor(){super();this.attachShadow({mode:'open'});this._prevJson='';this._boilerTab=0;this._contentTab='live';this._history={};this._historyPower={};this._historyLoading={};this._histLastFetch=0;}
 
+  connectedCallback(){if(!this._fetchTimer)this._fetchTimer=setInterval(()=>this._fetchHistory(),300000);}
+  disconnectedCallback(){clearInterval(this._fetchTimer);this._fetchTimer=null;}
   setConfig(cfg){
     this._cfg={tank_liters:0,cold_water_temp:10,shower_temp:38,shower_liters_per_min:8,shower_duration_min:8,title:'Warm water',...cfg};
     this._render();
@@ -252,6 +254,14 @@ class CloudemsBoilerCard extends HTMLElement {
 
   set hass(hass){
     this._hass=hass;
+    // Clear optimistic setpoint als HA de nieuwe waarde al doorgestuurd heeft
+    if(this._optimisticSp){
+      Object.keys(this._optimisticSp).forEach(eid=>{
+        const st=hass.states[eid];if(!st)return;
+        const real=parseFloat(st.attributes?.temperature);
+        if(Math.abs(real-this._optimisticSp[eid])<0.5)delete this._optimisticSp[eid];
+      });
+    }
     const st=hass.states['sensor.cloudems_boiler_status'];
     const boilers=st?.attributes?.boilers??[];
     const json=JSON.stringify([st?.last_updated,st?.state,boilers.map(b=>[b.temp_c,b.current_power_w,b.is_on,b.active_setpoint_c,b.tank_liters_learned,b.ramp_setpoint_c])]);
@@ -325,8 +335,8 @@ class CloudemsBoilerCard extends HTMLElement {
       }).catch(()=>{});
     }
   }
-  _adjustSetpoint(eid,delta){if(!this._hass||!eid)return;const st=this._hass.states[eid];const cur=parseFloat(st?.attributes?.temperature??53);const t=Math.max(35,Math.min(80,cur+delta));this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:t}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:t}));}
-  _setSetpoint(eid,temp){if(!this._hass||!eid)return;this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:temp}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:temp}));}
+  _adjustSetpoint(eid,delta){if(!this._hass||!eid)return;const st=this._hass.states[eid];const cur=this._optimisticSp?.[eid]??parseFloat(st?.attributes?.temperature??53);const t=Math.max(35,Math.min(80,cur+delta));if(!this._optimisticSp)this._optimisticSp={};this._optimisticSp[eid]=t;this._render();this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:t}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:t}));}
+  _setSetpoint(eid,temp){if(!this._hass||!eid)return;if(!this._optimisticSp)this._optimisticSp={};this._optimisticSp[eid]=temp;this._render();this._hass.callService('cloudems','boiler_send_now',{entity_id:eid,on:true,setpoint_c:temp}).catch(()=>this._hass.callService('water_heater','set_temperature',{entity_id:eid,temperature:temp}));}
 
   _renderLiveTab(b,cfg,hass,statusSensor){
     const labelSlug=(b.label||'').toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/,'');
@@ -335,12 +345,21 @@ class CloudemsBoilerCard extends HTMLElement {
     const recP=hass.states[`sensor.cloudems_boiler_${labelSlug}_power`];
     const tempC=b.temp_c??(isNaN(parseFloat(recT?.state))?null:parseFloat(recT?.state));
     const vbSt=hass.states[`water_heater.cloudems_boiler_${labelSlug}`]??hass.states[`water_heater.cloudems_boiler_${eidSlug}`];
-    const vbSp=vbSt?.attributes?.temperature??null;
+    const vbSp=this._optimisticSp?.[b.entity_id]??vbSt?.attributes?.temperature??null;
     const setpoint=vbSp??b.active_setpoint_c??b.setpoint_c??60;
     const maxSp=b.hardware_max_c||b.max_setpoint_boost_c||Math.max(b.max_setpoint_green_c||0,b.setpoint_c||60,75);
     const recPow=recP&&recP.state!=='unavailable'&&recP.state!=='unknown'?parseFloat(recP.state):null;
     const powerW=b.current_power_w??(isNaN(recPow)?null:recPow)??0;
-    const coldT=cfg.cold_water_temp,showerT=cfg.shower_temp,flowLpm=cfg.shower_liters_per_min,durMin=cfg.shower_duration_min;
+    // v5.5.465: gebruik geleerde waarden indien beschikbaar, anders config-defaults
+    const _learned = b?.shower_learned || {};
+    const _learnedFlow = b?.shower_flow_learned;
+    const _learnedDur  = b?.shower_duration_learned;
+    const _learnedL    = b?.shower_liters_learned;
+    const coldT   = cfg.cold_water_temp;
+    const showerT = cfg.shower_temp;
+    const flowLpm = _learnedFlow ?? cfg.shower_liters_per_min;
+    const durMin  = _learnedDur  ?? cfg.shower_duration_min;
+    const _isLearned = !!(_learnedFlow || _learnedDur);
     // Use learned or configured tank liters
     const tankL=cfg.tank_liters>0?cfg.tank_liters:(b.tank_liters_active||80);
     const safeT=tempC??setpoint;
@@ -359,7 +378,7 @@ class CloudemsBoilerCard extends HTMLElement {
       ? arr.map(pt => { const d = new Date(pt.t*1000); return {t:d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'),v:pt.v}; })
       : null;
     const hist  = _buildHist(b.temp_history  || []) || this._history[b.entity_id]         || null;
-    const histP = _buildHist(b.power_history || []) || (this._historyPower||{})[b.entity_id] || null;
+    const histP = _buildHist(b.power_history || []) || (this._historyPower||{})[b.entity_id] || (this._powerSamples?.[b.entity_id]?.length > 1 ? this._powerSamples[b.entity_id] : null);
 
     // Warmtebron
     const wbSt=hass.states['sensor.cloudems_goedkoopste_warmtebron'];
@@ -378,15 +397,15 @@ class CloudemsBoilerCard extends HTMLElement {
         <span style="font-size:10px;color:rgba(255,255,255,.35)">${vbSt.attributes?.hvac_action||vbSt.state||'—'}</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <button onclick="this.getRootNode().host._adjustSetpoint('${vbSt.entity_id}', -1)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
+        <button onclick="this.getRootNode().host._adjustSetpoint('${b.entity_id}', -1)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">−</button>
         <div style="flex:1;text-align:center">
           <div style="font-size:20px;font-weight:700;color:#ffd600;font-family:monospace">${vbSp!=null?vbSp.toFixed(0)+'°C':'—'}</div>
           <div style="font-size:9px;color:rgba(255,255,255,.35);margin-top:1px">Setpoint · Nu: ${tempC!=null?tempC.toFixed(1)+'°C':'—'}</div>
         </div>
-        <button onclick="this.getRootNode().host._adjustSetpoint('${vbSt.entity_id}', +1)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+        <button onclick="this.getRootNode().host._adjustSetpoint('${b.entity_id}', +1)" style="width:28px;height:28px;border-radius:50%;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.06);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
       </div>
       <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        ${[{l:'Nacht',v:45},{l:'Normaal',v:b.max_setpoint_green_c||53},{l:'PV-boost',v:Math.round(maxSp)}].map(p=>`<button onclick="this.getRootNode().host._setSetpoint('${vbSt.entity_id}',${p.v})" style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:${vbSp!=null&&Math.round(vbSp)===p.v?'rgba(255,214,0,.15)':'rgba(255,255,255,.04)'};color:${vbSp!=null&&Math.round(vbSp)===p.v?'#ffd600':'rgba(255,255,255,.5)'};font-size:10px;cursor:pointer">${p.l}<br><span style="font-size:9px;opacity:.7">${p.v}°</span></button>`).join('')}
+        ${[{l:'Nacht',v:45},{l:'Normaal',v:b.max_setpoint_green_c||53},{l:'PV-boost',v:Math.round(maxSp)}].map(p=>`<button onclick="this.getRootNode().host._setSetpoint('${b.entity_id}',${p.v})" style="flex:1;padding:4px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:${vbSp!=null&&Math.round(vbSp)===p.v?'rgba(255,214,0,.15)':'rgba(255,255,255,.04)'};color:${vbSp!=null&&Math.round(vbSp)===p.v?'#ffd600':'rgba(255,255,255,.5)'};font-size:10px;cursor:pointer">${p.l}<br><span style="font-size:9px;opacity:.7">${p.v}°</span></button>`).join('')}
       </div></div>`:'';
 
     return `
@@ -424,7 +443,7 @@ class CloudemsBoilerCard extends HTMLElement {
           const _ttShw=_TTB?_TTB.html('bl-shw','Beschikbare douches',[
             {label:'Berekend',  value:showers+' douches'},
             {label:'Tankinhoud',value:tankL+' L ('+( cfg.tank_liters>0?'config':b.tank_liters_learned?'geleerd':'standaard')+')'},
-            {label:'Per douche',value:(durMin*flowLpm).toFixed(0)+' L ('+durMin+'min × '+flowLpm+' L/min)'},
+            {label:'Per douche',value:(_learnedL?_learnedL.toFixed(0):(durMin*flowLpm).toFixed(0))+' L'+(_isLearned?' ✓':'')+'  ('+durMin.toFixed(1)+'min × '+flowLpm.toFixed(1)+' L/min)'},
             {label:'Douchetem.',value:showerT+'°C'},
             {label:'Koud water',value:coldT+'°C'},
           ],{footer:'Berekend op basis van beschikbaar warm water boven douchetemperatuur'}):{wrap:'',tip:''};
@@ -453,8 +472,8 @@ class CloudemsBoilerCard extends HTMLElement {
         <div class="donut-row" style="margin-top:16px">
           <div class="donut-wrap">${buildDonut(usablePct,tempToColor(safeT))}<div class="donut-center"><span class="donut-big" id="dv">${usableL}</span><span class="donut-small">liter</span></div></div>
           <div class="donut-info">
-            <div class="donut-row-item"><span class="donut-key">🚿 Per douche</span><span class="donut-v">${(durMin*flowLpm).toFixed(0)} L</span></div>
-            <div class="donut-row-item"><span class="donut-key">⏱️ Douchetijd</span><span class="donut-v">${durMin} min</span></div>
+            <div class="donut-row-item"><span class="donut-key">🚿 Per douche</span><span class="donut-v">${(_learnedL?_learnedL.toFixed(0):(durMin*flowLpm).toFixed(0))} L${_isLearned?' ✓':''}</span></div>
+            <div class="donut-row-item"><span class="donut-key">⏱️ Douchetijd</span><span class="donut-v">${durMin.toFixed(1)} min${_isLearned?' ✓':''}</span></div>
             <div class="donut-row-item"><span class="donut-key">🌡️ Koud water</span><span class="donut-v">${coldT}°C</span></div>
             <div class="donut-row-item"><span class="donut-key">🧮 Tankvolume</span><span class="donut-v">${tankL} L ${cfg.tank_liters>0?'(config)':b.tank_liters_learned?'(geleerd)':'(standaard)'}</span></div>
           </div>

@@ -148,6 +148,16 @@ class PhaseCurrentFusion:
         # Consensus = ongewogen gemiddelde van beschikbare schattingen
         consensus = sum(valid.values()) / len(valid)
 
+        # v5.5.341: outlier-filter — methodes die >3× de consensus afwijken worden
+        # buiten beschouwing gelaten. Voorkomt dat één spike-sensor het resultaat domineert.
+        if len(valid) >= 2:
+            valid = {
+                m: v for m, v in valid.items()
+                if v <= max(consensus * 3.0, consensus + 5.0)
+            }
+            if valid:
+                consensus = sum(valid.values()) / len(valid)
+
         # Update EMA van afwijking per methode
         for m, val in valid.items():
             deviation = abs(val - consensus) / max(abs(consensus), 0.5)
@@ -175,6 +185,11 @@ class PhaseCurrentFusion:
                  if v is not None and m in self._state.get(phase, {})}
         if not valid:
             return 0.0
+
+        # v5.5.341: outlier-filter ook in realtime pad
+        if len(valid) >= 2:
+            _cons = sum(valid.values()) / len(valid)
+            valid = {m: v for m, v in valid.items() if v <= max(_cons * 3.0, _cons + 5.0)}
 
         fused_abs = self._weighted_average(phase, valid)
         sign      = self._determine_sign(power_w, estimates)

@@ -112,6 +112,10 @@ class SmartDelayConfig:
     # 0 = uitgeschakeld (surplus-trigger niet actief)
     # >0 = schakel in als solar_surplus_w >= surplus_threshold_w
     surplus_threshold_w: float = 0.0
+    # v5.5.324: suggest_only — stuur alleen push, stuur schakelaar NIET aan.
+    # Voor apparaten die niet hervatten na stroomonderbreking (vaatwasser, wasmachine).
+    suggest_only:        bool  = False
+    _suggest_notified_h: int   = -1   # intern: uur waarop push verstuurd (anti-spam)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SmartDelayConfig":
@@ -126,6 +130,7 @@ class SmartDelayConfig:
             latest_hour        = int(d.get("latest_hour", 23)),
             grace_s            = int(d.get("grace_s", 30)),
             notify             = bool(d.get("notify", True)),
+            suggest_only       = bool(d.get("suggest_only", False)),
             active             = bool(d.get("active", True)),
             wait_mode          = str(d.get("wait_mode", "price")),
             max_wait_h         = int(d.get("max_wait_h", 0)),
@@ -144,6 +149,7 @@ class SmartDelayConfig:
             "latest_hour":        self.latest_hour,
             "grace_s":            self.grace_s,
             "notify":             self.notify,
+            "suggest_only":       self.suggest_only,
             "active":             self.active,
             "wait_mode":          self.wait_mode,
             "max_wait_h":         self.max_wait_h,
@@ -170,8 +176,9 @@ class SmartDelayScheduler:
         result = await scheduler.async_evaluate(price_info)
     """
 
-    def __init__(self, hass: HomeAssistant, configs: list[dict]) -> None:
-        self._hass    = hass
+    def __init__(self, hass: HomeAssistant, configs: list[dict], notify_mgr=None) -> None:
+        self._hass       = hass
+        self._notify_mgr = notify_mgr  # v5.5.324: NotificationManager
         self._configs: list[SmartDelayConfig] = [
             SmartDelayConfig.from_dict(c)
             for c in configs if c.get("entity_id")
@@ -307,6 +314,14 @@ class SmartDelayScheduler:
     async def _notify(self, cfg: SmartDelayConfig, title: str, message: str) -> None:
         if not cfg.notify:
             return
+        # v5.5.324: gebruik NotificationManager als beschikbaar (mobile_app support)
+        if self._notify_mgr:
+            await self._notify_mgr.send(
+                title, message,
+                category="smart_delay",
+                notification_id=f"cloudems_smart_delay_{cfg.entity_id.replace('.','_')}",
+            )
+            return
         try:
             await self._hass.services.async_call(
                 "persistent_notification", "create",
@@ -322,7 +337,7 @@ class SmartDelayScheduler:
 
     # ── Hoofd-evaluatieloop ────────────────────────────────────────────────────
 
-    async def async_evaluate(self, price_info: dict, solar_surplus_w: float = 0.0) -> list[dict]:
+    async def async_evaluate(self, price_info: dict, solar_surplus_w: float = 0.0, co2_info: dict = None) -> list[dict]:
         """
         Evalueer alle slimme uitstelmodus-schakelaars.
         Aanroepen elke coordinator-tick (10s).
@@ -364,6 +379,23 @@ class SmartDelayScheduler:
 
                 if price <= cfg.price_threshold_eur:
                     # Stroom is al goedkoop — geen actie nodig
+                    continue
+
+                # suggest_only: stuur push, schakelaar NIET aansturen
+                if cfg.suggest_only:
+                    # Anti-spam: alleen één suggestie per dag per apparaat
+                    if cfg._suggest_notified_h != now_h:
+                        cfg._suggest_notified_h = now_h
+                        _start_h = self._cheap_start_hour(cfg, price_info)
+                        _hint = f" Beste moment: {_start_h:02d}:00." if _start_h is not None else ""
+                        await self._notify(
+                            cfg,
+                            title=f"⏳ {cfg.label or cfg.entity_id}: wacht met starten",
+                            message=(
+                                f"Stroom is nu duur (€{price:.4f}/kWh > drempel €{cfg.price_threshold_eur:.4f}/kWh).{_hint}\n"
+                                f"CloudEMS stuurt een melding zodra het goedkoopst is."
+                            ),
+                        )
                     continue
 
                 # Tijdvenster: is er überhaupt een goedkoop blok vandaag/morgen?
@@ -443,6 +475,33 @@ class SmartDelayScheduler:
                         "reason":    f"Uitgeschakeld na {cfg.grace_s}s grace — wacht op {st.target_hour:02d}:00",
                     })
                 continue
+
+            # ── SUGGEST_ONLY: stuur "Start nu!" push bij goedkoop/surplus ──
+            if cfg.suggest_only and st.state == DelayState.IDLE:
+                is_cheap   = price <= cfg.price_threshold_eur or bool(price_info.get("in_cheapest_3h"))
+                is_surplus = cfg.surplus_threshold_w > 0 and solar_surplus_w >= cfg.surplus_threshold_w
+                _co2_g    = float((co2_info or {}).get("current_gco2_kwh", 999) or 999)
+                _co2_good = _co2_g < 150  # < 150 gCO2/kWh = groen net (veel wind/solar)
+                _good_now  = is_cheap or is_surplus or _co2_good
+                # Anti-spam: stuur max 1x per uur per richting (goed/slecht)
+                _stamp = now_h * 10 + (1 if _good_now else 0)
+                if _good_now and cfg._suggest_notified_h != _stamp:
+                    cfg._suggest_notified_h = _stamp
+                    _why = (f"PV-surplus {solar_surplus_w:.0f}W" if is_surplus
+                            else f"CO2-groen net: {_co2_g:.0f} gCO2/kWh" if _co2_good
+                            else f"goedkoopste uur €{price:.4f}/kWh")
+                    await self._notify(
+                        cfg,
+                        title=f"✅ Start nu: {cfg.label or cfg.entity_id}",
+                        message=(
+                            f"Nu is het beste moment voor **{cfg.label or cfg.entity_id}**. "
+                            f"Reden: {_why}. "
+                            f"CloudEMS stuurt dit apparaat niet aan — even zelf starten!"
+                        ),
+                        notification_id=f"cloudems_suggest_{cfg.entity_id.replace('.','_')}",
+                    )
+                    actions.append({"entity_id": cfg.entity_id, "label": cfg.label,
+                                    "action": "suggest_start", "reason": _why})
 
             # ── INTERCEPTED: wacht op goedkoop blok ──────────────────────
             if st.state == DelayState.INTERCEPTED:

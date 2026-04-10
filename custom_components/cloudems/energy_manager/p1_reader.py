@@ -718,9 +718,9 @@ class HAEntityFallbackReader:
                     "power_production_phase_l3", "currently_returned_l3",
                     "energieproductie_fase_l3",
                 ),
-                "current_l1": ("current_l1", "current_phase_l1",),
-                "current_l2": ("current_l2", "current_phase_l2",),
-                "current_l3": ("current_l3", "current_phase_l3",),
+                "current_l1": ("current_l1", "current_phase_l1", "stroom_fase_l1", "stroom_l1",),
+                "current_l2": ("current_l2", "current_phase_l2", "stroom_fase_l2", "stroom_l2",),
+                "current_l3": ("current_l3", "current_phase_l3", "stroom_fase_l3", "stroom_l3",),
                 "energy_import_t1_kwh": ("electricity_used_tariff_1", "energieverbruik_tarief_1",),
                 "energy_import_t2_kwh": ("electricity_used_tariff_2", "energieverbruik_tarief_2",),
                 "energy_export_t1_kwh": (
@@ -771,6 +771,28 @@ class HAEntityFallbackReader:
                 )
         except Exception as _e0:
             _LOGGER.debug("P1 HAFallback pass0 fout: %s", _e0)
+
+        # Pass 0.5: keyword match op ALLE sensoren (niet alleen DSMR platform)
+        # Vangt sensoren op die via een DSMR add-on of custom integratie draaien
+        _kw_map_05 = {
+            "current_l1": ("stroom_fase_l1", "stroom_l1", "current_l1",),
+            "current_l2": ("stroom_fase_l2", "stroom_l2", "current_l2",),
+            "current_l3": ("stroom_fase_l3", "stroom_l3", "current_l3",),
+        }
+        for key, keywords in _kw_map_05.items():
+            if key in self._resolved: continue
+            for st in self._hass.states.async_all():
+                if st.domain != "sensor": continue
+                eid_low = st.entity_id.lower()
+                if any(kw in eid_low for kw in keywords):
+                    try:
+                        val = float(st.state)
+                        if 0 <= val <= 100:  # plausibel stroombereik (A)
+                            self._resolved[key] = st.entity_id
+                            _LOGGER.warning("P1 HAFallback pass0.5: %s → %s", key, st.entity_id)
+                            break
+                    except (ValueError, TypeError):
+                        pass
 
         # Pass 1: exact hardcoded entity_id match (backwards compat)
         all_states = {s.entity_id for s in self._hass.states.async_all()}

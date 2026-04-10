@@ -1152,7 +1152,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "azimuth_deg":    user_input.get("inv_azimuth") or None,
                 "tilt_deg":       user_input.get("inv_tilt") or None,
                 "rated_power_w":  float(user_input.get("inv_rated_power", 0)) or None,
-
+                # v5.5.339: energie-sensor voor dagproductie (optioneel)
+                "energy_sensor":  user_input.get("inv_energy_sensor") or None,
+                # v5.5.505: AC limiet voor clipping detectie
+                "max_ac_power_w": float(user_input.get("inv_max_ac_power", 0)) or None,
             })
             self._inv_step += 1
             if self._inv_step < self._inv_count:
@@ -1175,6 +1178,10 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # ── Begrenzing ────────────────────────────────────────────────
                 vol.Optional("inv_min_pct", default=float(existing.get("min_power_pct", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=50)),
                 vol.Optional("inv_control", default=existing.get("control_entity") or vol.UNDEFINED): _ent(["switch","number"]),
+                # v5.5.339: energie-sensor voor dagproductie (kWh of Wh, optioneel)
+                vol.Optional("inv_energy_sensor", description={"suggested_value": existing.get("energy_sensor")}): vol.Any(None, _ent(["sensor"])),
+                # v5.5.505: AC limiet omvormer (Wp) — voor clipping detectie, 0 = onbekend
+                vol.Optional("inv_max_ac_power", default=float(existing.get("max_ac_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
             }),
             description_placeholders={
                     "diagram_url": "/local/cloudems/diagrams/inverter_detail.svg",
@@ -1301,15 +1308,17 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         existing_bat_cfgs = getattr(self, "_existing_bat_cfgs", []) or self._config.get(CONF_BATTERY_CONFIGS, [])
         if user_input is not None:
             self._config[CONF_BATTERY_CONFIGS].append({
-                "power_sensor":     user_input.get("bat_power_sensor"),
-                "soc_sensor":       user_input.get("bat_soc_sensor"),
-                "capacity_kwh":     float(user_input.get("bat_capacity_kwh", 0.0)),
-                "max_charge_w":     float(user_input.get("bat_max_charge_w", 0.0)),
-                "max_discharge_w":  float(user_input.get("bat_max_discharge_w", 0.0)),
-                "charge_entity":    user_input.get("bat_charge_entity", ""),
-                "discharge_entity": user_input.get("bat_discharge_entity", ""),
-                "label":            user_input.get("bat_label", f"Batterij {i}"),
-                "priority":         i,
+                "power_sensor":          user_input.get("bat_power_sensor"),
+                "soc_sensor":            user_input.get("bat_soc_sensor"),
+                "capacity_kwh":          float(user_input.get("bat_capacity_kwh", 0.0)),
+                "max_charge_w":          float(user_input.get("bat_max_charge_w", 0.0)),
+                "max_discharge_w":       float(user_input.get("bat_max_discharge_w", 0.0)),
+                "charge_entity":         user_input.get("bat_charge_entity", ""),
+                "discharge_entity":      user_input.get("bat_discharge_entity", ""),
+                "charge_kwh_sensor":     user_input.get("bat_charge_kwh_sensor") or "",
+                "discharge_kwh_sensor":  user_input.get("bat_discharge_kwh_sensor") or "",
+                "label":                 user_input.get("bat_label", f"Batterij {i}"),
+                "priority":              i,
             })
             self._bat_step += 1
             if self._bat_step < self._bat_count:
@@ -1328,6 +1337,12 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("bat_max_discharge_w", default=0.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("bat_charge_entity"):    _ent(["number", "input_number"]),
                 vol.Optional("bat_discharge_entity"): _ent(["number", "input_number"]),
+                vol.Optional("bat_charge_kwh_sensor",
+                    default=existing_bat.get("charge_kwh_sensor") or vol.UNDEFINED):
+                    _ent(["sensor"]),
+                vol.Optional("bat_discharge_kwh_sensor",
+                    default=existing_bat.get("discharge_kwh_sensor") or vol.UNDEFINED):
+                    _ent(["sensor"]),
                 vol.Optional("bat_label", default=f"Batterij {i}"): str,
             }),
             description_placeholders={
@@ -1348,6 +1363,8 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._config[CONF_SHUTTER_COUNT]   = self._shutter_count
             self._config[CONF_SHUTTER_CONFIGS] = []
             self._config["shutter_global_smoke_sensor"] = user_input.get("shutter_global_smoke_sensor") or ""
+            self._config["shutter_global_wind_sensor"]  = user_input.get("shutter_global_wind_sensor") or ""
+            self._config["shutter_wind_threshold_ms"]   = float(user_input.get("shutter_wind_threshold_ms") or 12.0)
             self._shutter_step = 0
             self._overkiz_prefill = overkiz_covers
             if self._shutter_count == 0 and overkiz_covers:
@@ -1372,6 +1389,16 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SHUTTER_COUNT, default=existing_count): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=opts, mode="dropdown")
                 ),
+                vol.Optional(
+                    "shutter_global_wind_sensor",
+                    default=self._config.get("shutter_global_wind_sensor", "") or
+                            self._config.get("wind_speed_sensor", "") or vol.UNDEFINED,
+                ): selector.EntitySelector(selector.EntitySelectorConfig(
+                    domain="sensor", device_class="wind_speed")),
+                vol.Optional(
+                    "shutter_wind_threshold_ms",
+                    default=float(self._config.get("shutter_wind_threshold_ms", 12.0)),
+                ): vol.All(vol.Coerce(float), vol.Range(min=5, max=40)),
                 vol.Optional(
                     "shutter_global_smoke_sensor",
                     default=self._config.get("shutter_global_smoke_sensor", "") or vol.UNDEFINED,
@@ -2170,6 +2197,7 @@ class CloudEMSConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         type_opts = [
             selector.SelectOptionDict(value="heat_pump", label="🔥 Warmtepomp"),
             selector.SelectOptionDict(value="airco",     label="❄️ Airco / koeling"),
+            selector.SelectOptionDict(value="floor_heating", label="🌡️ Vloerverwarming"),
             selector.SelectOptionDict(value="hybrid",    label="🔄 Hybride (WP + ketel)"),
         ]
         return self.async_show_form(
@@ -3285,6 +3313,61 @@ class CloudEMSOptionsFlow(_OptionsBase):
         except Exception as exc:
             _LOGGER.debug("Battery provider scan failed: %s", exc)
 
+        # 5. Grid kWh sensoren auto-detect
+        try:
+            from .energy_manager.energy_source_manager import EnergySourceManager as _ESM
+            _all_suggestions = _ESM.auto_detect_all(self.hass, data)
+            for _path, _sensor in _all_suggestions.items():
+                # Flatten pad naar display-naam
+                _disp = _path.replace(".", " → ").replace("_", " ")
+                if _path not in applied:
+                    applied[_path] = _sensor
+        except Exception as _esm_e:
+            _LOGGER.debug("EnergySourceManager auto_detect_all fout: %s", _esm_e)
+
+        # 5b. Bekende accu-merken: zoek energie-sensoren automatisch
+        # Zonneplan Nexus: energy_charged_kwh / energy_discharged_kwh sensoren
+        # Deze zijn beschikbaar via de Zonneplan integratie in HA
+        try:
+            from homeassistant.helpers import entity_registry as er
+            _ent_reg = er.async_get(self.hass)
+            _KNOWN_CHARGE_PATTERNS = [
+                "charged_kwh", "energy_charged", "charge_energy",
+                "geladen_vandaag", "battery_charge_kwh", "charged_today",
+            ]
+            _KNOWN_DISCHARGE_PATTERNS = [
+                "discharged_kwh", "energy_discharged", "discharge_energy",
+                "ontladen_vandaag", "battery_discharge_kwh", "discharged_today",
+            ]
+            bat_cfgs = data.get("battery_configs", [])
+            if bat_cfgs:
+                for _idx, _bat_cfg in enumerate(bat_cfgs):
+                    if _bat_cfg.get("charge_kwh_sensor") and _bat_cfg.get("discharge_kwh_sensor"):
+                        continue  # al geconfigureerd
+                    # Zoek sensoren die overeenkomen met bekende patronen
+                    _chg_sensor = None
+                    _dis_sensor = None
+                    for _entry in _ent_reg.entities.values():
+                        if _entry.domain != "sensor":
+                            continue
+                        _eid = _entry.entity_id.lower()
+                        if not _chg_sensor:
+                            for _pat in _KNOWN_CHARGE_PATTERNS:
+                                if _pat in _eid:
+                                    _chg_sensor = _entry.entity_id
+                                    break
+                        if not _dis_sensor:
+                            for _pat in _KNOWN_DISCHARGE_PATTERNS:
+                                if _pat in _eid:
+                                    _dis_sensor = _entry.entity_id
+                                    break
+                    if _chg_sensor and not _bat_cfg.get("charge_kwh_sensor"):
+                        applied[f"bat_{_idx}_charge_kwh_sensor"] = _chg_sensor
+                    if _dis_sensor and not _bat_cfg.get("discharge_kwh_sensor"):
+                        applied[f"bat_{_idx}_discharge_kwh_sensor"] = _dis_sensor
+        except Exception as _exc_kwh:
+            _LOGGER.debug("Battery energy sensor auto-detect failed: %s", _exc_kwh)
+
         self._auto_detect_results = applied
 
         # Build summary lines
@@ -3329,6 +3412,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="prices_opts",  label="💶 Prijzen & Belasting"),
                         selector.SelectOptionDict(value="budget_opts",  label="📊 Energiebudget"),
                         selector.SelectOptionDict(value="advanced_opts", label="📡 P1 & Geavanceerd"),
+                        selector.SelectOptionDict(value="notifications_opts", label="🔔 Notificaties & Meldingen"),
+                        selector.SelectOptionDict(value="extra_sensors_opts",label="🌡️ Extra sensoren & Omgeving"),
                         selector.SelectOptionDict(value="egauge_opts",      label="📊 eGauge Submeter"),
                         selector.SelectOptionDict(value="neighbourhood_opts", label="🏘️ Buurtenergie (P2P)"),
                         selector.SelectOptionDict(value="blackout_guard_opts",label="⚡ Blackout Guard"),
@@ -3337,6 +3422,95 @@ class CloudEMSOptionsFlow(_OptionsBase):
                         selector.SelectOptionDict(value="__terug__",    label="← Terug"),
                     ], mode="list"))
             }),
+        )
+
+    async def async_step_extra_sensors_opts(self, user_input=None):
+        """🌡️ Extra sensoren & Omgeving — optionele sensoren voor betere sturing."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Sla alle ingevulde sensoren op
+            for _k in (
+                "outside_temp_entity", "irradiance_sensor", "wind_speed_sensor",
+                "rain_sensor", "co2_sensor", "indoor_co2_sensor",
+                "battery_temp_sensor", "water_meter_sensor",
+                "grid_frequency_sensor", "pv_panel_temp_sensor",
+            ):
+                if _k in user_input:
+                    self._opts[_k] = user_input.get(_k) or ""
+            return self._save(self._opts)
+
+        # Auto-detect via device_class
+        def _detect(device_class, unit=None):
+            for s in self.hass.states.async_all("sensor"):
+                dc = s.attributes.get("device_class", "")
+                u  = s.attributes.get("unit_of_measurement", "")
+                if dc == device_class:
+                    if unit is None or unit in u:
+                        return s.entity_id
+            return None
+
+        _auto_temp    = _detect("temperature")
+        _auto_wind    = _detect("wind_speed")
+        _auto_rain    = _detect("precipitation") or _detect("precipitation_intensity")
+        _auto_co2     = _detect("carbon_dioxide")
+        _auto_freq    = _detect("frequency", "Hz")
+        _auto_irr     = _detect("irradiance")
+
+        def _d(key, auto=None):
+            return data.get(key) or auto or vol.UNDEFINED
+
+        return self.async_show_form(
+            step_id="extra_sensors_opts",
+            data_schema=vol.Schema({
+                # Temperatuur
+                vol.Optional("outside_temp_entity",
+                    default=_d("outside_temp_entity", _auto_temp)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
+                vol.Optional("pv_panel_temp_sensor",
+                    default=_d("pv_panel_temp_sensor")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
+                vol.Optional("battery_temp_sensor",
+                    default=_d("battery_temp_sensor")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="temperature")),
+                # Straling & PV
+                vol.Optional("irradiance_sensor",
+                    default=_d("irradiance_sensor", _auto_irr)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="irradiance")),
+                # Wind & Regen
+                vol.Optional("wind_speed_sensor",
+                    default=_d("wind_speed_sensor", _auto_wind)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="wind_speed")),
+                vol.Optional("rain_sensor",
+                    default=_d("rain_sensor", _auto_rain)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")),
+                # Luchtkwaliteit
+                vol.Optional("co2_sensor",
+                    default=_d("co2_sensor", _auto_co2)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="carbon_dioxide")),
+                vol.Optional("indoor_co2_sensor",
+                    default=_d("indoor_co2_sensor", _auto_co2)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="carbon_dioxide")),
+                # Grid
+                vol.Optional("grid_frequency_sensor",
+                    default=_d("grid_frequency_sensor", _auto_freq)): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="frequency")),
+                # Water
+                vol.Optional("water_meter_sensor",
+                    default=_d("water_meter_sensor")): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="water")),
+            }),
+            description_placeholders={
+                "auto_detected": ", ".join(filter(None, [
+                    f"buitentemperatuur" if _auto_temp else None,
+                    f"irradiantie" if _auto_irr else None,
+                    f"wind" if _auto_wind else None,
+                    f"regen" if _auto_rain else None,
+                    f"CO₂" if _auto_co2 else None,
+                    f"frequentie" if _auto_freq else None,
+                ])) or "geen",
+            },
         )
 
     async def async_step_noodstroom(self, user_input=None):
@@ -3552,6 +3726,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 user_input[CONF_MAX_CURRENT_L2] = _l1
                 user_input[CONF_MAX_CURRENT_L3] = _l1
             user_input[CONF_MAX_CURRENT_PER_PHASE] = _l1
+            # Sla ook kWh sensor instellingen op (T1/T2 per tarief)
+            for _k in ("grid_import_kwh_t1", "grid_import_kwh_t2",
+                       "grid_export_kwh_t1", "grid_export_kwh_t2"):
+                if _k in user_input:
+                    self._opts[_k] = user_input[_k] or ""
             return self._save(user_input)
 
         dsmr_type_opts = [
@@ -3576,6 +3755,32 @@ class CloudEMSOptionsFlow(_OptionsBase):
         else:
             schema[vol.Optional(CONF_IMPORT_SENSOR, default=data.get(CONF_IMPORT_SENSOR) or vol.UNDEFINED)] = _ent()
             schema[vol.Optional(CONF_EXPORT_SENSOR, default=data.get(CONF_EXPORT_SENSOR) or vol.UNDEFINED)] = _ent()
+        # v5.5.509: DSMR P1 splitst import/export in T1 (laag) en T2 (hoog) tarief
+        # Auto-detect via EnergySourceManager
+        try:
+            from .energy_manager.energy_source_manager import EnergySourceManager as _ESM
+            _auto = _ESM.auto_detect_all(self.hass, data)
+        except Exception:
+            _auto = {}
+
+        def _kwh_default(key, legacy_key=None):
+            # Haal waarde op: config → auto-detect → legacy → UNDEFINED
+            v = (data.get(key) or _auto.get(key) or
+                 (data.get(legacy_key) if legacy_key else None))
+            return v if v else vol.UNDEFINED
+
+        schema[vol.Optional("grid_import_kwh_t1",
+            default=_kwh_default("grid_import_kwh_t1", "grid_import_kwh_sensor")
+        )] = _ent(["sensor"])
+        schema[vol.Optional("grid_import_kwh_t2",
+            default=_kwh_default("grid_import_kwh_t2")
+        )] = _ent(["sensor"])
+        schema[vol.Optional("grid_export_kwh_t1",
+            default=_kwh_default("grid_export_kwh_t1", "grid_export_kwh_sensor")
+        )] = _ent(["sensor"])
+        schema[vol.Optional("grid_export_kwh_t2",
+            default=_kwh_default("grid_export_kwh_t2")
+        )] = _ent(["sensor"])
         return self.async_show_form(step_id="sensors", data_schema=vol.Schema(schema))
 
     async def async_step_phase_sensors(self, user_input=None):
@@ -4388,9 +4593,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
             _back = await self._maybe_back(user_input)
             if _back is not None: return _back
             self._config[CONF_EV_CHARGER_CONFIGS].append({
-                "entity_id": user_input.get("ev_charger_entity", ""),
-                "label":     user_input.get("ev_charger_label", f"EV Laadpaal {i}"),
-                "switch":    user_input.get("ev_charger_switch", ""),
+                "entity_id":     user_input.get("ev_charger_entity", ""),
+                "label":         user_input.get("ev_charger_label", f"EV Laadpaal {i}"),
+                "switch":        user_input.get("ev_charger_switch", ""),
+                "energy_sensor": user_input.get("ev_energy_sensor") or "",
             })
             # Backwards compat: zet eerste als CONF_EV_CHARGER_ENTITY
             if self._ev_charger_step == 0:
@@ -4405,6 +4611,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Required("ev_charger_entity", description={"suggested_value": existing.get("entity_id")}): _ent(["number", "input_number", "sensor"]),
                 vol.Optional("ev_charger_label", default=existing.get("label", f"EV Laadpaal {i}")): str,
                 vol.Optional("ev_charger_switch", default=existing.get("switch", "") or vol.UNDEFINED): _ent(["switch", "input_boolean"]),
+                vol.Optional("ev_energy_sensor",
+                    default=existing.get("energy_sensor") or vol.UNDEFINED): _ent(["sensor"]),
             }),
             description_placeholders={"ev_num": str(i), "total": str(self._ev_charger_count)},
         )
@@ -5147,6 +5355,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 "azimuth_deg":    user_input.get("inv_azimuth") or None,
                 "tilt_deg":       user_input.get("inv_tilt") or None,
                 "rated_power_w":  float(user_input.get("inv_rated_power", 0)) or None,
+                "max_ac_power_w": float(user_input.get("inv_max_ac_power", 0)) or None,
+                "energy_sensor":  user_input.get("inv_energy_sensor") or existing.get("energy_sensor") or None,
             })
             self._inv_step += 1
             if self._inv_step < self._inv_count:
@@ -5164,6 +5374,8 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("inv_azimuth", description={"suggested_value": existing.get("azimuth_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=360))),
                 vol.Optional("inv_tilt",    description={"suggested_value": existing.get("tilt_deg")}): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=90))),
                 vol.Optional("inv_rated_power", default=float(existing.get("rated_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("inv_max_ac_power", default=float(existing.get("max_ac_power_w") or 0)): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
+                vol.Optional("inv_energy_sensor", description={"suggested_value": existing.get("energy_sensor")}): vol.Any(None, _ent(["sensor"])),
             }),
             description_placeholders={
                 "inverter_num": str(i),
@@ -5388,10 +5600,28 @@ class CloudEMSOptionsFlow(_OptionsBase):
             i = getattr(self, "_inv_step", 0) + 1
             if not hasattr(self, "_opts") or CONF_BATTERY_CONFIGS not in self._opts:
                 self._opts[CONF_BATTERY_CONFIGS] = []
+            # v5.5.513: automatisch Nexus kWh sensoren detecteren
+            _nexus_chg = _nexus_dis = ""
+            try:
+                from homeassistant.helpers import entity_registry as _er
+                _ent_reg = _er.async_get(self.hass)
+                for _entry in _ent_reg.entities.values():
+                    if _entry.domain != "sensor": continue
+                    _eid = _entry.entity_id.lower()
+                    if not _nexus_chg and "production_day" in _eid:
+                        _nexus_chg = _entry.entity_id
+                    if not _nexus_dis and "delivery_day" in _eid:
+                        _nexus_dis = _entry.entity_id
+                    if _nexus_chg and _nexus_dis:
+                        break
+            except Exception:
+                pass
             self._opts[CONF_BATTERY_CONFIGS].append({
-                "battery_type": "zonneplan",
-                "label":        f"Zonneplan Nexus",
-                "priority":     i,
+                "battery_type":         "zonneplan",
+                "label":                f"Zonneplan Nexus",
+                "priority":             i,
+                "charge_kwh_sensor":    _nexus_chg,
+                "discharge_kwh_sensor": _nexus_dis,
             })
             self._inv_step = getattr(self, "_inv_step", 0) + 1
             # Zijn er nog meer batterijen te configureren?
@@ -5531,9 +5761,11 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 ),
             }),
             description_placeholders={
-                "battery_num": str(i),
-                "total":       str(self._inv_count),
+                "battery_num":       str(i),
+                "total":             str(self._inv_count),
                 "detected_providers": ", ".join(h.provider_label for h in hints) if hints else "geen",
+                "detected_hint":     (f"⚡ Gedetecteerd: {', '.join(h.provider_label for h in hints)}"
+                                      if hints else ""),
             },
         )
 
@@ -5549,16 +5781,18 @@ class CloudEMSOptionsFlow(_OptionsBase):
             if _back is not None: return _back
             _bat_keep = lambda k_ui, k_ex: user_input.get(k_ui) or existing.get(k_ex, "")
             self._opts[CONF_BATTERY_CONFIGS].append({
-                "battery_type":     "manual",
-                "power_sensor":     user_input.get("bat_power_sensor") or existing.get("power_sensor"),
-                "soc_sensor":       user_input.get("bat_soc_sensor")   or existing.get("soc_sensor"),
-                "capacity_kwh":     float(user_input.get("bat_capacity_kwh", 0.0)),
-                "max_charge_w":     float(user_input.get("bat_max_charge_w", 0.0)),
-                "max_discharge_w":  float(user_input.get("bat_max_discharge_w", 0.0)),
-                "charge_entity":    _bat_keep("bat_charge_entity",    "charge_entity"),
-                "discharge_entity": _bat_keep("bat_discharge_entity", "discharge_entity"),
-                "label":            user_input.get("bat_label", f"Batterij {i}"),
-                "priority":         i,
+                "battery_type":          "manual",
+                "power_sensor":          user_input.get("bat_power_sensor") or existing.get("power_sensor"),
+                "soc_sensor":            user_input.get("bat_soc_sensor")   or existing.get("soc_sensor"),
+                "capacity_kwh":          float(user_input.get("bat_capacity_kwh", 0.0)),
+                "max_charge_w":          float(user_input.get("bat_max_charge_w", 0.0)),
+                "max_discharge_w":       float(user_input.get("bat_max_discharge_w", 0.0)),
+                "charge_entity":         _bat_keep("bat_charge_entity",    "charge_entity"),
+                "discharge_entity":      _bat_keep("bat_discharge_entity", "discharge_entity"),
+                "charge_kwh_sensor":     user_input.get("bat_charge_kwh_sensor") or existing.get("charge_kwh_sensor", ""),
+                "discharge_kwh_sensor":  user_input.get("bat_discharge_kwh_sensor") or existing.get("discharge_kwh_sensor", ""),
+                "label":                 user_input.get("bat_label", f"Batterij {i}"),
+                "priority":              i,
             })
             self._inv_step += 1
             if self._inv_step < self._inv_count:
@@ -5576,6 +5810,10 @@ class CloudEMSOptionsFlow(_OptionsBase):
                 vol.Optional("bat_max_discharge_w", default=float(existing.get("max_discharge_w", 0.0))): vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)),
                 vol.Optional("bat_charge_entity", default=existing.get("charge_entity") or vol.UNDEFINED): _ent(["number", "input_number"]),
                 vol.Optional("bat_discharge_entity", default=existing.get("discharge_entity") or vol.UNDEFINED): _ent(["number", "input_number"]),
+                vol.Optional("bat_charge_kwh_sensor",
+                    default=existing.get("charge_kwh_sensor") or vol.UNDEFINED): _ent(["sensor"]),
+                vol.Optional("bat_discharge_kwh_sensor",
+                    default=existing.get("discharge_kwh_sensor") or vol.UNDEFINED): _ent(["sensor"]),
                 vol.Optional("bat_label", default=existing.get("label", f"Batterij {i}")): str,
             }),
             description_placeholders={
@@ -5936,6 +6174,57 @@ class CloudEMSOptionsFlow(_OptionsBase):
             }),
         )
 
+
+    async def async_step_notifications_opts(self, user_input=None):
+        """Options flow: notificatie-instellingen (mobile push + categorieën)."""
+        data = self._data()
+        if user_input is not None:
+            _back = await self._maybe_back(user_input)
+            if _back is not None: return _back
+            # Sla notify_services op als lijst (kommagescheiden invoer splitsen)
+            raw_svcs = user_input.get("notify_services_raw", "")
+            svcs = [s.strip() for s in raw_svcs.split(",") if s.strip()]
+            user_input["notify_services"] = svcs
+            user_input.pop("notify_services_raw", None)
+            cats = {
+                "boiler":        bool(user_input.pop("notify_cat_boiler", True)),
+                "smart_delay":   bool(user_input.pop("notify_cat_smart_delay", True)),
+                "solar":         bool(user_input.pop("notify_cat_solar", True)),
+                "energy_report": bool(user_input.pop("notify_cat_energy_report", True)),
+                "legionella":    bool(user_input.pop("notify_cat_legionella", True)),
+            }
+            user_input["notify_categories"] = cats
+            return self._save(user_input)
+
+        # Huidige waarden ophalen
+        existing_svcs = data.get("notify_services", []) or []
+        cats = data.get("notify_categories", {}) or {}
+        return self.async_show_form(
+            step_id="notifications_opts",
+            description_placeholders={
+                "info": (
+                    "Voer je HA notify-service(s) in voor push-meldingen naar je telefoon, "
+                    "bijv. notify.mobile_app_mijn_telefoon. "
+                    "Leeg laten = CloudEMS zoekt automatisch alle mobiele apps. "
+                    "Meerdere services kommagescheiden invoeren."
+                )
+            },
+            data_schema=vol.Schema({
+                vol.Optional("notify_services_raw",
+                    default=", ".join(existing_svcs)): str,
+                # Categorieën aan/uit
+                vol.Optional("notify_cat_boiler",
+                    default=bool(cats.get("boiler", True))): bool,
+                vol.Optional("notify_cat_smart_delay",
+                    default=bool(cats.get("smart_delay", True))): bool,
+                vol.Optional("notify_cat_solar",
+                    default=bool(cats.get("solar", True))): bool,
+                vol.Optional("notify_cat_energy_report",
+                    default=bool(cats.get("energy_report", True))): bool,
+                vol.Optional("notify_cat_legionella",
+                    default=bool(cats.get("legionella", True))): bool,
+            }),
+        )
 
     async def async_step_battery_advanced_opts(self, user_input=None):
         """Options flow: geavanceerde batterij-instellingen (ruimte, terugverdientijd, Mijnbatterij)."""

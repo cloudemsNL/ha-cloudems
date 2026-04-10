@@ -102,6 +102,14 @@ class HAEntityProvider(EntityProvider):
                 domain, service, entity_id,
             )
             return False
+        # Controleer of entity bestaat in HA state machine (vermijd spam bij startup)
+        _state = self._hass.states.get(entity_id)
+        if _state is None:
+            logger.debug(
+                "HA service call uitgesteld (%s.%s): entity %r nog niet beschikbaar",
+                domain, service, entity_id,
+            )
+            return False
         service_data = dict(data) if data else {}
         target = {"entity_id": entity_id}
         try:

@@ -141,6 +141,90 @@ class PaybackTracker:
                 "discharge_kwh":  round(discharge_kwh, 3),
             })
 
+
+    def _build_dod_histogram(self, capacity_kwh: float) -> dict:
+        """Bouw DoD-histogram uit dagelijkse ontlaaddata (laatste 90 dagen).
+
+        DoD% per dag = discharge_kwh / capacity_kwh * 100
+        Buckets: 0-20, 20-40, 40-60, 60-80, 80-100
+        """
+        if capacity_kwh <= 0:
+            return {}
+        buckets = {"0-20": 0, "20-40": 0, "40-60": 0, "60-80": 0, "80-100": 0}
+        total_kwh = 0.0
+        days_with_data = 0
+        for day in self._daily_revenues:
+            dis_kwh = float(day.get("discharge_kwh") or 0)
+            if dis_kwh <= 0:
+                continue
+            days_with_data += 1
+            total_kwh += dis_kwh
+            dod_pct = min(100.0, dis_kwh / capacity_kwh * 100)
+            if   dod_pct < 20:  buckets["0-20"]   += 1
+            elif dod_pct < 40:  buckets["20-40"]  += 1
+            elif dod_pct < 60:  buckets["40-60"]  += 1
+            elif dod_pct < 80:  buckets["60-80"]  += 1
+            else:               buckets["80-100"] += 1
+
+        avg_dod_pct = (total_kwh / capacity_kwh / max(days_with_data, 1)) * 100
+        # Batterijlevensduur schatting: meeste Li-ion = 3000-4000 equivalente volledige cycli
+        # Gewogen DoD-factor: ondiep laden (20%) = 5× langere levensduur vs vol laden (100%)
+        # Bron: Wöhler-curve benadering
+        dod_weights = {"0-20": 0.05, "20-40": 0.15, "40-60": 0.35, "60-80": 0.65, "80-100": 1.0}
+        total_w = sum(buckets[b] * dod_weights[b] for b in buckets)
+        n_days  = sum(buckets.values())
+        weighted_cycles_per_day = (total_w / max(n_days, 1))
+
+        RATED_CYCLES = 4000  # conservatief voor LFP (Nexus/Zonneplan)
+        if weighted_cycles_per_day > 0:
+            est_lifetime_days = RATED_CYCLES / weighted_cycles_per_day
+        else:
+            est_lifetime_days = None
+
+        return {
+            "buckets":             buckets,
+            "days_analysed":       days_with_data,
+            "avg_dod_pct":         round(avg_dod_pct, 1),
+            "total_discharge_kwh": round(total_kwh, 1),
+            "equivalent_cycles":   round(total_kwh / max(capacity_kwh, 1), 1),
+            "est_lifetime_years":  round(est_lifetime_days / 365, 1) if est_lifetime_days else None,
+        }
+
+    def _build_wat_als(self) -> dict:
+        """Schat kosten zonder batterij obv historische data.
+
+        Aanname: zonder batterij zou alle arbitrage-winst verloren gaan.
+        De charge_kwh zou gekocht zijn op gemiddelde prijs ipv goedkoop,
+        en de discharge_kwh zou geïmporteerd zijn op gemiddelde prijs.
+        """
+        from statistics import mean
+        total_saved   = 0.0
+        total_charge  = 0.0
+        total_dis     = 0.0
+        daily_savings = []
+
+        for day in self._daily_revenues:
+            rev   = float(day.get("revenue_eur") or 0)
+            chg   = float(day.get("charge_kwh") or 0)
+            dis   = float(day.get("discharge_kwh") or 0)
+            total_saved  += rev
+            total_charge += chg
+            total_dis    += dis
+            daily_savings.append(rev)
+
+        n_days = len(self._daily_revenues)
+        avg_saving_day = total_saved / max(n_days, 1)
+
+        return {
+            "total_saved_eur":     round(total_saved, 2),
+            "avg_saving_per_day":  round(avg_saving_day, 4),
+            "avg_saving_per_month":round(avg_saving_day * 30.44, 2),
+            "total_charge_kwh":    round(total_charge, 1),
+            "total_discharge_kwh": round(total_dis, 1),
+            "days_analysed":       n_days,
+            "annual_projection_eur": round(avg_saving_day * 365, 2),
+        }
+
     def get_purchase_price(self, capacity_kwh: float) -> dict:
         """Return purchase price — configured or estimated from capacity and age."""
         cfg_price = self._config.get("battery_purchase_price_eur")
@@ -272,6 +356,10 @@ class PaybackTracker:
             "tracking_days":       tracking_days,
             "monthly_history":     self._monthly_history[-12:],
             "daily_revenues":      self._daily_revenues[-30:],
+            # v5.5.333: DoD-histogram — verdeling van dagelijkse ontlaaddiepte
+            "dod_histogram":       self._build_dod_histogram(capacity_kwh),
+            # v5.5.333: Wat-als — schatting zonder batterij
+            "wat_als":             self._build_wat_als(),
             "data_source":         data_source,
             "data_source_note":    data_source_note,
             "install_date":        getattr(self, "_zonneplan_install_date", None),

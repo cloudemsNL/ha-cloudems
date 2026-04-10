@@ -1,11 +1,13 @@
-// CloudEMS eGauge Card v5.4.96
-const CARD_EGAUGE_VERSION = '5.5.318';
+// CloudEMS eGauge Card v5.5.465
+const CARD_EGAUGE_VERSION = '5.5.465';
 // eGauge smart meter — grid and phase data
 
 class CloudemsEgaugeCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: "open" }); this._prev = ""; }
   setConfig(c) { this._cfg = { title: "📊 eGauge Submeter", ...c }; this._render(); }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-egauge-card-editor');}
   set hass(h) {
     this._hass = h;
     const s = h.states["sensor.cloudems_egauge"];
@@ -54,7 +56,7 @@ class CloudemsEgaugeCard extends HTMLElement {
   }
 
   getCardSize() { return 3; }
-  static getConfigElement() { return document.createElement("cloudems-egauge-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-egauge-card-editor');}
   static getStubConfig() { return {}; }
 }
 

@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Energy Demand Card  v5.4.96
+// CloudEMS Energy Demand Card  v5.5.465
 
-const DEMAND_CARD_VERSION = "5.5.318";
+const DEMAND_CARD_VERSION = "5.5.465";
 
 const S = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -99,6 +99,8 @@ class CloudemsDemandCard extends HTMLElement {
 
   setConfig(cfg){this._cfg=cfg;this._render();}
 
+  
+  static getConfigElement(){return document.createElement('cloudems-demand-card-editor');}
   set hass(hass){
     this._hass=hass;
     const st=hass.states['sensor.cloudems_energy_demand'];

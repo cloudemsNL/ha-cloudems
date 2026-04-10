@@ -1,6 +1,6 @@
 // CloudEMS Energy View Card — flow + sankey gecombineerd met tabs
 // Flow card (cloudems-cards.js) en Sankey card worden als child elements gebruikt
-const EV_CARD_VERSION = "5.5.318";
+const EV_CARD_VERSION = "5.5.465";
 
 class CloudEMSEnergyViewCard extends HTMLElement {
   constructor() {
@@ -92,7 +92,7 @@ class CloudEMSEnergyViewCard extends HTMLElement {
   }
 
   getCardSize() { return 6; }
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement() { return document.createElement('cloudems-energy-view-card-editor'); }
   static getStubConfig() { return {}; }
 }
 

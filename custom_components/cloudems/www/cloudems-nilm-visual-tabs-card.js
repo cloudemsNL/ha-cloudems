@@ -1,5 +1,5 @@
-// cloudems-nilm-visual-tabs-card — tab-wrapper v5.5.183
-const CLOUDEMS_NILM_VISUAL_TABS_CARD_VERSION = "5.5.318";
+// cloudems-nilm-visual-tabs-card — tab-wrapper v5.5.465
+const CLOUDEMS_NILM_VISUAL_TABS_CARD_VERSION = "5.5.465";
 
 class CloudEMSNilmVisualTabsCard extends HTMLElement {
   constructor() {
@@ -20,6 +20,8 @@ class CloudEMSNilmVisualTabsCard extends HTMLElement {
     this._config = config || {};
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-nilm-visual-tabs-card-editor');}
   set hass(h) {
     this._hass = h;
     // Geef hass door aan alle al gecreëerde child cards
@@ -109,9 +111,20 @@ class CloudEMSNilmVisualTabsCard extends HTMLElement {
   }
 
   getCardSize() { return 5; }
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement(){return document.createElement('cloudems-nilm-visual-tabs-card-editor');}
   static getStubConfig() { return {}; }
 }
+
+
+
+
+class CloudemsNilmVisualTabsCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});}
+  setConfig(){}
+  connectedCallback(){this.shadowRoot.innerHTML='<div style="padding:12px;font-size:12px;color:#aaa">Geen configuratie nodig — alles automatisch via CloudEMS.</div>';}
+}
+if(!customElements.get('cloudems-nilm-visual-tabs-card-editor'))customElements.define('cloudems-nilm-visual-tabs-card-editor',CloudemsNilmVisualTabsCardEditor);
+if(!customElements.get('cloudems-nilm-visual-tabs-card-editor'))customElements.define('cloudems-nilm-visual-tabs-card-editor',CloudemsNilmVisualTabsCardEditor);
 
 if (!customElements.get('cloudems-nilm-visual-tabs-card'))
   customElements.define('cloudems-nilm-visual-tabs-card', CloudEMSNilmVisualTabsCard);

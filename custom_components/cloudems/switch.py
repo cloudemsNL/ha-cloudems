@@ -977,7 +977,9 @@ class CloudEMSShutterAutoSwitch(CoordinatorEntity, SwitchEntity, RestoreEntity):
     async def async_turn_off(self, **kwargs):
         sc = getattr(self.coordinator, "_shutter_ctrl", None)
         if sc:
-            sc.set_auto_enabled(self._cover_id, False)
+            # v5.5.349: gebruik 12u timeout ipv permanent — rolluiken keren terug naar auto
+            # Permanent uit was de oorzaak van "rolluik blijft op uit hangen"
+            sc.set_auto_enabled(self._cover_id, False, hours=12.0)
             self.hass.async_create_task(self.coordinator.async_request_refresh())
         self.async_write_ha_state()
 

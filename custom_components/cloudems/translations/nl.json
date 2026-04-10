@@ -283,7 +283,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "inv_energy_sensor": "Dagproductie sensor (kWh) (optioneel)",
+          "inv_max_ac_power": "AC-limiet omvormer (Wp) (optioneel)"
         },
         "data_description": {
           "inv_sensor": "🔌 Koppel de vermogenssensor van deze omvormer (W of kW)",
@@ -538,7 +540,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "bat_charge_kwh_sensor": "Batterij geladen kWh sensor (optioneel)",
+          "bat_discharge_kwh_sensor": "Batterij ontladen kWh sensor (optioneel)"
         },
         "placeholders": {
           "battery_num": {
@@ -566,7 +570,9 @@
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
           "shutter_smoke_sensor": "Rookmelder (optioneel)",
-          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
+          "shutter_global_wind_sensor": "Windsnelheid sensor — stormbescherming (optioneel)",
+          "shutter_wind_threshold_ms": "Stormdrempel m/s (default 12) (optioneel)"
         }
       },
       "shutter_detail": {
@@ -1396,7 +1402,8 @@
           "ev_charger_entity": "Laadpaal sensor/setpoint",
           "ev_charger_label": "Naam",
           "ev_charger_switch": "Schakelaar (optioneel)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "ev_energy_sensor": "EV energie sensor (kWh vandaag) (optioneel)"
         }
       },
       "ev_opts": {
@@ -1581,7 +1588,9 @@
           "inv_azimuth": "Azimut (graden)",
           "inv_tilt": "Hellingshoek (graden)",
           "inv_rated_power": "Nominaal vermogen (Wp)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "inv_energy_sensor": "Dagproductie sensor (kWh) (optioneel)",
+          "inv_max_ac_power": "AC-limiet omvormer (Wp) (optioneel)"
         },
         "title": "Inverter Detail"
       },
@@ -1602,7 +1611,9 @@
           "bat_charge_entity": "Laad-entiteit",
           "bat_discharge_entity": "Ontlaad-entiteit",
           "bat_label": "Label / naam",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "bat_charge_kwh_sensor": "Batterij geladen kWh sensor (optioneel)",
+          "bat_discharge_kwh_sensor": "Batterij ontladen kWh sensor (optioneel)"
         },
         "title": "Battery Detail"
       },
@@ -1882,7 +1893,11 @@
           "grid_sensor": "Net vermogenssensor (W)",
           "import_power_sensor": "Import sensor (W)",
           "export_power_sensor": "Export sensor (W)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "grid_import_kwh_t1": "Import kWh — Tarief 1 (laag/nacht) (optioneel)",
+          "grid_import_kwh_t2": "Import kWh — Tarief 2 (hoog/dag) (optioneel)",
+          "grid_export_kwh_t1": "Export kWh — Tarief 1 (laag/nacht) (optioneel)",
+          "grid_export_kwh_t2": "Export kWh — Tarief 2 (hoog/dag) (optioneel)"
         }
       },
       "shutter_count_opts": {
@@ -1890,7 +1905,9 @@
         "data": {
           "shutter_count": "Aantal rolluiken (0–99)",
           "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
-          "back_to_menu": "← Terug naar menu"
+          "back_to_menu": "← Terug naar menu",
+          "shutter_global_wind_sensor": "Windsnelheid sensor — stormbescherming (optioneel)",
+          "shutter_wind_threshold_ms": "Stormdrempel m/s (default 12) (optioneel)"
         }
       },
       "v2h_opts": {
@@ -2167,6 +2184,22 @@
           "adaptivehome_token": "AdaptiveHome token (optioneel, voor cloud-sync)",
           "partner_slug": "Partner slug (optioneel, voor white-label installaties)"
         }
+      },
+      "extra_sensors_opts": {
+        "title": "🌡️ Extra sensoren & Omgeving",
+        "description": "Optionele sensoren voor nauwkeurigere sturing en betere forecasts.\n\nAutomatisch gevonden: {auto_detected}",
+        "data": {
+          "outside_temp_entity": "Buitentemperatuur sensor (optioneel)",
+          "pv_panel_temp_sensor": "PV paneel temperatuur sensor (optioneel)",
+          "battery_temp_sensor": "Batterij temperatuur sensor (optioneel)",
+          "irradiance_sensor": "Instraling sensor / pyranometer (optioneel)",
+          "wind_speed_sensor": "Windsnelheid sensor (optioneel)",
+          "rain_sensor": "Neerslag sensor (optioneel)",
+          "co2_sensor": "CO₂ sensor buiten (optioneel)",
+          "indoor_co2_sensor": "CO₂ sensor binnen (optioneel)",
+          "grid_frequency_sensor": "Netfrequentie sensor (optioneel)",
+          "water_meter_sensor": "Watermeter sensor (optioneel)"
+        }
       }
     },
     "abort": {
@@ -2221,7 +2254,11 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "grid_import_kwh_t1": "Import kWh — Tarief 1 (laag/nacht) (optioneel)",
+          "grid_import_kwh_t2": "Import kWh — Tarief 2 (hoog/dag) (optioneel)",
+          "grid_export_kwh_t1": "Export kWh — Tarief 1 (laag/nacht) (optioneel)",
+          "grid_export_kwh_t2": "Export kWh — Tarief 2 (hoog/dag) (optioneel)"
         },
         "description": "Netaansluiting, netspanning en faseinstellingen."
       },
@@ -2404,7 +2441,7 @@
           "congestion_threshold_w": "Netcongestie drempel (W)",
           "congestion_price_threshold": "Prijsdrempel congestie (€/kWh)",
           "battery_chemistry": "Batterijchemie (LFP / NMC / NCA / LTO)",
-          "outside_temp_entity": "Buitentemperatuursensor (voor warmtevraag)",
+          "outside_temp_entity": "Buitentemperatuursensor (voor warmtevraag) (optioneel)",
           "battery_degradation_enabled": "Batterijdegradatie bijhouden",
           "congestion_enabled": "Netcongestiedetectie inschakelen",
           "dsmr_source": "Meterbron",
@@ -2459,7 +2496,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "inv_energy_sensor": "Dagproductie sensor (kWh) (optioneel)",
+          "inv_max_ac_power": "AC-limiet omvormer (Wp) (optioneel)"
         },
         "placeholders": {
           "azimuth_tip": {
@@ -2559,7 +2598,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "bat_charge_kwh_sensor": "Batterij geladen kWh sensor (optioneel)",
+          "bat_discharge_kwh_sensor": "Batterij ontladen kWh sensor (optioneel)"
         },
         "placeholders": {
           "battery_num": {
@@ -2607,7 +2648,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "shutter_global_wind_sensor": "Windsnelheid sensor — stormbescherming (optioneel)",
+          "shutter_wind_threshold_ms": "Stormdrempel m/s (default 12) (optioneel)"
         }
       },
       "shutter_detail_opts": {
@@ -3041,7 +3084,7 @@
       },
       "battery_type_opts": {
         "title": "🔋 Batterij {battery_num} van {total} — Welk type?",
-        "description": "Kies hoe CloudEMS deze batterij aanstuurt.\n\n⚡ **Beheerde provider** (Zonneplan, Tibber…) — CloudEMS communiceert via de officiële integratie. Geen losse sensoren nodig.\n\n🔧 **Handmatig** — Je koppelt zelf een SOC-sensor en laad/ontlaad-schakelaar.\n\n{detected_hint}",
+        "description": "Kies hoe CloudEMS deze batterij aanstuurt.\n\n⚡ **Beheerde provider** (Zonneplan, Tibber…) — CloudEMS communiceert via de officiële integratie. Geen losse sensoren nodig.\n\n🔧 **Handmatig** — Je koppelt zelf een SOC-sensor en laad/ontlaad-schakelaar.",
         "data": {
           "bat_type": "Type batterij",
           "back_to_menu": "← Terug naar menu",
@@ -3640,7 +3683,8 @@
         "data": {
           "ev_charger_entity": "Laadpaal sensor/setpoint",
           "ev_charger_label": "Naam",
-          "ev_charger_switch": "Schakelaar (optioneel)"
+          "ev_charger_switch": "Schakelaar (optioneel)",
+          "ev_energy_sensor": "EV energie sensor (kWh vandaag) (optioneel)"
         }
       },
       "user": {
@@ -3869,7 +3913,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "inv_energy_sensor": "Dagproductie sensor (kWh) (optioneel)",
+          "inv_max_ac_power": "AC-limiet omvormer (Wp) (optioneel)"
         },
         "data_description": {
           "inv_sensor": "🔌 Koppel de vermogenssensor van deze omvormer (W of kW)",
@@ -4124,7 +4170,9 @@
           "nilm_shift_price_threshold": "Prijsdrempel voor verschuiving (€/kWh)",
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
-          "shutter_smoke_sensor": "Rookmelder (optioneel)"
+          "shutter_smoke_sensor": "Rookmelder (optioneel)",
+          "bat_charge_kwh_sensor": "Batterij geladen kWh sensor (optioneel)",
+          "bat_discharge_kwh_sensor": "Batterij ontladen kWh sensor (optioneel)"
         },
         "placeholders": {
           "battery_num": {
@@ -4152,7 +4200,9 @@
           "pool_filter_power_entity": "Vermogenssensor filterpomp",
           "pool_heat_power_entity": "Vermogenssensor warmtepomp",
           "shutter_smoke_sensor": "Rookmelder (optioneel)",
-          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)"
+          "shutter_global_smoke_sensor": "Globale rookmelder (optioneel)",
+          "shutter_global_wind_sensor": "Windsnelheid sensor — stormbescherming (optioneel)",
+          "shutter_wind_threshold_ms": "Stormdrempel m/s (default 12) (optioneel)"
         }
       },
       "shutter_detail": {
@@ -5022,6 +5072,22 @@
           "battery_room_auto_heat": "Automatisch verwarmen",
           "battery_purchase_price_eur": "Aanschafprijs (€, 0=automatisch)",
           "battery_purchase_date": "Aankoopdatum (JJJJ-MM-DD)"
+        }
+      },
+      "extra_sensors_opts": {
+        "title": "🌡️ Extra sensoren & Omgeving",
+        "description": "Optionele sensoren voor nauwkeurigere sturing en betere forecasts.\n\nAutomatisch gevonden: {auto_detected}",
+        "data": {
+          "outside_temp_entity": "Buitentemperatuur sensor (optioneel)",
+          "pv_panel_temp_sensor": "PV paneel temperatuur sensor (optioneel)",
+          "battery_temp_sensor": "Batterij temperatuur sensor (optioneel)",
+          "irradiance_sensor": "Instraling sensor / pyranometer (optioneel)",
+          "wind_speed_sensor": "Windsnelheid sensor (optioneel)",
+          "rain_sensor": "Neerslag sensor (optioneel)",
+          "co2_sensor": "CO₂ sensor buiten (optioneel)",
+          "indoor_co2_sensor": "CO₂ sensor binnen (optioneel)",
+          "grid_frequency_sensor": "Netfrequentie sensor (optioneel)",
+          "water_meter_sensor": "Watermeter sensor (optioneel)"
         }
       }
     },

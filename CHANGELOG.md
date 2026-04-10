@@ -1,4 +1,12 @@
-## v5.5.192 (2026-04-05)
+## v5.5.466 (2026-04-09)
+
+### Battery card & plan card bugfixes
+- `cloudems-battery-card.js`: Countdown timer werkt nu correct — `document.querySelectorAll` doorzoekt geen shadow DOM. Opgelost via `window._zpCdHosts` (Set van shadow roots per kaartinstantie).
+- `cloudems-battery-plan-card.js`: SOC `—` voor verleden uren opgelost — `soc_start ?? actual?.soc_pct ?? null` fallback hersteld (was weggevallen t.o.v. v428).
+- `cloudems-battery-plan-card.js`: LADEN/LEVER toont nooit meer streepje — `charge_kwh ?? 0` altijd een getal. `fmtKwh(0)` → `0W`, `fmtKwh(0.5)` → `0.50kWh`.
+- `cloudems-battery-plan-card.js`: SOC kolom toont alleen eindsoc% met optionele `van X%` subtitle als start ≠ eind — geen `27→27%` meer.
+
+
 
 ### Batterijplan tabel — correcte beslissingen via Zonneplan tariefgroep
 - `coordinator.py`: Plan-generator gebruikt nu de werkelijke Zonneplan tariefgroep-forecast (low/normal/high per uur) voor acties, niet meer een simplistische 15ct drempel die alles als "laden" markeerde.
@@ -1447,3 +1455,918 @@ Schone release — werkmap gesynchroniseerd. Bevat alle fixes van deze sessie:
 - Fix: PV forecast lege grafiek toont "Forecast bouwt op na 3+ zonnedagen"
 - Fix: Zelfconsumptie realtime berekening — geen opbouw meer nodig na herstart
 - Test: alle 61 dashboard cards gecontroleerd op JS definitie
+
+## v5.5.467 (2026-04-09)
+
+### Bugfixes battery cards en Zonneplan bridge
+
+**cloudems-battery-overview-card.js** (Week/Gisteren/Vandaag/Morgen kaart):
+- SOC verleden uren: toonde altijd `—`. Nu: werkelijke gemeten SOC uit `actual.soc_pct`.
+- LADEN/LEVER: toonde `—` (kleur #374151, bijna onzichtbaar). Nu: `0W` in #475569 als waarde 0 is.
+- kWh: verleden uren tonen nu energie in kWh (avg W / 1000) voor waarden ≥ 100W.
+
+**cloudems-battery-card.js** (-6u/nu/+6u tabel):
+- SOC: toonde `27%→27%` (zelfde waarde). Nu: alleen eindsoc%, `start→end` alleen als ze verschillen.
+
+**zonneplan_bridge.py** (slider sturing):
+- CHARGE-pad: `plan_deliver_w > 50` → `>= 0`. Bij laaduur (plan_deliver_w=0) viel slider terug op hardware max (~10000W). Nu schrijft hij 0W.
+- DISCHARGE-pad: zelfde fix.
+- HOLD-pad: slider werd niet geschreven als waarde 0W was (`and _deliver_target > 0` check). Nu schrijft hij altijd.
+
+## v5.5.468 (2026-04-09)
+
+### Fase-inbalans meldingen gedebounced (24 uur)
+
+**data_quality_monitor.py** — `phase_badge_mismatch` check:
+- De melding verscheen elke coordinator-cyclus (~10s) zodra een fase-badge mismatch gedetecteerd werd.
+- Nu: melding wordt alleen getoond als de mismatch aaneengesloten 24 uur aanhoudt.
+- Patroon: zelfde `_first_seen` debounce als de bestaande `self_cons_zero` check.
+- Automatische reset: als de mismatch verdwijnt, reset de timer — bij terugkeer begint de 24 uur opnieuw.
+
+Opmerking: de `phase_advisor` notificaties (HA pop-ups) waren al gelimiteerd op 1×/dag via `ADVISE_COOLDOWN_S = 86400`. Die zijn ongewijzigd.
+
+## v5.5.469 (2026-04-09)
+
+### Battery card en overview card fixes
+
+**cloudems-battery-card.js**:
+- SOC: toonde `19%→19%` (end→end volgorde bug). Nu: `_ps0+'%→'+_ps1+'%'` = `10%→19%`. Pijl alleen getoond als start ≠ eind.
+- LADEN/LEVER: toonde `—` in kleur #374151 (onzichtbaar). Nu: `0W` in #475569 als waarde 0 of null is.
+
+**cloudems-battery-overview-card.js**:
+- SOC: toonde `16% v.14%` (achtersteevoren). Nu: `14%→16%` (start→eind, correct).
+- kWh: threshold `>= 100W` verwijderd — alle verleden-uur waarden tonen nu consistent in `0.08 kWh` formaat. Spatie toegevoegd: `0.11 kWh` i.p.v. `0.11kWh`.
+
+## v5.5.470 (2026-04-09)
+
+### Verleden uren: 0W → 0 kWh, PV streepje gefixed
+
+**cloudems-battery-card.js**, **cloudems-battery-overview-card.js**, **cloudems-battery-plan-card.js**:
+- Nul-waarden in verleden uren tonen nu `0 kWh` i.p.v. `0W` (eenheid is energie, niet vermogen).
+- PV kolom: `—` voor uren zonder zon → `0W` (toekomst) of `0 kWh` (verleden).
+- `fmtE` en `fmtKwh` functions: nul geeft nu `0 kWh`.
+
+## v5.5.471 (2026-04-09)
+
+### SOC verleden uren toont nu ook start→eind%
+
+**cloudems-battery-card.js**, **cloudems-battery-overview-card.js**, **cloudems-battery-plan-card.js**:
+- SOC voor verleden uren toonde alleen het eindgetal. Nu: `start%→eind%` als de coordinator beide waarden kent (soc_start geketend van vorig uur, soc_end = gemeten).
+- Logica uniform in alle drie kaarten: `_ps0 !== _ps1 → start→eind`, anders alleen eind.
+
+## v5.5.472 (2026-04-09)
+
+### PV streepje gefixed — Temporal Dead Zone bug
+
+**cloudems-battery-card.js**:
+- `_zero` werd op regel 353 gedeclareerd maar al gebruikt op regel 346 (vóór declaratie).
+- In JavaScript veroorzaakt dit een "Cannot access before initialization" TDZ fout → PV toonde altijd `—`.
+- Fix: `_zero` verplaatst vóór `pvDisp` zodat de volgorde klopt.
+- Resultaat: PV toont nu `0W` (toekomst) of `0 kWh` (verleden) bij nul-waarden.
+
+## v5.5.473 (2026-04-09)
+
+### Simultaan laden+ontladen zichtbaar + countdown timer gefixed
+
+**cloudems-battery-card.js**:
+- netW filter verwijderd: LADEN en LEVER worden nu onafhankelijk getoond. Als het plan zegt "laad 300W EN lever 1100W", tonen beide kolommen hun waarde — niet één van de twee op basis van netto richting.
+- Countdown timer: `<span class="zp-cd">wachten</span>` werd elke 10s gereset door set hass() innerHTML rebuild, waardoor "· Xs" nooit stabiel zichtbaar was. Fix: template gebruikt nu direct `window._zpCd` zodat elke render de huidige waarde toont.
+
+## v5.5.474 (2026-04-09)
+
+### Countdown timer altijd zichtbaar
+
+**cloudems-battery-card.js**:
+- Countdown was alleen zichtbaar bij |plan - slider| > 50W. Als sliders al kloppen → geen element → nooit zichtbaar.
+- Nu altijd zichtbaar: bij mismatch oranje "wachten · Xs", bij match groen "✓ plan · Xs".
+- `.zp-cd` span aanwezig in beide staten zodat de setInterval altijd iets kan updaten.
+
+## v5.5.475 (2026-04-09)
+
+### Morgen-plan: SOC headroom controle toegevoegd
+
+**coordinator.py** — `schedule_tomorrow` plan builder:
+- `_exp_dis = min(_deficit_t, _del_t)` miste SOC headroom check. Bij SOC=10% (minimum) werd toch 1244W discharge gepland terwijl de accu leeg is. SOC werd dan geclamped op 10% maar LEVER bleef hoog.
+- Fix: `_headroom_t = max(0, (_sim_t - _min_t)/100 * _cap_t * 1000)` nu toegepast op zowel deficit-branch als high-branch.
+- PV=0W morgen: data-beschikbaarheidsissue — omvormer stuurt morgen's forecast pas later op de dag. Geen codebug.
+
+## v5.5.476 (2026-04-09)
+
+### Morgen-plan: PV forecast en SOC headroom gefixed
+
+**coordinator.py** — `schedule_tomorrow` plan builder:
+
+PV forecast morgen — twee bugs:
+1. Eerste loop zocht `day=='tomorrow'` in `pv_forecast_hourly` — maar die entries hebben geen `day` field. Nooit een treffer. Loop verwijderd.
+2. Tweede loop gebruikte `=` i.p.v. `+=` — bij meerdere omvormers overschreef elke omvormer de vorige. Nu worden alle omvormers per uur gesommeerd.
+3. Extra fallback: solar_learner.get_forecast_tomorrow() als pv_forecast_hourly_tomorrow leeg is.
+
+SOC headroom in deficit-branch: `_exp_dis = min(_deficit_t, _del_t)` → nu `min(_deficit_t, _del_t, _headroom_t)`.
+
+## v5.5.477 (2026-04-09)
+
+### Slider label "Solar laden" → "Laden (max)"
+
+**cloudems-battery-card.js**:
+- "Solar laden" is misleidend — de slider bepaalt de maximale laadsnelheid ongeacht bron (zon of net bij goedkoop tarief). Hernoemd naar "Laden (max)".
+- "Levering thuis" blijft ongewijzigd — dat is wél een correcte omschrijving.
+
+## v5.5.478 (2026-04-09)
+
+### Battery-card: verleden uren LADEN/LEVER/PV in kWh
+
+**cloudems-battery-card.js**:
+- LADEN en LEVER toonden verleden-uur waarden in W (`61W`, `106W`). Nu in kWh (`0.06 kWh`, `0.11 kWh`).
+- PV verleden uren: zelfde fix.
+- `fmtE` functie toegevoegd (zelfde als overview-card): `w > 0 → (w/1000).toFixed(2)+' kWh'`.
+- Nul-waarden tonen `0 kWh` voor verleden, `0W` voor toekomst.
+
+## v5.5.479 (2026-04-09)
+
+### Battery-card: kWh ook als actual ontbreekt voor verleden uren
+
+**cloudems-battery-card.js**:
+- `chgDisp = isPast && actual ? actChg : chgW` — als `actual` null is (uur nog niet in _hourly_actual), viel het terug op `chgW` met W-eenheid.
+- Fix: `isPast` alleen bepaalt de eenheid. `chgVal > 0 → isPast ? fmtE(chgVal) : chgVal+'W'`.
+- Rij 18:00 met `LADEN=106W` toont nu `0.11 kWh`.
+
+SOC enkelvoudige waarden zijn correct: als soc_start=soc_end (afgerond) was er geen SOC-verandering in dat uur (bijv. 106W laden in 9.3kWh accu = 1.1% → afgerond 1% verschil, soms 0%).
+
+## v5.5.480 (2026-04-09)
+
+### Slider EMA verwijderd — raw P1 voor huidig-uur plan
+
+**coordinator.py**:
+- `_slider_house_ema` met α=0.05 had een tijdconstante van ~3 minuten. Bij een sprong van 400W naar 1883W stuurde de slider 1027W terwijl het plan 1862W toonde.
+- De EMA was bedoeld om thrashing te voorkomen, maar de CloudCommandQueue (15s debounce + rate limiting) doet dat al.
+- Fix: huidig uur gebruikt nu direct de raw P1 house_load_w. Tabel en slider zijn nu consistent.
+
+## v5.5.481 (2026-04-09)
+
+### Verleden-uur kWh afgeleid van SOC × capaciteit
+
+**cloudems-battery-card.js** + **cloudems-battery-overview-card.js**:
+- `bat_w` sensor van de Nexus kan afwijken door Kirchhoff correcties → toonde 0 kWh terwijl SOC 87%→18% (=6.4 kWh discharge) zichtbaar was.
+- Fix: voor verleden uren wordt LADEN en LEVER nu berekend als `SOC_delta / 100 × capaciteit_kWh`.
+  - Discharge kWh = max(0, soc_start - soc_end) / 100 × cap
+  - Charge kWh = max(0, soc_end - soc_start) / 100 × cap
+- Fallback naar bat_w als SOC delta niet beschikbaar is.
+- Capaciteit: `capKwh` uit `sensor.cloudems_battery_savings.attributes.capacity_kwh` (default 9.3 kWh).
+
+## v5.5.482 (2026-04-09)
+
+### Nieuwe NETTO kWh kolom — LADEN/LEVER terug naar W
+
+**cloudems-battery-card.js**:
+- LADEN en LEVER: altijd W (gemiddeld vermogen van dat uur, past én toekomst).
+- Nieuwe NETTO kolom (tussen LEVER en PV): netto energie kWh met teken.
+  - Verleden: `(soc_end - soc_start)/100 × capaciteit_kWh` (meest betrouwbaar). Positief=geladen, negatief=ontladen.
+  - Toekomst: `power_w/1000` uit het plan (= charge_w - discharge_w).
+- Kleur: groen (+kWh = netto geladen), oranje (−kWh = netto ontladen), grijs (≈0).
+
+## v5.5.483 (2026-04-09)
+
+### LADEN/LEVER verleden uren consistent met NETTO
+
+**cloudems-battery-card.js**:
+- Probleem: bat_w sensor toonde 0W maar SOC delta gaf 6.42 kWh discharge → LEVER=0W maar NETTO=-6.42 kWh (onmogelijk).
+- Fix: LADEN en LEVER voor verleden uren worden nu afgeleid van NETTO (= SOC delta × cap):
+  - NETTO < 0 (netto ontladen): LEVER = |netto_W| W, LADEN = 0W
+  - NETTO > 0 (netto geladen): LADEN = netto_W W, LEVER = 0W
+- Alle drie kolommen (LADEN, LEVER, NETTO) zijn nu intern consistent.
+- Toekomst uren: ongewijzigd (charge_w / discharge_w uit plan).
+
+## v5.5.484 (2026-04-09)
+
+### LADEN/LEVER: echte gemiddelden uit coordinator accumulator
+
+**coordinator.py**:
+- `_hourly_acc` accumuleert nu apart: `chg` (alleen bat_w > 10W) en `dis` (alleen |bat_w| < -10W).
+- Bij uur-overgang: `chg_w` = gemiddeld laadvermogen (alleen tijdens laden), `dis_w` = gemiddeld ontlaadvermogen (alleen tijdens ontladen).
+- Beide waarden zitten nu in `_hourly_actual[h]` beschikbaar voor JS kaarten.
+
+**cloudems-battery-card.js**:
+- LADEN (verleden): `actual.chg_w` — werkelijk gemiddeld laadvermogen van dat uur.
+- LEVER (verleden): `actual.dis_w` — werkelijk gemiddeld ontlaadvermogen van dat uur.
+- NETTO: ongewijzigd (SOC delta × capaciteit).
+- Alle drie zijn nu onafhankelijk en kunnen alle drie tegelijk een waarde hebben.
+
+## v5.5.485 (2026-04-09)
+
+### Alle drie kaarten consistent met chg_w/dis_w accumulator
+
+**cloudems-battery-overview-card.js** + **cloudems-battery-plan-card.js**:
+- Zelfde fix als 5.5.484 voor battery-card: LADEN en LEVER voor verleden uren gebruiken nu `actual.chg_w` en `actual.dis_w` uit de coordinator accumulator.
+- Fallback naar `bat_w` voor uren vóór 5.5.484.
+
+## v5.5.486 (2026-04-09)
+
+### Configuratiefout gefixed + SOC altijd start→eind
+
+**cloudems-battery-card.js**:
+- Configuratiefout: NETTO kolom stond in de header maar `${nettoStr}` ontbrak in de rij-template. Header en rij waren niet gesynchroniseerd → crash bij renderen.
+- SOC: `_ps0 !== _ps1` check verwijderd — altijd `start%→eind%` tonen ook als waarden gelijk zijn.
+
+**cloudems-battery-overview-card.js** + **cloudems-battery-plan-card.js**:
+- SOC: zelfde fix — altijd `start%→eind%` tonen.
+
+## v5.5.487 (2026-04-09)
+
+### NETTO: geen bat_w fallback, altijd kWh, — bij geen data
+
+**cloudems-battery-card.js**:
+- NETTO verleden: `actual.bat_w` fallback verwijderd — bat_w heeft sign-flip issues (Kirchhoff). Als geen SOC data → toont '—' i.p.v. een verkeerde waarde.
+- NETTO toekomst/huidig: `s.power_w / 1000` altijd in kWh formaat ('+1.10 kWh' of '−1.10 kWh').
+- Drempel verlaagd van 0.01 naar 0.005 kWh zodat kleine waarden zichtbaar zijn.
+
+## v5.5.488 (2026-04-09)
+
+### NETTO: altijd SOC delta × capaciteit
+
+**cloudems-battery-card.js**:
+- NETTO is voor elk uur hetzelfde: `(soc_end - soc_start) / 100 × capaciteit_kWh`.
+- Verleden: soc_start/soc_end uit meting (_hourly_actual).
+- Huidig en toekomst: soc_start/soc_end uit plan-simulatie.
+- Geen bat_w, geen power_w meer — één betrouwbare formule voor alle uren.
+- Groen = netto geladen, oranje = netto ontladen, grijs = geen data (—).
+
+## v5.5.489 (2026-04-09)
+
+### Uitlijning, HUIS, SOC gefixed
+
+**cloudems-battery-card.js**:
+- NETTO toonde '—' als soc_start/soc_end ontbrak → kolom onzichtbaar → PV leek in NETTO-positie → HUIS leek leeg. Fix: NETTO toont nu altijd '0 kWh' als geen data (grijs), nooit '—'.
+- SOC: als soc_start null is maar actual.soc_pct beschikbaar → gebruik dat als fallback. Zo toont 18:00 altijd start→eind ook als soc_start niet in het plan staat.
+
+## v5.5.491 (2026-04-09)
+
+### SOC grenspunten — simpel en correct
+
+**coordinator.py**:
+- `soc_pct` in `_hourly_actual` was het gemiddelde van alle samples dat uur. Nu: **laatste sample** van het uur. Dat is het grenspunt: einde van dit uur = begin van het volgende.
+- `soc_start` voor een uur = `soc_end` van het vorige uur (= grenspunt). Nooit een fallback naar het huidige uur's gemiddelde.
+- Resultaat: nooit meer single SOC values — elke uur heeft altijd een begin én eindwaarde.
+- NETTO = `(soc_end - soc_start) / 100 × capaciteit` is nu ook altijd correct.
+
+## v5.5.498 (2026-04-10)
+
+### kWh accumulatie: ruwe Nexus waarde ipv Kirchhoff-gecorrigeerd
+
+**coordinator.py**:
+- `battery_raw_w` wordt nu opgeslagen in `data` direct na spike-filter maar vóór Kirchhoff-correctie.
+
+**sensor.py** — `CloudEMSBatteryPowerSensor._accumulate()`:
+- Gebruikt nu `battery_raw_w` als beschikbaar i.p.v. de Kirchhoff-gecorrigeerde `batteries[].power_w`.
+- Kirchhoff-correctie past de waarde aan voor energiebalans-berekeningen maar de Nexus interne Wh-teller (en Zonneplan app) meet de werkelijke accu-stroom — niet de balancer-schatting.
+- Verwacht: `charge_kwh_today` en `discharge_kwh_today` komen nu overeen met Zonneplan statistieken.
+
+GitHub issue #50 (Roodie84): zelfde probleem bevestigd.
+
+## v5.5.499 (2026-04-10)
+
+### kWh bronnen: accu-sensoren als primaire bron
+
+**config_flow.py** — `battery_detail` stap:
+- Twee nieuwe velden: `bat_charge_kwh_sensor` en `bat_discharge_kwh_sensor`.
+- Auto-detect (stap 5 in auto_detect): zoekt bekende patronen zoals `charged_kwh`, `energy_charged`, `discharged_kwh` etc. in HA entity registry.
+- Nexus-specifiek: Zonneplan integratie publiceert deze sensoren automatisch.
+
+**sensor.py** — `CloudEMSBatteryPowerSensor`:
+- Prioriteit kWh-accumulatie:
+  1. Geconfigureerde accu-sensoren (`charge_kwh_sensor` / `discharge_kwh_sensor`) → direct lezen, geen berekening
+  2. `battery_raw_w` (ruwe Nexus waarde, vóór Kirchhoff) → zelf accumuleren
+  3. `total_w` (Kirchhoff-gecorrigeerd) → fallback als niets anders beschikbaar
+
+GitHub issue #50 (Roodie84): fix voor systematische afwijking t.o.v. Zonneplan statistieken.
+
+## v5.5.500 (2026-04-10)
+
+### kWh sensoren ook in options flow
+
+**config_flow.py** — `battery_detail_opts` stap (options flow):
+- Zelfde `bat_charge_kwh_sensor` / `bat_discharge_kwh_sensor` velden toegevoegd als in de setup wizard.
+- Bestaande waarden worden hersteld uit config (`existing.get(...)`).
+- Samenvatting:
+  - Setup wizard: `battery_detail` → kWh sensor velden + auto-detect
+  - Options flow: `battery_detail_opts` → zelfde velden, bestaande waarden hersteld
+  - Sensor: leest sensors direct (prio 1), raw_w (prio 2), Kirchhoff (prio 3)
+
+## v5.5.500 (2026-04-10)
+
+### kWh bronnen: 4-niveau prioriteit + Nexus entity map uitgebreid
+
+**zonneplan_bridge.py**:
+- Entity map uitgebreid met `charged_today` en `discharged_today` (bekende sensor-namen voor meerdere accu-merken).
+- `get_info()` exposed `charged_today_kwh` en `discharged_today_kwh` zodat coordinator deze kan doorgeven.
+
+**sensor.py** — 4-niveau kWh-bron prioriteit:
+1. Geconfigureerde HA-sensoren (`bat_charge_kwh_sensor` / `bat_discharge_kwh_sensor`) → meest nauwkeurig
+2. Bridge entity map (`charged_today` / `discharged_today`) → automatisch als Nexus/accu deze levert
+3. `battery_raw_w` (ruwe sensor vóór Kirchhoff) → zelf accumuleren
+4. `total_w` (Kirchhoff-gecorrigeerd) → laatste fallback
+
+**config_flow.py**:
+- `battery_detail` stap: twee nieuwe optionele velden voor kWh-sensoren.
+- Auto-detect: zoekt automatisch bekende kWh-sensor patronen in entity registry.
+
+## v5.5.501 (2026-04-10)
+
+### PV kWh: energy_sensor als primaire bron (issue #49)
+
+**coordinator.py**:
+- PV kWh accumuleerde via `W × tijd` — zelfde probleem als bij de batterij (issue #50).
+- Fix: elke cyclus wordt de `energy_sensor` van elke omvormer uitgelezen (kWh vandaag).
+- Als de sensor beschikbaar is, wordt de uur-verdeling herschaald naar het werkelijke totaal.
+- Ondersteunt Wh én kWh sensoren (automatische conversie op basis van `unit_of_measurement`).
+- Werkt voor alle bekende omvormers: SolarEdge, Huawei, Growatt, GoodWe, SMA, Fronius etc.
+- De `energy_sensor` was al configureerbaar in de wizard maar werd nooit gebruikt voor correctie.
+
+GitHub issue #49 (Roodie84): PV forecast/werkelijk klopt niet.
+
+## v5.5.502 (2026-04-10)
+
+### EnergySourceManager — generieke kWh-bronbeheerder
+
+**energy_manager/energy_source_manager.py** (nieuw):
+- Generieke klasse die kWh-sensoren leest voor alle apparaattypen.
+- Prioriteit: sensor (device-intern, overleeft herstart) → berekening (fallback).
+- Auto-detect per categorie: pv, battery_charge, battery_discharge, grid_import, grid_export, device.
+- Eenheidsconversie: kWh, Wh, MWh, kJ, J automatisch omgezet.
+- `auto_detect_all()`: scant alle geconfigureerde apparaten en stelt sensoren voor.
+
+**coordinator.py**:
+- Initialiseert `_energy_source_mgr` dict bij setup voor alle geconfigureerde sensoren.
+
+**config_flow.py** — `sensors` stap:
+- Twee nieuwe velden: `grid_import_kwh_sensor` en `grid_export_kwh_sensor`.
+- Auto-detect: `EnergySourceManager.auto_detect_all()` scant PV, batterij, grid en NILM.
+- Sensors stap: gebruiker kan kWh-sensoren instellen voor grid import/export.
+
+Architectuurprincipe: apparaat-interne kWh tellers overleven herstarts en zijn nauwkeuriger
+dan W×t accumulatie. Berekening blijft altijd beschikbaar als fallback.
+
+## v5.5.503 (2026-04-10)
+
+### EnergySourceManager: dagelijks reset vs cumulatief
+
+**energy_manager/energy_source_manager.py**:
+- Twee sensortypen herkend:
+  - `daily_reset`: sensor reset zelf elke dag naar 0 (omvormer energy_today, accu geladen_vandaag) → direct lezen
+  - `cumulative`: sensor telt oneindig op (P1 netmeter, lifetime accu-teller) → delta = huidig − dag_start
+- Type-detectie via: HA `state_class` (meest betrouwbaar), daarna entity_id patronen
+- Negatieve delta (sensor reset of terugzetting) wordt opgevangen met automatische dag-start reset
+- `restore_day_start()`: herstel na HA herstart vanuit persistente opslag
+- `get_persist_state()`: geeft persisteerbare staat voor opslag
+
+**coordinator.py**:
+- `_store_esm_state`: nieuwe persistente opslag voor dag-startwaarden
+- Bij setup: herstel dag-startwaarden van alle ESM instanties
+- Elke 60s: sla dag-startwaarden op (zelfde cyclus als anchor_kwh)
+
+## v5.5.504 (2026-04-10)
+
+### HistoricalBootstrapper — betrouwbaar vanaf dag 1
+
+**energy_manager/historical_bootstrapper.py** (nieuw):
+- Laadt historische sensordata vanuit HA recorder statistics API.
+- Voedt alle CloudEMS learners met historische data zodat het systeem direct accuraat is.
+- Categorieën en terugkijkperiode:
+  - PV productie: 365 dagen (seizoenspatroon voor zonne-forecast)
+  - Huisverbruik: 90 dagen (weekpatroon voor HouseConsumptionLearner)
+  - Grid import/export: 90 dagen
+  - Batterij laden/ontladen: 30 dagen
+  - NILM apparaten: 30 dagen
+- Dagelijkse waarden voor cumulatieve sensoren: delta = max - min per uur-groep
+- Veilig om meerdere keren aan te roepen via `_done` set
+
+**coordinator.py**:
+- `_run_historical_bootstrap()`: gestart 30s na setup (wacht op volledige initialisatie)
+- Bootstrap voedt: PV forecast learner, HouseConsumptionLearner, NILM device learner
+- Werkt voor alle geconfigureerde energy_sensor, charge_kwh_sensor, grid_*_kwh_sensor
+
+## v5.5.505 (2026-04-10)
+
+### Batterijgezondheid, kwaliteitsindicatoren, sensor fingerprinting, PV clipping
+
+**energy_manager/battery_health.py** (nieuw):
+- BatteryHealthTracker: round-trip efficiëntie, SoH, equivalente cycli
+- Werkelijke capaciteit vs rated op basis van kWh metingen
+
+**energy_manager/sensor_quality.py** (nieuw):
+- SensorQualityMonitor: per categorie 'sensor'/'calculated'/'estimated'/'missing'
+- Setup score 0-100% met issues en verbeterpunten
+
+**energy_manager/sensor_fingerprint.py** (nieuw):
+- SensorFingerprinter: herkent 15+ omvormermerken, 7+ batterijmerken, 4+ grid meters
+- Stelt automatisch correcte kWh-sensoren voor per merk
+
+**energy_manager/pv_clipping.py** (nieuw):
+- PVClippingDetector: detecteert wanneer omvormer limiteert op AC-maximum
+- Markeert clipping-uren voor betere forecast learning (niet trainen op geclipte data)
+
+**coordinator.py**:
+- Initialiseert alle vier managers bij setup
+- BatteryHealthTracker per batterij config
+- SensorFingerprinter voor wizard hints
+- PVClippingDetector per omvormer met max_ac_power_w config
+
+**cloudems-battery-card.js**:
+- Data kwaliteitsbadge: ● sensor / ◐ berekend / ○ geschat / ✕ ontbreekt
+- Setup score badge in header
+- Round-trip efficiëntie: werkelijk gemeten i.p.v. berekend
+
+## v5.5.506 (2026-04-10)
+
+### kWh sensoren in alle wizard/flow stappen
+
+**config_flow.py** — kWh sensor velden toegevoegd/hersteld per stap:
+
+| Stap | Nieuw veld | Al aanwezig |
+|------|-----------|-------------|
+| `inverter_detail` (wizard) | `max_ac_power_w` (clipping) | `energy_sensor` ✓ |
+| `inverter_detail_opts` (opties) | `energy_sensor`, `max_ac_power_w` | — |
+| `battery_detail` (wizard) | `charge_kwh_sensor`, `discharge_kwh_sensor` | ✓ |
+| `battery_detail_opts` (opties) | `charge_kwh_sensor`, `discharge_kwh_sensor` | ✓ |
+| `sensors` (opties) | `grid_import_kwh_sensor`, `grid_export_kwh_sensor` | ✓ |
+| `ev_charger_detail` (wizard) | `energy_sensor` | — |
+| Boiler `bu_*` | — | `energy_sensor` ✓ |
+
+Nexus: automatisch geconfigureerd via managed battery — geen handmatige actie nodig.
+
+## v5.5.507 (2026-04-10)
+
+### DSMR T1/T2 tarieven + nette labels voor alle kWh velden
+
+**config_flow.py** — `sensors` stap:
+- Grid kWh: 2 velden → 4 velden voor DSMR T1/T2 per tarief:
+  - "Import kWh — Tarief 1 (laag/nacht)"
+  - "Import kWh — Tarief 2 (hoog/dag)"
+  - "Export kWh — Tarief 1 (laag/nacht)"
+  - "Export kWh — Tarief 2 (hoog/dag)"
+- Legacy `grid_import/export_kwh_sensor` velden blijven werken als fallback
+
+**energy_manager/energy_source_manager.py**:
+- T1/T2 DSMR auto-detect patronen toegevoegd (tarief_1, tariff1, delivered_tariff1, etc.)
+- `sum_t1_t2()` helper: telt T1+T2 op voor totaal dagbedrag
+
+**coordinator.py**:
+- Grid ESM initialiseert nu 4 managers (import_t1, import_t2, export_t1, export_t2)
+- Legacy single sensor fallback behouden
+
+**translations** (7 talen):
+- Alle nieuwe veldnamen hebben nu een nette label in NL, EN, DE en via fallback voor DA/FI/FR/IT/NB/PL/PT/SV
+
+## v5.5.508 (2026-04-10)
+
+### Log fixes: translation fout, entity spam, performance
+
+**translations** (6 talen):
+- `battery_type_opts.description` bevatte `{detected_hint}` placeholder maar die werd nooit meegegeven → formatjs MISSING_VALUE error bij elke render van de wizard. Placeholder verwijderd uit alle vertalingen.
+
+**config_flow.py**:
+- `detected_hint` alsnog toegevoegd aan `description_placeholders` van `battery_type_opts` voor beide flows (setup + opties).
+
+**ha_provider.py**:
+- Entity's die niet in de HA state machine staan (bijv. bij herstart) logden WARNING per service call → spam van 8+ berichten. Downgraded naar DEBUG want dit is normaal gedrag bij opstarten.
+- Entities die echt niet bestaan (na grace period) blijven WARNING loggen.
+
+## v5.5.509 (2026-04-10)
+
+### kWh velden: (optioneel) labels + auto-detect werkt nu
+
+**config_flow.py** — `sensors` stap:
+- T1/T2 velden gebruiken nu `default=` i.p.v. `description=` → HA vult waarden in.
+- Auto-detect via `EnergySourceManager.auto_detect_all()` wordt aangeroepen bij openen van de stap en vult gevonden sensoren direct in als default waarde.
+- Fallback volgorde: opgeslagen config → auto-detect → legacy veld → leeg
+
+**translations** (8 talen):
+- Alle optionele kWh sensor velden krijgen "(optioneel)" label:
+  - "Import kWh — Tarief 1 (laag/nacht) (optioneel)"
+  - "Dagproductie sensor (kWh) (optioneel)"
+  - "Batterij geladen kWh sensor (optioneel)"
+  - etc.
+
+## v5.5.510 (2026-04-10)
+
+### Extra sensoren & Omgeving — nieuwe wizard stap
+
+**config_flow.py** — nieuwe stap `extra_sensors_opts`:
+- Bereikbaar via Instellingen → CloudEMS → "🌡️ Extra sensoren & Omgeving"
+- Auto-detect via HA device_class: temperature, irradiance, wind_speed, precipitation, carbon_dioxide, frequency, water
+- 10 optionele sensoren met netjes label + (optioneel):
+
+| Sensor | Gebruikt voor |
+|--------|--------------|
+| Buitentemperatuur | Rolluiken, WKK stooklijn, thermisch model, PV temp correctie |
+| PV paneel temperatuur | PV forecast temperatuurcorrectie (+15% nauwkeuriger) |
+| Batterij temperatuur | Degradatiemodel, laadbeperking <5°C |
+| Irradiantie / pyranometer | Directe stralingsmeting → beste PV forecast |
+| Windsnelheid | FCR inkomsten schatting, ventilatie koeling, WKK |
+| Neerslag | PV reinigingsadvies, paneel output correctie |
+| CO₂ buiten/binnen | Ventilatie koppeling, luchtkwaliteit dashboard |
+| Netfrequentie | FCR deelname nauwkeuriger |
+| Watermeter | Totale energierekening, lekdetectie |
+
+**coordinator.py**:
+- `_read_extra_sensor()`: generieke helper voor optionele sensoren
+- Alle 9 nieuwe sensorwaarden beschikbaar in `data` dict voor alle subsystemen
+
+## v5.5.511 (2026-04-10)
+
+### Windsnelheid: echte sensor + stormbescherming rolluiken
+
+**config_flow.py** — rolluiken setup (`shutter_count` stap):
+- Windsnelheid sensor (optioneel) — voor echte meting i.p.v. weersvoorspelling
+- Stormdrempel (m/s, default 12 m/s = Beaufort 6) — rolluiken gaan automatisch omhoog
+
+**coordinator.py**:
+- Rolluiken, PV-dip detector en PV forecast gebruiken nu echte windsensor als geconfigureerd
+- Prioriteit: echte sensor → weersvoorspelling (API)
+- Stormbescherming: bij overschrijding drempel → rolluiken omhoog + WARNING in log
+
+Opmerking: wind was al aanwezig als weersforecast (API) maar nooit als echte sensor.
+De rolluiken hadden al rook + temperatuursensor maar het meest kritische (storm!) ontbrak.
+
+## v5.5.512 (2026-04-10)
+
+### EnvironmentalProcessor + MultidayPlanner
+
+**energy_manager/environmental_processor.py** (nieuw):
+- Irradiantie: real-time PV forecast correctie + soiling factor tracking
+- Regen: paneel-reinigingsdetectie (>2mm → soiling factor omhoog)
+- Batterijtemperatuur: laadbeperking LFP tabel (<0°C stop, 0-5°C 20%, 5-10°C 50%)
+- PV paneel temperatuur: vermogenscorrectie (-0.35%/°C boven 25°C)
+- CO₂: ventilatie aanbeveling bij >1000 ppm (🌬️), urgent bij >1500 ppm
+- Water: nacht-lekdetectie (>5L per kwartier tussen 23:00-06:00)
+
+**energy_manager/multiday_planner.py** (nieuw):
+- Analyseert EPEX prijzen voor vandaag + morgen + overmorgen
+- SOC-doelen per dag-einde: hoog als morgen duur, laag als morgen goedkoop
+- Cross-day advies: "Morgen goedkoper → vandaag minder laden"
+- Goedkoopste laaduren en duurste ontlaaduren per dag
+
+**coordinator.py**:
+- EnvironmentalProcessor.process_all() elke cyclus → resultaten in data["environmental"]
+- Batterijlaadlimiet automatisch verlaagd bij extreme temperatuur
+
+## v5.5.513 (2026-04-10)
+
+### Nexus kWh sensoren: correcte detectie en auto-configuratie
+
+**Root cause**: Zonneplan integratie gebruikt `state_class=TOTAL_INCREASING` voor
+`delivery_day` en `production_day`, maar dit zijn dagwaarden die om middernacht resetten.
+EnergySourceManager interpreteerde ze daardoor als cumulatief → verkeerde delta berekening.
+
+**energy_manager/energy_source_manager.py**:
+- Detectievolgorde omgedraaid: entity_id patronen eerst, state_class daarna
+- `_DAILY_PATTERNS` uitgebreid met Zonneplan patronen: `delivery_day`, `production_day`,
+  `levering_vandaag`, `productie_vandaag`
+- Auto-detect battery patronen: `production_day` → charge, `delivery_day` → discharge
+- Resultaat: sensoren worden nu als `daily_reset` behandeld → correcte directe lezing
+
+**config_flow.py** — managed battery Zonneplan setup:
+- Bij aanmaken Nexus batterij config: automatisch zoeken naar `production_day` en
+  `delivery_day` in entity registry → direct invullen als kWh-sensoren
+- Werkt voor alle installaties ongeacht `contract["label"]` naam
+
+Na herstart of herinstallatie: kaart toont 4,58 kWh geladen / 5,45 kWh ontladen.
+
+## v5.5.514 (2026-04-10)
+
+### ZonneplanP1Bridge — volledige Zonneplan integratie als databron
+
+**energy_manager/zonneplan_p1_bridge.py** (nieuw):
+- Leest alle bruikbare data uit de Zonneplan HA integratie automatisch
+- Fallback voor grid/P1: gebruikt Zonneplan P1 meter data als geen DSMR geconfigureerd
+- Fallback voor PV: `sensor.zonneplan_last_measured_value` → solar_power
+- Fallback voor prijs: `sensor.zonneplan_current_electricity_tariff`
+- Aanvulling kWh dag totalen (worden altijd ingevuld naast andere bronnen)
+
+**Beschikbare data via Zonneplan:**
+
+| Zonneplan sensor | CloudEMS veld | Gebruik |
+|-----------------|---------------|---------|
+| `electricity_consumption` | `grid_power` (import W) | Fallback P1 |
+| `electricity_production` | `grid_power` (export W) | Fallback P1 |
+| `electricity_total_today` | `zp_grid_import_kwh_today` | kWh dag |
+| `electricity_total_today_returned` | `zp_grid_export_kwh_today` | kWh dag |
+| `last_measured_value` | `solar_power` | Fallback PV |
+| `yield_today` | `zp_pv_kwh_today` | kWh dag |
+| `power` (battery) | Batterij vermogen | Aanvulling |
+| `state_of_charge` | Batterij SOC | Aanvulling |
+| `production_day` | `zp_bat_charged_kwh_today` | kWh dag |
+| `delivery_day` | `zp_bat_discharged_kwh_today` | kWh dag |
+| `current_electricity_tariff` | `current_price_eur_kwh` | Fallback prijs |
+
+**coordinator.py**:
+- Detecteert Zonneplan integratie bij startup automatisch
+- `fill_missing()` vult ontbrekende velden aan zonder bestaande data te overschrijven
+- Werkt ook voor gebruikers die alleen Zonneplan P1 meter hebben (geen eigen DSMR)
+- Ideale basis voor cloud variant: alle data via Zonneplan API
+
+## v5.5.515 (2026-04-10)
+
+### Label audit: alle optionele sensoren hebben nu (optioneel)
+
+**translations** (8 talen — 64 + 8 = 72 labels gecorrigeerd):
+- Systematische audit: alle optionele sensoren in alle stappen in alle talen
+- Gecorrigeerde stappen: inverter_detail, inverter_detail_opts, battery_detail,
+  battery_detail_opts, ev_charger_detail, sensors, extra_sensors_opts,
+  shutter_count, shutter_count_opts, advanced_opts
+- Velden: inv_energy_sensor, inv_max_ac_power, bat_charge/discharge_kwh_sensor,
+  ev_energy_sensor, grid_import/export_kwh_t1/t2, alle omgevingssensoren
+
+## v5.5.516 (2026-04-10)
+
+### Lovelace storage corruptie fix
+
+**Oorzaak**: HA meldt "Input is a zero-length, empty document" voor `lovelace.cloudems-lovelace`.
+Dit ontstaat als CloudEMS het storage bestand schrijft maar er dan een crash/herstart tussendoor komt,
+of als twee processen tegelijk schrijven.
+
+**__init__.py** — `_async_ensure_lovelace_dashboard()`:
+- **Atomic write**: schrijft naar `.tmp` bestand, valideert de JSON, dan pas `replace()` (atomair op Linux)
+- **Lege YAML guard**: als dashboard YAML leeg of `None` is → skip met WARNING, overschrijf bestaand storage niet
+- **JSON validatie**: vóór rename wordt de geschreven JSON teruggelezen en gevalideerd
+- **Lege JSON guard**: als de te schrijven JSON leeg is → skip met WARNING
+
+Gebruikers die de repair-melding zien: klik "Verzenden" om te bevestigen dat HA het lege bestand
+hernoemd heeft. CloudEMS schrijft daarna een geldig dashboard bij de volgende herstart.
+
+## v5.5.517 (2026-04-10)
+
+### Dashboard herstel na HA repair
+
+**__init__.py** — `_async_ensure_lovelace_dashboard()`:
+- Detecteert nu of het bestaande storage bestand geen CloudEMS views bevat
+  (bijv. na HA repair → reset naar lege "Nieuwe sectie" view)
+- Bij detectie: WARNING in log + dashboard wordt hersteld vanuit YAML
+- Hersteld dashboard triggert ook live reload zodat browser direct de juiste views toont
+
+**Herstelprocedure na storage corruptie:**
+1. Klik "Verzenden" op de HA repair melding
+2. Installeer 5.5.517
+3. Herstart HA — CloudEMS detecteert het lege dashboard en herstelt het automatisch
+
+## v5.5.518 (2026-04-10)
+
+### Nexus kWh: runtime auto-detect voor bestaande installaties
+
+**Root cause**: bestaande installaties hebben `charge_kwh_sensor` en `discharge_kwh_sensor`
+niet in hun `battery_configs` omdat die velden pas later toegevoegd zijn.
+De config wordt opgeslagen in HA en is niet automatisch bijgewerkt.
+
+**coordinator.py** — ESM setup:
+- Als `charge_kwh_sensor` leeg is voor een Nexus batterij: zoekt automatisch naar
+  `production_day` en `delivery_day` sensoren in de HA entity registry
+- Schrijft gevonden sensoren terug naar de bat config in memory zodat sensor.py ze ook vindt
+- Logt gevonden sensoren als INFO voor debugging
+
+**sensor.py** — native_value:
+- Als `charge_kwh_sensor` leeg is: kijkt ook in `coordinator._energy_source_mgr`
+  voor bat_chg_0/bat_dis_0 managers die de coordinator al opgezet heeft
+- Geen herstart of herconfiguratie nodig — werkt automatisch na installatie
+
+## v5.5.519 (2026-04-10)
+
+### Nexus kWh: fix voor managed battery zonder battery_configs
+
+**Root cause**: de Nexus batterij wordt via de Zonneplan bridge beheerd.
+`battery_configs` is leeg → de auto-detect loop van v5.5.518 runt nooit.
+
+**sensor.py**:
+- Prio 1: via ESM managers (coordinator heeft ze gevuld)
+- Prio 2: directe scan van alle HA sensor states op `production_day` / `delivery_day`
+- Werkt nu ook als `battery_configs` volledig leeg is
+- Geen herconfiguratie of herstart vereist
+
+## v5.5.519 (2026-04-10)
+
+### ZonneplanP1Bridge: detectie herschreven
+
+**Root cause**: bridge zocht op exacte entity_ids zoals `sensor.zonneplan_production_day`
+maar de echte entity heet `sensor.thuisbatterij_productie_vandaag` — device naam als prefix.
+
+**energy_manager/zonneplan_p1_bridge.py**:
+- detect() herschreven met dezelfde aanpak als de al werkende ZonneplanMarginCalculator
+- Filter op `"zonneplan" in entity_id` + `endswith(patroon)` — werkt voor elke device naam
+- Patronen: `_production_day`, `_productie_vandaag`, `_delivery_day`, `_levering_vandaag`
+
+**sensor.py**:
+- Leest `zp_bat_charged_kwh_today` / `zp_bat_discharged_kwh_today` als Bron 2a
+  (na geconfigureerde sensor, vóór W×t accumulatie)
+
+## v5.5.520 (2026-04-10)
+
+### Echte kWh meters voor P1, NILM sockets + auto-detect overal consistent
+
+**coordinator.py** — P1/DSMR runtime auto-detect:
+- Als grid_import/export kWh sensoren niet geconfigureerd zijn: auto-detect via
+  `EnergySourceManager.auto_detect_all()` bij startup → zelfde patroonmatch als de rest
+
+**nilm/detector.py** — DetectedDevice:
+- Nieuw veld: `energy_sensor_id` — kWh sensor van het apparaat
+- Opgenomen in `to_dict()` zodat de coordinator het kan lezen
+
+**nilm/hybrid_nilm.py** — AnchoredDevice:
+- Nieuw veld: `energy_sensor_id`
+- Bij registratie van nieuw anker: auto-detect op basis van entity_id patronen
+  (bijv. `sensor.wasmachine_energy`, `sensor.wasmachine_kwh`)
+
+**coordinator.py** — NILM anchor kWh accumulatie:
+- Prioriteit 1: `energy_sensor_id` — direct van apparaat sensor (exact, overleeft herstart)
+- Prioriteit 2: W×t accumulatie (fallback als geen sensor geconfigureerd)
+
+## v5.5.520 (2026-04-10)
+
+### MeasurementTracker + P1/NILM/PV runtime fixes
+
+**energy_manager/measurement_tracker.py** (nieuw):
+- Vergelijkt sensor vs berekening per stroom (PV, grid, batterij, huis)
+- Drie niveaus:
+  - <5% afwijking: kalibratiefactor publiceren (kleine offset)
+  - 5-20%: loggen, sensor wint, geen correctie (model is OK, maar niet precies)
+  - >20%: structurele fout — berekeningsmodel klopt niet, sensor is primair,
+    berekening gemarkeerd als onbetrouwbaar, diagnostiek publiceren
+- Correctiefactoren zijn NOOIT voor structurele fouten
+- Publiceert `data["measurement_quality"]` voor dashboard + cloud diagnostiek
+
+**coordinator.py**:
+- P1/DSMR kWh runtime auto-detect bij startup als niet geconfigureerd
+- NILM smart plugs: `energy_sensor_id` als prio 1 boven W×t accumulatie
+- PV: tracking toegevoegd (sensor vs W×t), logt structurele afwijkingen
+- `measurement_quality` gepubliceerd elke cyclus
+
+**nilm/detector.py**:
+- `DetectedDevice.energy_sensor_id` veld toegevoegd
+
+## v5.5.520 (2026-04-10)
+
+### Runtime auto-detect voor alle energie-sensoren + passieve meting vs berekening
+
+**coordinator.py** — runtime auto-detect (zelfde aanpak als ZonneplanMarginCalculator):
+- PV `energy_sensor`: auto-detect via EnergySourceManager als niet geconfigureerd
+- Grid import/export kWh: auto-detect als T1/T2 velden leeg zijn
+- Batterij charge/discharge: auto-detect via `production_day`/`delivery_day` patronen
+- NILM smart plugs: gebruiken nu `energy_sensor_id` als prio 1, W×t als fallback
+
+**energy_manager/measurement_tracker.py** (nieuw):
+- Passieve observatie: sensor kWh vs berekende kWh per stroom
+- Logt WARNING bij >20% structurele afwijking (max 1x per uur)
+- Publiceert naar `data["measurement_quality"]` — dashboard en toekomstige cloud
+- **Bewust geen auto-correctie**: met 2 installaties onbetrouwbaar.
+  Auto-correctie komt in cloud variant na statistische validatie.
+
+**nilm/detector.py**:
+- `DetectedDevice.energy_sensor_id` veld toegevoegd voor directe kWh meting
+
+## v5.5.520 (2026-04-10)
+
+### MeasurementTracker — lokaal leren van correctiefactoren
+
+**energy_manager/measurement_tracker.py** (nieuw):
+- Vergelijkt sensor (primair) vs W×t berekening (fallback) per stroom
+- Leert lokaal via mediaan over rolling 30-dagenvenster
+- Als sensor wegvalt: gecorrigeerde berekening als fallback
+- Logt structurele afwijkingen > 20% als WARNING
+- Publiceert factoren naar data["measurement_factors"]
+
+**Stromen**: pv, grid_import, grid_export, bat_charge, bat_discharge
+
+**coordinator.py**:
+- PV: sensor primair → leert factor → gecorrigeerde W×t als fallback
+- Dagovergang: commit meting aan tracker voor alle stromen
+- `data["pv_kwh_source"]` = "sensor" | "corrected_calc" | "raw_calc"
+- P1/DSMR en NILM runtime auto-detect toegevoegd
+
+**Architectuur voor cloud**:
+- Factoren worden lokaal geleerd en gepubliceerd
+- Cloud kan later factoren terug sturen (zoals EPEX prijzen)
+- Statistische validatie over veel installaties → cloud variant
+
+## v5.5.521 (2026-04-10)
+
+### Notificatie-spam fix + zelf-lerend systeem verbeteringen
+
+**energy_manager/notification_manager.py**:
+- Spam-key gebruikt nu `notification_id` ipv alleen `title` — zelfde melding = zelfde key
+- Per-categorie cooldowns: phase/diagnostics/sensor/forecast = 1x per dag, tips = 1x per week
+- `persistent_notification` valt ook onder cooldown (niet meer elke slow_tick aangemaakt)
+
+**energy_manager/self_diagnostics.py**:
+- `run_analysis()` draaide elke ~1.7 min → notificatie max 1x per 24u
+
+**energy_manager/measurement_tracker.py**:
+- `validate_sensor()`: detecteert fout geconfigureerde sensor (factor > 5x = Wh als kWh)
+
+**coordinator.py**:
+- Battery capaciteit auto-kalibratie: meet werkelijke capaciteit via charge_kwh / SOC-delta
+- Logt afwijking > 15% t.o.v. geconfigureerde capaciteit
+- NILM smart plug energy sensor auto-linking: zoekt kWh-sensor op hetzelfde HA-device
+  (bijv. Shelly plug S heeft altijd energy sensor naast power sensor)
+- Sensor sanity check bij dagovergang: suspect sensoren worden gelogd
+
+## v5.5.522 (2026-04-10)
+
+### Notificatie cooldowns overleven herstart
+
+**energy_manager/notification_manager.py**:
+- Spam-timestamps worden opgeslagen in `cloudems_notification_cooldowns_v1` (HA storage)
+- Bij herstart: timestamps herladen — cooldown loopt gewoon door
+- Verlopen entries (> 1 week) worden automatisch opgeruimd bij laden
+- Na elke verzonden notificatie direct opslaan
+
+## v5.5.523 (2026-04-10)
+
+### Performance fix: nieuwe modules naar slow_tick
+
+**Root cause performance CRITICAL**: EnvironmentalProcessor.process_all() draaide
+elke 10s cyclus — onnodig voor omgevingssensoren die elke 1-5 min veranderen.
+
+**coordinator.py**:
+- EnvironmentalProcessor: elke 10s → alleen bij slow_tick (~100s)
+- Verwachte impact: -20-30ms per cyclus, minder CRITICAL/MINIMAL modes
+
+**Diagnose uit logs**:
+- Regelmatig CRITICAL (>1000ms), soms 8-11 seconden piek
+- full_logging=false bij CRITICAL → ZonneplanP1Bridge INFO logs onderdrukt
+- Verklaart waarom bridge-detectie nooit in logs verscheen
+
+## v5.5.524 (2026-04-10)
+
+### ZonneplanP1Bridge: echte root cause battery kWh fix
+
+**Root cause**: SOC en vermogen werken via de bestaande Zonneplan API bridge.
+De battery kWh sensoren (`sensor.thuisbatterij_productie_vandaag`) bevatten
+GEEN "zonneplan" in hun entity_id — de bridge filterde hier op en vond ze dus nooit.
+
+**energy_manager/zonneplan_p1_bridge.py**:
+- detect() gesplitst in twee groepen:
+  - Groep 1: P1/electricity/PV → `"zonneplan" in entity_id` (werkte al)
+  - Groep 2: battery → `entity_registry.platform == "zonneplan_one"` filter
+    (vindt `sensor.thuisbatterij_*` correct ongeacht device naam)
+- Extra INFO log bij succesvolle detectie batterij kWh sensoren
+
+## v5.5.525 (2026-04-10)
+
+### Nexus kWh: directe scan werkte niet door vertaling
+
+**Root cause**: sensor.py Prio 2 directe scan zocht naar `"production_day"` maar
+de Zonneplan integratie vertaalt de entity naar `sensor.thuisbatterij_productie_vandaag`
+— "productie_vandaag" bevat nooit "production_day".
+
+**sensor.py**:
+- Directe scan uitgebreid met Nederlandse patronen:
+  - geladen: `production_day`, `productie_vandaag`, `production_today`, `charged_kwh`
+  - ontladen: `delivery_day`, `levering_vandaag`, `delivery_today`, `discharged_kwh`
+- Dit is de eenvoudigste en meest robuuste fix — werkt ongeacht bridge of ESM
+
+## v5.5.526 (2026-04-10)
+
+### Multi-battery: kWh, SOC en capaciteit correct geaggregeerd
+
+**sensor.py — CloudEMSBatteryPowerSensor (kWh)**:
+- Sommeer alle geconfigureerde batterijen per bron:
+  - Bron 1: geconfigureerde sensors per bat_cfg (bat_chg_0, bat_chg_1, ...)
+  - Bron 2: pattern scan (NL + EN) sommeer alle matches
+
+**sensor.py — Battery SOC sensor**:
+- Single battery: batteries[0].soc_pct (was al correct)
+- Multi-battery: capaciteitsgewogen gemiddelde
+  - bat1=80% × 10kWh + bat2=40% × 5kWh → 66.7% (15kWh totaal)
+- extra_state_attributes: capaciteit = som, vermogen = som
+
+**Vermogen** was al correct gesommeerd via `sum(b.get("power_w"))`.
+
+## v5.5.527 (2026-04-10)
+
+### Multi-battery: volledige audit en fixes
+
+**sensor.py**:
+- SOC: simpel gemiddelde (SOC1+SOC2+...)/n — niet gewogen
+- Capaciteit: sum() over alle batteries
+- kWh: sum() per bron (geconfigureerd per bat_cfg, ESM, pattern scan)
+
+**coordinator.py**:
+- batt_soc voor schedule/flex: simpel gemiddelde uit data["batteries"]
+- batt_capacity voor schedule/flex: sum() uit data["batteries"]
+- Fallback naar legacy single-sensor als batteries[] leeg is
+
+**Principe**: alles wat per-batterij is wordt gesommeerd (kWh, vermogen, capaciteit)
+of gemiddeld (SOC). Grid/Net is altijd enkelvoudig.
+
+## v5.5.527 (2026-04-10)
+
+### Multi-battery audit + SOC fix
+
+**sensor.py — SOC**:
+- Simpel gemiddelde: (SOC1 + SOC2 + ... + SOCn) / n
+- Geen capaciteitsweging — dat was fout
+
+**Volledig audit multi-battery**:
+- battery_raw_w: ✅ al gesommeerd in coordinator
+- batt_soc voor beslissingen: ✅ al simpel gemiddelde
+- batt_capacity voor beslissingen: ✅ al som
+- round-trip efficiëntie: ✅ correct (discharge/charge × 100, gesommeerde waarden)
+- coordinator batteries[0] aanroepen: ✅ allemaal bewaakt
+- max_charge_w/max_discharge_w: per batterij via battery_configs (correct)

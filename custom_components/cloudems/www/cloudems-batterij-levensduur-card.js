@@ -1,5 +1,5 @@
-// CloudEMS Batterij Levensduur Card v5.4.96
-const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.5.318';
+// CloudEMS Batterij Levensduur Card v5.5.465
+const CARD_BATTERIJ_LEVENSDUUR_VERSION = '5.5.465';
 // Tracks battery cycles, DoD, estimated remaining capacity
 
 class CloudemsBatterijLevensduurCard extends HTMLElement {
@@ -18,7 +18,7 @@ class CloudemsBatterijLevensduurCard extends HTMLElement {
     const sh = this.shadowRoot; if (!sh || !h) return;
     const a   = h.states["sensor.cloudems_battery_savings"]?.attributes || {};
     const _sohRaw = parseFloat(h.states["sensor.cloudems_battery_state_of_health"]?.state); const soh = isNaN(_sohRaw) ? 100 : _sohRaw;
-    const fc  = a.degradation_forecast || null;  // v5.5.12: gemeten degradatie prognose
+    const fc  = a.degradation_forecast || null;  // v5.5.465: gemeten degradatie prognose
     const soc = parseFloat(h.states["sensor.cloudems_battery_so_c"]?.state || 0);
 
     const totalCycles  = parseInt(a.sessions_year || 0) + (a.history_years||[]).reduce((s,y)=>s+y.sessions,0);

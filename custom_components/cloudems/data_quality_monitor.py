@@ -25,6 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 # Drempels
 _PV_MIN_W = 50          # minimaal PV-vermogen om check te activeren
 _SC_ZERO_HOLD_S = 600   # 10 minuten aanhoudend 0% vóór melding
+_PHASE_BADGE_HOLD_S = 86400  # 24 uur aanhoudend vóór fase-badge melding
 _PHASE_GRID_MIN_W = 200 # netto grid moet >200W afwijken voor badge-check
 _BOILER_PWR_MIN_W = 50  # minimaal boiler-vermogen om mismatch te melden
 _SENSOR_UNKNOWN = {"unknown", "unavailable", "none", "", "-", None}
@@ -143,6 +144,9 @@ class DataQualityMonitor:
 
         code = "phase_badge_mismatch"
         self._first_seen.setdefault(code, now)
+        # Alleen tonen na 24 uur aanhoudende mismatch — kortdurende afwijkingen zijn normaal
+        if now - self._first_seen[code] < _PHASE_BADGE_HOLD_S:
+            return []
 
         fase_richting = "IMPORT" if all_import else "EXPORT"
         grid_richting = "IMPORT" if net_import else "EXPORT"

@@ -39,7 +39,7 @@ class ClimateEpexDevice:
     """Configuratie van één WP of Airco."""
     entity_id:      str
     label:          str
-    device_type:    str    # "heat_pump" | "airco" | "hybrid"
+    device_type:    str    # "heat_pump" | "airco" | "hybrid" | "floor_heating"
     power_entity:   str    # vermogensensor
     offset_c:       float  # max offset in °C
     enabled:        bool   = True
@@ -219,6 +219,14 @@ class ClimateEpexController:
                     new_offset = -dev.offset_c  # voorkoelen
                 elif is_dear and is_cooling:
                     new_offset = dev.offset_c   # minder koelen
+            elif dev.device_type == "floor_heating":
+                # v5.5.331: vloerverwarming — zelfde logica als heat_pump
+                # Goedkoop: hoger setpoint (thermische opslag in vloer)
+                # Duur: lager setpoint (vertraagde afgifte benut opgeslagen warmte)
+                if is_cheap and is_heating:
+                    new_offset = dev.offset_c
+                elif is_dear and is_heating:
+                    new_offset = -dev.offset_c
 
             # Alleen aanpassen als offset veranderd is
             old_offset = self._active_offsets.get(dev.entity_id, 0.0)

@@ -54,7 +54,7 @@ class PeakShaving:
     def __init__(self, hass: HomeAssistant, config: dict) -> None:
         self._hass   = hass
         self._limit  = float(config.get("peak_shaving_limit_w", 5000))
-        self._assets: list[str] = config.get("peak_shaving_assets", [])
+        self._assets: list[str] = list(config.get("peak_shaving_assets", []))
         self._shed_active: list[str] = []
         self._store  = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self._history: dict = {"daily": {}, "monthly": {}}
@@ -139,44 +139,37 @@ class PeakShaving:
 
     # ── Shedding ──────────────────────────────────────────────────────────────
 
+
+
     async def _shed_loads(self, current_w: float) -> str:
-        """Turn off sheddable assets one by one until under limit."""
+        """Schakel geconfigureerde assets uit (alleen user-configured shed assets).
+        Boilers met climate/water_heater controle worden door de coordinator geschaald.
+        Alleen switch-gestuurde assets worden hier uitgeschakeld."""
         for entity_id in self._assets:
             state = self._hass.states.get(entity_id)
             if state and state.state not in ("off", "unavailable", "unknown"):
                 await self._hass.services.async_call(
                     "homeassistant", "turn_off", {"entity_id": entity_id}, blocking=False
                 )
-                _LOGGER.info("CloudEMS PeakShaving: shed %s (%.0f W)", entity_id, current_w)
+                _LOGGER.info(
+                    "CloudEMS PeakShaving: shed %s (%.0fW > limiet %.0fW)",
+                    entity_id, current_w, self._limit,
+                )
                 if entity_id not in self._shed_active:
                     self._shed_active.append(entity_id)
-                # Watchdog: entity moet "off" blijven tijdens peak shaving
-                _wd = getattr(getattr(self, "_hass", None), "_cloudems_watchdog", None) or \
-                      getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
-                if _wd:
-                    async def _restore_off(eid=entity_id):
-                        await self._hass.services.async_call("homeassistant", "turn_off", {"entity_id": eid}, blocking=False)
-                    _wd.register(f"peak_shed_{entity_id}", entity_id, "off", _restore_off)
                 return f"shed:{entity_id}"
         return "at_limit_no_assets"
 
     async def _restore_loads(self) -> None:
-        """Restore sheddable assets (reverse order)."""
-        # Deregistreer uit watchdog
-        _wd = getattr(getattr(self, "_coordinator", None), "_actuator_watchdog", None)
-        if _wd:
-            for eid in self._shed_active:
-                _wd.unregister(f"peak_shed_{eid}")
-        self._shed_active = []
-        for entity_id in reversed(self._assets):
+        """Herstel geconfigureerde assets (omgekeerde volgorde)."""
+        for entity_id in reversed(self._shed_active):
             state = self._hass.states.get(entity_id)
-            if state and state.state in ("off",):
+            if state and state.state == "off":
                 await self._hass.services.async_call(
                     "homeassistant", "turn_on", {"entity_id": entity_id}, blocking=False
                 )
                 _LOGGER.info("CloudEMS PeakShaving: restored %s", entity_id)
-
-    # ── Summary ───────────────────────────────────────────────────────────────
+        self._shed_active = []
 
     def _get_monthly_summary(self) -> list[dict]:
         return [

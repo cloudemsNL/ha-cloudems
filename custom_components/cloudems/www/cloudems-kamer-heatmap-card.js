@@ -1,9 +1,11 @@
-// CloudEMS Kamer Temperatuur Heatmap Card v5.4.96
-const CARD_KAMER_HEATMAP_VERSION = '5.5.318';
+// CloudEMS Kamer Temperatuur Heatmap Card v5.5.465
+const CARD_KAMER_HEATMAP_VERSION = '5.5.465';
 
 class CloudemsKamerHeatmapCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode:"open" }); this._p = ""; }
   setConfig(c) { this._cfg = { title:"🌡️ Kamer Temperaturen", ...c }; this._r(); }
+  
+  static getConfigElement(){return document.createElement('cloudems-kamer-heatmap-card-editor');}
   set hass(h) {
     this._hass = h;
     const zones = Object.values(h.states).filter(s =>
@@ -137,7 +139,7 @@ class CloudemsKamerHeatmapCard extends HTMLElement {
 </div>`;
   }
   getCardSize() { return Math.ceil(this._hass ? Object.values(this._hass.states).filter(s=>s.entity_id.startsWith('sensor.cloudems_zone_')&&!s.entity_id.includes('kosten')).length / 2 : 2) + 2; }
-  static getConfigElement() { return document.createElement("cloudems-kamer-heatmap-card-editor"); }
+  static getConfigElement(){return document.createElement('cloudems-kamer-heatmap-card-editor');}
   static getStubConfig() { return {}; }
 }
 class CloudemsKamerHeatmapCardEditor extends HTMLElement {

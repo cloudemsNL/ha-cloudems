@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Architecture Card v5.4.96
+// CloudEMS Architecture Card v5.5.465
 
-const ARCH_VERSION = '5.5.318';
+const ARCH_VERSION = '5.5.465';
 
 class CloudEMSArchCard extends HTMLElement {
   constructor() {
@@ -10,6 +10,8 @@ class CloudEMSArchCard extends HTMLElement {
     this._activeTab = 'diagram';
   }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-arch-card-editor');}
   set hass(h) {
     this._hass = h;
     const j = JSON.stringify([
@@ -22,7 +24,7 @@ class CloudEMSArchCard extends HTMLElement {
 
   setConfig(c) { this._cfg = c; }
   getCardSize() { return 14; }
-  static getConfigElement() { return document.createElement('cloudems-arch-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-arch-card-editor');}
   static getStubConfig() { return {}; }
 
   _render() {
@@ -343,6 +345,49 @@ class CloudEMSArchCard extends HTMLElement {
     </table>`;
   }
 }
+
+
+
+
+class CloudemsArchCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+    var row_border=document.createElement('div');row_border.style.marginBottom='10px';
+    var lbl_border=document.createElement('label');lbl_border.textContent='Rand tonen';lbl_border.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inp_border=document.createElement('input');
+    inp_border.id='border';
+    inp_border.type='checkbox';
+    inp_border.style.marginRight='6px';
+    
+    inp_border.checked=c.border!==false;
+    row_border.appendChild(lbl_border);row_border.appendChild(inp_border);sh.appendChild(row_border);
+    inp_border.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      nc["border"]=inp_border.checked;
+      if(nc['border']===undefined||nc['border']==='')delete nc['border'];
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+  }
+}
+if(!customElements.get('cloudems-arch-card-editor'))customElements.define('cloudems-arch-card-editor',CloudemsArchCardEditor);
+if(!customElements.get('cloudems-arch-card-editor'))customElements.define('cloudems-arch-card-editor',CloudemsArchCardEditor);
 
 if (!customElements.get('cloudems-arch-card'))
   customElements.define('cloudems-arch-card', CloudEMSArchCard);

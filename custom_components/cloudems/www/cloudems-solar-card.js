@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 CloudEMS (https://cloudems.eu)
 // All rights reserved. See LICENSE for full terms.
-// CloudEMS Solar Card  v5.5.53 — herbouwd naar Solcast-stijl met rolling history
+// CloudEMS Solar Card  v5.5.465 — herbouwd naar Solcast-stijl met rolling history
 
-const SOL_VERSION = "5.5.318";
+const SOL_VERSION = "5.5.465";
 const SOL_STYLES = `
   :host {
     --sl-bg:#0c1409;--sl-surface:#121a0e;--sl-border:rgba(255,255,255,0.07);
@@ -137,8 +137,56 @@ class CloudemsSolarCard extends HTMLElement {
     this._cfg = c || {};
   }
 
+
+  async _prefillActualFromHistory(hass) {
+    // v5.5.465: herstel vandaag+gisteren uurdata via HA history API na page reload/herstart
+    try {
+      if (this._histPrefilled) return;
+      this._histPrefilled = true;
+      const solarEid = 'sensor.cloudems_solar_system';
+      const now   = new Date();
+      const start = new Date(now - 30 * 60 * 60 * 1000); // 30u = vandaag + gisteren
+      const url   = `history/period/${start.toISOString()}?filter_entity_id=${solarEid}&end_time=${now.toISOString()}&minimal_response&no_attributes`;
+      const raw   = await hass.callApi('GET', url);
+      if (!Array.isArray(raw) || !raw[0]) return;
+      const series = raw[0];
+      // Bouw uur-voor-uur kWh op uit W-waarden
+      const today     = new Date(); today.setHours(0,0,0,0);
+      const yesterday = new Date(today - 86400000);
+      const todayKwh  = new Array(24).fill(0);
+      const ystKwh    = new Array(24).fill(0);
+      let prevTs = null, prevW = 0;
+      series.forEach(s => {
+        const ts = new Date(s.last_changed || s.last_updated);
+        const w  = parseFloat(s.state);
+        if (!isFinite(w) || w < 0) { prevTs = ts; prevW = 0; return; }
+        if (prevTs) {
+          const dtH = (ts - prevTs) / 3600000; // uren
+          const kWh = prevW * dtH / 1000;
+          const h   = prevTs.getHours();
+          if (prevTs >= today)     todayKwh[h] += kWh;
+          else if (prevTs >= yesterday) ystKwh[h] += kWh;
+        }
+        prevTs = ts; prevW = w;
+      });
+      const todaySum = todayKwh.reduce((a,b)=>a+b,0);
+      const ystSum   = ystKwh.reduce((a,b)=>a+b,0);
+      if (todaySum > 0.01) {
+        this._pvHist    = todayKwh.map(v => Math.round(v * 1000) / 1000);
+        this._pvHistDay = now.getDate();
+      }
+      if (ystSum > 0.01) {
+        this._pvHistYst = ystKwh.map(v => Math.round(v * 1000) / 1000);
+      }
+    } catch(e) {
+      // Geen history beschikbaar — geen probleem
+    }
+  }
+
   set hass(h) {
     this._hass = h;
+    // v5.5.465: herstel vandaag/gisteren na page reload via HA history
+    if (!this._histPrefilled) this._prefillActualFromHistory(h);
     const j = JSON.stringify([
       h.states['sensor.cloudems_solar_system_intelligence']?.state,
       h.states['sensor.cloudems_pv_forecast_today']?.state,
@@ -259,6 +307,11 @@ class CloudemsSolarCard extends HTMLElement {
       Object.entries(ystRaw).forEach(([hr, kwh]) => { ystHourly[parseInt(hr)] = parseFloat(kwh || 0); });
     } else if (Array.isArray(ystRaw) && ystRaw.length === 24) {
       ystRaw.forEach((v, i) => { ystHourly[i] = v; });
+    }
+    // v5.5.465: fallback gisteren uit history prefill als backend leeg is
+    const ystSum = ystHourly.reduce((a,b)=>a+b,0);
+    if (ystSum < 0.01 && this._pvHistYst && this._pvHistYst.length === 24) {
+      this._pvHistYst.forEach((v, i) => { ystHourly[i] = v; });
     }
 
     const dailyHistory = accA.daily_history || [];
@@ -553,7 +606,7 @@ class CloudemsSolarCard extends HTMLElement {
     </div>`).join('');
   }
 
-  static getConfigElement() { return document.createElement('cloudems-solar-card-editor'); }
+  static getConfigElement(){return document.createElement('cloudems-solar-card-editor');}
   static getStubConfig() { return {type:'cloudems-solar-card', title:'Zonnepanelen'}; }
 }
 

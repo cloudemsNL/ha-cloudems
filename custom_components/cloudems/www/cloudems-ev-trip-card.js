@@ -1,5 +1,5 @@
-// CloudEMS EV Trip Planner Card v5.4.96
-const CARD_EV_TRIP_VERSION = '5.5.318';
+// CloudEMS EV Trip Planner Card v5.5.465
+const CARD_EV_TRIP_VERSION = '5.5.465';
 // Calendar-based EV charging recommendations
 
 class CloudemsEvTripCard extends HTMLElement {

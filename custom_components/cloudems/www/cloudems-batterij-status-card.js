@@ -1,5 +1,5 @@
 // CloudEMS Batterij Status Card — Off-grid + Energiekosten gecombineerd
-const BST_VERSION = "5.5.318";
+const BST_VERSION = "5.5.465";
 
 class CloudEMSBatterijStatusCard extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'open' }); this._tab = 'offgrid'; }

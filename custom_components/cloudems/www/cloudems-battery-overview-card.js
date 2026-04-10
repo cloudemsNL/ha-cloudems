@@ -1,5 +1,5 @@
 // CloudEMS Battery Overview Card — week + uur-voor-uur plan
-const BOV_VERSION = "5.5.318";
+const BOV_VERSION = "5.5.528";
 
 class CloudEMSBatteryOverviewCard extends HTMLElement {
   constructor() {
@@ -11,6 +11,8 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
 
   setConfig(c) { this._config = c || {}; }
 
+  
+  static getConfigElement(){return document.createElement('cloudems-battery-overview-card-editor');}
   set hass(h) {
     this._hass = h;
     if (!this._initialized) {
@@ -84,6 +86,7 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
     const today     = schA.schedule || schA.schedule_today || schA.slots || [];
     const tomorrow  = schA.schedule_tomorrow || [];
     const soc_now   = parseFloat(schA.soc_pct ?? h.states['sensor.cloudems_battery_so_c']?.state ?? 0);
+    const capKwh = parseFloat(h.states['sensor.cloudems_battery_savings']?.attributes?.capacity_kwh || schA.capacity_kwh || 0) || 9.3;
     const payback  = h?.states['sensor.cloudems_payback']?.attributes || {};
     const accuracy = (schA.plan_accuracy) || {};
     const alpha    = h?.states['sensor.cloudems_alpha']?.attributes || {};
@@ -105,7 +108,7 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
         const prevSlots = yesterday.slice(-hoursNeeded).map(s => ({...s, _from_yesterday: true}));
         slots = [...prevSlots, ...slots];
       }
-      html = this._planHtml(slots, tab, schA, soc_now);
+      html = this._planHtml(slots, tab, schA, soc_now, capKwh);
     }
 
     content.innerHTML = html;
@@ -117,7 +120,7 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
     }
   }
 
-  _planHtml(slots, tab, schA, soc_now) {
+  _planHtml(slots, tab, schA, soc_now, capKwh = 9.3) {
     if (!slots.length) {
       const hr = schA.human_reason || '';
       return `<div style="padding:20px;font-size:12px;color:#475569;text-align:center">
@@ -145,29 +148,51 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
       const soc0  = s.soc_start ?? null;
       const soc1  = s.soc_end ?? s.soc_pct ?? null;
       // Verleden uren: SOC niet tonen (plan-SOC klopt niet voor verleden)
-      const socStr = past ? '—' : (soc0 != null && soc1 != null
-        ? `${Math.round(soc0)}→${Math.round(soc1)}%`
-        : soc1 != null ? `${Math.round(soc1)}%` : '');
+      const actual = s.actual || null;
+      // SOC: verleden = werkelijke SOC, toekomst = plan eind% (met "van X%" als start ≠ eind)
+      const actSocPct = actual?.soc_pct != null ? Math.round(actual.soc_pct) : null;
+      const _s0 = soc0 != null ? Math.round(soc0) : null;
+      const _s1 = soc1 != null ? Math.round(soc1) : null;
+      const socEnd = past ? actSocPct : _s1;
+      // SOC: altijd start→eind als beiden bekend, anders enkel eind
+      const socStr = socEnd != null
+        ? (_s0 != null ? _s0+'%→'+socEnd+'%' : socEnd+'%')
+        : '—';
 
       const priceCol = tg === 'high' ? '#f97316' : tg === 'low' ? '#10b981' : '#64748b';
       const bg = now ? 'rgba(96,165,250,.08)' : tgBg(tg);
       const bl = now ? '2px solid #60a5fa' : '2px solid transparent';
 
-      // Laad/ontlaad kolommen
-      const actual = s.actual || null;
-      // Verleden: werkelijk gemeten vermogen
-      const actChg   = actual && (actual.bat_w || 0) > 0 ? Math.round(actual.bat_w) : null;
-      const actDis   = actual && (actual.bat_w || 0) < 0 ? Math.round(Math.abs(actual.bat_w)) : null;
+      // Laad/ontlaad kolommen — verleden: kWh (avg W / 1000), toekomst: W plan
+      const fmtE = w => w > 0 ? (w/1000).toFixed(2)+' kWh' : '0 kWh';
+      // Verleden: werkelijk gemeten vermogen (actual al boven gedeclareerd)
+      // LADEN: gemiddeld laadvermogen uit accumulator (chg_w), LEVER: ontlaadvermogen (dis_w)
+      const _capK = (capKwh > 0 ? capKwh : 9.3);
       const actPvV   = actual ? Math.round(actual.pv_w || 0) : null;
       const actHwV   = actual ? Math.round(actual.house_w || 0) : null;
-      const chgDisp  = past && actual ? actChg : (chgW > 0 ? Math.round(chgW) : null);
-      const disDisp  = past && actual ? actDis : (disW > 0 ? Math.round(disW) : null);
-      const pvDisp   = past && actual ? (actPvV > 0 ? actPvV : null) : (s.pv_w > 0 ? Math.round(s.pv_w) : null);
+      // Verleden: gebruik chg_w/dis_w uit accumulator, fallback bat_w
+      const _ladW = past
+        ? (actual?.chg_w != null ? actual.chg_w : Math.max(0,  actual?.bat_w||0))
+        : (chgW > 0 ? Math.round(chgW) : 0);
+      const _levW = past
+        ? (actual?.dis_w != null ? actual.dis_w : Math.max(0, -(actual?.bat_w||0)))
+        : (disW > 0 ? Math.round(disW) : 0);
+      const chgDisp = _ladW > 0 ? (_ladW+'W') : null;
+      const disDisp = _levW > 0 ? (_levW+'W') : null;
+      // NETTO kWh: SOC delta × cap voor verleden, power_w voor toekomst
+      const _nettoW2 = past
+        ? (_s0 != null && _s1 != null ? (_s1 - _s0) / 100 * _capK * 1000 : (actual?.bat_w||0))
+        : (soc1 != null && soc0 != null ? (soc1-soc0)/100*_capK*1000 : _ladW - _levW);
+      const _nettoKwh2 = _nettoW2 / 1000;
+      const _nettoFmt2 = Math.abs(_nettoKwh2) < 0.01 ? '0 kWh'
+        : (_nettoKwh2 > 0 ? '+' : '') + _nettoKwh2.toFixed(2) + ' kWh';
+      const _nettoColor2 = _nettoW2 > 50 ? '#22c55e' : _nettoW2 < -50 ? '#f97316' : '#475569';
+      const pvDisp   = past && actual ? actPvV : (s.pv_w > 0 ? Math.round(s.pv_w) : 0);
       const hwDisp   = past && actual ? actHwV : (s.house_w > 0 ? Math.round(s.house_w) : null);
       const isActual = past && !!actual;
 
-      const chgStr = chgDisp ? `<span style="color:${isActual?'#34d399':'#10b981'}">${chgDisp}W</span>` : '<span style="color:#374151">—</span>';
-      const disStr = disDisp ? `<span style="color:${isActual?'#fb923c':'#f97316'}">${disDisp}W</span>` : '<span style="color:#374151">—</span>';
+      const chgStr = chgDisp ? `<span style="color:${isActual?'#34d399':'#10b981'}">${chgDisp}</span>` : '<span style="color:#475569">0W</span>';
+      const disStr = disDisp ? `<span style="color:${isActual?'#fb923c':'#f97316'}">${disDisp}</span>` : '<span style="color:#475569">0W</span>';
       // Fix 3: toon afwijking gepland vs werkelijk voor verleden uren
       const planChg = chgW > 0 ? Math.round(chgW) : 0;
       const planDis = disW > 0 ? Math.round(disW) : 0;
@@ -180,7 +205,7 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
           diffChg !== null ? (diffChg>0?'+':'')+diffChg+'W' :
           diffDis !== null ? (diffDis>0?'+':'')+diffDis+'W' : ''
         }</span>` : '';
-      const pvStr  = pvW > 50 ? `<span style="color:#f59e0b">${Math.round(pvW)}W</span>` : '<span style="color:#374151">—</span>';
+      const pvStr  = pvW > 0 ? `<span style="color:#f59e0b">${Math.round(pvW)}W</span>` : `<span style="color:#475569">${past?'0 kWh':'0W'}</span>`;
       const hwStr  = hwW > 0 ? `${Math.round(hwW)}W` : '—';
 
       return `<div style="display:grid;grid-template-columns:34px 36px 36px 42px 44px 48px 1fr;gap:3px;align-items:center;padding:3px 6px;border-radius:4px;background:${bg};border-left:${bl};opacity:${past?.45:1}">
@@ -506,9 +531,37 @@ class CloudEMSBatteryOverviewCard extends HTMLElement {
   }
 
   getCardSize() { return 4; }
-  static getConfigElement() { return document.createElement('div'); }
+  static getConfigElement(){return document.createElement('cloudems-battery-overview-card-editor');}
   static getStubConfig() { return {}; }
 }
+
+
+
+
+class CloudemsBatteryOverviewCardEditor extends HTMLElement{
+  constructor(){super();this.attachShadow({mode:'open'});this._cfg={};}
+  setConfig(c){this._cfg=c||{};this._render();}
+  _render(){
+    var self=this;var c=this._cfg;var sh=this.shadowRoot;sh.innerHTML='';
+    var style=document.createElement('style');
+    style.textContent=':host{display:block;padding:12px}';
+    sh.appendChild(style);
+    // Titel veld
+    var rowT=document.createElement('div');rowT.style.marginBottom='10px';
+    var lblT=document.createElement('label');lblT.textContent='Titel';lblT.style.cssText='display:block;font-size:12px;color:#aaa;margin-bottom:4px';
+    var inpT=document.createElement('input');inpT.type='text';inpT.id='title';
+    inpT.style.cssText='background:var(--card-background-color,#1c1c1c);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:var(--primary-text-color,#fff);padding:5px 8px;font-size:13px;box-sizing:border-box;width:100%';inpT.value=c.title||'';inpT.placeholder='(automatisch)';
+    rowT.appendChild(lblT);rowT.appendChild(inpT);sh.appendChild(rowT);
+    inpT.addEventListener('change',function(){
+      var nc=Object.assign({},c);
+      if(inpT.value)nc.title=inpT.value;else delete nc.title;
+      self.dispatchEvent(new CustomEvent('config-changed',{detail:{config:nc},bubbles:true,composed:true}));
+    });
+    
+  }
+}
+if(!customElements.get('cloudems-battery-overview-card-editor'))customElements.define('cloudems-battery-overview-card-editor',CloudemsBatteryOverviewCardEditor);
+if(!customElements.get('cloudems-battery-overview-card-editor'))customElements.define('cloudems-battery-overview-card-editor',CloudemsBatteryOverviewCardEditor);
 
 if (!customElements.get('cloudems-battery-overview-card'))
   customElements.define('cloudems-battery-overview-card', CloudEMSBatteryOverviewCard);

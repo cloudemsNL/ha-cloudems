@@ -164,6 +164,12 @@ class NILMLoadShifter:
             dev_type_key = (device.get("device_type") or "").lower().strip()
             dev_name_key = (device.get("name") or "").lower().strip()
             keys = {k for k in (dev_id, dev_type_key, dev_name_key) if k}
+            # v5.5.350: apparaattypen die NOOIT uitgesteld mogen worden
+            # Koelkast/vriezer → voedselveiligheid
+            # Heat_pump → comfortcritisch, grote thermische massa
+            NEVER_SHIFT = {"refrigerator", "freezer", "heat_pump", "medical"}
+            if dev_type_key in NEVER_SHIFT:
+                continue
             if self._include and not keys.intersection(self._include):
                 continue  # niet op de include-lijst
             if keys.intersection(self._exclude):

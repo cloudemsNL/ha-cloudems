@@ -78,8 +78,11 @@ class TennetImbalanceSignal:
         """Fetch current imbalance and calculate pre-positioning signal."""
         now = time.time()
 
-        if self._api_available and now - self._last_fetch > FETCH_INTERVAL:
+        # v5.5.380: retry na 30 min ook als API eerder faalde
+        _retry_interval = FETCH_INTERVAL if self._api_available else 1800
+        if now - self._last_fetch > _retry_interval:
             _LOGGER.debug("TennetImbalance: fetching from API (api_available=%s)", self._api_available)
+            self._api_available = True  # reset — probeer opnieuw
             await self._fetch_tennet()
             self._last_fetch = now
 
@@ -262,6 +265,13 @@ class TennetImbalanceSignal:
             source             = "epex_proxy",
         )
         self._last_signal = signal
+        # v5.5.380: schat Tennet prijs uit EPEX zodat display niet "Waiting" toont
+        # NL correlatie: Tennet up ≈ EPEX * 1000 + 20 €/MWh (activatietoeslag)
+        if epex_price > 0:
+            # v5.5.465: altijd bijwerken (niet alleen als == 0) zodat de display
+            # de actuele EPEX-schatting toont zolang de Tennet API niet reageert
+            self._last_up_price   = epex_price * 1000 + 20.0   # €/MWh schatting
+            self._last_down_price = max(0.0, epex_price * 1000 - 20.0)
         return signal
 
     def to_dict(self) -> dict:
